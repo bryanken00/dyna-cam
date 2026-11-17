@@ -21,7 +21,8 @@ the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a
 `Authorization: App <token>`, scoped to `req.pairedApp.sessionId`; see
 `utils/sessionDevices.js`), `/api/v1/pair/*` (a 6-digit pairing key → a device or box token;
 rate-limited) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
-credential). Queries see the whole database (soft deletes aside); the seeded
+credential; `/public/stream-setup/:code` takes a player's own stream key, see
+`utils/sessionStreams.js`). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.

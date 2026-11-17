@@ -1,13 +1,13 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the signed LAN HLS live view for session devices, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the signed LAN HLS live view for session devices, players' own RTMP streams of a session, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
 
 Node 20.12+ · plain ESM JavaScript · **no runtime dependencies, never add one** · ffmpeg 5+ · pm2 ·
 `node:test`. The box records each court's RTSP camera into a rolling buffer and cuts the replays
-players save. API calls are **outbound** only; the two listeners are LAN-only (court buttons, live view).
+players save. API calls are **outbound** only; the two listeners are LAN-only (court buttons, live view); player streams push RTMP(S) out.
 Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1/device/`.
 
 ## Module layout (`src/`)
@@ -23,6 +23,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
+| `restream.js` | Players' own streams (`SessionStreams`): one ffmpeg per /config session with `stream.url`, live HLS from 127.0.0.1 → `-c:v copy -c:a aac -ar 44100 -f flv`, backoff, status, cap, heartbeat `sessionStreams` |
 | `live.js` | LAN live view `GET\|HEAD /live/:courtId/{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
 | `stream.js` | RTMP via the recorder's own ffmpeg (tee + fifo slave): escaping, key masking, stderr → stream status, restart rule |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
@@ -100,6 +101,24 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Buffer files restart their clock at 0 (`reset_timestamps`): segments are served with PTS/DTS/PCR
   + the csv content start (90 kHz) — a Transform over `createReadStream`, in place, no remux.
 - Heartbeat: `live: { url: "http://<LIVE_HOST | first private IPv4>:<port>", key } | null`.
+
+## Player streams (`restream.js`, PLAN-002 §6.1)
+
+- `/config` `sessions[].stream: { url } | null` (only while recording). One ffmpeg per session in
+  `[startMs, endMs)` on a court this box records: input = the box's OWN signed live playlist
+  (`LiveView.localPlaylistUrl`, `exp` = end + 10 min, re-signed with a restart 1 min before expiry),
+  `-extension_picky 0 -live_start_index -3 -re`, output `-map 0:v:0 -map 0:a? -c:v copy
+  -c:a aac -ar 44100 -b:a 96k -f flv -flvflags no_duration_filesize <url>` (video never re-encoded;
+  the camera's 8 kHz audio is resampled for Facebook/YouTube). **Never** touch or restart the recorder, never a camera connection.
+- Start/stop on window, stream added/removed, session gone; new url → restart. Exit → backoff 5 s → 60 s;
+  no output 30 s → kill. Max 4 (`MAX_SESSION_STREAMS`), logged once. A failure never reaches recording,
+  clips or the live server.
+- Status from `-progress pipe:1`: `starting` → `live` after 5 s of moving output (pauses > 3 s reset) →
+  `error` + `describeRestreamFailure(all error lines of the run)`. `LIVE_PORT=0` → error "Live view is off
+  on this box (LIVE_PORT=0)".
+- Heartbeat `sessionStreams: [{ sessionId, status, message }]` (`[]` when none); config + heartbeat
+  every 15 s while one is due. Every stderr line → `maskRestreamLine` (key, URL, `sig=`) before use;
+  the config cache drops `stream`.
 
 ## Segment timing (`segments.js`)
 

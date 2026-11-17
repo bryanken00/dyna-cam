@@ -549,8 +549,13 @@ describe("heartbeat", () => {
     await make({ info: () => ({ url: "http://192.168.1.50:8090", key: KEY }) }).heartbeat();
     await make(null).heartbeat();
     assert.deepEqual(sent, [
-      { agentVersion: "1.2.3", cameras: [], live: { url: "http://192.168.1.50:8090", key: KEY } },
-      { agentVersion: "1.2.3", cameras: [], live: null },
+      {
+        agentVersion: "1.2.3",
+        cameras: [],
+        live: { url: "http://192.168.1.50:8090", key: KEY },
+        sessionStreams: [],
+      },
+      { agentVersion: "1.2.3", cameras: [], live: null, sessionStreams: [] },
     ]);
   });
 });

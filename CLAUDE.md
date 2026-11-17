@@ -125,7 +125,9 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   `Authorization: App <token>`: the session, its live view and Stop; unpaired 10 min after the
   session ends); `/api/v1/pair/*` trades a single-use 6-digit key from the Admin portal (Setup →
   Recorder Boxes, or a session's "Pair a device") for one of those tokens; `/api/v1/public/*` is
-  the player's page (the court QR / clip share token is the credential). The app keeps its token
+  the player's page (the court QR / clip share token is the credential, and a short-lived code
+  from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
+  stored encrypted and never returned). The app keeps its token
   in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
   only — staff work, including payments, happens on the web.
 - **Backend changes are tested:** `cd back && npm test` (throwaway database, never touches

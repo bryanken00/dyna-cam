@@ -107,7 +107,7 @@ router.get(
       // starting within a day, or ended in the last 30 minutes (parts may
       // still be waiting to be cut)
       req.db.query(
-        `SELECT sessionId, courtId, startAt, endAt
+        `SELECT sessionId, courtId, startAt, endAt, status, streamUrl
          FROM recording_sessions
          WHERE venueId = ? AND status IN ('Scheduled', 'Recording', 'Processing')
            AND startAt <= DATE_ADD(?, INTERVAL 1 DAY)
@@ -146,12 +146,23 @@ router.get(
         logoUrl: signUploadUrl(venue.logoUrl),
       },
       courts,
-      sessions: sessionRows.map((row) => ({
-        sessionId: row.sessionId,
-        courtId: row.courtId,
-        startMs: toEpochMs(row.startAt),
-        endMs: toEpochMs(row.endAt),
-      })),
+      sessions: sessionRows.map((row) => {
+        const startMs = toEpochMs(row.startAt);
+        const endMs = toEpochMs(row.endAt);
+        const recording =
+          ["Scheduled", "Recording"].includes(row.status) &&
+          startMs <= Date.now() &&
+          endMs > Date.now();
+        // PLAN-002 Phase G: the player's own stream, only while the session records
+        const streamUrl = recording && row.streamUrl ? decryptSecret(row.streamUrl) : null;
+        return {
+          sessionId: row.sessionId,
+          courtId: row.courtId,
+          startMs,
+          endMs,
+          stream: streamUrl ? { url: streamUrl } : null,
+        };
+      }),
       clip: { preSeconds: CLIP_PRE_SECONDS, postSeconds: CLIP_POST_SECONDS },
       serverTime: Date.now(),
     });
@@ -167,7 +178,7 @@ router.post(
   "/heartbeat",
   validateBody(heartbeatSchema),
   catchAsync(async (req, res) => {
-    const { agentVersion, cameras, live } = req.body;
+    const { agentVersion, cameras, live, sessionStreams } = req.body;
     const { venueId, deviceId } = req.device;
 
     const courtRows = await req.db.query(
@@ -211,7 +222,7 @@ router.post(
        WHERE deviceId = ?`,
       [
         agentVersion || null,
-        JSON.stringify({ cameras: reported, reportedAt: now }),
+        JSON.stringify({ cameras: reported, sessionStreams, reportedAt: now }),
         liveUrl,
         liveKey,
         now,

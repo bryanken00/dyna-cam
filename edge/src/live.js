@@ -528,6 +528,17 @@ export class LiveView {
     return host ? `http://${host}:${this.server.address().port}` : null;
   }
 
+  /**
+   * The box's own signed playlist link for a court on 127.0.0.1 (player
+   * streams read it, restream.js); null while the server isn't running.
+   */
+  localPlaylistUrl(courtId, exp) {
+    if (!this.server) return null;
+    const port = this.server.address().port;
+    const sig = signLive(this.key, courtId, exp);
+    return `http://127.0.0.1:${port}/live/${encodeURIComponent(courtId)}/index.m3u8?exp=${exp}&sig=${sig}`;
+  }
+
   /** The heartbeat's `live` field: { url, key }, or null when off or no LAN address is known. */
   info() {
     if (!this.server) return null;

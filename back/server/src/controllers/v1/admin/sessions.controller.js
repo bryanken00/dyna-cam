@@ -8,6 +8,7 @@ import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { createPairingCode, PAIRING_CODE_TTL_MINUTES } from "../../../utils/pairing.js";
 import { createSessionPairingCodeSchema } from "../../../validators/pairing.validator.js";
+import { clearStream, describeStream, FORGET_STREAM_SQL } from "../../../utils/sessionStreams.js";
 import {
   endSessionNow,
   materializeSessionParts,
@@ -168,9 +169,17 @@ router.get(
     const secondsSince = (at) => Math.max(0, Math.round((Date.now() - toEpochMs(at)) / 1000));
     const secondsUntil = (at) => Math.max(0, Math.round((toEpochMs(at) - Date.now()) / 1000));
 
+    const [streamRow] = await req.db.query(
+      `SELECT sessionId, venueId, status, startAt, endAt, streamUrl, streamPlatform,
+              streamUpdatedAt
+       FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      [req.params.sessionId]
+    );
+
     return res.sendSuccess("Session retrieved successfully", {
       session: {
         ...toSession(rows[0]),
+        stream: await describeStream(req.db, streamRow),
         devices: devices.map((device) => ({
           ...device,
           lastSeenSecondsAgo: device.lastSeenAt ? secondsSince(device.lastSeenAt) : null,
@@ -302,7 +311,7 @@ router.post(
   catchAsync(async (req, res) => {
     const now = getCurrentTimestampLocal();
     const result = await req.db.query(
-      `UPDATE recording_sessions SET status = 'Cancelled', dateUpdated = ?
+      `UPDATE recording_sessions SET status = 'Cancelled', dateUpdated = ?, ${FORGET_STREAM_SQL}
        WHERE sessionId = ? AND status = 'Scheduled' AND startAt > ?`,
       [now, req.params.sessionId, now]
     );
@@ -333,6 +342,23 @@ router.post(
         : res.sendError("Only a session that is recording can be ended", 409);
     }
     return res.sendSuccess("Session ended — its footage is being saved", { endAt: result.endAt });
+  })
+);
+
+/**
+ * POST /:sessionId/stream/stop — stop the player's own live stream (Phase G)
+ */
+router.post(
+  "/:sessionId/stream/stop",
+  checkPermission("clips", null, "write"),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT sessionId FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      [req.params.sessionId]
+    );
+    if (rows.length === 0) return res.sendError("Session not found", 404);
+    await clearStream(req.db, req.params.sessionId);
+    return res.sendSuccess("Live stream stopped");
   })
 );
 

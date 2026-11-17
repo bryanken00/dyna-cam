@@ -14,8 +14,19 @@ const CLOCK_SKEW_WARN_MS = 2000;
  * still records.
  */
 export class DeviceSync {
-  constructor({ api, recorders, settings, agentVersion, log, preview = null, live = null }) {
+  constructor({
+    api,
+    recorders,
+    settings,
+    agentVersion,
+    log,
+    preview = null,
+    live = null,
+    sessionStreams = null,
+  }) {
     this.preview = preview;
+    // Players' own live streams (restream.js): fed with /config sessions, reported in the heartbeat
+    this.sessionStreams = sessionStreams;
     // LAN live view (live.js): its address and signing key go in every heartbeat
     this.live = live;
     this.api = api;
@@ -78,7 +89,9 @@ export class DeviceSync {
       device: config.device,
       venue: { ...config.venue, logoUrl: null },
       courts: config.courts,
-      sessions: config.sessions || [],
+      // Without the players' stream addresses: they hold stream keys and are only
+      // used while the API is reachable
+      sessions: (config.sessions || []).map(({ stream: _stream, ...session }) => session),
       clip: config.clip,
     });
   }
@@ -93,6 +106,7 @@ export class DeviceSync {
     }
     this.recorders.setSessions(config.sessions || []);
     await this.recorders.sync(config.courts || []);
+    this.sessionStreams?.setSessions(fromCache ? [] : config.sessions || []);
     this.preview?.setWanted(fromCache ? [] : config.courts);
     if (!fromCache) await this.updateLogo(config.venue?.logoUrl ?? null);
   }
@@ -141,12 +155,18 @@ export class DeviceSync {
       cameras: this.recorders.statuses(),
       // { url, key } | null (off, port taken, or no LAN address)
       live: this.live?.info() ?? null,
+      // [{ sessionId, status, message }] for each player stream due now; [] when none
+      sessionStreams: this.sessionStreams?.statuses() ?? [],
     });
   }
 
-  /** While a camera-setup page is open, config and heartbeat run every 15 s so it reacts fast. */
+  /**
+   * While a camera-setup page is open or a player's stream is due, config and
+   * heartbeat run every 15 s so starts, stops and statuses show up fast.
+   */
   interval(seconds) {
-    return this.preview?.active ? Math.min(seconds, 15) : seconds;
+    const busy = this.preview?.active || this.sessionStreams?.recordingNow();
+    return busy ? Math.min(seconds, 15) : seconds;
   }
 
   startTimers() {

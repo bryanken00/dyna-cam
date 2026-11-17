@@ -318,6 +318,48 @@ Check it from a laptop on the venue Wi-Fi (with a link from the API, which carri
 `ffplay '<hlsUrl>'`. Note that ffmpeg tools need `-extension_picky 0` for segment links that end
 in a query string: `ffprobe -extension_picky 0 '<hlsUrl>'`.
 
+## Player's own live stream
+
+A player can stream **their session** to **their own** Facebook or YouTube (PLAN-002 §6). They
+scan a QR on the session device and paste their stream key on their phone; the API then sends
+the session's stream address in `/config` (only while the session is recording), and the box
+reports its status in the heartbeat (`sessionStreams`).
+
+How the box does it:
+
+- **Its own small ffmpeg per session**, reading the court's [live view](#live-view-on-the-venue-wi-fi)
+  from the box itself (`http://127.0.0.1:<LIVE_PORT>/live/…`, signed with the box's own key)
+  and sending it to the player's `rtmp://` / `rtmps://` address (video copied, only the audio
+  re-encoded to 44.1 kHz). **No video re-encode, no second camera connection, and no recorder
+  restart**, so turning a player's
+  stream on or off never leaves a gap in the recording, a clip or a session part.
+- It starts when the session starts (or when the player adds the stream), stops when the session
+  ends or the player stops it, and restarts on a new address. If ffmpeg fails it retries after
+  5 s, 10 s, … up to 60 s. A failure only affects that player's stream.
+- It runs about 10 s behind the court.
+- **At most 4** player streams per box; more show *"Too many player streams on this box"*.
+- While a player's stream is due, the box reads its config and sends its heartbeat every 15 s,
+  so a start or stop shows up within about 15 s.
+- **Status** per session: *starting* (until output has flowed steadily for 5 s), *live*, or
+  *error* with a reason: *Facebook refused the stream key*, *Can't reach facebook.com*,
+  *Connection to youtube.com dropped*, *No video from the camera yet*, or *Live view is off on this
+  box (LIVE_PORT=0)*: player streams need the live view.
+- **The stream key is a secret:** logs and statuses show at most its last 4 characters
+  (`rtmps://live-api-s.facebook.com:443/rtmp/****k2N9`). The box doesn't write it to disk: the
+  cached config drops it.
+
+Things to know:
+
+- **Upload:** each player stream sends about the camera's bitrate **up** (1–2 Mbit/s for a C200 at
+  720p), on top of a venue court stream and clip uploads. Check the venue's upload speed.
+- **Facebook keyframes:** Facebook wants a keyframe at least every 2 seconds. The video is the
+  camera's own (copied), and a Tapo C200 sends one every 2–6 s, so Facebook may show a *"keyframe
+  frequency"* warning or buffer now and then. The stream still runs. Where the camera allows it,
+  set its keyframe interval (I-frame / GOP) to 2 s or less.
+- **Audio** is re-encoded to AAC 44.1 kHz (the camera sends 8 kHz, which Facebook and YouTube may
+  warn about or play silent). It's one small mono track, so it costs almost no CPU. (Not yet tried
+  against the real services.)
+
 ## Court buttons
 
 A Wi-Fi button at each court saves the replay just like the QR code does. The button calls the
@@ -455,6 +497,8 @@ clip from the court's QR page.
   reading ffmpeg's stream messages, and the restart rule.
 - **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
   segments into a signed HLS live playlist and streams the files with their timestamps shifted.
+- **Player streams** (`src/restream.js`): one ffmpeg per session that copies the box's own live
+  view to the player's RTMP(S) address, with backoff, status and key masking.
 - **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
   202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
@@ -488,6 +532,9 @@ clip from the court's QR page.
 | Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
 | Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
 | Device shows *Live view needs the venue Wi-Fi* | Device on the same Wi-Fi as the box (not a guest network with client isolation)? Box firewall open on 8090 (`sudo ufw allow 8090/tcp`)? Does the startup log say `live view on http://<ip>:8090` with the right address (else set `LIVE_HOST`)? Is the court recording? |
+| Player stream *refused the stream key* | The player pasted an old or wrong key, or ended the live video in their Facebook/YouTube app. They paste a new key on their phone. |
+| Player stream *Can't reach facebook.com / youtube.com* | Venue internet up? Some networks block outgoing RTMP (port 1935) or RTMPS (443 to `live-api-s.facebook.com`). |
+| Player stream *No video from the camera yet* | The court isn't recording (camera offline) — fix that first. The stream retries on its own. |
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
 | Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |

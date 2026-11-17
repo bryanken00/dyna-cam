@@ -71,3 +71,6 @@ export const clipShareUrl = (shareToken) => `${appUrl()}/clip/${shareToken}`;
 
 /** Public page for a recording session's share link (all its parts). */
 export const sessionShareUrl = (shareToken) => `${appUrl()}/session/${shareToken}`;
+
+/** The page a player opens on their own phone to add their live stream (PLAN-002 Phase G). */
+export const streamSetupUrl = (code) => `${appUrl()}/stream/${code}`;

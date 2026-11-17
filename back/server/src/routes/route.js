@@ -31,6 +31,8 @@ router.use("/v1/device", requireDevice, deviceRoute);
 
 // Players — no login; the court QR code / clip share link is the credential
 import publicRoute from "../controllers/v1/public/public.controller.js";
+import streamSetupRoute from "../controllers/v1/public/stream-setup.controller.js";
+router.use("/v1/public/stream-setup", streamSetupRoute); // PLAN-002 Phase G
 router.use("/v1/public", publicRoute);
 
 // PLAN-002 pairing — a 6-digit key is the credential, once (no login)

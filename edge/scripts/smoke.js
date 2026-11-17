@@ -20,6 +20,8 @@
  * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
  *    HLS; ffprobe plays the signed playlist URL and the video clock must run
  *    on across segments (each file restarts at 0 on disk), a bad signature 403s.
+ *    Then a player's own stream (restream.js) copies that live view to a local
+ *    RTMP listener: it must report "live" and the listener must get H.264.
  * 7. Meanwhile (skip with --no-stream) a second recorder records AND streams to
  *    a local ffmpeg RTMP server through the tee muxer: segments keep coming,
  *    the receiver gets video, killing the receiver leaves the recording running
@@ -35,6 +37,7 @@ import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
 import { createLiveServer, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
+import { SessionStreams } from "../src/restream.js";
 import { loadTimeline } from "../src/segments.js";
 import { maskStreamUrl } from "../src/stream.js";
 import { sleep } from "../src/util.js";
@@ -204,7 +207,7 @@ function check({ info, video, audio, boxes, frames, videoStart, thumb }) {
 const RTMP_URL = "rtmp://127.0.0.1:19350/live/smoke-key-9876";
 
 /** ffmpeg as a one-shot RTMP server, writing what it receives to an MPEG-TS file. */
-const rtmpReceiver = (file) =>
+const rtmpReceiver = (file, rtmpUrl = RTMP_URL) =>
   spawn(
     FFMPEG,
     [
@@ -215,7 +218,7 @@ const rtmpReceiver = (file) =>
       "-listen",
       "1",
       "-i",
-      RTMP_URL,
+      rtmpUrl,
       "-c",
       "copy",
       "-f",
@@ -348,9 +351,64 @@ async function livePhase({ bufferRoot }) {
     if (!audio) fail(`no audio in the live view — ${result}`);
     if (!(sequence(second) > sequence(first))) fail(`media sequence did not move on — ${result}`);
     log.info(result);
+    await playerStreamPhase({
+      port: server.address().port,
+      key,
+      workDir: path.dirname(bufferRoot),
+    });
   } finally {
     server.close();
   }
+}
+
+/** Phase 6b: a player's own stream — its own ffmpeg copies the live view to RTMP (here a local listener). */
+async function playerStreamPhase({ port, key, workDir }) {
+  const playerUrl = "rtmp://127.0.0.1:19351/live/player-key-4321";
+  const received = path.join(workDir, "player-received.ts");
+  const receiver = rtmpReceiver(received, playerUrl);
+  await sleep(1000);
+  const live = {
+    settings: { livePort: port },
+    localPlaylistUrl: (courtId, exp) =>
+      `http://127.0.0.1:${port}/live/${courtId}/index.m3u8?exp=${exp}&sig=${signLive(key, courtId, exp)}`,
+  };
+  const streams = new SessionStreams({
+    live,
+    records: () => true,
+    ffmpegPath: FFMPEG,
+    log: createLogger("player-stream"),
+  });
+  const now = Date.now();
+  streams.setSessions([
+    {
+      sessionId: "smoke-session",
+      courtId: "court-smoke",
+      startMs: now - 1000,
+      endMs: now + 600_000,
+      stream: { url: playerUrl },
+    },
+  ]);
+  let status;
+  try {
+    for (let i = 0; i < 25 && status?.status !== "live"; i += 1) {
+      await streams.tick();
+      status = streams.statuses()[0];
+      await sleep(1000);
+    }
+    await sleep(3000);
+  } finally {
+    await streams.stopAll();
+    await sleep(1000);
+    receiver.kill("SIGKILL");
+  }
+  const got = await probeFile(FFPROBE, received).catch(() => ({ duration: 0, streams: [] }));
+  const codecs = got.streams.map((s) => s.codec).join("+") || "nothing";
+  const result = `player stream: ${status?.status} ("${status?.message}"); the listener got ${codecs}, ${got.duration.toFixed(1)}s`;
+  if (status?.status !== "live") fail(`the player stream did not go live — ${result}`);
+  if (!got.streams.some((s) => s.codec === "h264") || got.duration < 4) {
+    fail(`the player stream sent no video — ${result}`);
+  }
+  log.info(result);
 }
 
 /** Phase 4: camera details + a preview JPEG, read from the buffer (never from the camera). */

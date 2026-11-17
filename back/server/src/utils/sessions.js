@@ -1,5 +1,6 @@
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { randomToken } from "./crypto/tokens.js";
+import { FORGET_STREAM_SQL } from "./sessionStreams.js";
 
 /**
  * Full-session recording (PLAN-001 Phase 3).
@@ -110,8 +111,10 @@ export const materializeSessionParts = async (db, { venueId } = {}) => {
 
     const nextStatus = session.endAt <= now ? "Processing" : "Recording";
     if (nextStatus !== session.status) {
+      // A finished session forgets the player's stream key (PLAN-002 Phase G)
+      const forget = nextStatus === "Processing" ? `, ${FORGET_STREAM_SQL}` : "";
       await db.query(
-        `UPDATE recording_sessions SET status = ?, dateUpdated = ?
+        `UPDATE recording_sessions SET status = ?, dateUpdated = ?${forget}
          WHERE sessionId = ? AND status IN ('Scheduled', 'Recording')`,
         [nextStatus, now, session.sessionId]
       );

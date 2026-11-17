@@ -14,3 +14,35 @@ export const clipTokenParamsSchema = z.object({ shareToken: token });
 
 // /sessions/:shareToken
 export const sessionTokenParamsSchema = z.object({ shareToken: token });
+
+// /stream-setup/:code — the player's own live stream (PLAN-002 Phase G)
+export const streamSetupParamsSchema = z.object({ code: token });
+
+/** A stream key as pasted: no spaces, no slashes (it goes after the platform's server URL). */
+const streamKey = z
+  .string()
+  .trim()
+  .min(8, "Paste the whole stream key")
+  .max(200, "That stream key is too long")
+  .regex(/^[A-Za-z0-9_.~:?=&%+-]+$/, "Paste only the stream key, without spaces or slashes");
+
+/** A full RTMP(S) address with its key, for platforms other than Facebook and YouTube. */
+const rtmpAddress = z
+  .string()
+  .trim()
+  .max(500, "That address is too long")
+  .refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return ["rtmp:", "rtmps:"].includes(parsed.protocol) && parsed.hostname && parsed.pathname.length > 1;
+    } catch {
+      return false;
+    }
+  }, "Enter the full address starting with rtmp:// or rtmps://, including the stream key");
+
+// PUT /stream-setup/:code
+export const saveStreamSchema = z.discriminatedUnion("platform", [
+  z.object({ platform: z.literal("FACEBOOK"), streamKey }),
+  z.object({ platform: z.literal("YOUTUBE"), streamKey }),
+  z.object({ platform: z.literal("OTHER"), url: rtmpAddress }),
+]);

@@ -31,6 +31,7 @@ const RUNNING = ["Scheduled", "Recording"];
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
+  s.streamUrl, s.streamPlatform, s.streamUpdatedAt,
   (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
     AS partsReady`;
 

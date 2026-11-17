@@ -12,6 +12,7 @@ import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
 import { JobQueue } from "./queue.js";
 import { RecorderManager } from "./recorder.js";
+import { SessionStreams } from "./restream.js";
 import { DeviceSync } from "./sync.js";
 
 /**
@@ -43,7 +44,7 @@ async function checkFfmpeg(settings, log) {
 }
 
 /** The parts that talk to the API: previews, config/heartbeat sync and the job loop. */
-function createServices({ settings, api, recorders, encoder, jobsDir, live }) {
+function createServices({ settings, api, recorders, encoder, jobsDir, live, sessionStreams }) {
   // Camera-setup previews: lowest priority, never while clips are busy (jobs is set below)
   let jobs = null;
   const preview = new PreviewSender({
@@ -62,6 +63,7 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live }) {
     agentVersion: AGENT_VERSION,
     log: createLogger("sync"),
     live,
+    sessionStreams,
   });
   const clipLog = createLogger("clip");
   jobs = new JobRunner({
@@ -84,6 +86,24 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live }) {
   });
 
   return { preview, sync, jobs };
+}
+
+/**
+ * LAN live view from the buffer (a taken port only turns it off, recording goes
+ * on) and the players' own streams: their own ffmpeg reading the live view —
+ * never the recorder.
+ */
+async function startLiveView(settings, recorders) {
+  const live = new LiveView({ settings, log: createLogger("live") });
+  await live.start();
+  const sessionStreams = new SessionStreams({
+    live,
+    records: (courtId) => recorders.has(courtId),
+    ffmpegPath: settings.ffmpegPath,
+    log: createLogger("player-stream"),
+  });
+  process.on("exit", () => sessionStreams.killAllSync());
+  return { live, sessionStreams };
 }
 
 async function main() {
@@ -144,18 +164,9 @@ async function main() {
   // Whatever happens to this process, no ffmpeg is left recording behind it
   process.on("exit", () => recorders.killAllSync());
 
-  // LAN live view from the buffer; a taken port only turns it off, recording goes on
-  const live = new LiveView({ settings, log: createLogger("live") });
-  await live.start();
-
-  const { preview, sync, jobs } = createServices({
-    settings,
-    api,
-    recorders,
-    encoder,
-    jobsDir,
-    live,
-  });
+  const { live, sessionStreams } = await startLiveView(settings, recorders);
+  const services = { settings, api, recorders, encoder, jobsDir, live, sessionStreams };
+  const { preview, sync, jobs } = createServices(services);
 
   // Stream restarts wait until no uncut clip/part window reaches into the last 70 s
   recorders.pendingWindows = (courtId) => jobs.pendingWindows(courtId);
@@ -185,6 +196,7 @@ async function main() {
     sync.stop();
     clearInterval(previewTimer);
     buttons?.close();
+    await sessionStreams.stopAll();
     live.close();
     await jobs.stop();
     await recorders.stopAll();
@@ -208,6 +220,7 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   recorders.startTicker();
+  sessionStreams.startTicker();
   await sync.init();
   if (shuttingDown) return;
   await jobs.start();

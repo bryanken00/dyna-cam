@@ -38,6 +38,18 @@ export const heartbeatSchema = z.object({
     .max(100)
     .optional()
     .default([]),
+  // PLAN-002 Phase G: each player stream the box runs (or retries)
+  sessionStreams: z
+    .array(
+      z.object({
+        sessionId: z.string().min(1).max(50),
+        status: z.enum(["starting", "live", "error"]),
+        message: optionalString(255),
+      })
+    )
+    .max(50)
+    .optional()
+    .default([]),
   // PLAN-002 Phase E: the box's LAN live view (edge/src/live.js) — its address
   // and the key the API signs live-view links with. null = live view off.
   live: z
