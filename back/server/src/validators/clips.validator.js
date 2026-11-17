@@ -9,6 +9,11 @@ const optionalDate = () =>
       .optional()
   );
 
+// POST / — staff "save this court's last 60 seconds now"
+export const createClipSchema = z.object({
+  courtId: z.string().min(1, "Court is required").max(50),
+});
+
 // GET /
 export const listClipsQuerySchema = z.object({
   page: queryInt(1),

@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
+  Keyboard,
   Link2,
   Loader2,
   MapPin,
@@ -11,6 +12,7 @@ import {
   Radio,
   Undo2,
   User,
+  WandSparkles,
   Video,
   VideoOff,
   X,
@@ -47,6 +49,12 @@ import SectionLabel from "../../../../../components/SectionLabel";
 import StatusToggle from "../../../../../components/StatusToggle";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../../utils/decode-html";
+import {
+  BUTTON_CODE_MAX,
+  BUTTON_CODE_PATTERN,
+  BUTTON_PRESS_PORT,
+  suggestButtonCode,
+} from "../../../../../utils/dynaCam";
 import {
   TAPO_CREDENTIAL_MAX,
   TAPO_CREDENTIAL_MIN,
@@ -109,6 +117,14 @@ const buildSchema = (isEditMode) =>
           "Enter the camera's RTSP address, starting with rtsp://",
         ),
       removeCamera: z.boolean(),
+      // Optional; unique across all courts (the API answers 409 on a clash)
+      buttonCode: z
+        .string()
+        .trim()
+        .refine(
+          (v) => v === "" || BUTTON_CODE_PATTERN.test(v),
+          "Use 3–32 letters, digits, - or _",
+        ),
       status: z.enum(["Active", "Inactive"]),
     })
     .superRefine((v, ctx) => {
@@ -137,6 +153,7 @@ const EMPTY = {
   tapoStream: TAPO_DEFAULT_STREAM,
   rtspUrl: "",
   removeCamera: false,
+  buttonCode: "",
   status: "Active",
 };
 
@@ -168,10 +185,11 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   const {
     formState: { isDirty, isSubmitSuccessful },
   } = form;
-  const [cameraType, removeCamera] = useWatch({
-    control: form.control,
-    name: ["cameraType", "removeCamera"],
-  });
+  const [cameraType, removeCamera, watchedVenueId, watchedName, buttonCode] =
+    useWatch({
+      control: form.control,
+      name: ["cameraType", "removeCamera", "venueId", "name", "buttonCode"],
+    });
 
   // Same query as the Courts page filter, so it is usually already cached
   const { data: optionsData, isLoading: venuesLoading } = useGetCourtOptions({
@@ -197,11 +215,23 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             ...EMPTY,
             venueId: entity.venueId ?? "",
             name: decodeHTML(entity.name) ?? "",
+            buttonCode: entity.buttonCode ?? "",
             status: entity.status === "Inactive" ? "Inactive" : "Active",
           }
         : EMPTY,
     );
   }, [open, entity, form]);
+
+  const venueNameForCode = isEditMode
+    ? decodeHTML(entity?.venueName)
+    : venueOptions.find((o) => o.value === watchedVenueId)?.label || "";
+
+  const handleGenerateCode = () => {
+    form.setValue("buttonCode", suggestButtonCode(venueNameForCode, watchedName), {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  };
 
   const createMutation = useCreateCourt();
   const updateMutation = useUpdateCourt();
@@ -250,6 +280,8 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             name: values.name,
             status: values.status,
             removeCamera: values.removeCamera,
+            // PUT is a full update for the code: "" clears it, so always send it
+            buttonCode: values.buttonCode,
             // Omitted = keep the stored camera (the URL is write-only)
             ...(cameraRtspUrl ? { cameraRtspUrl } : {}),
           },
@@ -258,6 +290,7 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         await createMutation.mutateAsync({
           venueId: values.venueId,
           name: values.name,
+          ...(values.buttonCode ? { buttonCode: values.buttonCode } : {}),
           ...(cameraRtspUrl ? { cameraRtspUrl } : {}),
         });
       }
@@ -655,6 +688,54 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                     )}
                   </>
                 )}
+              </div>
+
+              {/* Court button */}
+              <div className="mt-7">
+                <SectionLabel>Court button</SectionLabel>
+                <FormField
+                  control={form.control}
+                  name="buttonCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Button code</FormLabel>
+                      <div className="flex items-start gap-2">
+                        <div className="relative flex-1 min-w-0">
+                          <Keyboard className={iconPrefix} style={mutedIcon} />
+                          <FormControl>
+                            <Input
+                              placeholder="e.g., dink-city-court-1"
+                              className="h-10 pl-9 font-mono"
+                              maxLength={BUTTON_CODE_MAX}
+                              spellCheck={false}
+                              autoCapitalize="none"
+                              autoComplete="off"
+                              {...field}
+                            />
+                          </FormControl>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 shrink-0"
+                          onClick={handleGenerateCode}
+                        >
+                          <WandSparkles />
+                          Generate
+                        </Button>
+                      </div>
+                      <FormDescription>
+                        Optional. Set the court&apos;s Wi-Fi button to call{" "}
+                        <span className="font-mono break-all">
+                          http://&lt;recorder-box-address&gt;:{BUTTON_PRESS_PORT}
+                          /press/{buttonCode?.trim() || "<code>"}
+                        </span>{" "}
+                        — see the recorder box guide.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* Status — edit only; a new court starts Active */}

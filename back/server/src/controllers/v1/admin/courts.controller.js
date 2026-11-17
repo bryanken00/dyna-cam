@@ -24,7 +24,7 @@ const router = express.Router();
 
 const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
-         c.cameraRtspUrl, c.qrToken,
+         c.cameraRtspUrl, c.qrToken, c.buttonCode,
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -32,6 +32,20 @@ const COURT_SELECT = `
          ) AS recorderOnline
   FROM courts c
   JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'`;
+
+/** Button codes are unique across every court (one press must reach one court). */
+const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
+  if (!buttonCode) return false;
+  const [rows] = exceptCourtId
+    ? await conn.execute(
+        `SELECT courtId FROM courts WHERE buttonCode = ? AND courtId != ? LIMIT 1 FOR UPDATE`,
+        [buttonCode, exceptCourtId]
+      )
+    : await conn.execute(`SELECT courtId FROM courts WHERE buttonCode = ? LIMIT 1 FOR UPDATE`, [
+        buttonCode,
+      ]);
+  return rows.length > 0;
+};
 
 const toCourt = (row) => {
   const { cameraRtspUrl, ...court } = row;
@@ -168,7 +182,7 @@ router.post(
   checkPermission("venues", "courts", "write"),
   validateBody(createCourtSchema),
   catchAsync(async (req, res) => {
-    const { venueId, name, cameraRtspUrl } = req.body;
+    const { venueId, name, cameraRtspUrl, buttonCode } = req.body;
     const now = getCurrentTimestampLocal();
 
     let conn;
@@ -194,6 +208,10 @@ router.post(
         await req.db.rollback(conn);
         return res.sendError("This venue already has a court with this name", 409);
       }
+      if (await buttonCodeTaken(conn, buttonCode)) {
+        await req.db.rollback(conn);
+        return res.sendError("Another court already uses this button code", 409);
+      }
 
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
       const courtId = uuidRow[0].id;
@@ -201,9 +219,19 @@ router.post(
 
       await conn.execute(
         `INSERT INTO courts
-           (courtId, venueId, name, cameraRtspUrl, qrToken, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, 'Active', ?, ?)`,
-        [courtId, venueId, name, encryptSecret(cameraRtspUrl), qrToken, now, now]
+           (courtId, venueId, name, cameraRtspUrl, qrToken, buttonCode, status, dateCreated,
+            dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+        [
+          courtId,
+          venueId,
+          name,
+          encryptSecret(cameraRtspUrl),
+          qrToken,
+          buttonCode || null,
+          now,
+          now,
+        ]
       );
 
       await req.db.commit(conn);
@@ -229,7 +257,7 @@ router.put(
   validateBody(updateCourtSchema),
   catchAsync(async (req, res) => {
     const { courtId } = req.params;
-    const { name, cameraRtspUrl, removeCamera, status } = req.body;
+    const { name, cameraRtspUrl, removeCamera, buttonCode, status } = req.body;
     const now = getCurrentTimestampLocal();
 
     let conn;
@@ -259,15 +287,19 @@ router.put(
         await req.db.rollback(conn);
         return res.sendError("This venue already has a court with this name", 409);
       }
+      if (await buttonCodeTaken(conn, buttonCode, courtId)) {
+        await req.db.rollback(conn);
+        return res.sendError("Another court already uses this button code", 409);
+      }
 
       let storedCamera = target[0].cameraRtspUrl;
       if (removeCamera) storedCamera = null;
       else if (cameraRtspUrl) storedCamera = encryptSecret(cameraRtspUrl);
 
       await conn.execute(
-        `UPDATE courts SET name = ?, cameraRtspUrl = ?, status = ?, dateUpdated = ?
+        `UPDATE courts SET name = ?, cameraRtspUrl = ?, buttonCode = ?, status = ?, dateUpdated = ?
          WHERE courtId = ?`,
-        [name, storedCamera, status || "Active", now, courtId]
+        [name, storedCamera, buttonCode || null, status || "Active", now, courtId]
       );
 
       await req.db.commit(conn);
@@ -317,7 +349,8 @@ router.delete(
   checkPermission("venues", "courts", "write"),
   catchAsync(async (req, res) => {
     const result = await req.db.query(
-      `UPDATE courts SET status = 'Deleted', dateUpdated = ?
+      // The button code is freed so a new court can take over the button
+      `UPDATE courts SET status = 'Deleted', buttonCode = NULL, dateUpdated = ?
        WHERE courtId = ? AND status != 'Deleted'`,
       [getCurrentTimestampLocal(), req.params.courtId]
     );

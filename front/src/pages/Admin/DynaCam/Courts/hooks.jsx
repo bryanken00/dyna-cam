@@ -297,6 +297,31 @@ export const useCourtHooks = () => {
         render: (_, record) => <CameraChip camera={record.camera} />,
       },
       {
+        title: "Button",
+        dataIndex: "buttonCode",
+        key: "buttonCode",
+        width: 150,
+        render: (code) =>
+          code ? (
+            <span
+              className="font-mono inline-block max-w-full truncate align-middle"
+              title={code}
+              style={{
+                fontSize: 11.5,
+                padding: "2px 8px",
+                borderRadius: 999,
+                border: "1px solid var(--color-line)",
+                background: "var(--color-surface-sunken)",
+                color: "var(--color-text-dark)",
+              }}
+            >
+              {code}
+            </span>
+          ) : (
+            <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>—</span>
+          ),
+      },
+      {
         title: "Recorder",
         dataIndex: "recorderOnline",
         key: "recorderOnline",

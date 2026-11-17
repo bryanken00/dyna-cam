@@ -86,6 +86,10 @@ export function loadConfig(env = process.env) {
     uploadConcurrency: int(env, "UPLOAD_CONCURRENCY", 1, 1, 4),
     heartbeatSeconds: int(env, "HEARTBEAT_SECONDS", 30, 5, 600),
     configRefreshSeconds: int(env, "CONFIG_REFRESH_SECONDS", 60, 10, 3600),
+    // Court buttons on the LAN: unset → 8089; set to "" or 0 → off
+    buttonPort: env.BUTTON_PORT === undefined ? 8089 : int(env, "BUTTON_PORT", 0, 0, 65535),
+    buttonHost: String(env.BUTTON_HOST || "0.0.0.0").trim(),
+    buttonKey: String(env.BUTTON_KEY ?? "").trim(),
     logLevel: ["debug", "info", "warn", "error"].includes(logLevel) ? logLevel : "info",
     ffmpegPath: env.FFMPEG_PATH || "ffmpeg",
     ffprobePath: env.FFPROBE_PATH || "ffprobe",

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createApi } from "./api.js";
+import { startButtonServer } from "./buttons.js";
 import { detectEncoder, makeClip } from "./clipper.js";
 import { AGENT_VERSION, ConfigError, loadConfig, loadEnvFile, USER_AGENT } from "./config.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
@@ -97,6 +98,7 @@ async function main() {
       }),
   });
 
+  let buttons = null;
   let shuttingDown = false;
   const shutdown = async (signal) => {
     if (shuttingDown) {
@@ -111,6 +113,7 @@ async function main() {
     }, 12_000);
     force.unref();
     sync.stop();
+    buttons?.close();
     await jobs.stop();
     await recorders.stopAll();
     log.info("stopped cleanly");
@@ -124,6 +127,15 @@ async function main() {
   if (shuttingDown) return;
   await jobs.start();
   sync.startTimers();
+  if (settings.buttonPort && !shuttingDown) {
+    buttons = await startButtonServer({
+      host: settings.buttonHost,
+      port: settings.buttonPort,
+      key: settings.buttonKey,
+      log: createLogger("buttons"),
+      onPress: (press) => jobs.addPress(press),
+    });
+  }
 }
 
 main().catch((err) => {

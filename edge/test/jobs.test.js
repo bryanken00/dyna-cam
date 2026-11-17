@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ApiError } from "../src/api.js";
-import { JobRunner, STALE_MS } from "../src/jobs.js";
+import { JobRunner, PRESS_RELAY_MAX_AGE_MS, STALE_MS } from "../src/jobs.js";
 import { JobQueue } from "../src/queue.js";
 
 const NOW = 1_794_881_000_000;
@@ -33,10 +33,15 @@ function fakeApi(overrides = {}) {
     uploadClip: record("upload", overrides.upload ?? { status: "Ready" }),
     failClip: record("fail", overrides.fail ?? {}),
     getJobs: record("jobs", { jobs: [] }),
+    pressButton: record(
+      "press",
+      overrides.press ?? { clipId: "c-1", shareUrl: "https://x/clip/t", merged: false }
+    ),
   };
 }
 
 async function makeRunner({ api = fakeApi(), clip, now = NOW } = {}) {
+  const clock = typeof now === "function" ? now : () => now;
   const queue = await new JobQueue(path.join(dir, "queue.json")).load();
   const runner = new JobRunner({
     api,
@@ -45,7 +50,7 @@ async function makeRunner({ api = fakeApi(), clip, now = NOW } = {}) {
     jobsDir: path.join(dir, "jobs"),
     settings: { clipConcurrency: 1, uploadConcurrency: 1 },
     log: silent,
-    now: () => now,
+    now: clock,
   });
   return { runner, queue, api };
 }
@@ -204,5 +209,53 @@ describe("recover", () => {
     await runner.recover();
     assert.equal(queue.get("clip-1").state, "waiting");
     await assert.rejects(fs.access(path.join(dir, "jobs", "orphan")));
+  });
+});
+
+describe("button presses", () => {
+  it("persists a press and relays it with the receipt time", async () => {
+    const { runner, queue, api } = await makeRunner();
+    const entry = await runner.addPress({ buttonCode: "court-1", pressedAtMs: NOW - 500 });
+    const saved = JSON.parse(await fs.readFile(path.join(dir, "queue.json"), "utf8"));
+    assert.equal(saved.jobs[0].buttonCode, "court-1");
+    await runner.step(entry);
+    assert.deepEqual(api.calls.at(-1).slice(0, 3), ["press", "court-1", NOW - 500]);
+    assert.equal(queue.size, 0);
+  });
+
+  it("survives a restart", async () => {
+    const first = await makeRunner();
+    await first.runner.addPress({ buttonCode: "court-1", pressedAtMs: NOW - 500 });
+    const second = await makeRunner();
+    assert.equal(second.queue.list()[0].state, "press");
+  });
+
+  it("drops 404 / 409 / 422 / 400 as final", async () => {
+    for (const status of [404, 409, 422, 400]) {
+      const { runner, queue, api } = await makeRunner({
+        api: fakeApi({ press: new ApiError("x", { status }) }),
+      });
+      const entry = await runner.addPress({ buttonCode: `b-${status}`, pressedAtMs: NOW - 500 });
+      await runner.step(entry);
+      assert.equal(queue.size, 0, String(status));
+      assert.equal(api.calls.length, 1);
+    }
+  });
+
+  it("retries a network failure with backoff, then gives up after ~100 s", async () => {
+    let now = NOW;
+    const { runner, queue } = await makeRunner({
+      api: fakeApi({ press: new ApiError("offline") }),
+      now: () => now,
+    });
+    const entry = await runner.addPress({ buttonCode: "court-1", pressedAtMs: NOW });
+    await runner.step(entry);
+    assert.equal(queue.get(entry.pressId).attempts, 1);
+    assert.equal(queue.get(entry.pressId).nextAttemptAt, NOW + 1000);
+    await runner.step(queue.get(entry.pressId));
+    assert.equal(queue.get(entry.pressId).nextAttemptAt, NOW + 2000);
+    now = NOW + PRESS_RELAY_MAX_AGE_MS + 1;
+    await runner.step(queue.get(entry.pressId));
+    assert.equal(queue.size, 0);
   });
 });

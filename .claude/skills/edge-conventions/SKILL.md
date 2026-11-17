@@ -1,13 +1,14 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
 
 Node 20.12+ · plain ESM JavaScript · **no runtime dependencies** · ffmpeg 5+ · pm2 ·
-`node:test`. The box records each court's RTSP camera into a rolling buffer and cuts the replays
-players save. It only makes **outbound** calls. The product context is in
+`node:test`. Never add runtime dependencies (`node:http` for the listener). The box records each court's RTSP camera into a rolling buffer and cuts the replays
+players save. Its only calls to the API are **outbound**; the one listener is LAN-only, for
+court buttons. The product context is in
 `docs/plans/PLAN-001-court-replay-cameras/plan.md` ("Recorder box"), and the server half is in
 `back/server/src/controllers/v1/device/device.controller.js`.
 
@@ -22,13 +23,13 @@ players save. It only makes **outbound** calls. The product context is in
 | `clipper.js` | Pure window and selection math, ffmpeg argument builders, encoder detection, `cutClip`, `makeClip` |
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
+| `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
 | `index.js` | Wiring and graceful shutdown only |
 
-Keep logic in pure exported functions (args, math, selection) so `test/` can cover it without
-ffmpeg or a network. Inject side effects (`api`, `clip`, `spawnImpl`, `now`) for the same reason.
+Keep logic in pure exported functions and inject side effects (`api`, `clip`, `spawnImpl`, `now`) so `test/` runs without ffmpeg or internet.
 
 ## Device API contract (don't change it from here)
 
@@ -49,7 +50,10 @@ ffmpeg or a network. Inject side effects (`api`, `clip`, `spawnImpl`, `now`) for
   only when the path (without the query) changes.
 - Use `requestedAtMs` (epoch ms), never parse `requestedAt`. A job older than 15 min is failed
   server-side, so drop it.
-- Claim (`/processing`) is best-effort. The upload is accepted for Pending clips too.
+- Claim (`/processing`) is best-effort, but exclusive: another box's claim → 409 → drop.
+- Button press: `POST /buttons/:code/press {pressedAtMs}` → 201 or 200 (merged) with `shareUrl`.
+  It is queued (`state: "press"`) and retried while under 100 s old (the API refuses > 120 s).
+  404, 409, 422 and 400 are final and logged in words.
 - Upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
 
 ## ffmpeg rules
@@ -92,13 +96,9 @@ tolerates holes ≤ 7 s, and the window must be inside a closed segment before c
 
 ## Data and state
 
-`DATA_DIR` holds:
-
-- `buffer/<courtId>/` (segments, csv, index, run, pid);
-- `jobs/<clipId>/` (work dir; segments hard-linked in so pruning can't pull them away);
-- `queue.json`;
-- `config.json` (mode 600, holds camera passwords);
-- `logo/`.
+`DATA_DIR` holds `buffer/<courtId>/` (segments, csv, index, run, pid), `jobs/<clipId>/` (segments
+hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
+`config.json` (mode 600, holds camera passwords) and `logo/`.
 
 Every JSON write is atomic (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
 

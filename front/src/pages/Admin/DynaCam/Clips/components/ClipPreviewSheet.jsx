@@ -8,10 +8,10 @@ import {
 } from "@/components/ui/sheet";
 import DescriptionList from "../../../../../components/DescriptionList";
 import StatusDot from "../../../../../components/StatusDot";
+import SourceChip from "./SourceChip";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { getImageUrl } from "../../../../../utils/upload";
 import {
-  CLIP_SOURCE_LABEL,
   CLIP_STATUS_TONE,
   formatBytes,
   formatDate,
@@ -143,7 +143,7 @@ const ClipPreviewSheet = ({
                   },
                   {
                     label: "Saved by",
-                    value: CLIP_SOURCE_LABEL[clip?.source] || clip?.source || "-",
+                    value: <SourceChip source={clip?.source} />,
                   },
                   { label: "Length", value: formatDuration(clip?.durationSeconds) },
                   { label: "File size", value: formatBytes(clip?.sizeBytes) },

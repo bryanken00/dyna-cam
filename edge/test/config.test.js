@@ -31,6 +31,17 @@ describe("loadConfig", () => {
     assert.equal(cfg.dataDir, path.join(ROOT_DIR, "data"));
   });
 
+  it("turns the button listener on by default and off with an empty/0 port", () => {
+    const cfg = loadConfig(base);
+    assert.equal(cfg.buttonPort, 8089);
+    assert.equal(cfg.buttonHost, "0.0.0.0");
+    assert.equal(cfg.buttonKey, "");
+    assert.equal(loadConfig({ ...base, BUTTON_PORT: "" }).buttonPort, 0);
+    assert.equal(loadConfig({ ...base, BUTTON_PORT: "0" }).buttonPort, 0);
+    assert.equal(loadConfig({ ...base, BUTTON_PORT: "9000", BUTTON_KEY: " k " }).buttonKey, "k");
+    assert.throws(() => loadConfig({ ...base, BUTTON_PORT: "70000" }), /BUTTON_PORT/);
+  });
+
   it("rejects bad values", () => {
     assert.throws(() => loadConfig({ ...base, ENCODER: "nvenc" }), /ENCODER must be one of/);
     assert.throws(() => loadConfig({ ...base, BUFFER_SECONDS: "30" }), /BUFFER_SECONDS/);

@@ -6,7 +6,7 @@ the API queues a clip job. The box picks the job up, cuts 60 s before the tap pl
 burns the venue logo in bottom-right, makes a JPEG thumbnail and uploads both.
 
 The box only makes **outbound** HTTPS calls to the API. The venue needs no port-forwarding and no
-public IP. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
+public IP. The only thing it listens on is a small LAN port for the court buttons. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
 product.
 
 **Stack:** Node 20.12+ (plain ESM JavaScript, no runtime dependencies) · ffmpeg 5+ · pm2.
@@ -80,6 +80,9 @@ nano .env        # API_URL=https://api.your-domain   DEVICE_TOKEN=<the token>
 | `CLIP_CONCURRENCY` / `UPLOAD_CONCURRENCY` | `1` / `1` | Clips cut / uploaded at the same time |
 | `HEARTBEAT_SECONDS` | `30` | Heartbeat interval (the portal shows a box offline after 90 s) |
 | `CONFIG_REFRESH_SECONDS` | `60` | How often courts, camera URLs and the logo are re-read |
+| `BUTTON_PORT` | `8089` | LAN port for court buttons. Set it empty or `0` to turn buttons off. |
+| `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
+| `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
 
@@ -133,11 +136,82 @@ The venues use TP-Link **Tapo C200** cameras (Wi-Fi, indoor pan/tilt). On firmwa
 Other RTSP cameras work the same way. H.264 or H.265 is fine, since the clip is re-encoded to
 H.264 anyway.
 
+## Court buttons
+
+A Wi-Fi button at each court saves the replay just like the QR code does. The button calls the
+box on the LAN, and the box notes the press time the moment the request arrives. It answers `202`
+at once, so the button never waits on the internet, and then relays the press to the API. If the
+internet is slow or down, the press is kept in `data/queue.json` and retried for about 100 s
+(the API refuses presses older than 2 minutes).
+
+```
+GET  http://<box-ip>:8089/press/<buttonCode>?key=<BUTTON_KEY>     (POST works too)
+GET  http://<box-ip>:8089/health
+```
+
+- **Button code:** set it per court in the **Admin portal → Courts** (3–32 letters, digits, `-`
+  or `_`, for example `court-1`). One code per button.
+- **Key:** set `BUTTON_KEY` in `.env` to a long random string (`openssl rand -hex 16`). Without a
+  key, anyone on the venue Wi-Fi can save clips.
+- **Box address:** give the box a fixed LAN IP (a DHCP reservation in the router), like the
+  cameras.
+- **Bounces:** a second press of the same button within 3 s is ignored. The API also merges
+  presses on one court within 20 s into the same clip.
+- **Answers:**
+
+  | Status | Meaning |
+  | --- | --- |
+  | `202 {"ok":true}` | Accepted |
+  | `202 {"ok":true,"duplicate":true}` | Bounce, ignored |
+  | `400` | Bad code |
+  | `401` | Wrong or missing key |
+  | `404` | Unknown path |
+
+- **The log** shows each press and its result:
+  - `button court-1: clip saved <clipId> — <share link>`;
+  - `Button code X is not set on any court of this venue — set it in Admin → Courts` (404);
+  - court has no camera (409), or press too old (422).
+
+### Shelly Button 1
+
+1. Add the button to the venue Wi-Fi with the Shelly app (or its own access point at
+   `192.168.33.1`).
+2. Open the button's web UI → **Actions** → **Button Short Press URL**, and enter
+   `http://<box-ip>:8089/press/court-1?key=<BUTTON_KEY>`. Enable it and save.
+3. Press it. The box log shows `button court-1 pressed`, and the clip appears in the Admin portal.
+
+The Shelly Button 1 sleeps between presses and needs a second or two to join Wi-Fi. The press time
+is when the request reaches the box, so the clip ends that much later. Every clip already
+includes 5 s after the press.
+
+### ESP32 (outline)
+
+Any ESP32 with a momentary push button works:
+
+```cpp
+#include <WiFi.h>
+#include <HTTPClient.h>
+const char* URL = "http://192.168.1.10:8089/press/court-1?key=YOUR_BUTTON_KEY";
+const int PIN = 0;                       // button to GND, internal pull-up
+void setup() { pinMode(PIN, INPUT_PULLUP); WiFi.begin("venue-ssid", "wifi-password"); }
+void loop() {
+  if (digitalRead(PIN) == LOW) {         // pressed
+    HTTPClient http; http.begin(URL); http.setTimeout(3000);
+    http.POST("");                       // 202 = accepted
+    http.end();
+    delay(3000);                         // simple debounce (the box debounces too)
+  }
+  delay(20);
+}
+```
+
+Keep the board on wired USB power. Reconnect Wi-Fi in `loop()` if `WiFi.status() != WL_CONNECTED`.
+
 ## Test without real hardware
 
 ```bash
 npm run lint
-npm test          # node:test, no network: window math, segment selection, ffmpeg args, masking, queue, job loop, API client
+npm test          # node:test, no internet: window math, segment selection, ffmpeg args, masking, queue, job loop, buttons, API client
 npm run smoke     # ~2 min, ffmpeg only, no API, no camera
 ```
 
@@ -186,6 +260,8 @@ clip from the court's QR page.
   4. Overlay the logo at 12% of the width, bottom-right.
   5. Encode H.264 at up to 1080p with AAC audio and `+faststart`.
   6. Make the thumbnail from the middle frame.
+- **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
+  202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
   1. Long-poll `GET /jobs?wait=25`.
   2. Persist the job to `data/queue.json`, then claim it.
@@ -210,6 +286,7 @@ clip from the court's QR page.
 | `box clock is …s behind/ahead of the server` | NTP isn't working: `chronyc tracking`, `timedatectl` |
 | Clips cut a few seconds off | Check the clock (above), then the camera's own time. |
 | Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
+| Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
 | Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
 
 Test a camera by hand (the password stays out of the box's logs, but not your shell history):

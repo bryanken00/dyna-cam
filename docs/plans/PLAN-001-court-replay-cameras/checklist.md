@@ -202,16 +202,27 @@
 
 ## Phase 2: Physical button + staff save
 
-- [ ] Migration: `courts.buttonCode` unique index (if not already in 001), button press source
-- [ ] Device endpoint `POST /device/buttons/:buttonCode/press` → creates a `BUTTON` clip using
-      the box-supplied timestamp (same cooldown merge)
-- [ ] `edge/`: LAN listener `POST /press/:buttonCode`, timestamped locally, queued if offline
-- [ ] Admin `POST /admin/clips` (staff save for a court) behind `clips` write
-- [ ] Courts drawer: button code field; Clips page: "Save clip now" action
-- [ ] Tests: button press for another venue's button → 404; staff save permission 403 for
-      read-only role
-- [ ] Tried: press the Wi-Fi button on court → clip appears in Admin Clips with source `BUTTON`
-- [ ] Lint/test/build pass; changelog entry (`ref: PLAN-001`)
+- [x] Migration `003_add_button_code_to_courts.sql`: `courts.buttonCode` + unique index (the
+      `BUTTON` source already exists in `clips.source`); deleting a court or venue frees its code
+- [x] Device endpoint `POST /device/buttons/:buttonCode/press` (`{pressedAtMs?}`) → `BUTTON` clip
+      anchored to the press time, same rules as a QR save via the shared
+      `utils/clipRequests.js`; 404 for another venue's button, 422 for a press older than 2 min
+- [x] `edge/`: LAN listener (`BUTTON_PORT` 8089) `GET|POST /press/:buttonCode`, timestamped on
+      receipt, answers 202 at once, optional `BUTTON_KEY`, 3 s debounce, relayed with retries
+      while under 100 s old, persisted in the queue; Shelly / ESP32 setup in `edge/README.md`
+- [x] Admin `POST /admin/clips` (staff save for a court) behind `clips` write; 503
+      `CAMERA_OFFLINE` while the box is offline
+- [x] Courts drawer: button code field (with "Generate" and the box URL hint) + list column;
+      Clips page: "Save clip now" dialog (write access only, inactive courts hidden) + source chip
+- [x] Tests (`tests/buttons-staff-save.test.js`, 9): codes unique + freed on delete; press →
+      BUTTON clip at the press time, merge, another venue's button 404, too-old 422; staff save
+      201, offline 503, read-only 403, deleted court 404
+- [x] Tried on the real Tapo C200 (throwaway database): a button press sent to the box's LAN
+      listener (as a Shelly would) → 202, wrong key → 401 → `BUTTON` clip Ready in 9 s, 65.0 s;
+      staff "Save clip now" → `STAFF` clip Ready in 9 s. *(No physical Shelly/ESP32 button on hand —
+      the press was the same HTTP call the button makes.)*
+- [x] Lint/test/build pass (API 112 tests, web lint + build, edge 71 tests); changelog entry
+      (`ref: PLAN-001`)
 
 ## Phase 3: Full-session recording
 

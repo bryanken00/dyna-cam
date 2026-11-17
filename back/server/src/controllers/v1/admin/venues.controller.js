@@ -268,7 +268,7 @@ router.delete(
       }
 
       await conn.execute(
-        `UPDATE courts SET status = 'Deleted', dateUpdated = ?
+        `UPDATE courts SET status = 'Deleted', buttonCode = NULL, dateUpdated = ?
          WHERE venueId = ? AND status != 'Deleted'`,
         [now, venueId]
       );

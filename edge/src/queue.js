@@ -5,10 +5,16 @@ import { readJson, writeJsonAtomic } from "./util.js";
  * a reboot neither loses a cut-but-not-uploaded clip nor a job still waiting
  * to be cut (the buffer segments survive a reboot too).
  *
- * Entry: { clipId, courtId, source, requestedAtMs, preSeconds, postSeconds,
- *          state: "waiting" | "ready" | "failing", claimed, attempts,
- *          nextAttemptAt, videoPath?, thumbnailPath?, failReason?, receivedAt }
+ * Clip entry:  { key, courtId, source, requestedAtMs, preSeconds, postSeconds,
+ *               state: "waiting" | "ready" | "failing", claimed, attempts,
+ *               nextAttemptAt, videoPath?, thumbnailPath?, failReason?, receivedAt }
+ * Press entry: { pressId, buttonCode, requestedAtMs (= pressedAtMs), state: "press",
+ *               attempts, nextAttemptAt } — a court button press not yet relayed.
  */
+
+/** Queue key: a press's own id, else the clip id. */
+export const queueKey = (entry) => entry?.pressId ?? entry?.clipId;
+
 export class JobQueue {
   constructor(file) {
     this.file = file;
@@ -20,18 +26,18 @@ export class JobQueue {
     const data = await readJson(this.file, { version: 1, jobs: [] });
     this.entries.clear();
     for (const entry of Array.isArray(data?.jobs) ? data.jobs : []) {
-      if (entry?.clipId && Number.isFinite(entry.requestedAtMs))
-        this.entries.set(entry.clipId, entry);
+      if (queueKey(entry) && Number.isFinite(entry.requestedAtMs))
+        this.entries.set(queueKey(entry), entry);
     }
     return this;
   }
 
-  has(clipId) {
-    return this.entries.has(clipId);
+  has(key) {
+    return this.entries.has(key);
   }
 
-  get(clipId) {
-    return this.entries.get(clipId) ?? null;
+  get(key) {
+    return this.entries.get(key) ?? null;
   }
 
   /** Oldest request first — its footage is the closest to being overwritten. */
@@ -44,21 +50,21 @@ export class JobQueue {
   }
 
   async put(entry) {
-    this.entries.set(entry.clipId, entry);
+    this.entries.set(queueKey(entry), entry);
     await this.save();
     return entry;
   }
 
-  async update(clipId, patch) {
-    const entry = this.entries.get(clipId);
+  async update(key, patch) {
+    const entry = this.entries.get(key);
     if (!entry) return null;
     Object.assign(entry, patch);
     await this.save();
     return entry;
   }
 
-  async remove(clipId) {
-    if (this.entries.delete(clipId)) await this.save();
+  async remove(key) {
+    if (this.entries.delete(key)) await this.save();
   }
 
   /** Writes are chained, so they land in order and never interleave. */

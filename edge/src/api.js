@@ -127,6 +127,14 @@ export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalTh
 
     claimClip: (clipId) => request("POST", clipPath(clipId, "processing")),
 
+    /** A court button press, with the box's receipt time. → { clipId, shareUrl, merged } */
+    pressButton: (buttonCode, pressedAtMs, signal) =>
+      request("POST", `/buttons/${encodeURIComponent(buttonCode)}/press`, {
+        json: { pressedAtMs },
+        timeoutMs: 10_000,
+        signal,
+      }),
+
     failClip: (clipId, reason) =>
       request("POST", clipPath(clipId, "fail"), { json: { reason: truncate(reason, 255) } }),
 

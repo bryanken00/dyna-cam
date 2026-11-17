@@ -3,12 +3,12 @@ import { toast } from "sonner";
 import { Copy, ExternalLink, Film, Play, Trash2 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
+import SourceChip from "./components/SourceChip";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
 import { copyText } from "../../../../utils/clipboard";
 import { getImageUrl } from "../../../../utils/upload";
 import {
-  CLIP_SOURCE_LABEL,
   CLIP_STATUS_TONE,
   formatBytes,
   formatDate,
@@ -38,8 +38,9 @@ export const useClipHooks = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
 
-  // ─── Preview Sheet State ───────────────────────────────────────────
+  // ─── Preview Sheet / Save Dialog State ─────────────────────────────
   const [previewClip, setPreviewClip] = useState(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -108,6 +109,15 @@ export const useClipHooks = () => {
 
   const handlePreviewClose = useCallback(() => {
     setPreviewClip(null);
+  }, []);
+
+  const handleOpenSaveDialog = useCallback(() => {
+    setSaveDialogOpen(true);
+  }, []);
+
+  // The mutation invalidates ["clips"], so the new Pending row appears
+  const handleCloseSaveDialog = useCallback(() => {
+    setSaveDialogOpen(false);
   }, []);
 
   const handleCopyShareLink = useCallback(async (record) => {
@@ -293,16 +303,18 @@ export const useClipHooks = () => {
         dataIndex: "requestedAt",
         key: "requestedAt",
         width: 180,
-        render: (requestedAt, record) => (
-          <div>
-            <div style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
-              {formatDateTime(requestedAt)}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-              {CLIP_SOURCE_LABEL[record.source] || record.source}
-            </div>
-          </div>
+        render: (requestedAt) => (
+          <span style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+            {formatDateTime(requestedAt)}
+          </span>
         ),
+      },
+      {
+        title: "Source",
+        dataIndex: "source",
+        key: "source",
+        width: 110,
+        render: (source) => <SourceChip source={source} />,
       },
       {
         title: "Length",
@@ -393,6 +405,9 @@ export const useClipHooks = () => {
     handleClearFilters,
     previewClip,
     handlePreviewClose,
+    saveDialogOpen,
+    handleOpenSaveDialog,
+    handleCloseSaveDialog,
     handleCopyShareLink,
     handleDeleteRequest,
   };

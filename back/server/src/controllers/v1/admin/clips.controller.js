@@ -1,11 +1,13 @@
 import express from "express";
-import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
+import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
+import { ERROR_CODES } from "../../../utils/APIError.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { clipShareUrl } from "../../../utils/clips.js";
 import { removeClipFiles } from "../../../utils/file/clipFiles.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
-import { listClipsQuerySchema } from "../../../validators/clips.validator.js";
+import { createClipSchema, listClipsQuerySchema } from "../../../validators/clips.validator.js";
+import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
 
 /**
  * Clips — the replays saved from court cameras (PLAN-001).
@@ -116,6 +118,64 @@ router.get(
 );
 
 /**
+ * POST /
+ * Staff save a court's last 60 seconds now (e.g. a player asked at the desk).
+ * Same rules as a QR save (utils/clipRequests.js): merged into a clip made on
+ * that court in the last few seconds, refused while the camera is offline.
+ */
+router.post(
+  "/",
+  checkPermission("clips", null, "write"),
+  validateBody(createClipSchema),
+  catchAsync(async (req, res) => {
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      const [courts] = await conn.execute(
+        `SELECT ${COURT_RECORDING_COLUMNS}
+         FROM courts c
+         JOIN venues v ON v.venueId = c.venueId
+         WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
+         LIMIT 1`,
+        [onlineSince(), req.body.courtId]
+      );
+      if (courts.length === 0) {
+        await req.db.rollback(conn);
+        return res.sendError("Court not found or not active", 404);
+      }
+
+      result = await requestClip(conn, courts[0], {
+        source: "STAFF",
+        requestedAt: getCurrentTimestampLocal(),
+      });
+      await req.db.commit(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok) {
+      return res.sendError(
+        "This court's camera or recorder box is offline, so nothing can be saved",
+        null,
+        503,
+        ERROR_CODES.CAMERA_OFFLINE
+      );
+    }
+
+    const body = {
+      clipId: result.clipId,
+      shareUrl: clipShareUrl(result.shareToken),
+      merged: result.merged,
+    };
+    return result.merged
+      ? res.sendSuccess("This moment is already being saved", body)
+      : res.sendSuccess("Saving the clip", body, 201);
+  })
+);
+
+/**
  * GET /options
  * Venues and courts for the Clips filters — under the clips permission, so
  * the page works without the Venues or Courts permissions.
@@ -127,13 +187,18 @@ router.get(
     const [venues, courts] = await Promise.all([
       req.db.query(`SELECT venueId, name FROM venues WHERE status != 'Deleted' ORDER BY name ASC`),
       req.db.query(
-        `SELECT c.courtId, c.name, c.venueId, v.name AS venueName
+        `SELECT c.courtId, c.name, c.venueId, v.name AS venueName,
+                (c.status = 'Active' AND v.status = 'Active') AS active
          FROM courts c JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
          WHERE c.status != 'Deleted'
          ORDER BY v.name ASC, c.name ASC`
       ),
     ]);
-    return res.sendSuccess("Clip filter options", { venues, courts });
+    return res.sendSuccess("Clip filter options", {
+      venues,
+      // `active`: the court can save clips now (court and venue both Active)
+      courts: courts.map((court) => ({ ...court, active: Boolean(court.active) })),
+    });
   })
 );
 

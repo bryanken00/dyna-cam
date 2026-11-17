@@ -21,11 +21,25 @@ const optionalRtspUrl = () =>
       .optional()
   );
 
+/**
+ * The code a court's physical button sends to the recorder box
+ * (http://<box>:<port>/press/<code>). Letters, digits, - and _.
+ */
+const optionalButtonCode = () =>
+  emptyToUndefined(
+    z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9_-]{3,32}$/, "Use 3–32 letters, digits, - or _")
+      .optional()
+  );
+
 // POST /
 export const createCourtSchema = z.object({
   venueId: z.string().min(1, "Venue is required").max(50),
   name: z.string().trim().min(1, "Name is required").max(100),
   cameraRtspUrl: optionalRtspUrl(),
+  buttonCode: optionalButtonCode(),
 });
 
 // PUT /:courtId
@@ -35,6 +49,8 @@ export const updateCourtSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
   cameraRtspUrl: optionalRtspUrl(),
   removeCamera: z.boolean().optional().default(false),
+  // Full update like the other fields: omitted/"" clears the button
+  buttonCode: optionalButtonCode(),
   status: z.enum(["Active", "Inactive"]).optional(),
 });
 

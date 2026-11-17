@@ -203,7 +203,7 @@ const CourtsPage = () => {
               columns={columns}
               rowKey="courtId"
               loading={isLoading}
-              scroll={{ x: 900 }}
+              scroll={{ x: 1050 }}
             />
             <PaginationFooter
               pagination={pagination}

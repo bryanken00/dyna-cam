@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { CircleAlert, CircleCheck, Film, Filter, Hourglass } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Film,
+  Filter,
+  Hourglass,
+  Scissors,
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useClipHooks } from "./hooks";
 import ClipPreviewSheet from "./components/ClipPreviewSheet";
+import SaveClipFormModal from "./components/SaveClipFormModal";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -42,6 +50,9 @@ const ClipsPage = () => {
     handleClearFilters,
     previewClip,
     handlePreviewClose,
+    saveDialogOpen,
+    handleOpenSaveDialog,
+    handleCloseSaveDialog,
     handleCopyShareLink,
     handleDeleteRequest,
   } = useClipHooks();
@@ -76,7 +87,15 @@ const ClipsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Clips"
-        subtitle="Replays saved from the court cameras — by players scanning the QR, or the court button."
+        subtitle="Replays saved from the court cameras — by players scanning the QR, the court button, or staff."
+        actions={
+          canWrite && (
+            <Button onClick={handleOpenSaveDialog}>
+              <Scissors />
+              Save clip now
+            </Button>
+          )
+        }
       />
 
       {/* 2. STAT CARDS */}
@@ -245,7 +264,7 @@ const ClipsPage = () => {
               columns={columns}
               rowKey="clipId"
               loading={isLoading}
-              scroll={{ x: 1100 }}
+              scroll={{ x: 1200 }}
             />
             <PaginationFooter
               pagination={pagination}
@@ -256,7 +275,13 @@ const ClipsPage = () => {
         )}
       </div>
 
-      {/* 4. PREVIEW */}
+      {/* 4. SAVE DIALOG + PREVIEW */}
+      <SaveClipFormModal
+        open={saveDialogOpen}
+        onClose={handleCloseSaveDialog}
+        onSuccess={handleCloseSaveDialog}
+      />
+
       <ClipPreviewSheet
         open={!!previewClip}
         clip={previewClip}

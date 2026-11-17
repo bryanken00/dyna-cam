@@ -1,11 +1,14 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
 
 /** The server fails a clip nobody finished within 15 min — don't start one older than that. */
 export const STALE_MS = 15 * 60_000;
 /** A cut clip is retried until the server answers; an offline box gives up after this. */
 export const UPLOAD_GIVE_UP_MS = 60 * 60_000;
+/** The API refuses a button press older than 2 min; stop retrying a bit before that. */
+export const PRESS_RELAY_MAX_AGE_MS = 100_000;
 const LONG_POLL_SECONDS = 25;
 const MAX_CUT_ATTEMPTS = 2;
 
@@ -30,8 +33,9 @@ export class JobRunner {
       cut: settings.clipConcurrency ?? 1,
       upload: settings.uploadConcurrency ?? 1,
       report: 2,
+      press: 4,
     };
-    this.busy = { cut: 0, upload: 0, report: 0 };
+    this.busy = { cut: 0, upload: 0, report: 0, press: 0 };
     this.active = new Map();
     this.abort = new AbortController();
     this.stopped = false;
@@ -55,14 +59,19 @@ export class JobRunner {
     for (const entry of this.queue.list()) {
       entry.nextAttemptAt = 0;
       if (entry.state === "ready" && !(await exists(entry.videoPath))) {
-        await this.queue.update(entry.clipId, {
+        await this.queue.update(queueKey(entry), {
           state: "waiting",
           videoPath: null,
           thumbnailPath: null,
         });
       }
     }
-    const keep = new Set(this.queue.list().map((e) => safeId(e.clipId)));
+    const keep = new Set(
+      this.queue
+        .list()
+        .filter((e) => e.clipId)
+        .map((e) => safeId(e.clipId))
+    );
     for (const name of await fsp.readdir(this.jobsDir).catch(() => [])) {
       if (!keep.has(name))
         await fsp.rm(path.join(this.jobsDir, name), { recursive: true, force: true });
@@ -167,7 +176,7 @@ export class JobRunner {
   async claim(entry) {
     try {
       await this.api.claimClip(entry.clipId);
-      await this.queue.update(entry.clipId, { claimed: true });
+      await this.queue.update(queueKey(entry), { claimed: true });
     } catch (err) {
       if (err.isGone) {
         this.log.info(`clip ${entry.clipId} is no longer waiting (${err.status}) — dropped`);
@@ -197,23 +206,24 @@ export class JobRunner {
     const now = this.now();
     for (const entry of this.queue.list()) {
       if (this.stopped) return;
-      if (this.active.has(entry.clipId) || (entry.nextAttemptAt || 0) > now) continue;
-      const kind = { ready: "upload", failing: "report" }[entry.state] || "cut";
+      if (this.active.has(queueKey(entry)) || (entry.nextAttemptAt || 0) > now) continue;
+      const kind = { ready: "upload", failing: "report", press: "press" }[entry.state] || "cut";
       if (this.busy[kind] >= this.limits[kind]) continue;
       this.busy[kind] += 1;
       const run = this.step(entry)
-        .catch((err) => this.log.error(`job ${entry.clipId} step failed`, err))
+        .catch((err) => this.log.error(`job ${queueKey(entry)} step failed`, err))
         .finally(() => {
           this.busy[kind] -= 1;
-          this.active.delete(entry.clipId);
+          this.active.delete(queueKey(entry));
           this.wake();
         });
-      this.active.set(entry.clipId, run);
+      this.active.set(queueKey(entry), run);
     }
   }
 
   /** Do the next thing for one entry (always returns a promise). Exposed for tests. */
   step(entry) {
+    if (entry.state === "press") return this.relayPress(entry);
     const age = this.now() - entry.requestedAtMs;
     const limit = entry.state === "waiting" ? STALE_MS : UPLOAD_GIVE_UP_MS;
     if (age > limit) {
@@ -237,7 +247,7 @@ export class JobRunner {
         return this.toFailing(entry, "Could not process the video on the recorder box");
       }
       this.log.warn(`cutting clip ${entry.clipId} failed, trying again`, err);
-      await this.queue.update(entry.clipId, { attempts, nextAttemptAt: this.now() + 5000 });
+      await this.queue.update(queueKey(entry), { attempts, nextAttemptAt: this.now() + 5000 });
       return undefined;
     }
     if (!this.queue.has(entry.clipId)) {
@@ -255,7 +265,7 @@ export class JobRunner {
     this.log.info(
       `cut clip ${entry.clipId}: ${result.durationSeconds.toFixed(1)}s with ${result.encoder}`
     );
-    await this.queue.update(entry.clipId, {
+    await this.queue.update(queueKey(entry), {
       state: "ready",
       videoPath: result.videoPath,
       thumbnailPath: result.thumbnailPath,
@@ -293,7 +303,7 @@ export class JobRunner {
           err
         );
       }
-      await this.queue.update(entry.clipId, { attempts, nextAttemptAt: this.now() + delay });
+      await this.queue.update(queueKey(entry), { attempts, nextAttemptAt: this.now() + delay });
       return undefined;
     }
   }
@@ -308,7 +318,7 @@ export class JobRunner {
     } catch (err) {
       if (!err.isGone && err.isRetryable && !this.stopped) {
         const attempts = (entry.attempts || 0) + 1;
-        await this.queue.update(entry.clipId, {
+        await this.queue.update(queueKey(entry), {
           attempts,
           nextAttemptAt: this.now() + this.retryDelay(err, attempts, 5000, 300_000),
         });
@@ -321,7 +331,7 @@ export class JobRunner {
 
   async toFailing(entry, reason) {
     await fsp.rm(this.workDir(entry), { recursive: true, force: true });
-    await this.queue.update(entry.clipId, {
+    await this.queue.update(queueKey(entry), {
       state: "failing",
       failReason: truncate(reason, 255),
       videoPath: null,
@@ -333,8 +343,70 @@ export class JobRunner {
   }
 
   async drop(entry) {
-    await this.queue.remove(entry.clipId);
-    await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+    await this.queue.remove(queueKey(entry));
+    if (entry.clipId) await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+  }
+
+  // ─── Court buttons ─────────────────────────────────────────────────────────
+
+  /**
+   * A button press from the LAN listener (buttons.js). Persisted first, so a
+   * restart does not lose it, then relayed to the API by the work loop.
+   */
+  async addPress({ buttonCode, pressedAtMs }) {
+    const entry = {
+      pressId: `press-${buttonCode}-${pressedAtMs}`,
+      buttonCode,
+      requestedAtMs: pressedAtMs,
+      state: "press",
+      attempts: 0,
+      nextAttemptAt: 0,
+    };
+    await this.queue.put(entry);
+    this.wake();
+    return entry;
+  }
+
+  /** POST /buttons/:code/press. 404/409/422/400 are final; anything else is retried while the press is young. */
+  async relayPress(entry) {
+    const code = entry.buttonCode;
+    const age = this.now() - entry.requestedAtMs;
+    if (age > PRESS_RELAY_MAX_AGE_MS) {
+      this.log.warn(
+        `button ${code}: could not reach the API within ${Math.round(age / 1000)}s — press dropped`
+      );
+      return this.drop(entry);
+    }
+    try {
+      const data = await this.api.pressButton(code, entry.requestedAtMs, this.abort.signal);
+      this.log.info(
+        `button ${code}: ${data.merged ? "joined the clip already being saved" : "clip saved"} ` +
+          `${data.clipId} — ${data.shareUrl}`
+      );
+      return this.drop(entry);
+    } catch (err) {
+      if (this.stopped) return undefined;
+      const final = {
+        404: `Button code ${code} is not set on any court of this venue — set it in Admin → Courts`,
+        409: `button ${code}: its court has no camera configured`,
+        422: `button ${code}: press is too old for the recorder buffer`,
+        400: `button ${code}: the API rejected the code (${err.detail})`,
+      }[err.status];
+      if (final) {
+        this.log.warn(final);
+        return this.drop(entry);
+      }
+      const attempts = (entry.attempts || 0) + 1;
+      const delay = Math.min(this.retryDelay(err, attempts, 1000, 15_000), 15_000);
+      if (err.status !== 401) {
+        this.log.warn(
+          `button ${code}: relay failed, retrying in ${Math.round(delay / 1000)}s`,
+          err
+        );
+      }
+      await this.queue.update(queueKey(entry), { attempts, nextAttemptAt: this.now() + delay });
+      return undefined;
+    }
   }
 }
 

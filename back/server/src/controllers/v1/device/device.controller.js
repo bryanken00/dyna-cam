@@ -1,11 +1,17 @@
 import express from "express";
-import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
+import {
+  catchAsync,
+  validateBody,
+  validateParams,
+  validateQuery,
+} from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import {
   CLIP_POST_SECONDS,
   CLIP_PRE_SECONDS,
+  clipShareUrl,
   daysFromNowLocal,
   toEpochMs,
 } from "../../../utils/clips.js";
@@ -16,8 +22,16 @@ import {
   toStoredUploadPath,
 } from "../../../utils/file/clipFiles.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
+import {
+  COURT_RECORDING_COLUMNS,
+  localFromEpochMs,
+  onlineSince,
+  requestClip,
+} from "../../../utils/clipRequests.js";
 import { upload } from "../../../utils/file/uploads.js";
 import {
+  buttonParamsSchema,
+  buttonPressSchema,
   failClipSchema,
   heartbeatSchema,
   jobsQuerySchema,
@@ -37,7 +51,12 @@ import {
  *   POST /clips/:clipId/processing     claim a job
  *   POST /clips/:clipId/upload         multipart: video (mp4) + thumbnail (jpeg)
  *   POST /clips/:clipId/fail           give up on a job, with a reason
+ *   POST /buttons/:buttonCode/press    a court button was pressed (Phase 2)
  */
+
+// A press the box could not relay straight away is still worth saving only
+// while the moment is in its rolling buffer; after that it is refused.
+const BUTTON_PRESS_MAX_AGE_MS = 2 * 60 * 1000;
 const router = express.Router();
 
 const CLIP_MAX_UPLOAD_MB = Math.max(
@@ -200,6 +219,71 @@ router.get(
         postSeconds: CLIP_POST_SECONDS,
       })),
     });
+  })
+);
+
+/**
+ * POST /buttons/:buttonCode/press
+ * A court's physical button (Shelly / ESP32) called the box on the LAN; the box
+ * relays it here with the press time. Saves that court's clip by the same rules
+ * as a QR scan (utils/clipRequests.js). Only courts of the box's own venue.
+ */
+router.post(
+  "/buttons/:buttonCode/press",
+  validateParams(buttonParamsSchema),
+  validateBody(buttonPressSchema),
+  catchAsync(async (req, res) => {
+    const nowMs = Date.now();
+    let pressedAtMs = req.body.pressedAtMs ?? nowMs;
+    if (pressedAtMs > nowMs) pressedAtMs = nowMs; // box clock slightly ahead
+    if (nowMs - pressedAtMs > BUTTON_PRESS_MAX_AGE_MS) {
+      throw new APIError(
+        "This press is too old — the moment is no longer in the recorder's buffer",
+        422,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
+
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      const [courts] = await conn.execute(
+        `SELECT ${COURT_RECORDING_COLUMNS}
+         FROM courts c
+         JOIN venues v ON v.venueId = c.venueId
+         WHERE c.buttonCode = ? AND c.venueId = ? AND c.status = 'Active' AND v.status = 'Active'
+         LIMIT 1`,
+        [onlineSince(), req.params.buttonCode, req.device.venueId]
+      );
+      if (courts.length === 0) {
+        await req.db.rollback(conn);
+        throw new APIError(
+          "No court of this venue uses that button",
+          404,
+          ERROR_CODES.RESOURCE_NOT_FOUND
+        );
+      }
+
+      result = await requestClip(conn, courts[0], {
+        source: "BUTTON",
+        requestedAt: localFromEpochMs(pressedAtMs),
+      });
+      await req.db.commit(conn);
+    } catch (err) {
+      if (!(err instanceof APIError)) await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok) {
+      throw new APIError("This court has no camera configured", 409, ERROR_CODES.CAMERA_OFFLINE);
+    }
+
+    return res.sendSuccess(
+      result.merged ? "Already saving this moment" : "Saving the clip",
+      { clipId: result.clipId, shareUrl: clipShareUrl(result.shareToken), merged: result.merged },
+      result.merged ? 200 : 201
+    );
   })
 );
 
