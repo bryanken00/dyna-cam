@@ -48,7 +48,7 @@ const RESET_TOKEN_TTL_MIN = 30;
 // The public origin used to build links in emails (falls back to the first
 // FRONTEND_URL entry, then localhost).
 const appUrl = () =>
-  (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:5173")
+  (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:4020")
     .split(",")[0]
     .trim()
     .replace(/\/$/, "");

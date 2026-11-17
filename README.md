@@ -163,8 +163,8 @@ continue from `npm run db:setup` below. The steps it automates are spelled out n
 
 Once set up, start both dev servers from one terminal — `./run-mac.sh` on macOS, `./run.sh` in
 Git Bash on Windows. Output is prefixed per app and Ctrl+C stops everything. Both take the same
-arguments: `back` or `front` to start just one, and `stop` to free the dev ports (3000 — or `PORT`
-from `back/.env` — and 5173) if a server was left running.
+arguments: `back` or `front` to start just one, and `stop` to free the dev ports (4021 — or `PORT`
+from `back/.env` — and 4020) if a server was left running.
 
 ### 1. Backend
 
@@ -187,7 +187,7 @@ npm run keys
 # are skipped when already present.
 npm run db:setup
 
-npm run dev                   # nodemon on http://localhost:3000  (API under /api/v1)
+npm run dev                   # nodemon on http://localhost:4021  (API under /api/v1)
 ```
 
 **Required env vars** (see [`back/.env.example`](back/.env.example) for the full annotated list):
@@ -218,15 +218,15 @@ Rate limiting, Redis, SMTP and SSL are also optional and documented there.
 cd front
 npm install
 
-cp .env.example .env          # set VITE_API_URL to the backend (default http://localhost:3000)
+cp .env.example .env          # set VITE_API_URL to the backend (default http://localhost:4021)
 
-npm run dev                   # Vite dev server (http://localhost:5173)
+npm run dev                   # Vite dev server (http://localhost:4020)
 ```
 
 Frontend env (`front/.env`): `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_APP_NAME`, `VITE_STORE_KEY`,
 `VITE_APP_ENV`, `VITE_SENTRY_DSN`. `VITE_STORE_KEY` prefixes every browser-storage key
 (`<key>-admin-auth`, `<key>-ui-theme`, …) — give each project its own so two apps on one origin
-(e.g. `localhost:5173`) don't share a session. The app version isn't an env var — it's `version` in `front/package.json`,
+(e.g. `localhost:4020`) don't share a session. The app version isn't an env var — it's `version` in `front/package.json`,
 injected at build time as `import.meta.env.APP_VERSION`. Make sure the backend's `FRONTEND_URL` /
 `ALLOWED_ORIGINS` include the Vite origin so CORS + CSRF allow it.
 

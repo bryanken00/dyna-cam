@@ -25,14 +25,14 @@ set -u
 
 cd "$(dirname "$0")" || exit 1
 
-# The API listens on PORT from back/.env (3000 if unset); Vite on 5173.
+# The API listens on PORT from back/.env (4021 if unset); Vite on 4020.
 BACK_PORT="$(sed -n 's/^PORT=\([0-9][0-9]*\).*/\1/p' back/.env 2>/dev/null | tail -n 1)"
-BACK_PORT="${BACK_PORT:-3000}"
+BACK_PORT="${BACK_PORT:-4021}"
 
 # name : port : ANSI colour
 ALL=(
   "back:$BACK_PORT:36"
-  "front:5173:34"
+  "front:4020:34"
 )
 
 PIDFILE=".run.pid"

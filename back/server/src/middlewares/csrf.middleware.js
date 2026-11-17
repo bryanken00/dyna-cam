@@ -298,7 +298,7 @@ export const csrfErrorHandler = (err, req, res, next) => {
  * Use this before CSRF protection for defense in depth
  *
  * Environment Variables:
- * - ALLOWED_ORIGINS: Comma-separated list of allowed origins (e.g., "http://localhost:3000,https://app.example.com")
+ * - ALLOWED_ORIGINS: Comma-separated list of allowed origins (e.g., "http://localhost:4020,https://app.example.com")
  * - FRONTEND_URL: Single frontend URL (legacy support)
  * - PRODUCTION_URL: Production URL (legacy support)
  */
@@ -316,8 +316,8 @@ export const validateOrigin = (req, res, next) => {
     const devDefaults =
       process.env.NODE_ENV === "development"
         ? [
-            "http://localhost:3000",
-            "http://localhost:3001",
+            "http://localhost:4020",
+            "http://localhost:4021",
             "http://localhost:5173",
             "http://localhost:4200",
           ]

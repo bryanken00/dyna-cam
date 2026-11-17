@@ -88,7 +88,7 @@ function purifyReqBody(obj, fieldModes = {}) {
 export function securityHeaders(options = {}) {
   const {
     isDevelopment = process.env.NODE_ENV === "development",
-    allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:3000"],
+    allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:4020"],
     enableCSP = false,
   } = options;
   return [
