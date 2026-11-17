@@ -18,7 +18,8 @@ import SetupSection from "./SetupSection";
 import LiveChip from "../../components/LiveChip";
 import PasswordInput from "../../../../../components/PasswordInput";
 import StatusToggle from "../../../../../components/StatusToggle";
-import { courtUpdatePayload } from "../../../../../utils/dynaCam";
+import StreamLayoutPicker from "../../../../../components/StreamLayoutPicker";
+import { STREAM_LAYOUTS, courtUpdatePayload } from "../../../../../utils/dynaCam";
 import { isRtmpUrl, isWebUrl } from "../../../../../utils/tapo";
 import { useUpdateCourt } from "../../../../../services/requests/admin/courts";
 
@@ -46,6 +47,7 @@ const buildSchema = (hasStoredStream) =>
           "Enter the stream's RTMP address (with the stream key), starting with rtmp://",
         ),
       removeStream: z.boolean(),
+      streamLayout: z.enum(STREAM_LAYOUTS),
       streamWatchUrl: z
         .string()
         .trim()
@@ -65,26 +67,44 @@ const buildSchema = (hasStoredStream) =>
       }
     });
 
+/** The layout a court can stream: anything with camera 2, else Cam 1. */
+const layoutOf = (court) =>
+  court.camera2?.configured ? court.streamLayout || "CAM1" : "CAM1";
+
 const valuesFrom = (court) => ({
   streamEnabled: !!court.stream?.enabled,
   streamRtmpUrl: "",
   removeStream: false,
+  streamLayout: layoutOf(court),
   streamWatchUrl: court.stream?.watchUrl || "",
 });
 
-/** Live streaming to YouTube / Facebook from the recorder box. */
+/** What each layout costs the recorder box. */
+const LAYOUT_HINT = {
+  CAM1: "Cam 1's video is copied as it comes — light on the recorder box.",
+  CAM2: "Cam 2's video is copied as it comes — light on the recorder box.",
+  STACKED:
+    "Both cameras, Cam 1 above Cam 2 (1280×1440). The recorder box re-encodes it: more CPU, and about 3 Mbit/s of upload.",
+};
+
+/**
+ * Live streaming to YouTube / Facebook from the recorder box. On a court
+ * with camera 2 it also picks what the stream shows: Cam 1, Cam 2 or both
+ * stacked.
+ */
 const StreamSection = ({ court, canWrite }) => {
   const stream = court.stream;
   const hasStoredStream = !!stream?.configured;
+  const hasCamera2 = !!court.camera2?.configured;
   const schema = useMemo(() => buildSchema(hasStoredStream), [hasStoredStream]);
 
   const form = useForm({ resolver: zodResolver(schema), defaultValues: valuesFrom(court) });
   const {
     formState: { isDirty },
   } = form;
-  const [streamEnabled, removeStream] = useWatch({
+  const [streamEnabled, removeStream, streamLayout] = useWatch({
     control: form.control,
-    name: ["streamEnabled", "removeStream"],
+    name: ["streamEnabled", "removeStream", "streamLayout"],
   });
   const updateMutation = useUpdateCourt();
 
@@ -108,6 +128,7 @@ const StreamSection = ({ court, canWrite }) => {
           streamEnabled: values.removeStream ? false : values.streamEnabled,
           removeStream: values.removeStream,
           streamWatchUrl: values.streamWatchUrl,
+          streamLayout: hasCamera2 ? values.streamLayout : "CAM1",
           ...(values.streamRtmpUrl && !values.removeStream
             ? { streamRtmpUrl: values.streamRtmpUrl }
             : {}),
@@ -118,6 +139,7 @@ const StreamSection = ({ court, canWrite }) => {
         streamEnabled: values.removeStream ? false : values.streamEnabled,
         streamRtmpUrl: "",
         removeStream: false,
+        streamLayout: hasCamera2 ? values.streamLayout : "CAM1",
         streamWatchUrl: values.streamWatchUrl,
       });
     } catch (error) {
@@ -151,6 +173,28 @@ const StreamSection = ({ court, canWrite }) => {
                 </FormItem>
               )}
             />
+
+            {hasCamera2 && (
+              <FormField
+                control={form.control}
+                name="streamLayout"
+                render={({ field }) => (
+                  <FormItem className="mb-5">
+                    <FormLabel>What the stream shows</FormLabel>
+                    <StreamLayoutPicker
+                      value={field.value}
+                      onChange={(v) => canWrite && field.onChange(v)}
+                      disabled={!canWrite}
+                    />
+                    <FormDescription>
+                      {LAYOUT_HINT[streamLayout]} Saved with the stream settings;
+                      a running stream restarts for a few seconds to switch.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             {hasStoredStream && (
               <div

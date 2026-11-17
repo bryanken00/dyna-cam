@@ -44,6 +44,10 @@ const StreamPage = () => {
     loadError,
     refetch,
     handleChangeKey,
+    isPickingLayout,
+    handlePickLayout,
+    handleLayoutDone,
+    handleLayoutSaved,
     handleKeepStream,
     handleSaved,
     handleStop,
@@ -129,7 +133,9 @@ const StreamPage = () => {
           </p>
           <StreamKeyForm
             code={code}
+            cameras={setup?.cameras}
             platform={stream?.platform}
+            layout={stream?.layout}
             onSuccess={handleSaved}
             onCancel={stream ? handleKeepStream : undefined}
             onGone={refetch}
@@ -146,11 +152,17 @@ const StreamPage = () => {
         </>
       ) : (
         <StreamStatusCard
+          code={code}
           stream={stream}
           setup={setup}
           onStop={handleStop}
           isStopping={isStopping}
           onChangeKey={handleChangeKey}
+          isPickingLayout={isPickingLayout}
+          onPickLayout={handlePickLayout}
+          onLayoutDone={handleLayoutDone}
+          onLayoutSaved={handleLayoutSaved}
+          onGone={refetch}
         />
       )}
     </PublicLayout>

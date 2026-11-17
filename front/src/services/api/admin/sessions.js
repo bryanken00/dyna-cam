@@ -14,7 +14,7 @@ export const getSessionsApi = async (filters = {}) => {
 //   pairingCodes: live keys only, never the digits —
 //               [{ pairingCodeId, name, expiresAt, expiresInSeconds }]
 //   stream: the player's own live stream (Phase G), never the key —
-//           { platform, status, message, maskedUrl, updatedAt } | null
+//           { platform, status, message, maskedUrl, layout, updatedAt } | null
 export const getSessionByIdApi = async (sessionId) => {
   const response = await api.get(`/api/v1/admin/sessions/${sessionId}`);
   return response.data;

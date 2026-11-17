@@ -4,6 +4,7 @@ import StatusDot from "../../../../../components/StatusDot";
 import StreamPlatformIcon from "../../../../../components/StreamPlatformIcon";
 import { confirm } from "../../../../../store/confirmStore";
 import {
+  STREAM_LAYOUT_LABEL,
   STREAM_PLATFORM_LABEL,
   streamStatusInfo,
 } from "../../../../../utils/dynaCam";
@@ -15,7 +16,7 @@ import { useStopSessionStream } from "../../../../../services/requests/admin/ses
  * `stream` null → "No personal stream".
  *
  * @param {string} sessionId
- * @param {object|null} stream  { platform, status, message, maskedUrl, updatedAt }
+ * @param {object|null} stream  { platform, status, message, maskedUrl, layout, updatedAt }
  * @param {boolean} canWrite    shows Stop stream
  */
 const SessionStreamLine = ({ sessionId, stream, canWrite }) => {
@@ -51,6 +52,11 @@ const SessionStreamLine = ({ sessionId, stream, canWrite }) => {
           style={{ color: "var(--color-text-muted)" }}
         />
         {platform}
+        {stream.layout && (
+          <span style={{ fontWeight: 400, color: "var(--color-text-muted)" }}>
+            · {STREAM_LAYOUT_LABEL[stream.layout] || stream.layout}
+          </span>
+        )}
       </div>
       <StatusDot tone={tone}>{label}</StatusDot>
       {stream.maskedUrl && (

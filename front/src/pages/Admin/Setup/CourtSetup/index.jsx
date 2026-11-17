@@ -15,7 +15,8 @@ import { VENUES_PATH, venuePath } from "../../../../utils/dynaCam";
 
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — set up one court: its
- * camera (guided, with the live check), QR sign, button and live stream.
+ * camera and optional camera 2 (guided, with the live check), QR sign,
+ * button and live stream.
  * Each section saves on its own with the court's full PUT.
  */
 const CourtSetupPage = () => {
@@ -96,7 +97,7 @@ const CourtSetupPage = () => {
 
       <PageHeader
         title={courtName}
-        subtitle={`${venueName} · set up the camera, QR sign, button and live stream`}
+        subtitle={`${venueName} · set up the cameras, QR sign, button and live stream`}
         actions={
           <div className="flex items-center gap-3">
             <StatusDot tone={court.status === "Active" ? "success" : "muted"}>
@@ -110,10 +111,20 @@ const CourtSetupPage = () => {
       {/* `key` remounts a section's form when another court is opened */}
       <CameraSection
         key={`camera-${court.courtId}`}
+        slot="camera"
         court={court}
         canWrite={canWrite}
-        checking={checking}
-        justSaved={justSaved}
+        checking={!!checking.camera}
+        justSaved={!!justSaved.camera}
+        onSaved={handleCameraSaved}
+      />
+      <CameraSection
+        key={`camera2-${court.courtId}`}
+        slot="camera2"
+        court={court}
+        canWrite={canWrite}
+        checking={!!checking.camera2}
+        justSaved={!!justSaved.camera2}
         onSaved={handleCameraSaved}
       />
       <QrSignSection key={`qr-${court.courtId}`} court={court} canWrite={canWrite} />

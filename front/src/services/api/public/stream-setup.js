@@ -6,8 +6,9 @@
 import axiosInstance from "../axios";
 
 // { setup: { courtName, venueName, startAt, endAt, sessionStatus, expiresAt,
-//   expiresInSeconds }, stream: { platform, status, message, maskedUrl,
-//   updatedAt } | null } · 404 unknown / expired code or the session has ended
+//   expiresInSeconds, cameras: 1|2 }, stream: { platform, status, message,
+//   maskedUrl, layout, updatedAt } | null }
+// · 404 unknown / expired code or the session has ended
 export const getStreamSetupApi = async (code) => {
   const response = await axiosInstance.get(
     `/api/v1/public/stream-setup/${encodeURIComponent(code)}`,
@@ -15,7 +16,10 @@ export const getStreamSetupApi = async (code) => {
   return response.data;
 };
 
-// { platform: "FACEBOOK"|"YOUTUBE", streamKey } or { platform: "OTHER", url }
+// { platform: "FACEBOOK"|"YOUTUBE", streamKey } or { platform: "OTHER", url },
+// plus `layout` ("CAM1"|"CAM2"|"STACKED", default STACKED; ignored on a
+// one-camera court) — or a layout-only `{ layout }` to switch the cameras of
+// the saved stream (409 "Add your stream key first" when there is none)
 // → 200 { stream } · 400 field errors · 404 as above · 409 the session has ended
 export const saveStreamSetupApi = async (code, data) => {
   const response = await axiosInstance.put(

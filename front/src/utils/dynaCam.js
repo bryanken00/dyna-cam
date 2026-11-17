@@ -214,6 +214,17 @@ export const STREAM_PLATFORM_LABEL = {
   OTHER: "Other",
 };
 
+/**
+ * What a live stream shows on a court with two cameras (Phase H): one camera
+ * copied as it comes, or both stacked (Cam 1 over Cam 2) and re-encoded.
+ */
+export const STREAM_LAYOUTS = ["CAM1", "CAM2", "STACKED"];
+export const STREAM_LAYOUT_LABEL = {
+  CAM1: "Cam 1",
+  CAM2: "Cam 2",
+  STACKED: "Both (stacked)",
+};
+
 /** An RTMP(S) address with its key, as the API accepts for "Other". */
 export const RTMP_URL_PATTERN = /^rtmps?:\/\/\S+$/i;
 
@@ -353,7 +364,10 @@ export const courtUpdatePayload = (court, overrides = {}) => ({
   buttonCode: court?.buttonCode || "",
   streamEnabled: !!court?.stream?.enabled,
   streamWatchUrl: court?.stream?.watchUrl || "",
+  // CAM2 / STACKED need camera 2 (the API answers 400 otherwise)
+  streamLayout: court?.camera2?.configured ? court?.streamLayout || "CAM1" : "CAM1",
   removeCamera: false,
+  removeCamera2: false,
   removeStream: false,
   ...overrides,
 });

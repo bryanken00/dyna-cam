@@ -1,8 +1,10 @@
 import dayjs from "dayjs";
-import { KeyRound, Loader2, Square } from "lucide-react";
+import { KeyRound, Loader2, Pencil, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import StreamLayoutForm from "./StreamLayoutForm";
 import StreamPlatformIcon from "../../../../components/StreamPlatformIcon";
 import {
+  STREAM_LAYOUT_LABEL,
   STREAM_PLATFORM_LABEL,
   streamStatusInfo,
 } from "../../../../utils/dynaCam";
@@ -33,12 +35,27 @@ const nextStep = (stream, setup) => {
 };
 
 /**
- * The player's stream as it is now: status, platform, masked address, and
- * Stop / Change key. Presentational — the page owns the actions.
+ * The player's stream as it is now: status, platform, masked address, the
+ * cameras it shows (two-camera courts, with Change), and Stop / Change key.
+ * The page owns the actions.
  */
-const StreamStatusCard = ({ stream, setup, onStop, isStopping, onChangeKey }) => {
+const StreamStatusCard = ({
+  code,
+  stream,
+  setup,
+  onStop,
+  isStopping,
+  onChangeKey,
+  isPickingLayout,
+  onPickLayout,
+  onLayoutDone,
+  onLayoutSaved,
+  onGone,
+}) => {
   const { label, tone } = streamStatusInfo(stream);
   const hint = nextStep(stream, setup);
+  const twoCameras = Number(setup?.cameras) === 2;
+  const layout = stream?.layout || "STACKED";
 
   return (
     <div
@@ -113,6 +130,39 @@ const StreamStatusCard = ({ stream, setup, onStop, isStopping, onChangeKey }) =>
           </div>
         )}
       </div>
+
+      {twoCameras && (
+        <div className="px-4 py-3" style={{ borderTop: "1px solid var(--color-line)" }}>
+          {isPickingLayout ? (
+            <StreamLayoutForm
+              code={code}
+              layout={layout}
+              onSuccess={onLayoutSaved}
+              onCancel={onLayoutDone}
+              onGone={onGone}
+            />
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                Cameras{" "}
+                <span className="font-medium" style={{ color: "var(--color-text-dark)" }}>
+                  {STREAM_LAYOUT_LABEL[layout] || layout}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isStopping}
+                onClick={onPickLayout}
+              >
+                <Pencil />
+                Change
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="p-3 space-y-2.5" style={{ borderTop: "1px solid var(--color-line)" }}>
         <Button

@@ -12,20 +12,28 @@ const LIVE_CHECK_MS = 90 * 1000;
 /** Ask the box for preview pictures this often (the API grants 2 minutes). */
 const PREVIEW_EVERY_MS = 90 * 1000;
 
+/** The court's camera slots: `court.camera` and, optionally, `court.camera2`. */
+const CAMERA_SLOTS = ["camera", "camera2"];
+
+/** Has the box picked up this camera's current address? */
+const hasSwitched = (camera) => camera?.live?.cameraVersion === camera?.version;
+
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — one court's setup:
- * Camera (guided, with the live check), QR sign, Button, Live stream.
+ * Camera and Camera 2 (guided, each with its live check), QR sign, Button,
+ * Live stream.
  */
 export const useCourtSetupHooks = () => {
   const { venueId, courtId } = useParams();
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission("venues", "courts", "write");
 
-  // Live check after a camera save: a camera was saved on this visit, and
-  // whether we're still watching closely for the box to switch to it
-  const [justSaved, setJustSaved] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const checkTimer = useRef(null);
+  // Live check after a camera save, per slot ("camera" | "camera2"): saved
+  // on this visit, and whether we're still watching closely for the box to
+  // switch to it
+  const [justSaved, setJustSaved] = useState({});
+  const [checking, setChecking] = useState({});
+  const checkTimers = useRef({});
 
   const { data, isLoading, error, refetch, isFetching } = useGetCourtById(
     courtId,
@@ -34,9 +42,11 @@ export const useCourtSetupHooks = () => {
       // is about the current address only when the versions match), else
       // 15 s for the preview
       refetchInterval: (query) => {
-        const camera = query.state.data?.data?.court?.camera;
-        const switched = camera?.live?.cameraVersion === camera?.version;
-        return checking && !switched ? 5000 : 15000;
+        const court = query.state.data?.data?.court;
+        const waiting = CAMERA_SLOTS.some(
+          (slot) => checking[slot] && !hasSwitched(court?.[slot]),
+        );
+        return waiting ? 5000 : 15000;
       },
       refetchIntervalInBackground: false,
     },
@@ -59,16 +69,25 @@ export const useCourtSetupHooks = () => {
     };
   }, [courtId, requestPreview]);
 
-  // Called by the camera section after a successful save
-  const handleCameraSaved = useCallback(() => {
-    setJustSaved(true);
-    setChecking(true);
-    if (courtId) requestPreview(courtId);
-    clearTimeout(checkTimer.current);
-    checkTimer.current = setTimeout(() => setChecking(false), LIVE_CHECK_MS);
-  }, [courtId, requestPreview]);
+  // Called by a camera section after a successful save
+  const handleCameraSaved = useCallback(
+    (slot) => {
+      setJustSaved((prev) => ({ ...prev, [slot]: true }));
+      setChecking((prev) => ({ ...prev, [slot]: true }));
+      if (courtId) requestPreview(courtId);
+      clearTimeout(checkTimers.current[slot]);
+      checkTimers.current[slot] = setTimeout(
+        () => setChecking((prev) => ({ ...prev, [slot]: false })),
+        LIVE_CHECK_MS,
+      );
+    },
+    [courtId, requestPreview],
+  );
 
-  useEffect(() => () => clearTimeout(checkTimer.current), []);
+  useEffect(() => {
+    const timers = checkTimers.current;
+    return () => Object.values(timers).forEach(clearTimeout);
+  }, []);
 
   return {
     venueId: court?.venueId || venueId,

@@ -29,8 +29,16 @@ const noticeStyle = {
  * @param {object}  camera     the court's `camera` (configured, version, live, snapshotUrl, …)
  * @param {boolean} checking   a camera was just saved; still watching closely
  * @param {boolean} justSaved  a camera was saved on this visit
+ * @param {boolean} [showNextSteps]  "The camera works. Next: …" (camera 1 only)
+ * @param {string}  [previewAlt]     alt text of the preview picture
  */
-const CameraLiveCheck = ({ camera, checking, justSaved }) => {
+const CameraLiveCheck = ({
+  camera,
+  checking,
+  justSaved,
+  showNextSteps = true,
+  previewAlt = "Latest preview from the court camera",
+}) => {
   const live = camera?.live || null;
   const health = cameraHealth(camera);
   // The box's report is about the current address only when the versions
@@ -116,7 +124,7 @@ const CameraLiveCheck = ({ camera, checking, justSaved }) => {
               <span>{hint}</span>
             </div>
           )}
-          {health.key === "ok" && justSaved && (
+          {health.key === "ok" && justSaved && showNextSteps && (
             <p
               className="m-0 inline-flex items-center gap-1.5"
               style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
@@ -171,7 +179,7 @@ const CameraLiveCheck = ({ camera, checking, justSaved }) => {
             <img
               key={snapshot}
               src={snapshot}
-              alt="Latest preview from the court camera"
+              alt={previewAlt}
               className="w-full h-full object-contain"
             />
           ) : (

@@ -7,6 +7,7 @@ import {
   Loader2,
   Network,
   Pencil,
+  Plus,
   Save,
   User,
   Video,
@@ -106,6 +107,47 @@ const cameraUrlFrom = (values) =>
         stream: values.tapoStream,
       });
 
+/**
+ * What differs between the court's two camera slots. Camera 2 (Phase H) is
+ * optional: collapsed until "Add a second camera", and removing it also puts
+ * the court's live stream back on Cam 1.
+ */
+const SLOTS = {
+  camera: {
+    id: "court-camera",
+    title: "Camera",
+    description: "Connect the court's camera, then check what the recorder box receives.",
+    urlKey: "cameraRtspUrl",
+    removeKey: "removeCamera",
+    optional: false,
+    savedMessage: "Camera saved — checking it now",
+    removedMessage: "Camera removed",
+    removeLabel: "Remove",
+    removeTitle: "Remove camera",
+    removeText:
+      "Remove this court's camera? The recorder box stops recording it, so players can't save clips here until a camera is set up again.",
+    emptyText: "No camera set up for this court yet.",
+    previewAlt: "Latest preview from the court camera",
+  },
+  camera2: {
+    id: "court-camera2",
+    title: "Camera 2 (optional)",
+    description:
+      "A second angle on the same court. Clips and session videos then show both, Cam 1 above Cam 2, and the live stream can show either or both.",
+    urlKey: "camera2RtspUrl",
+    removeKey: "removeCamera2",
+    optional: true,
+    savedMessage: "Camera 2 saved — checking it now",
+    removedMessage: "Camera 2 removed",
+    removeLabel: "Remove camera 2",
+    removeTitle: "Remove camera 2",
+    removeText:
+      "Remove this court's second camera? Clips and session videos go back to Cam 1 only, and the court's live stream switches to Cam 1.",
+    emptyText: "No second camera on this court.",
+    previewAlt: "Latest preview from the court's camera 2",
+  },
+};
+
 const iconPrefix =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
 const mutedIcon = { color: "var(--color-text-muted)" };
@@ -115,12 +157,18 @@ const tipStyle = { fontSize: 12.5, color: "var(--color-text-secondary)" };
  * Guided camera setup: ① camera type → ② address → save → ③ live check.
  * The camera address is write-only, so a configured camera shows its masked
  * address and "Change camera" opens steps ① and ② again.
+ *
+ * `slot` picks the court's camera: "camera" (always shown as a form until
+ * set) or "camera2" (optional — collapsed behind "Add a second camera").
+ * `onSaved(slot)` starts that camera's live check.
  */
-const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
-  const camera = court.camera;
+const CameraSection = ({ slot = "camera", court, canWrite, checking, justSaved, onSaved }) => {
+  const cfg = SLOTS[slot] || SLOTS.camera;
+  const camera = court[slot];
   const configured = !!camera?.configured;
-  const [editing, setEditing] = useState(!configured);
-  const showForm = canWrite && (editing || !configured);
+  // An optional camera starts collapsed; a required one opens the form
+  const [editing, setEditing] = useState(!configured && !cfg.optional);
+  const showForm = canWrite && (editing || (!configured && !cfg.optional));
 
   const form = useForm({ resolver: zodResolver(cameraSchema), defaultValues: EMPTY });
   const cameraType = useWatch({ control: form.control, name: "cameraType" });
@@ -128,8 +176,8 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
   const updateMutation = useUpdateCourt();
 
   const onSubmit = async (values) => {
-    const cameraRtspUrl = cameraUrlFrom(values);
-    if (cameraRtspUrl.length > RTSP_MAX) {
+    const rtspUrl = cameraUrlFrom(values);
+    if (rtspUrl.length > RTSP_MAX) {
       form.setError("tapoPassword", {
         message: "The camera address is too long — shorten the username or password",
       });
@@ -138,12 +186,12 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
     try {
       await updateMutation.mutateAsync({
         courtId: court.courtId,
-        courtData: courtUpdatePayload(court, { cameraRtspUrl }),
-        successMessage: "Camera saved — checking it now",
+        courtData: courtUpdatePayload(court, { [cfg.urlKey]: rtspUrl }),
+        successMessage: cfg.savedMessage,
       });
       form.reset(EMPTY);
       setEditing(false);
-      onSaved?.();
+      onSaved?.(slot);
     } catch (error) {
       // the mutation's onError already surfaced a toast
       console.error("Save camera error:", error);
@@ -152,18 +200,21 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
 
   const handleRemove = async () => {
     const ok = await confirm({
-      title: "Remove camera",
-      description:
-        "Remove this court's camera? The recorder box stops recording it, so players can't save clips here until a camera is set up again.",
-      confirmText: "Remove camera",
+      title: cfg.removeTitle,
+      description: cfg.removeText,
+      confirmText: cfg.removeTitle,
       cancelText: "Cancel",
       danger: true,
     });
     if (!ok) return;
     updateMutation.mutate({
       courtId: court.courtId,
-      courtData: courtUpdatePayload(court, { removeCamera: true }),
-      successMessage: "Camera removed",
+      courtData: courtUpdatePayload(court, {
+        [cfg.removeKey]: true,
+        // Without camera 2 only Cam 1 can be streamed
+        ...(slot === "camera2" ? { streamLayout: "CAM1" } : {}),
+      }),
+      successMessage: cfg.removedMessage,
     });
   };
 
@@ -178,10 +229,10 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
 
   return (
     <SetupSection
-      id="court-camera"
-      title="Camera"
-      description="Connect the court's camera, then check what the recorder box receives."
-      aside={<CameraStatusChip camera={camera} />}
+      id={cfg.id}
+      title={cfg.title}
+      description={cfg.description}
+      aside={configured || !cfg.optional ? <CameraStatusChip camera={camera} /> : null}
     >
       {/* Current camera (address is write-only — shown masked) */}
       {configured && !showForm && (
@@ -222,7 +273,7 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
                 disabled={updateMutation.isPending}
               >
                 <VideoOff />
-                Remove
+                {cfg.removeLabel}
               </Button>
             </div>
           )}
@@ -231,8 +282,21 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
 
       {!configured && !canWrite && (
         <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
-          No camera set up for this court yet.
+          {cfg.emptyText}
         </p>
+      )}
+
+      {/* Optional camera, not set: collapsed */}
+      {!configured && canWrite && !showForm && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
+            {cfg.emptyText}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Plus />
+            Add a second camera
+          </Button>
+        </div>
       )}
 
       {/* Steps ① and ② */}
@@ -392,7 +456,7 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
             )}
 
             <div className="flex justify-end gap-3 mt-5">
-              {configured && (
+              {(configured || cfg.optional) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -419,7 +483,13 @@ const CameraSection = ({ court, canWrite, checking, justSaved, onSaved }) => {
           <StepLabel n={3} done={!showForm}>
             Live check
           </StepLabel>
-          <CameraLiveCheck camera={camera} checking={checking} justSaved={justSaved} />
+          <CameraLiveCheck
+            camera={camera}
+            checking={checking}
+            justSaved={justSaved}
+            showNextSteps={slot === "camera"}
+            previewAlt={cfg.previewAlt}
+          />
         </>
       )}
     </SetupSection>

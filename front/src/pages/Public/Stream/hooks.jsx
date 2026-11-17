@@ -14,15 +14,26 @@ export const useStreamPageHooks = () => {
   const { data, isLoading, error, refetch, isFetching } = useGetStreamSetup(code);
   const stopMutation = useStopStreamSetup(code);
 
-  // "Change key" shows the form over a saved stream
+  // "Change key" shows the form over a saved stream; "Change" on the
+  // cameras shows the layout picker in the status card
   const [isChangingKey, setIsChangingKey] = useState(false);
+  const [isPickingLayout, setIsPickingLayout] = useState(false);
 
   const setup = data?.data?.setup || null;
   const stream = data?.data?.stream ?? null;
   const notFound = error?.response?.status === 404;
   const showForm = !stream || isChangingKey;
 
-  const handleChangeKey = useCallback(() => setIsChangingKey(true), []);
+  const handleChangeKey = useCallback(() => {
+    setIsPickingLayout(false);
+    setIsChangingKey(true);
+  }, []);
+  const handlePickLayout = useCallback(() => setIsPickingLayout(true), []);
+  const handleLayoutDone = useCallback(() => setIsPickingLayout(false), []);
+  const handleLayoutSaved = useCallback(() => {
+    setIsPickingLayout(false);
+    toast.success("Cameras switched");
+  }, []);
   const handleKeepStream = useCallback(() => setIsChangingKey(false), []);
   const handleSaved = useCallback(() => {
     setIsChangingKey(false);
@@ -44,6 +55,7 @@ export const useStreamPageHooks = () => {
     stopMutation.mutate(undefined, {
       onSuccess: () => {
         setIsChangingKey(false);
+        setIsPickingLayout(false);
         toast.success("Stream stopped");
       },
       onError: (err) => {
@@ -71,6 +83,10 @@ export const useStreamPageHooks = () => {
     loadError: !notFound ? error : null,
     refetch,
     handleChangeKey,
+    isPickingLayout,
+    handlePickLayout,
+    handleLayoutDone,
+    handleLayoutSaved,
     handleKeepStream,
     handleSaved,
     handleStop,

@@ -15,8 +15,10 @@ import {
 
 import PasswordInput from "../../../../components/PasswordInput";
 import StatusToggle from "../../../../components/StatusToggle";
+import StreamLayoutPicker from "../../../../components/StreamLayoutPicker";
 import {
   RTMP_URL_PATTERN,
+  STREAM_LAYOUTS,
   STREAM_PLATFORM_LABEL,
 } from "../../../../utils/dynaCam";
 import { useSaveStreamSetup } from "../../../../services/requests/public/stream-setup";
@@ -33,6 +35,7 @@ const schema = z
     platform: z.enum(["FACEBOOK", "YOUTUBE", "OTHER"]),
     streamKey: z.string().trim(),
     url: z.string().trim(),
+    layout: z.enum(STREAM_LAYOUTS),
   })
   .superRefine((v, ctx) => {
     if (v.platform === "OTHER") {
@@ -52,7 +55,7 @@ const schema = z
     }
   });
 
-const API_FIELDS = ["platform", "streamKey", "url"];
+const API_FIELDS = ["platform", "streamKey", "url", "layout"];
 
 /**
  * An outside help link. `noreferrer`: our URL carries the setup code, which
@@ -122,15 +125,31 @@ const SECRET_INPUT_PROPS = {
  * from the form and the mutation as soon as the save succeeds.
  *
  * @param {string} code             the setup code from the URL
+ * @param {number} [cameras]        2 → also pick Cam 1 / Cam 2 / Both
  * @param {string} [platform]       preselected (Change key)
+ * @param {string} [layout]         preselected (Change key); default Both
  * @param {() => void} onSuccess    saved — show the status
  * @param {() => void} [onCancel]   back to the status (Change key only)
  * @param {() => void} [onGone]     404 / 409 — the page re-reads the setup
  */
-const StreamKeyForm = ({ code, platform, onSuccess, onCancel, onGone }) => {
+const StreamKeyForm = ({
+  code,
+  cameras = 1,
+  platform,
+  layout,
+  onSuccess,
+  onCancel,
+  onGone,
+}) => {
+  const twoCameras = Number(cameras) === 2;
   const form = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { platform: platform || "FACEBOOK", streamKey: "", url: "" },
+    defaultValues: {
+      platform: platform || "FACEBOOK",
+      streamKey: "",
+      url: "",
+      layout: STREAM_LAYOUTS.includes(layout) ? layout : "STACKED",
+    },
   });
   const selected = useWatch({ control: form.control, name: "platform" });
   const rootError = form.formState.errors.root?.server?.message;
@@ -139,14 +158,17 @@ const StreamKeyForm = ({ code, platform, onSuccess, onCancel, onGone }) => {
   const isPending = saveMutation.isPending;
 
   const onSubmit = async (values) => {
-    const payload =
-      values.platform === "OTHER"
+    const payload = {
+      ...(values.platform === "OTHER"
         ? { platform: "OTHER", url: values.url }
-        : { platform: values.platform, streamKey: values.streamKey };
+        : { platform: values.platform, streamKey: values.streamKey }),
+      // Only a two-camera court has a choice
+      ...(twoCameras ? { layout: values.layout } : {}),
+    };
     try {
       await saveMutation.mutateAsync(payload);
       // Don't keep the key anywhere once it is saved
-      form.reset({ platform: values.platform, streamKey: "", url: "" });
+      form.reset({ ...values, streamKey: "", url: "" });
       saveMutation.reset();
       onSuccess?.();
     } catch (error) {
@@ -236,6 +258,24 @@ const StreamKeyForm = ({ code, platform, onSuccess, onCancel, onGone }) => {
                     {...field}
                   />
                 </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
+        {twoCameras && (
+          <FormField
+            control={form.control}
+            name="layout"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>What your stream shows</FormLabel>
+                <StreamLayoutPicker
+                  value={field.value}
+                  onChange={field.onChange}
+                  showNotes={false}
+                />
                 <FormMessage />
               </FormItem>
             )}
