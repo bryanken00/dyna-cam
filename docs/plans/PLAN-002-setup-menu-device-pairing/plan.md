@@ -406,6 +406,89 @@ court streams.
   **Start streaming**, then the live status ("Live on Facebook ✓" / the error) and **Stop**.
 - **Web Admin:** the session detail's stream line.
 
+### 7. Two cameras on one court (Phase H)
+
+The requester (2026-11-17): *"Possible 2 cameras on 1 court? On the live stream, Cam 1 above
+Cam 2 like that — also have the option Cam 1 or Cam 2 only."*
+
+```
+ Cam 1 only        Cam 2 only        Both (stacked)
+┌──────────┐      ┌──────────┐      ┌──────────┐
+│  Cam 1   │      │  Cam 2   │      │  Cam 1   │  1280×720
+└──────────┘      └──────────┘      ├──────────┤
+ 1280×720          1280×720         │  Cam 2   │  1280×720
+ (copied)          (copied)         └──────────┘
+                                     1280×1440, re-encoded
+```
+
+**Decisions (answered 2026-11-17):**
+
+| Question | Answer |
+| --- | --- |
+| Which live views get the Cam 1 / Cam 2 / Both choice | The **player's own stream** (Phase G) and the **venue's court stream**. The session device's live view stays Cam 1 |
+| What clips and whole-game videos contain on a 2-camera court | **Stacked**, Cam 1 over Cam 2, one video per clip/part |
+| Who picks the layout of a player's stream | **The player**, on the stream page (default Both); changing it while live restarts their stream for a few seconds |
+
+#### 7.1 What costs what
+
+- **Cam 1 only / Cam 2 only** copy that camera's video as it comes: no extra CPU.
+- **Both (stacked)** decodes both cameras and encodes one new H.264 video (hardware encoder when
+  the box has one — VideoToolbox on a Mac, VAAPI/QSV on Linux — else `libx264 veryfast`). It
+  also gets a keyframe every 2 s, which ends Facebook's "keyframe frequency" warning. A box runs
+  at most `MAX_STACKED_STREAMS` (default 2) stacked streams at once; more show "Too many stacked
+  streams on this box — choose Cam 1 or Cam 2".
+- **Clips and session parts** are re-encoded already (watermark), so stacking adds one decode
+  and a taller encode; files are about twice the size.
+- The two cameras have their own clocks: the halves can be up to ~1 s apart.
+- **Sound** comes from Cam 1 (Cam 2's if Cam 1 has none).
+
+#### 7.2 Database (migration `013_second_camera.sql`)
+
+- `courts.camera2RtspUrl` (encrypted like `cameraRtspUrl`), `courts.snapshot2Path`,
+  `courts.snapshot2At` (Cam 2's preview picture).
+- `courts.streamLayout ENUM('CAM1','CAM2','STACKED') NOT NULL DEFAULT 'CAM1'` (the venue's
+  court stream) and `recording_sessions.streamLayout` (the player's stream, same values, NULL =
+  no stream).
+
+#### 7.3 Recorder box
+
+- **Recording:** each camera has its own recorder and rolling buffer (Cam 2 in
+  `buffer/<court>~cam2/`), its own camera details, preview and status (`camera: 1 | 2` in the
+  heartbeat). Losing Cam 2 never stops Cam 1.
+- **Live view (5.4):** `/live/<courtId>/index.m3u8` stays Cam 1; Cam 2 is
+  `/live/<courtId>/cam2/index.m3u8`, same signature.
+- **Every stream becomes a restream** (like the player's stream, 6.1): an ffmpeg reading the
+  box's own live view — one camera copied, or both stacked and encoded — sent to the RTMP(S)
+  address. **The venue's court stream moves off the recorder's tee** to this model, so changing
+  a court's stream settings no longer restarts the recorder (no gap in the recording); it runs
+  ~10 s further behind than before.
+- **Clips and session parts** on a 2-camera court: both cameras' segments for the same window
+  → each scaled to 1280×720 → stacked → watermark → H.264 1280×1440. If Cam 2 has no footage
+  for that window, the clip is Cam 1 only (and the other way round).
+
+#### 7.4 API
+
+- Courts: create/update accept `camera2RtspUrl` (optional; empty removes Cam 2) and
+  `streamLayout`; the court response adds `camera2` (masked address, version, live check,
+  preview picture), like `camera`. `POST /admin/courts/:courtId/preview` asks for both
+  cameras' pictures.
+- `/device/config` courts add `camera2RtspUrl` + `camera2Version` and
+  `stream: { rtmpUrl, layout }`; sessions' `stream: { url, layout }`.
+- Player's stream: `GET /public/stream-setup/:code` adds `setup.cameras` (1 or 2); `PUT` takes
+  `layout` (default `STACKED` on a 2-camera court, ignored on a 1-camera court); the `stream`
+  object everywhere adds `layout`.
+- An old box (before Phase H) ignores `camera2RtspUrl` and `layout`: it records and streams
+  Cam 1 only.
+
+#### 7.5 Screens
+
+- **Web → Court setup:** a **Camera 2 (optional)** section with the same guided steps, live
+  check and preview; **Remove camera 2**. The **Live stream** section gets **Cam 1 / Cam 2 /
+  Both (stacked)** when the court has two cameras.
+- **Player's stream page:** the same three choices (when the court has two cameras), under the
+  key field; shown again on the status card with **Change**.
+- **App:** no change (the device's live view stays Cam 1).
+
 ### Alternatives considered
 
 - **Drop the token entirely** (trust the venue network): anyone who can reach the API could read
@@ -449,6 +532,9 @@ court streams.
   charging for sessions — sessions stay free; paid 60-second clips are taken at the counter.
 - (Phase G) More than one personal stream per session; Instagram and TikTok (no plain RTMP for
   ordinary accounts); scoreboards or overlays on the player's stream.
+- (Phase H) More than two cameras per court; side-by-side or picture-in-picture layouts;
+  switching cameras automatically; a camera choice on the session device's live view;
+  separate per-camera clip files.
 
 ## Risks
 
@@ -476,6 +562,13 @@ court streams.
   the streams stutter; recording is unaffected (separate processes).
 - **(Phase G) Facebook's "keyframe frequency" warning:** the C200 doesn't send a keyframe every
   2 s; Facebook warns but plays.
+- **(Phase H) CPU:** each stacked stream is a live encode. A Mac or an Intel box with Quick Sync
+  handles a few; a low-power box may manage one. Capped by `MAX_STACKED_STREAMS`; recording
+  always comes first (streams are separate processes).
+- **(Phase H) Storage and upload:** stacked clips are about twice the size; a stacked stream
+  uses ~3 Mbit/s of upload.
+- **(Phase H) Moving the venue's court stream off the recorder's tee** changes working code from
+  PLAN-001 Phase 5: it is re-tested end to end (smoke) before it ships.
 
 ## Open questions
 
@@ -532,3 +625,10 @@ court streams.
   court stream keeps running alongside. Streamed by a separate process on the box from its own
   live view, so the recording never restarts. Document first; build waits for the go-ahead.
 
+
+- 2026-11-17: **Phase H — two cameras on one court** (section 7). Requester: a court can have 2
+  cameras; streams can show Cam 1 over Cam 2, or one camera only. Answers: the choice applies
+  to the player's own stream and the venue's court stream (not the device's live view); clips
+  and whole-game videos are stacked; the player picks their stream's layout. The venue's court
+  stream moves to the restream model so stream changes never restart the recorder. Document
+  first; build waits for the go-ahead.

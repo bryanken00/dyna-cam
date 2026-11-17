@@ -290,6 +290,48 @@
 - [ ] Tried for real: session on Court 1 → player scans the stream QR → pastes a Facebook key →
       the session appears live on Facebook → Stop
 
+## Phase H — Two cameras on one court (Cam 1 / Cam 2 / Both stacked)
+
+> Plan: [section 7](plan.md#7-two-cameras-on-one-court-phase-h). Build waits for the
+> requester's go-ahead.
+
+### H1 · Backend
+
+- [ ] Migration `013_second_camera.sql`: `courts.camera2RtspUrl` (encrypted), `snapshot2Path`,
+      `snapshot2At`, `streamLayout`; `recording_sessions.streamLayout`
+- [ ] Courts API: `camera2RtspUrl`, `streamLayout`; `camera2` in the court response (masked,
+      version, live check, preview); preview asks for both; snapshot upload for camera 2
+- [ ] `/device/config`: `camera2RtspUrl`, `camera2Version`, `stream.layout` (court + session);
+      heartbeat `camera: 1 | 2`
+- [ ] Player stream: `setup.cameras`, `PUT … layout`, `stream.layout`
+- [ ] Tests: camera 2 saved encrypted / masked / removed; layouts validated (CAM2/STACKED need
+      camera 2); config carries them; audit trail keeps no camera-2 password (BUG-001 helper)
+
+### H1 · Recorder box
+
+- [ ] A recorder + buffer per camera; camera details, preview and status per camera
+- [ ] Live view for camera 2 (`/live/<courtId>/cam2/…`)
+- [ ] Streams as restreams: copy for one camera; stacked = two inputs → scale → `vstack` →
+      H.264 (hardware encoder when available, keyframe every 2 s) → FLV; `MAX_STACKED_STREAMS`
+- [ ] The venue's court stream moves from the recorder tee to a restream (no recorder restart on
+      stream changes)
+- [ ] Clips and session parts stacked on 2-camera courts; one camera only when the other has no
+      footage for the window
+- [ ] Tests + smoke (two generated cameras → stacked clip 1280×1440, stacked and single
+      restreams to a local listener, recording never restarted); README
+
+### H2 · Web
+
+- [ ] Court setup: Camera 2 (optional) section; Live stream layout choice
+- [ ] Player's stream page: layout choice (2-camera courts), shown on the status card
+- [ ] `npm run lint && npm run build`
+
+### Phase H wrap-up
+
+- [ ] Migration `013` applied locally (ask first); changelog; commit H1, H2
+- [ ] Tried for real with two cameras (or the C200 twice via its two streams for a test):
+      stacked stream on Facebook, Cam 2 only, a stacked 60-second clip
+
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
