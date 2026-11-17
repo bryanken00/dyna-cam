@@ -55,6 +55,21 @@ export function parsePairingCode(raw) {
   return code;
 }
 
+/**
+ * LIVE_HOST: the address phones use to reach the box (an IPv4, a host name or
+ * a bracketed IPv6), no scheme or port. Empty → null (detected from the network).
+ */
+export function parseLiveHost(raw) {
+  const host = String(raw ?? "").trim();
+  if (!host) return null;
+  if (host.length > 253 || !/^([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])$/.test(host)) {
+    throw new ConfigError(
+      `LIVE_HOST must be the box's LAN address only, like 192.168.1.50 (got "${host}")`
+    );
+  }
+  return host;
+}
+
 /** Read and check the settings. Throws ConfigError with a message meant for a person. */
 export function loadConfig(env = process.env) {
   const apiUrl = String(env.API_URL ?? "")
@@ -85,6 +100,13 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`ENCODER must be one of ${ENCODERS.join(", ")} (got "${encoder}")`);
   }
   const logLevel = String(env.LOG_LEVEL || "info").trim();
+  // Live view on the LAN: unset → 8090; set to "" or 0 → off
+  const buttonPort = env.BUTTON_PORT === undefined ? 8089 : int(env, "BUTTON_PORT", 0, 0, 65535);
+  const livePort = env.LIVE_PORT === undefined ? 8090 : int(env, "LIVE_PORT", 0, 0, 65535);
+  if (livePort && livePort === buttonPort) {
+    throw new ConfigError(`LIVE_PORT and BUTTON_PORT must differ (both are ${livePort})`);
+  }
+  const liveHost = parseLiveHost(env.LIVE_HOST);
 
   return Object.freeze({
     apiUrl,
@@ -105,9 +127,11 @@ export function loadConfig(env = process.env) {
     diskWarnGb: int(env, "DISK_WARN_GB", 2, 0, 10_000),
     diskCriticalMb: int(env, "DISK_CRITICAL_MB", 500, 0, 1_000_000),
     // Court buttons on the LAN: unset → 8089; set to "" or 0 → off
-    buttonPort: env.BUTTON_PORT === undefined ? 8089 : int(env, "BUTTON_PORT", 0, 0, 65535),
+    buttonPort,
     buttonHost: String(env.BUTTON_HOST || "0.0.0.0").trim(),
     buttonKey: String(env.BUTTON_KEY ?? "").trim(),
+    livePort,
+    liveHost,
     logLevel: ["debug", "info", "warn", "error"].includes(logLevel) ? logLevel : "info",
     ffmpegPath: env.FFMPEG_PATH || "ffmpeg",
     ffprobePath: env.FFPROBE_PATH || "ffprobe",

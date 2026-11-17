@@ -6,7 +6,8 @@ the API queues a clip job. The box picks the job up, cuts 60 s before the tap pl
 burns the venue logo in bottom-right, makes a JPEG thumbnail and uploads both.
 
 The box only makes **outbound** HTTPS calls to the API. The venue needs no port-forwarding and no
-public IP. The only thing it listens on is a small LAN port for the court buttons. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
+public IP. It listens only on the venue LAN: a small port for the court buttons and one for the
+[live view](#live-view-on-the-venue-wi-fi) on session devices. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
 product.
 
 **Stack:** Node 20.12+ (plain ESM JavaScript, no runtime dependencies) · ffmpeg 5+ · pm2.
@@ -113,6 +114,8 @@ rejection loudly and keeps retrying slowly.
 | `BUTTON_PORT` | `8089` | LAN port for court buttons. Set it empty or `0` to turn buttons off. |
 | `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
 | `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
+| `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. Must differ from `BUTTON_PORT`. |
+| `LIVE_HOST` | detected | The box's LAN address as phones reach it (e.g. `192.168.1.50`). Leave empty to detect it; set it when the box has several networks (Docker, VPN) or detection picks the wrong one. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
 
@@ -279,6 +282,43 @@ How it works, and the rules:
   turning on several courts. YouTube/Facebook may warn that the bitrate is low for their
   recommended settings; the stream still works.
 
+## Live view on the venue Wi-Fi
+
+A phone or tablet paired to a session (PLAN-002) shows the court live, about 5–10 s behind. The
+video comes from the box over the venue Wi-Fi, not from the internet and not from a second camera
+connection: the box serves the newest segments of its own buffer as an HLS live playlist, without
+re-encoding.
+
+```
+GET http://<box-ip>:8090/live/<courtId>/index.m3u8?exp=<unix seconds>&sig=<hex>   → last 5 segments (~10 s)
+GET http://<box-ip>:8090/live/<courtId>/<epoch>.ts?exp=…&sig=…                   → one segment
+```
+
+- **Signed links only.** On first start the box makes a random key, `data/live-key` (mode 600),
+  and sends it with its LAN address in every heartbeat (`live: { url, key }`). The API signs
+  `courtId.exp` with it (HMAC-SHA256) when it hands a paired device its link; the box refuses a
+  bad signature or an expired link (403). The key and signatures are never logged. Delete
+  `data/live-key` to make a new key; the next heartbeat sends it.
+- **Same Wi-Fi.** The device must be on the **same network as the box**. A guest network with
+  **client isolation** (common on venue Wi-Fi) blocks it. The device then shows *"Live view needs
+  the venue Wi-Fi"*; recording is not affected.
+- **Firewall:** open TCP 8090 on the box: `sudo ufw allow 8090/tcp`.
+- **Address:** the box picks its first private LAN IPv4 (192.168.x, 10.x, 172.16–31.x), skipping
+  Docker and VPN interfaces. Give it a fixed address (DHCP reservation), or set `LIVE_HOST`.
+- **Off:** `LIVE_PORT=0` (the heartbeat then sends `live: null`). If the port is taken, the box logs
+  *"live view could not start on port 8090 … recording goes on without live view"* and keeps
+  recording.
+- A court that hasn't recorded for 30 s answers 404, so a stopped camera never shows a frozen
+  picture as live.
+- **Timestamps:** each buffer file starts its clock at 0 (`reset_timestamps`, for clip cutting).
+  The live view moves each segment's clock forward by its start time in `segments.csv` as it
+  sends it, so players see one running clock; a recorder restart is marked
+  `#EXT-X-DISCONTINUITY`.
+
+Check it from a laptop on the venue Wi-Fi (with a link from the API, which carries the signature):
+`ffplay '<hlsUrl>'`. Note that ffmpeg tools need `-extension_picky 0` for segment links that end
+in a query string: `ffprobe -extension_picky 0 '<hlsUrl>'`.
+
 ## Court buttons
 
 A Wi-Fi button at each court saves the replay just like the QR code does. The button calls the
@@ -414,6 +454,8 @@ clip from the court's QR page.
   `selectPartSegments`).
 - **Streaming** (`src/stream.js`): tee-muxer arguments and escaping, stream-key masking,
   reading ffmpeg's stream messages, and the restart rule.
+- **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
+  segments into a signed HLS live playlist and streams the files with their timestamps shifted.
 - **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
   202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
@@ -445,6 +487,7 @@ clip from the court's QR page.
 | Clips cut a few seconds off | Check the clock (above), then the camera's own time. |
 | Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
 | Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
+| Device shows *Live view needs the venue Wi-Fi* | Device on the same Wi-Fi as the box (not a guest network with client isolation)? Box firewall open on 8090 (`sudo ufw allow 8090/tcp`)? Does the startup log say `live view on http://<ip>:8090` with the right address (else set `LIVE_HOST`)? Is the court recording? |
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
 | Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |

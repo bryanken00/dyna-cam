@@ -14,8 +14,10 @@ const CLOCK_SKEW_WARN_MS = 2000;
  * still records.
  */
 export class DeviceSync {
-  constructor({ api, recorders, settings, agentVersion, log, preview = null }) {
+  constructor({ api, recorders, settings, agentVersion, log, preview = null, live = null }) {
     this.preview = preview;
+    // LAN live view (live.js): its address and signing key go in every heartbeat
+    this.live = live;
     this.api = api;
     this.recorders = recorders;
     this.settings = settings;
@@ -137,6 +139,8 @@ export class DeviceSync {
     await this.api.heartbeat({
       agentVersion: this.agentVersion,
       cameras: this.recorders.statuses(),
+      // { url, key } | null (off, port taken, or no LAN address)
+      live: this.live?.info() ?? null,
     });
   }
 

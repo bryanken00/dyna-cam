@@ -1,13 +1,13 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the signed LAN HLS live view for session devices, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
 
 Node 20.12+ · plain ESM JavaScript · **no runtime dependencies, never add one** · ffmpeg 5+ · pm2 ·
 `node:test`. The box records each court's RTSP camera into a rolling buffer and cuts the replays
-players save. API calls are **outbound** only; the one listener is LAN-only (court buttons).
+players save. API calls are **outbound** only; the two listeners are LAN-only (court buttons, live view).
 Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1/device/`.
 
 ## Module layout (`src/`)
@@ -23,6 +23,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
+| `live.js` | LAN live view `GET\|HEAD /live/:courtId/{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
 | `stream.js` | RTMP via the recorder's own ffmpeg (tee + fifo slave): escaping, key masking, stderr → stream status, restart rule |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
@@ -87,6 +88,20 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
     maxrate.
   - A failing hardware encoder → `libx264` once. `ENCODER=auto` test-encodes (listed ≠ working).
 
+## Live view (`live.js`, PLAN-002 §5.4)
+
+- `LIVE_PORT` (8090; empty/0 = off) on `0.0.0.0`; a taken port warns and recording goes on. Never a camera connection, never encoding.
+- `sig` = hex HMAC-SHA256(**the hex key string**, `${courtId}.${exp}`), `timingSafeEqual`; bad/expired → 403,
+  bad path → 404 (court id `[A-Za-z0-9_-]{1,64}`, file `index.m3u8` or `^\d{9,11}\.ts$`, folder `safeId`), not GET/HEAD → 405.
+  Never log the URL, `sig` or the key. Key: `DATA_DIR/live-key` (0600, made once).
+- Playlist: newest 5 CLOSED segments, VERSION 3, TARGETDURATION = ceil(longest), no ENDLIST, `no-store`.
+  MEDIA-SEQUENCE: first numbered segment = its name (epoch s), then +1 per segment (never goes back,
+  even after a restart); DISCONTINUITY on a new run / gap / untimed file, with DISCONTINUITY-SEQUENCE.
+  Newest closed segment > 30 s old → 404.
+- Buffer files restart their clock at 0 (`reset_timestamps`): segments are served with PTS/DTS/PCR
+  + the csv content start (90 kHz) — a Transform over `createReadStream`, in place, no remux.
+- Heartbeat: `live: { url: "http://<LIVE_HOST | first private IPv4>:<port>", key } | null`.
+
 ## Segment timing (`segments.js`)
 
 Segments are cut on keyframes (1.7–6.1 s seen) and the `%s` name is only when the file opened.
@@ -100,7 +115,7 @@ written is never used. Clips tolerate holes ≤ 7 s; the window must end in a cl
 ## Data and state
 `DATA_DIR` holds `buffer/<courtId>/` (segments, csv, index, run, pid), `jobs/<clipId>/` (segments
 hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
-`config.json` (mode 600, holds camera passwords) and `logo/`. Every JSON write is atomic
+`config.json` (mode 600, holds camera passwords), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
 
 ## Verification (run in `edge/` before reporting done)
@@ -110,6 +125,7 @@ npm run lint     # eslint (security plugin) + prettier-compatible; must be clean
 npm test         # node:test — no network, no ffmpeg
 npm run smoke    # ~2 min: real recorder + clipper on a Tapo-like source (pcm_alaw, irregular GOP):
                  # 65 s clip (h264+aac, all frames, faststart, JPEG) + a 60 s session part (capped)
+                 # + the live view played by ffprobe (clock never goes back, bad sig 403)
 ```
 
 Unit-test every new pure function and API error path; report what can't be verified here (real cameras, QSV/VAAPI, load test).

@@ -8,6 +8,7 @@ import { AGENT_VERSION, ConfigError, loadConfig, loadEnvFile, USER_AGENT } from 
 import { CredentialsError, recoverFromRevoked, resolveCredentials } from "./credentials.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
 import { JobRunner } from "./jobs.js";
+import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
 import { JobQueue } from "./queue.js";
 import { RecorderManager } from "./recorder.js";
@@ -15,7 +16,8 @@ import { DeviceSync } from "./sync.js";
 
 /**
  * Dyna Cam recorder box: config sync + heartbeat, one recorder per court, and
- * the clip job loop. Only outbound HTTPS — the venue needs no open ports.
+ * the clip job loop. The API is reached over outbound HTTPS only; the two
+ * listeners (court buttons, live view) are for the venue LAN.
  */
 /** No usable key: say what to do and stop (a person has to act). */
 function exitIfNoKey(err, log) {
@@ -41,7 +43,7 @@ async function checkFfmpeg(settings, log) {
 }
 
 /** The parts that talk to the API: previews, config/heartbeat sync and the job loop. */
-function createServices({ settings, api, recorders, encoder, jobsDir }) {
+function createServices({ settings, api, recorders, encoder, jobsDir, live }) {
   // Camera-setup previews: lowest priority, never while clips are busy (jobs is set below)
   let jobs = null;
   const preview = new PreviewSender({
@@ -59,6 +61,7 @@ function createServices({ settings, api, recorders, encoder, jobsDir }) {
     settings,
     agentVersion: AGENT_VERSION,
     log: createLogger("sync"),
+    live,
   });
   const clipLog = createLogger("clip");
   jobs = new JobRunner({
@@ -135,7 +138,18 @@ async function main() {
   // Whatever happens to this process, no ffmpeg is left recording behind it
   process.on("exit", () => recorders.killAllSync());
 
-  const { preview, sync, jobs } = createServices({ settings, api, recorders, encoder, jobsDir });
+  // LAN live view from the buffer; a taken port only turns it off, recording goes on
+  const live = new LiveView({ settings, log: createLogger("live") });
+  await live.start();
+
+  const { preview, sync, jobs } = createServices({
+    settings,
+    api,
+    recorders,
+    encoder,
+    jobsDir,
+    live,
+  });
 
   // Stream restarts wait until no uncut clip/part window reaches into the last 70 s
   recorders.pendingWindows = (courtId) => jobs.pendingWindows(courtId);
@@ -165,6 +179,7 @@ async function main() {
     sync.stop();
     clearInterval(previewTimer);
     buttons?.close();
+    live.close();
     await jobs.stop();
     await recorders.stopAll();
   };

@@ -17,7 +17,10 @@
  * 4. Camera setup: reads the camera's details and a preview JPEG from the
  *    latest closed segment (no camera connection).
  * 5. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
- * 6. Meanwhile (skip with --no-stream) a second recorder records AND streams to
+ * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
+ *    HLS; ffprobe plays the signed playlist URL and the video clock must run
+ *    on across segments (each file restarts at 0 on disk), a bad signature 403s.
+ * 7. Meanwhile (skip with --no-stream) a second recorder records AND streams to
  *    a local ffmpeg RTMP server through the tee muxer: segments keep coming,
  *    the receiver gets video, killing the receiver leaves the recording running
  *    and reports a stream error, and a new receiver is picked up again.
@@ -29,6 +32,7 @@ import path from "node:path";
 import { MediaProbe, PreviewSender } from "../src/camera.js";
 import { detectEncoder, makeClip } from "../src/clipper.js";
 import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
+import { createLiveServer, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
 import { loadTimeline } from "../src/segments.js";
@@ -294,6 +298,61 @@ async function streamPhase({ dir, file, settings }) {
   }
 }
 
+/** Phase 6: the LAN live view over the court-smoke buffer, read by ffprobe like a player. */
+async function livePhase({ bufferRoot }) {
+  await sleep(25_000);
+  const key = "5".repeat(64);
+  const server = createLiveServer({ bufferDir: bufferRoot, key, log: createLogger("live") });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const exp = Math.floor(Date.now() / 1000) + 300;
+    const base = `http://127.0.0.1:${server.address().port}/live/court-smoke/index.m3u8`;
+    const url = `${base}?exp=${exp}&sig=${signLive(key, "court-smoke", exp)}`;
+    const first = await (await fetch(url)).text();
+    const bad = await fetch(`${base}?exp=${exp}&sig=${"0".repeat(64)}`);
+    const segments = first.split("\n").filter((l) => l.startsWith("#EXTINF")).length;
+    if (segments !== 5 || first.includes("#EXT-X-ENDLIST")) fail(`live playlist:\n${first}`);
+    if (bad.status !== 403) fail(`a bad live signature answered ${bad.status}`);
+    // ffmpeg's HLS reader only accepts segment URIs ending in .ts unless extension_picky is off
+    const { stdout } = await runFfmpeg(FFPROBE, [
+      "-v",
+      "error",
+      "-extension_picky",
+      "0",
+      "-live_start_index",
+      "0",
+      "-read_intervals",
+      "%+7",
+      "-show_entries",
+      "packet=codec_type,pts_time",
+      "-of",
+      "csv=p=0",
+      url,
+    ]);
+    const packets = stdout
+      .trim()
+      .split("\n")
+      .map((l) => l.split(","));
+    const video = packets.filter(([type]) => type === "video").map(([, pts]) => Number(pts));
+    const backwards = video.filter((pts, i) => i > 0 && pts <= video[i - 1]).length;
+    const span = video.at(-1) - video[0];
+    const audio = packets.filter(([type]) => type === "audio").length;
+    const sequence = (text) => Number(/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text)?.[1]);
+    await sleep(5000);
+    const second = await (await fetch(url)).text();
+    const result =
+      `live view: ${segments} segments, sequence ${sequence(first)} → ${sequence(second)} after 5 s; ` +
+      `ffprobe read ${video.length} video packets over ${span.toFixed(2)}s (${backwards} going back), ${audio} audio packets`;
+    if (video.length < 150 || span < 5) fail(`ffprobe could not play the live view — ${result}`);
+    if (backwards) fail(`the live clock jumps back between segments — ${result}`);
+    if (!audio) fail(`no audio in the live view — ${result}`);
+    if (!(sequence(second) > sequence(first))) fail(`media sequence did not move on — ${result}`);
+    log.info(result);
+  } finally {
+    server.close();
+  }
+}
+
 /** Phase 4: camera details + a preview JPEG, read from the buffer (never from the camera). */
 async function cameraSetupPhase({ dir, bufferDir, settings }) {
   const media = await new MediaProbe({ ffprobePath: FFPROBE }).refresh(bufferDir);
@@ -357,6 +416,21 @@ async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settin
   return { ...partInfo, kbps };
 }
 
+/** The main court's recorder, fed in real time from the fake camera file. */
+const smokeRecorder = ({ bufferDir, file, settings }) =>
+  new CourtRecorder({
+    court: {
+      courtId: "court-smoke",
+      name: "Smoke court",
+      cameraRtspUrl: "rtsp://smoke:secret@127.0.0.1/stream1",
+    },
+    dir: bufferDir,
+    settings,
+    ffmpegMajor: 99,
+    log: createLogger("recorder"),
+    spawnImpl: pipedSpawn(file),
+  });
+
 async function main() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dyna-cam-smoke-"));
   const settings = {
@@ -382,20 +456,13 @@ async function main() {
       ? Promise.resolve(null)
       : streamPhase({ dir, file, settings }).catch((err) => err);
     const bufferDir = path.join(dir, "buffer", "court-smoke");
-    recorder = new CourtRecorder({
-      court: {
-        courtId: "court-smoke",
-        name: "Smoke court",
-        cameraRtspUrl: "rtsp://smoke:secret@127.0.0.1/stream1",
-      },
-      dir: bufferDir,
-      settings,
-      ffmpegMajor: 99,
-      log: createLogger("recorder"),
-      spawnImpl: pipedSpawn(file),
-    });
+    recorder = smokeRecorder({ bufferDir, file, settings });
     const startedAt = Date.now();
     recorder.start();
+    const liveView = livePhase({ bufferRoot: path.dirname(bufferDir) }).then(
+      () => null,
+      (e) => e
+    );
 
     // A player saves a replay 75 s into the recording: window = [15 s, 80 s]
     const entry = {
@@ -427,6 +494,8 @@ async function main() {
       });
     }
     const cutStartedAfter = ((Date.now() - startedAt) / 1000).toFixed(1);
+    const liveError = await liveView; // the finally block stops the recorder
+    if (liveError) throw liveError;
     await recorder.stop();
     if (result.status !== "done") fail(`clip not made: ${JSON.stringify(result)}`);
 
