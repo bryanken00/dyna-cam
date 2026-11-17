@@ -1,0 +1,449 @@
+@import "tailwindcss";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tw-animate-css";
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Dark mode is driven by a `.dark` class on <html> (toggled by the theme
+   store). This custom variant lets `dark:` Tailwind utilities work too.
+   ────────────────────────────────────────────────────────────────────────── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================================
+   MODERN DESIGN TOKENS — single source of truth.
+
+   The system: monochrome surfaces + hairline borders + ONE green accent used
+   sparingly (bars, ticks, focus, chips) — never on buttons. Primary buttons are
+   INVERTED (dark-on-light / light-on-dark). Cards are flat: 1px line, radius 14,
+   no shadow.
+
+   Never hardcode a hex in a page — reference these tokens so light/dark and
+   future re-themes "just work".
+   ============================================================================ */
+@theme {
+  /* ── TYPE ───────────────────────────────────────────────────────────────
+     Bundled (@fontsource-variable, imported in main.jsx) first, then the plain
+     CDN name from the index.html <link> fallback, then system stacks. */
+  --font-sans: "Onest Variable", "Onest", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
+    SFMono-Regular, Menlo, monospace;
+
+  /* ── ACCENT · green, used sparingly (never on buttons) ──────────────────── */
+  --color-secondary-color: #4ade80; /* bars, ticks, focus rings, chips */
+
+  /* Chart series colour. NOT the same as --color-secondary-color: that accent is
+     specced for tiny marks (ticks/chips) and only reaches 1.7:1 on a white
+     surface, which is unreadable as a line/area fill. This step is validated
+     (OKLCH lightness band + >=3:1 contrast) for the light surface. */
+  --chart-series-1: #16a34a;
+  --color-secondary-dark: #22c55e;
+  --color-secondary-light: #86efac;
+  --color-link: #16a34a; /* text links */
+
+  /* Legacy aliases → resolved to the accent so any unconverted reference
+     degrades to the new system instead of the old indigo. */
+  --color-primary: #22c55e;
+  --color-primary-color: #22c55e;
+  --color-primary-dark: #16a34a;
+  --color-primary-light: #4ade80;
+
+  /* ── SEMANTIC · Text ────────────────────────────────────────────────────── */
+  --color-text-color: #ffffff; /* on-accent text */
+  --color-text-dark: #18181b; /* primary text / values */
+  --color-text2: #27272a; /* mid text (expanded-parent nav label) */
+  --color-text-secondary: #52525b; /* body / labels */
+  --color-text-muted: #a1a1aa; /* captions, icons, `#`, units */
+
+  /* ── SEMANTIC · Surfaces ────────────────────────────────────────────────── */
+  --color-canvas: #f5f5f6; /* page background */
+  --color-surface: #ffffff; /* cards, table, drawer body */
+  --color-surface-raised: #ffffff; /* dropdowns, popovers */
+  --color-surface-sunken: #f4f4f5; /* wells, hover, toggle track */
+
+  /* ── SEMANTIC · Lines (hairline borders, not shadows) ───────────────────── */
+  --color-line: #e4e4e7; /* hairline borders */
+  --color-line-soft: #f4f4f5; /* row dividers */
+
+  /* Legacy aliases */
+  --color-border: #e4e4e7;
+  --color-border-light: #f4f4f5;
+  --color-primary-pale: #f4f4f5; /* was a pastel tint — now neutral */
+  --color-secondary-pale: #f4f4f5;
+  --color-bg-primary: #f5f5f6;
+  --color-bg-secondary: #f4f4f5;
+  --color-bg-tertiary: #e4e4e7;
+
+  /* ── INVERTED PRIMARY BUTTON ────────────────────────────────────────────── */
+  --color-btn-bg: #18181b;
+  --color-btn-text: #fafafa;
+
+  /* ── RADII ──────────────────────────────────────────────────────────────── */
+  --radius-card: 14px;
+  --radius-control: 9px;
+
+  /* ── STATUS (constant across themes) ────────────────────────────────────── */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #22c55e;
+
+  /* ── ACCENT CHIP GRADIENT (drawer header mark only) ─────────────────────── */
+  --gradient-primary: linear-gradient(135deg, #22c55e 0%, #4ade80 100%);
+  --gradient-background: linear-gradient(135deg, #f5f5f6 0%, #ffffff 100%);
+
+  /* ── SHADOWS — structure comes from borders, not shadows. Flat by design;
+     floating layers (dropdown/modal/drawer) get their shadow from shadcn/Radix. ── */
+  --shadow-card: none;
+  --shadow-raised: none;
+}
+
+/* ============================================================================
+   DARK MODE — overrides only the semantic tokens. Unlayered so it reliably
+   beats the layered `@theme` defaults.
+   ============================================================================ */
+.dark {
+  /* Accent — lift slightly for legibility on dark surfaces */
+  --color-link: #4ade80;
+  --color-primary-color: #4ade80;
+
+  /* Chart series — a *selected* dark step from the same green ramp (not an
+     automatic flip of the light value). Validated against the dark surface:
+     inside the dark OKLCH lightness band and >=3:1 contrast. */
+  --chart-series-1: #1eb055;
+
+  /* Text */
+  --color-text-dark: #f4f4f5;
+  --color-text2: #e4e4e7;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #52525b;
+
+  /* Surfaces */
+  --color-canvas: #09090b;
+  --color-surface: #0f0f12;
+  --color-surface-raised: #18181b;
+  --color-surface-sunken: #18181b;
+
+  /* Lines */
+  --color-line: #27272a;
+  --color-line-soft: #1c1c20;
+
+  /* Legacy aliases */
+  --color-border: #27272a;
+  --color-border-light: #1c1c20;
+  --color-primary-pale: #18181b;
+  --color-secondary-pale: #18181b;
+  --color-bg-primary: #09090b;
+  --color-bg-secondary: #18181b;
+  --color-bg-tertiary: #27272a;
+
+  /* Inverted primary flips in dark */
+  --color-btn-bg: #fafafa;
+  --color-btn-text: #09090b;
+
+  --gradient-background: linear-gradient(135deg, #09090b 0%, #0f0f12 100%);
+}
+
+/* ============================================================================
+   shadcn/ui BRIDGE — maps shadcn's semantic token names onto the Modern
+   tokens above so shadcn components inherit this design system for free.
+
+   HOW IT WORKS
+   - `@theme inline` inlines these `var(--color-*)` refs straight into the
+     generated utilities (`bg-primary`, `border-border`, `bg-card`, …). Because
+     each points at a Modern token that already flips in `.dark`, the shadcn
+     utilities flip automatically — no `.dark` block needed here.
+   - `inline` also means these do NOT re-emit `--color-primary` etc. to `:root`,
+     so existing inline-style refs like `var(--color-border)` keep their
+     legacy `@theme` values. No collision.
+
+   Notably: `--color-primary` maps to the INVERTED monochrome button (never the
+   green accent — that stays reserved for bars/ticks/focus/chips), and `--ring`
+   is the green accent, per the Modern design system.
+
+   When re-theming, change the Modern tokens above; this bridge follows.
+   ============================================================================ */
+:root {
+  /* Base radius shadcn derives its scale from — the Modern control radius. */
+  --radius: var(--radius-control);
+}
+
+@theme inline {
+  /* Radius scale (shadcn: rounded-sm/md/lg/xl) derived from --radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Surfaces & text */
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-text-dark);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-text-dark);
+  --color-popover: var(--color-surface-raised);
+  --color-popover-foreground: var(--color-text-dark);
+
+  /* Primary = inverted monochrome button (NOT the accent) */
+  --color-primary: var(--color-btn-bg);
+  --color-primary-foreground: var(--color-btn-text);
+
+  /* Secondary / muted / accent = the sunken neutral well + hover */
+  --color-secondary: var(--color-surface-sunken);
+  --color-secondary-foreground: var(--color-text-dark);
+  --color-muted: var(--color-surface-sunken);
+  --color-muted-foreground: var(--color-text-secondary);
+  --color-accent: var(--color-surface-sunken);
+  --color-accent-foreground: var(--color-text-dark);
+
+  /* Destructive */
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: var(--color-text-color);
+
+  /* Borders, inputs, focus ring (ring = green accent) */
+  --color-border: var(--color-line);
+  --color-input: var(--color-line);
+  --color-ring: var(--color-secondary-color);
+
+  /* Charts */
+  --color-chart-1: var(--chart-series-1);
+  --color-chart-2: var(--color-secondary-dark);
+  --color-chart-3: var(--color-secondary-light);
+  --color-chart-4: var(--color-warning);
+  --color-chart-5: var(--color-info);
+
+  /* Sidebar (shadcn sidebar block, if ever used) */
+  --color-sidebar: var(--color-surface);
+  --color-sidebar-foreground: var(--color-text-secondary);
+  --color-sidebar-primary: var(--color-btn-bg);
+  --color-sidebar-primary-foreground: var(--color-btn-text);
+  --color-sidebar-accent: var(--color-surface-sunken);
+  --color-sidebar-accent-foreground: var(--color-text-dark);
+  --color-sidebar-border: var(--color-line);
+  --color-sidebar-ring: var(--color-secondary-color);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────────
+   Tailwind v4 defaults a bare `border` to `currentColor` (near-black text), and
+   shadcn components lean on a bare `border` everywhere — outline buttons,
+   popovers, cards, command lists. Point the default at the hairline token.
+   In `@layer base` so any `border-*` colour utility still overrides it. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+}
+
+/* Set on html/body (not `*`) so element-level utilities such as `font-mono`
+   still win via normal inheritance rules. */
+html,
+body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  background-color: var(--color-canvas);
+  color: var(--color-text-dark);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Smooth the light↔dark transition on broad surfaces */
+body,
+.theme-transition {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease;
+}
+
+/* ── Accessibility ────────────────────────────────────────────────────────── */
+
+/* Keyboard focus ring for the hand-rolled controls (the bordered X in drawers,
+   .icon-btn, .pager-btn, plain <button>s). shadcn/Radix styles its own components,
+   but these were previously focusable with no visible indicator. `:focus-visible`
+   keeps it keyboard-only, so mouse clicks don't show a ring. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--color-secondary-color);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* Honour the OS "reduce motion" setting: drop transitions/animations rather
+   than merely shortening them. Charts additionally skip their mount animation
+   (see components/charts/useChartTheme.js). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Reusable utility: icon button (topbar / toolbar) ─────────────────────── */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.icon-btn:hover {
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+}
+
+/* ── Sidebar nav items — active = subtle fill + accent bar ─────────────────── */
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.nav-item:hover {
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+}
+.nav-item.is-active,
+.nav-item.is-active:hover {
+  background-color: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+  font-weight: 500;
+}
+/* The 2px accent bar is rendered by Sidebar.jsx per item, so it can sit on the
+   group rail for nested children rather than at the row's left edge. */
+.nav-item-danger {
+  color: var(--color-error);
+}
+.nav-item-danger:hover {
+  background-color: color-mix(in srgb, var(--color-error) 12%, transparent);
+  color: var(--color-error);
+}
+
+/* ── Pagination footer (shared by every list page) ─────────────────────────── */
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.pager-btn:hover:not(:disabled) {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pager-active {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.pager-size:hover {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-dark);
+}
+
+/* ── Landing page helpers ─────────────────────────────────────────────────── */
+.nav-link {
+  cursor: pointer;
+  position: relative;
+}
+.nav-link::after {
+  content: "";
+  position: absolute;
+  height: 2px;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--color-secondary-color);
+  transition: width 0.2s;
+}
+.nav-link:hover::after {
+  width: 100%;
+}
+.up {
+  top: -7rem;
+  transition: 0.3s;
+}
+.down {
+  top: 0;
+  transition: 0.3s;
+}
+
+/* ── Scrollbar (theme-aware) ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 70%, transparent);
+}

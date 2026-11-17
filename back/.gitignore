@@ -1,0 +1,8 @@
+node_modules
+auth-keys
+public
+!public/uploads/
+!public/uploads/**/.gitkeep
+logs
+.claude*
+.env

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Admin platform with role-based access control."
+    />
+    <meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+    <title>Admin Template</title>
+    <!-- Fonts are self-hosted via @fontsource-variable (imported in main.jsx).
+         No Google Fonts <link> here: it double-loaded the same families and made
+         every production page hit an external origin. -->
+    <!-- Apply the saved theme (or the OS one on "auto") before paint to avoid a
+         flash of the wrong mode. Mirrors src/store/themeStore.js. -->
+    <script>
+      (function () {
+        try {
+          var saved = JSON.parse(
+            localStorage.getItem("%VITE_STORE_KEY%-ui-theme") || "null",
+          );
+          // v0 saves predate "auto"; the store resets them to auto, so match that.
+          var mode = saved && saved.version >= 1 ? saved.state.mode : "auto";
+          var dark =
+            mode === "dark" ||
+            (mode !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
