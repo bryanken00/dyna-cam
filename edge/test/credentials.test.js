@@ -5,25 +5,28 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ApiError } from "../src/api.js";
 import {
-  codeHash,
   CredentialsError,
   DEVICE_FILE,
-  isCodeUsed,
-  recoverFromRevoked,
-  redeemPairingCode,
+  enroll,
+  ENROLL_RETRY_MAX_MS,
+  enrollHash,
+  markRevoked,
+  REFUSED_FILE,
   resolveCredentials,
-  USED_CODES_FILE,
+  REVOKED_FILE,
 } from "../src/credentials.js";
-import { maskCredentials } from "../src/util.js";
+import { createLogger } from "../src/log.js";
+import { maskCredentials, registerSecret } from "../src/util.js";
 
 const NOW = 1_794_881_000_000;
+const KEY = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
 let dir;
 let logged;
 const log = {
-  debug: (m) => logged.push(m),
-  info: (m) => logged.push(m),
-  warn: (m) => logged.push(m),
-  error: (m) => logged.push(m),
+  debug: (m, e) => logged.push(`${m}${e ? ` ${e.message || e}` : ""}`),
+  info: (m, e) => logged.push(`${m}${e ? ` ${e.message || e}` : ""}`),
+  warn: (m, e) => logged.push(`${m}${e ? ` ${e.message || e}` : ""}`),
+  error: (m, e) => logged.push(`${m}${e ? ` ${e.message || e}` : ""}`),
 };
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "edge-cred-"));
@@ -31,191 +34,210 @@ beforeEach(async () => {
 });
 afterEach(() => fs.rm(dir, { recursive: true, force: true }));
 
-const PAIRED = {
+const ENROLLED = {
   token: "dcb_0123456789abcdef0123456789abcdef",
   device: { deviceId: "dev-1", name: "Court box" },
   venue: { venueId: "ven-1", name: "Pickle Palace" },
 };
 
-/** pairDevice answers from a list: an object = success, an Error = failure. */
+/** enroll answers from a list: an object = success, an Error = failure. */
 function fakeApi(answers) {
   const calls = [];
   return {
     calls,
-    pairDevice: async (code, agentVersion) => {
-      calls.push([code, agentVersion]);
+    enroll: async (body) => {
+      calls.push(body);
       const next = answers.shift();
       if (next instanceof Error) throw next;
       return next;
     },
   };
 }
-const settings = (extra = {}) => ({ dataDir: dir, pairingCode: null, ...extra });
-const args = (api, extra = {}) => ({
+const apiError = (status, extra = {}) =>
+  new ApiError(`POST /enroll: HTTP ${status}`, { status, ...extra });
+const settings = (extra = {}) => ({
+  dataDir: dir,
+  enrollKey: KEY,
+  venueId: "ven-1",
+  boxName: "Court box",
+  ...extra,
+});
+const args = (api, extra = {}, sleeps = []) => ({
   settings: settings(extra),
   api,
   agentVersion: "1.0.0",
   log,
-  sleep: async () => {},
+  sleep: async (ms) => sleeps.push(ms),
   now: () => NOW,
 });
-const writeDevice = (data) => fs.writeFile(path.join(dir, DEVICE_FILE), JSON.stringify(data));
 
 describe("resolveCredentials: which token", () => {
-  it("prefers device.json, then a PAIRING_CODE", async () => {
-    const api = fakeApi([PAIRED]);
-    await writeDevice({ token: "dcb_stored_token_1234", name: "Box" });
-    const stored = await resolveCredentials(args(api, { pairingCode: "123456" }));
-    assert.deepEqual([stored.token, stored.source], ["dcb_stored_token_1234", "stored"]);
-    assert.equal(api.calls.length, 0, "no pairing while a token is saved");
-
-    await fs.rm(path.join(dir, DEVICE_FILE));
-    const paired = await resolveCredentials(args(api, { pairingCode: "123456" }));
-    assert.deepEqual([paired.token, paired.source], [PAIRED.token, "paired"]);
-    assert.deepEqual(api.calls, [["123456", "1.0.0"]]);
+  it("uses device.json first and never enrols then", async () => {
+    await fs.writeFile(path.join(dir, DEVICE_FILE), JSON.stringify({ token: "dcb_saved" }));
+    const api = fakeApi([]);
+    const creds = await resolveCredentials(args(api));
+    assert.equal(creds.token, "dcb_saved");
+    assert.equal(creds.source, "stored");
+    assert.equal(api.calls.length, 0);
   });
 
-  it("saves the pairing to device.json with mode 0600 and logs neither token nor key", async () => {
-    await resolveCredentials(args(fakeApi([PAIRED]), { pairingCode: "123456" }));
+  it("enrols with .env, saves device.json (0600) and logs neither token nor key", async () => {
+    const api = fakeApi([ENROLLED]);
+    const creds = await resolveCredentials(args(api));
+    assert.equal(creds.source, "enrolled");
+    assert.equal(creds.token, ENROLLED.token);
+    assert.deepEqual(api.calls, [
+      { enrollKey: KEY, venueId: "ven-1", name: "Court box", agentVersion: "1.0.0" },
+    ]);
     const file = path.join(dir, DEVICE_FILE);
     const saved = JSON.parse(await fs.readFile(file, "utf8"));
-    assert.deepEqual(
-      { ...saved, pairedAt: "x" },
-      {
-        token: PAIRED.token,
-        deviceId: "dev-1",
-        venueId: "ven-1",
-        name: "Court box",
-        venueName: "Pickle Palace",
-        pairedAt: "x",
-      }
-    );
-    assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
-    assert.ok(
-      logged.includes(
-        "Paired as Court box for Pickle Palace — you can remove PAIRING_CODE from .env"
-      )
-    );
-    assert.ok(
-      logged.every((m) => !String(m).includes(PAIRED.token) && !String(m).includes("123456"))
-    );
-    assert.equal(await isCodeUsed(dir, "123456"), true);
-    const used = await fs.readFile(path.join(dir, USED_CODES_FILE), "utf8");
-    assert.ok(
-      !used.includes("123456") && used.includes(codeHash("123456")),
-      "only the hash is kept"
-    );
+    assert.equal(saved.token, ENROLLED.token);
+    assert.equal(saved.deviceId, "dev-1");
+    assert.equal(saved.venueName, "Pickle Palace");
+    assert.ok(!JSON.stringify(saved).includes(KEY), "the enrol key isn't saved");
+    if (process.platform !== "win32") assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+    assert.match(logged.join("\n"), /Enrolled as Court box for Pickle Palace/);
+    assert.ok(logged.every((m) => !m.includes(ENROLLED.token) && !m.includes(KEY)));
   });
 
-  it("never sends the same key twice across restarts", async () => {
-    const api = fakeApi([PAIRED]);
-    await resolveCredentials(args(api, { pairingCode: "123456" }));
-    await fs.rm(path.join(dir, DEVICE_FILE));
-    await assert.rejects(resolveCredentials(args(api, { pairingCode: "123456" })), /already used/);
-    assert.equal(api.calls.length, 1);
+  it("asks a person to act when .env has no enrol values", async () => {
+    await assert.rejects(
+      resolveCredentials(args(fakeApi([]), { enrollKey: null, venueId: null })),
+      (err) => err instanceof CredentialsError && /set ENROLL_KEY and VENUE_ID/.test(err.message)
+    );
   });
+});
 
-  it("explains what to do when there is no key at all", async () => {
-    await assert.rejects(resolveCredentials(args(fakeApi([]))), (err) => {
+describe("enrolling: errors", () => {
+  it("a wrong key or venue (400) is final and not sent again — until .env changes", async () => {
+    const api = fakeApi([
+      apiError(400, { detail: "That enrol key or venue isn't accepted" }),
+      ENROLLED,
+    ]);
+    await assert.rejects(resolveCredentials(args(api)), (err) => {
       assert.ok(err instanceof CredentialsError);
-      assert.match(err.message, /Admin → Setup → Recorder Boxes .* PAIRING_CODE/);
+      assert.match(err.message, /refused this box's ENROLL_KEY \/ VENUE_ID/);
+      assert.match(err.message, /isn't accepted/);
+      assert.ok(!err.message.includes(KEY));
       return true;
     });
+    const refused = await fs.readFile(path.join(dir, REFUSED_FILE), "utf8");
+    assert.ok(refused.includes(enrollHash(KEY, "ven-1")));
+    assert.ok(!refused.includes(KEY), "only a hash is kept");
+
+    // A restart with the same values: nothing sent
+    await assert.rejects(resolveCredentials(args(api)), /already refused/);
+    assert.equal(api.calls.length, 1);
+
+    // A fixed VENUE_ID (or key) in .env is tried
+    const creds = await resolveCredentials(args(api, { venueId: "ven-2" }));
+    assert.equal(creds.token, ENROLLED.token);
+    assert.equal(api.calls.length, 2);
+    assert.equal(api.calls[1].venueId, "ven-2");
+  });
+
+  it("enrolment off on the API (403) retries every 5 min with a clear log", async () => {
+    const sleeps = [];
+    const api = fakeApi([
+      apiError(403, { code: "ENROLLMENT_DISABLED" }),
+      apiError(403, { code: "ENROLLMENT_DISABLED" }),
+      ENROLLED,
+    ]);
+    const data = await enroll(args(api, {}, sleeps));
+    assert.equal(data.token, ENROLLED.token);
+    assert.deepEqual(sleeps, [ENROLL_RETRY_MAX_MS, ENROLL_RETRY_MAX_MS]);
+    assert.equal(ENROLL_RETRY_MAX_MS, 300_000);
+    assert.match(logged.join("\n"), /Enrolment is turned off on the API/);
+    await assert.rejects(
+      fs.access(path.join(dir, REFUSED_FILE)),
+      "403 isn't remembered as refused"
+    );
+  });
+
+  it("a 429 waits for Retry-After, or 60 s without it", async () => {
+    const sleeps = [];
+    const api = fakeApi([apiError(429, { retryAfterMs: 7000 }), apiError(429), ENROLLED]);
+    await enroll(args(api, {}, sleeps));
+    assert.deepEqual(sleeps, [7000, 60_000]);
+    assert.match(logged.join("\n"), /paused by the API/);
+  });
+
+  it("retries network and server errors with backoff (2 s → 5 min)", async () => {
+    const sleeps = [];
+    const answers = Array.from({ length: 10 }, (_v, i) => apiError(i % 2 ? 503 : 0));
+    const api = fakeApi([...answers, ENROLLED]);
+    await enroll(args(api, {}, sleeps));
+    assert.deepEqual(sleeps.slice(0, 4), [2000, 4000, 8000, 16_000]);
+    assert.equal(Math.max(...sleeps), ENROLL_RETRY_MAX_MS);
   });
 });
 
-describe("redeemPairingCode: errors", () => {
-  it("a 400 (wrong / expired / used key) is final and the key is remembered", async () => {
-    const api = fakeApi([new ApiError("Invalid key", { status: 400 })]);
-    await assert.rejects(resolveCredentials(args(api, { pairingCode: "654321" })), /not accepted/);
-    assert.equal(api.calls.length, 1);
-    assert.equal(await isCodeUsed(dir, "654321"), true);
-    await assert.rejects(fs.access(path.join(dir, DEVICE_FILE)));
-  });
-
-  it("a 429 waits for Retry-After, or 60 s without it, then tries again", async () => {
-    const waits = [];
-    const api = fakeApi([
-      new ApiError("paused", { status: 429, retryAfterMs: 90_000 }),
-      new ApiError("too many", { status: 429 }),
-      PAIRED,
-    ]);
-    const data = await redeemPairingCode({
-      api,
-      code: "123456",
-      agentVersion: "1",
-      log,
-      sleep: async (ms) => waits.push(ms),
+describe("revoked", () => {
+  it("forgets the token and cached config, writes revoked.json (0600) and never re-enrols", async () => {
+    await fs.writeFile(path.join(dir, DEVICE_FILE), JSON.stringify({ token: ENROLLED.token }));
+    await fs.writeFile(path.join(dir, "config.json"), '{"courts":[]}');
+    const message = await markRevoked({
+      settings: settings(),
+      device: { deviceId: "dev-1", name: "Court box" },
       now: () => NOW,
     });
-    assert.equal(data.token, PAIRED.token);
-    assert.deepEqual(waits, [90_000, 60_000]);
-  });
-
-  it("retries network errors with backoff and gives up after 15 minutes", async () => {
-    let now = NOW;
-    const waits = [];
-    const api = { pairDevice: async () => Promise.reject(new ApiError("ECONNREFUSED")) };
-    await assert.rejects(
-      redeemPairingCode({
-        api,
-        code: "123456",
-        agentVersion: "1",
-        log,
-        now: () => now,
-        sleep: async (ms) => {
-          waits.push(ms);
-          now += ms;
-        },
-      }),
-      /Could not pair with the API for 15 minutes/
+    assert.match(
+      message,
+      /This box was revoked — delete .*revoked\.json \(and check \.env\) to enrol it again/
     );
-    assert.deepEqual(waits.slice(0, 4), [2000, 4000, 8000, 16_000]);
-    assert.ok(now - NOW <= 15 * 60_000);
-  });
-});
-
-describe("recoverFromRevoked", () => {
-  it("deletes device.json and pairs with a NEW key", async () => {
-    await writeDevice({ token: "dcb_old_token_1234" });
-    const api = fakeApi([PAIRED]);
-    const creds = await recoverFromRevoked(args(api, { pairingCode: "111222" }));
-    assert.equal(creds.token, PAIRED.token);
-    assert.ok(
-      logged.includes("This box was revoked — add it again in Admin to get a new pairing key")
-    );
-    assert.equal(
-      JSON.parse(await fs.readFile(path.join(dir, DEVICE_FILE), "utf8")).token,
-      PAIRED.token
-    );
-  });
-
-  it("does not retry the key it was paired with; cleans up and asks for a new one", async () => {
-    const api = fakeApi([PAIRED]);
-    await resolveCredentials(args(api, { pairingCode: "123456" }));
-    await assert.rejects(
-      recoverFromRevoked(args(api, { pairingCode: "123456" })),
-      /Recorder Boxes/
-    );
-    assert.equal(api.calls.length, 1);
-    await assert.rejects(fs.access(path.join(dir, DEVICE_FILE)), "revoked token forgotten");
-  });
-
-  it("without any PAIRING_CODE just forgets the token (and the cached camera config)", async () => {
-    await writeDevice({ token: "dcb_old_token_1234" });
-    await fs.writeFile(path.join(dir, "config.json"), "{}");
-    await assert.rejects(recoverFromRevoked(args(fakeApi([]))), CredentialsError);
     await assert.rejects(fs.access(path.join(dir, DEVICE_FILE)));
-    await assert.rejects(fs.access(path.join(dir, "config.json")));
+    await assert.rejects(fs.access(path.join(dir, "config.json")), "camera passwords removed");
+    const file = path.join(dir, REVOKED_FILE);
+    assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), {
+      revokedAt: new Date(NOW).toISOString(),
+      deviceId: "dev-1",
+      name: "Court box",
+    });
+    if (process.platform !== "win32") assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+
+    // The next start: valid .env values, but no enrolment while revoked.json is there
+    const api = fakeApi([ENROLLED]);
+    await assert.rejects(resolveCredentials(args(api)), (err) => {
+      assert.ok(err instanceof CredentialsError);
+      assert.equal(err.revoked, true);
+      assert.match(err.message, /This box was revoked/);
+      return true;
+    });
+    assert.equal(api.calls.length, 0);
+
+    // A person deletes revoked.json: it enrols again
+    await fs.rm(file);
+    assert.equal((await resolveCredentials(args(api))).source, "enrolled");
   });
 });
 
 describe("masking", () => {
   it("never shows a device token in a log line", () => {
-    assert.equal(maskCredentials(`got ${PAIRED.token}`), "got dcb_****");
     assert.equal(
-      maskCredentials("Authorization: Device 9f86d081884c7d659a2feaa0c55ad015"),
+      maskCredentials("token dcb_0123456789abcdef0123456789abcdef saved"),
+      "token dcb_**** saved"
+    );
+    assert.equal(
+      maskCredentials("Authorization: Device abcdefghijklmnop"),
       "Authorization: Device ****"
     );
+  });
+
+  it("masks ENROLL_KEY anywhere once registered, even through the logger", () => {
+    const secret = "Zq9-enrol-key-without-any-shape-1234567890";
+    registerSecret(secret);
+    assert.equal(maskCredentials(`sent ${secret} to the API`), "sent **** to the API");
+    const lines = [];
+    const original = console.error;
+    console.error = (line) => lines.push(line);
+    try {
+      createLogger("t").warn(`oops ${secret}`, new Error(`key=${secret}`));
+    } finally {
+      console.error = original;
+    }
+    assert.equal(lines.length, 1);
+    assert.ok(!lines[0].includes(secret));
+    registerSecret("short"); // too short to register: nothing breaks
+    assert.equal(maskCredentials("short"), "short");
   });
 });

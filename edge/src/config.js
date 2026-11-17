@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,16 +44,56 @@ const bool = (env, name, fallback) => {
   throw new ConfigError(`${name} must be true or false (got "${env[name]}")`);
 };
 
-/** PAIRING_CODE as typed ("123 456", "123-456") → "123456"; empty → null. */
-export function parsePairingCode(raw) {
-  const code = String(raw ?? "").replace(/[\s-]/g, "");
-  if (!code) return null;
-  if (!/^\d{6}$/.test(code)) {
+/** The API's enrol key is at least this long (back: RECORDER_ENROLL_KEY). */
+export const ENROLL_KEY_MIN = 32;
+const VENUE_ID = /^[A-Za-z0-9-]{1,50}$/;
+
+/**
+ * How the box gets its token (credentials.js): DATA_DIR/device.json from an
+ * earlier enrolment, else ENROLL_KEY + VENUE_ID (+ BOX_NAME) to enrol once.
+ * Without device.json both are required.
+ */
+export function parseEnrollment(env, dataDir, { hostname = os.hostname } = {}) {
+  const enrollKey = String(env.ENROLL_KEY ?? "").trim();
+  const venueId = String(env.VENUE_ID ?? "").trim();
+  const enrolled = fs.existsSync(path.join(dataDir, "device.json"));
+  if (!enrollKey && !enrolled) {
     throw new ConfigError(
-      "PAIRING_CODE must be the 6-digit key from Admin → Setup → Recorder Boxes"
+      "Missing ENROLL_KEY. Set ENROLL_KEY (the API's RECORDER_ENROLL_KEY) and VENUE_ID " +
+        "(Setup → Venues → the venue → Copy ID) in .env — see .env.example."
     );
   }
-  return code;
+  if (enrollKey && enrollKey.length < ENROLL_KEY_MIN) {
+    throw new ConfigError(
+      `ENROLL_KEY is too short (at least ${ENROLL_KEY_MIN} characters) — it must be exactly the API's RECORDER_ENROLL_KEY`
+    );
+  }
+  if (enrollKey && !venueId) {
+    throw new ConfigError(
+      "Missing VENUE_ID: the ID of this box's venue (Admin → Setup → Venues → the venue → Copy ID)"
+    );
+  }
+  if (venueId && !VENUE_ID.test(venueId)) {
+    throw new ConfigError(
+      "VENUE_ID must be the venue's ID as copied from Admin → Setup → Venues (letters, digits and dashes)"
+    );
+  }
+  const boxName = (String(env.BOX_NAME ?? "").trim() || String(hostname() || "").trim()).slice(
+    0,
+    100
+  );
+  return { enrollKey: enrollKey || null, venueId: venueId || null, boxName: boxName || null };
+}
+
+/** Settings from older setups that are no longer read — warned about, never used. */
+export function leftoverWarnings(settings) {
+  const hint = "a box enrols with ENROLL_KEY and VENUE_ID (see .env.example)";
+  return [
+    settings.ignoredDeviceToken &&
+      `DEVICE_TOKEN in .env is no longer used — ${hint}. You can delete the DEVICE_TOKEN line.`,
+    settings.ignoredPairingCode &&
+      `PAIRING_CODE in .env is no longer used — ${hint}. You can delete the PAIRING_CODE line.`,
+  ].filter(Boolean);
 }
 
 /**
@@ -75,15 +116,13 @@ export function loadConfig(env = process.env) {
   const apiUrl = String(env.API_URL ?? "")
     .trim()
     .replace(/\/+$/, "");
-  // Credentials (credentials.js): a token saved by pairing in DATA_DIR/device.json,
-  // else a 6-digit PAIRING_CODE to redeem. DEVICE_TOKEN is no longer read (PLAN-002
-  // Phase F) — index.js only warns when one is still set.
+  // DEVICE_TOKEN (Phase F) and PAIRING_CODE (Phase I) are no longer read —
+  // index.js only warns when one is still set
   const ignoredDeviceToken = String(env.DEVICE_TOKEN ?? "").trim() !== "";
-  const pairingCode = parsePairingCode(env.PAIRING_CODE);
+  const ignoredPairingCode = String(env.PAIRING_CODE ?? "").trim() !== "";
   if (!apiUrl) {
     throw new ConfigError(
-      "Missing API_URL. Copy .env.example to .env, set API_URL and the 6-digit PAIRING_CODE from " +
-        "the Admin portal → Setup → Recorder Boxes."
+      "Missing API_URL. Copy .env.example to .env and set API_URL, ENROLL_KEY and VENUE_ID."
     );
   }
   let parsed;
@@ -108,12 +147,17 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`LIVE_PORT and BUTTON_PORT must differ (both are ${livePort})`);
   }
   const liveHost = parseLiveHost(env.LIVE_HOST);
+  const dataDir = path.resolve(ROOT_DIR, env.DATA_DIR || "./data");
+  const { enrollKey, venueId, boxName } = parseEnrollment(env, dataDir);
 
   return Object.freeze({
     apiUrl,
     ignoredDeviceToken,
-    pairingCode,
-    dataDir: path.resolve(ROOT_DIR, env.DATA_DIR || "./data"),
+    ignoredPairingCode,
+    enrollKey,
+    venueId,
+    boxName,
+    dataDir,
     segmentSeconds: int(env, "SEGMENT_SECONDS", 2, 1, 10),
     // A clip needs 65 s plus the time the job takes to reach the box
     bufferSeconds: int(env, "BUFFER_SECONDS", 180, 90, 3600),

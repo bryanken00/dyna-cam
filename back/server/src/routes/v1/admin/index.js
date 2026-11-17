@@ -11,11 +11,9 @@ import settingsController from "../../../controllers/v1/admin/settings.controlle
 import dashboardController from "../../../controllers/v1/admin/dashboard.controller.js";
 import venuesController from "../../../controllers/v1/admin/venues.controller.js";
 import courtsController from "../../../controllers/v1/admin/courts.controller.js";
-import devicesController from "../../../controllers/v1/admin/devices.controller.js";
 import clipsController from "../../../controllers/v1/admin/clips.controller.js";
 import sessionsController from "../../../controllers/v1/admin/sessions.controller.js";
 import paymentsController from "../../../controllers/v1/admin/payments.controller.js";
-import pairingCodesController from "../../../controllers/v1/admin/pairing-codes.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -47,12 +45,9 @@ router.use("/dashboard", requireAuth, dashboardController);
 // Dyna Cam (PLAN-001)
 router.use("/venues", requireAuth, auditTrail("venues"), venuesController);
 router.use("/courts", requireAuth, auditTrail("courts"), courtsController);
-router.use("/devices", requireAuth, auditTrail("devices"), devicesController);
 router.use("/clips", requireAuth, auditTrail("clips"), clipsController);
 router.use("/sessions", requireAuth, auditTrail("sessions"), sessionsController);
 router.use("/payments", requireAuth, auditTrail("payments"), paymentsController);
 
-// PLAN-002 recorder box pairing keys (session devices pair under /sessions)
-router.use("/pairing-codes", requireAuth, auditTrail("pairing-codes"), pairingCodesController);
 
 export default router;

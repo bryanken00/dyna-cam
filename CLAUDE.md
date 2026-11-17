@@ -123,8 +123,10 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   `Authorization: Device <token>`, scoped to their venue — another venue's record is a 404);
   `/api/v1/app/*` (a phone/tablet paired to **one recording session**,
   `Authorization: App <token>`: the session, its live view and Stop; unpaired 10 min after the
-  session ends); `/api/v1/pair/*` trades a single-use 6-digit key from the Admin portal (Setup →
-  Recorder Boxes, or a session's "Pair a device") for one of those tokens; `/api/v1/public/*` is
+  session ends); `/api/v1/pair/*` trades a single-use 6-digit key from a session's "Pair a device" for an
+  app token, or (`/pair/enroll`) a box's `ENROLL_KEY` + `VENUE_ID` from its `.env` — matching
+  the API's `RECORDER_ENROLL_KEY` — for a box token. Recorder boxes have no page: list and revoke
+  them with `npm run boxes` / `npm run boxes:revoke -- <name or id>` in `back/`; `/api/v1/public/*` is
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
   stored encrypted and never returned). The app keeps its token

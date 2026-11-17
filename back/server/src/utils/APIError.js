@@ -69,6 +69,8 @@ export const ERROR_CODES = {
 
   // Unavailable (503)
   CAMERA_OFFLINE: 'CAMERA_OFFLINE',
+  // PLAN-002 Phase I: the API has no RECORDER_ENROLL_KEY, so boxes can't enrol
+  ENROLLMENT_DISABLED: 'ENROLLMENT_DISABLED',
 
   // Server Errors (500)
   INTERNAL_ERROR: 'INTERNAL_ERROR',

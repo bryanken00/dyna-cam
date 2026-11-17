@@ -103,11 +103,16 @@ describe("clips", () => {
     );
     assert.equal(config.data.clip.preSeconds, 60);
 
-    const box = await call("GET", `/admin/devices/${home.deviceId}`);
-    assert.equal(box.data.device.agentVersion, "0.1.0");
-    assert.ok(box.data.device.lastSeenSecondsAgo >= 0 && box.data.device.lastSeenSecondsAgo < 60);
+    // No Recorder Boxes page since PLAN-002 Phase I — the row and the court show it
+    const [[box]] = await ctx.sql.query(
+      `SELECT agentVersion, lastSeenAt IS NOT NULL AS seen, lastStatus FROM devices
+       WHERE deviceId = ?`,
+      [home.deviceId]
+    );
+    assert.equal(box.agentVersion, "0.1.0");
+    assert.equal(box.seen, 1);
     assert.deepEqual(
-      box.data.device.cameras.map((c) => c.courtId),
+      box.lastStatus.cameras.map((c) => c.courtId),
       [home.courtId]
     );
   });
@@ -378,7 +383,7 @@ describe("clips", () => {
     const options = await asCourts("/admin/courts/options");
     assert.equal(options.status, 200);
     assert.ok(options.data.venues.some((v) => v.venueId === home.venueId));
-    assert.equal((await asCourts("/admin/devices/options")).status, 403);
+    assert.equal((await asCourts("/admin/devices/options")).status, 404, "no boxes page (Phase I)");
 
     const court = await asCourts(`/admin/courts/${home.courtId}`);
     assert.equal(court.data.court.venueLogoUrl, null);

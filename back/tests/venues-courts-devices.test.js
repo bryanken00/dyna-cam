@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { startTestApp } from "./helpers/testApp.js";
+import { runScript, runScriptArgs, startTestApp } from "./helpers/testApp.js";
 
 const CAMERA = "rtsp://cam-user:s3cret-pass@192.168.1.50:554/stream1";
 
@@ -193,47 +193,52 @@ describe("venues, courts and recorder boxes", () => {
       venueId = await createVenue("Quezon City Pickle Hub");
     });
 
-    it("pairs with a key, and stores only the token's hash", async () => {
+    it("enrols from .env, and stores only the token's hash", async () => {
       const created = await ctx.pairBox(admin.token, venueId, "Front box");
       assert.equal(created.status, 201);
       const { deviceId, token } = created.data;
       assert.match(token, /^dcb_/);
-
-      const one = await call("GET", `/admin/devices/${deviceId}`);
-      assert.equal(one.status, 200);
-      assert.ok(!JSON.stringify(one.body).includes(token));
-      assert.equal(one.data.device.tokenHash, undefined);
-      assert.equal(one.data.device.online, true, "pairing counts as a sign of life");
-
-      // Offline once it goes quiet; any request brings it back
-      await ctx.sql.query(`UPDATE devices SET lastSeenAt = NULL WHERE deviceId = ?`, [deviceId]);
-      assert.equal((await call("GET", `/admin/devices/${deviceId}`)).data.device.online, false);
+      const [[row]] = await ctx.sql.query(
+        `SELECT tokenHash, lastSeenAt FROM devices WHERE deviceId = ?`,
+        [deviceId]
+      );
+      assert.notEqual(row.tokenHash, token);
+      assert.ok(row.lastSeenAt, "enrolling counts as a sign of life");
       assert.equal((await device("GET", "/device/config", token)).status, 200);
-      const after = await call("GET", `/admin/devices/${deviceId}`);
-      assert.equal(after.data.device.online, true, "a request counts as a sign of life");
     });
 
-    it("refuses a revoked box for good — it has to be paired again as a new box", async () => {
+    it("is listed and revoked from the API's command line, for good", async () => {
       const created = await ctx.pairBox(admin.token, venueId, "Back box");
       const { deviceId, token } = created.data;
+      const env = { DB_DATABASE: ctx.database };
 
-      assert.equal((await call("POST", `/admin/devices/${deviceId}/revoke`)).status, 200);
+      const listed = runScript("boxes.js", env);
+      assert.ok(listed.ok, listed.output);
+      assert.match(listed.output, /Back box/);
+      assert.match(listed.output, /Quezon City Pickle Hub/);
+
+      const byName = runScriptArgs("boxes.js", ["revoke", "Back box"], env);
+      assert.ok(byName.ok, byName.output);
+      assert.match(byName.output, /Revoked Quezon City Pickle Hub · Back box/);
       assert.equal((await device("GET", "/device/config", token)).status, 401);
+      assert.match(runScriptArgs("boxes.js", ["revoke", deviceId], env).output, /already revoked/);
+      assert.equal(runScriptArgs("boxes.js", ["revoke", "No such box"], env).ok, false);
 
+      // A new enrolment is a new box; the revoked token stays dead
       const again = await ctx.pairBox(admin.token, venueId, "Back box");
       assert.equal(again.status, 201);
       assert.notEqual(again.data.deviceId, deviceId);
-      assert.equal((await device("GET", "/device/config", again.data.token)).status, 200);
       assert.equal((await device("GET", "/device/config", token)).status, 401);
+      // By name, only active boxes count — the new "Back box" is the one revoked
+      const second = runScriptArgs("boxes.js", ["revoke", "Back box"], env);
+      assert.ok(second.ok, second.output);
+      assert.equal((await device("GET", "/device/config", again.data.token)).status, 401);
     });
 
-    it("can't be added or given a token without a pairing key (PLAN-002 Phase F)", async () => {
+    it("has no Recorder Boxes page or box pairing keys any more (Phase I)", async () => {
+      assert.equal((await call("GET", "/admin/devices")).status, 404);
       assert.equal((await call("POST", "/admin/devices", { venueId, name: "x" })).status, 404);
-      const created = await ctx.pairBox(admin.token, venueId, "Keyed box");
-      assert.equal(
-        (await call("POST", `/admin/devices/${created.data.deviceId}/token`)).status,
-        404
-      );
+      assert.equal((await call("GET", "/admin/pairing-codes/recorders")).status, 404);
     });
 
     it("refuses requests without a device token", async () => {
@@ -242,30 +247,12 @@ describe("venues, courts and recorder boxes", () => {
       // A user's JWT is not a device credential
       assert.equal((await ctx.api("GET", "/device/config", { token: admin.token })).status, 401);
     });
-
-    it("treats a deleted box as missing and leaves it alone", async () => {
-      const created = await ctx.pairBox(admin.token, venueId, "Old box");
-      const { deviceId, token } = created.data;
-      assert.equal((await call("DELETE", `/admin/devices/${deviceId}`)).status, 200);
-
-      assert.equal((await call("GET", `/admin/devices/${deviceId}`)).status, 404);
-      assert.equal((await call("PUT", `/admin/devices/${deviceId}`, { name: "X" })).status, 404);
-      assert.equal((await call("POST", `/admin/devices/${deviceId}/revoke`)).status, 404);
-      assert.equal((await call("DELETE", `/admin/devices/${deviceId}`)).status, 404);
-      assert.equal((await device("GET", "/device/config", token)).status, 401);
-
-      const [[row]] = await ctx.sql.query(`SELECT name FROM devices WHERE deviceId = ?`, [
-        deviceId,
-      ]);
-      assert.equal(row.name, "Old box");
-    });
   });
 
   describe("permissions", () => {
     it("lets read access look but not change", async () => {
       assert.equal((await call("GET", "/admin/venues", undefined, viewer)).status, 200);
       assert.equal((await call("GET", "/admin/courts", undefined, viewer)).status, 200);
-      assert.equal((await call("GET", "/admin/devices", undefined, viewer)).status, 200);
       assert.equal((await call("GET", "/admin/clips", undefined, viewer)).status, 200);
       assert.equal((await call("POST", "/admin/venues", { name: "Nope" }, viewer)).status, 403);
     });
@@ -273,7 +260,6 @@ describe("venues, courts and recorder boxes", () => {
     it("refuses staff without the permission", async () => {
       const nobody = await ctx.createStaff("Nobody");
       assert.equal((await call("GET", "/admin/venues", undefined, nobody)).status, 403);
-      assert.equal((await call("GET", "/admin/devices", undefined, nobody)).status, 403);
     });
   });
 });

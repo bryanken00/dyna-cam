@@ -9,15 +9,24 @@ import path from "node:path";
  * The userinfo runs up to the LAST "@" before the first "/", so a raw "@" in a
  * password is still covered.
  */
+/** Secrets from .env with no recognisable shape (ENROLL_KEY): masked wherever they appear. */
+const secrets = new Set();
+export function registerSecret(value) {
+  const secret = String(value ?? "");
+  if (secret.length >= 8) secrets.add(secret);
+}
+
 export function maskCredentials(text) {
   if (text === null || text === undefined) return text;
+  let out = String(text);
+  for (const secret of secrets) out = out.split(secret).join("****");
   return (
-    String(text)
+    out
       .replace(/([a-z][a-z0-9+.-]{0,20}:\/\/)([^\s/]*)@/gi, (_m, scheme, info) => {
         const colon = info.indexOf(":");
         return colon === -1 ? `${scheme}***@` : `${scheme}${info.slice(0, colon)}:***@`;
       })
-      // Device tokens: "dcb_…" from pairing, and anything after "Device " in a header
+      // Device tokens: "dcb_…" from enrolment, and anything after "Device " in a header
       .replace(/\bdcb_[A-Za-z0-9_-]{4,}/g, "dcb_****")
       .replace(/\b(Device )[A-Za-z0-9_-]{12,}/g, "$1****")
       // RTMP ingest URLs carry the stream key in the path: keep the app, show ≤ 4 chars of the key

@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -14,8 +14,8 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 
 | File | Owns |
 | --- | --- |
-| `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid; `USER_AGENT`, `AGENT_VERSION` |
-| `credentials.js` | Token: `device.json` (0600) → redeem `PAIRING_CODE` once (`POST /pair/device`, no auth); revoked → cleanup. `DEVICE_TOKEN` is gone (PLAN-002 Phase F) — a set one is only warned about |
+| `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid (`ENROLL_KEY` ≥ 32 + `VENUE_ID` required until `device.json` exists); `USER_AGENT`, `AGENT_VERSION`; warnings for leftover `DEVICE_TOKEN` / `PAIRING_CODE` |
+| `credentials.js` | Token: `device.json` (0600) → enrol once with `ENROLL_KEY` + `VENUE_ID` + `BOX_NAME` (`POST /pair/enroll`, no auth); refused pairs remembered as hashes (`enroll-refused.json`); revoked → `revoked.json`, no re-enrol (PLAN-002 Phase I) |
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court **camera** (`CourtRecorder`; camera 2 in `buffer/<safeId>~cam2`), restart/backoff, stall watchdog, pruning, heartbeat status with `camera` (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
@@ -40,10 +40,17 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   `User-Agent: DynaCamRecorder/<version>`. The API returns 403 for a missing UA or one containing
   bot, crawler, spider or scraper.
 - Envelope → `data`; failures throw `ApiError` (`status` 0 = no answer).
-- Errors: **404/409** clip gone or done → drop. **401**: a paired box (device.json) stops all work,
-  deletes device.json + config cache, tries a NEW `PAIRING_CODE` once, exits. Pairing: 400 final (key hash kept, never resent), 429 →
-  `Retry-After` or 60 s. Never log a token or key (`dcb_…` masked). **429** → `Retry-After`. **0/5xx** →
-  exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
+- Errors: **404/409** clip gone or done → drop. **401**: the box was revoked — stop all work, delete
+  device.json + config cache, write `revoked.json` (`{ revokedAt, deviceId, name }`, 0600), log "This box was
+  revoked — delete …/revoked.json (and check .env) to enrol it again", wait 1 min, exit 1. **429** →
+  `Retry-After`. **0/5xx** → exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
+- Enrolment (`POST /api/v1/pair/enroll { enrollKey, venueId, name?, agentVersion }`, no auth, same UA) →
+  201 `{ token, device, venue }` → device.json. **400/422** final: hash of (key, venue) kept, never resent
+  until `.env` changes. **403** (`ENROLLMENT_DISABLED`) / **404** → retry every 5 min. **429** → `Retry-After`
+  or 60 s. 0/5xx → backoff 2 s → 5 min. Never enrol while `revoked.json` exists (log, wait 1 min, exit 1).
+  A person-must-act exit always waits a minute first (pm2 `restart_delay` is only 5 s).
+- Never log a token or key: `dcb_…` masked; `ENROLL_KEY` is `registerSecret`ed so `maskCredentials`
+  (every log line) hides it.
 - `logoUrl` is signed and **relative** (`new URL(logoUrl, API_URL)`, token only to the API's own
   origin); re-download only when its path (without the query) changes.
 - Use `requestedAtMs`, never parse `requestedAt`; a clip job > 15 min old is failed server-side →
@@ -146,7 +153,8 @@ written is never used. Clips tolerate holes ≤ 7 s; the window must end in a cl
 `DATA_DIR` holds `buffer/<courtId>/` and `buffer/<courtId>~cam2/` (segments, csv, index, run, pid; camera 2's
 pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` (segments
 hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
-`config.json` (mode 600, holds camera passwords), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
+`config.json` (mode 600, holds camera passwords), `device.json` (0600, the token), `enroll-refused.json`
+(hashes), `revoked.json` (0600, blocks enrolment until a person deletes it), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
 
 ## Verification (run in `edge/` before reporting done)

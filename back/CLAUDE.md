@@ -19,8 +19,9 @@ the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a
 `/api/v1/device/*` (recorder boxes, `Authorization: Device <token>`, every query scoped to
 `req.device.venueId`), `/api/v1/app/*` (a phone/tablet paired to one recording session,
 `Authorization: App <token>`, scoped to `req.pairedApp.sessionId`; see
-`utils/sessionDevices.js`), `/api/v1/pair/*` (a 6-digit pairing key → a device or box token;
-rate-limited) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
+`utils/sessionDevices.js`), `/api/v1/pair/*` (a session's 6-digit key → an app token; a box's
+`RECORDER_ENROLL_KEY` → a box token at `/pair/enroll`; rate-limited — boxes are listed and
+revoked with `npm run boxes[:revoke]`) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
 credential; `/public/stream-setup/:code` takes a player's own stream key, see
 `utils/sessionStreams.js`). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.

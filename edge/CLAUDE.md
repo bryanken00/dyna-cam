@@ -16,7 +16,7 @@ Node 20.12+ · plain JavaScript (ESM, no TypeScript) · **no runtime dependencie
 ## Commands (run in `edge/`)
 
 ```bash
-npm start        # needs .env (API_URL, PAIRING_CODE until paired) — copy .env.example
+npm start        # needs .env (API_URL, ENROLL_KEY + VENUE_ID until enrolled) — copy .env.example
 npm run lint     # verification, 1 of 3
 npm test         # verification, 2 of 3 — no network, no ffmpeg needed
 npm run smoke    # verification, 3 of 3 — ~2 min, needs ffmpeg; no API, no camera

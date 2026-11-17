@@ -4,8 +4,15 @@ import { createApi } from "./api.js";
 import { startButtonServer } from "./buttons.js";
 import { PreviewSender } from "./camera.js";
 import { detectEncoder, makeClip } from "./clipper.js";
-import { AGENT_VERSION, ConfigError, loadConfig, loadEnvFile, USER_AGENT } from "./config.js";
-import { CredentialsError, recoverFromRevoked, resolveCredentials } from "./credentials.js";
+import {
+  AGENT_VERSION,
+  ConfigError,
+  leftoverWarnings,
+  loadConfig,
+  loadEnvFile,
+  USER_AGENT,
+} from "./config.js";
+import { CredentialsError, markRevoked, resolveCredentials } from "./credentials.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
 import { JobRunner } from "./jobs.js";
 import { LiveView } from "./live.js";
@@ -14,17 +21,29 @@ import { JobQueue } from "./queue.js";
 import { RecorderManager } from "./recorder.js";
 import { Restreams } from "./restream.js";
 import { DeviceSync } from "./sync.js";
+import { registerSecret } from "./util.js";
 
 /**
  * Dyna Cam recorder box: config sync + heartbeat, one recorder per court, and
  * the clip job loop. The API is reached over outbound HTTPS only; the two
  * listeners (court buttons, live view) are for the venue LAN.
  */
-/** No usable key: say what to do and stop (a person has to act). */
+/**
+ * A person has to act (revoked box, refused or missing ENROLL_KEY / VENUE_ID):
+ * say what to do, wait a minute, then exit non-zero. pm2's restart_delay is
+ * only 5 s, so the pause keeps a stuck box from restarting in a tight loop.
+ */
+const EXIT_PAUSE_MS = 60_000;
+function exitAfterPause(message, log) {
+  log.error(message);
+  return new Promise(() => {
+    setTimeout(() => process.exit(1), EXIT_PAUSE_MS);
+  });
+}
+
 function exitIfNoKey(err, log) {
   if (!(err instanceof CredentialsError)) throw err;
-  log.error(err.message);
-  process.exit(1);
+  return exitAfterPause(err.message, log);
 }
 
 /** ffmpeg's major version; exits with a clear message when ffmpeg is missing. */
@@ -125,12 +144,9 @@ async function main() {
   setLogLevel(settings.logLevel);
   const log = createLogger("main");
   log.info(`${USER_AGENT} starting — API ${settings.apiUrl}, data in ${settings.dataDir}`);
-  if (settings.ignoredDeviceToken) {
-    log.warn(
-      "DEVICE_TOKEN in .env is no longer used — a box pairs with a 6-digit PAIRING_CODE " +
-        "(Admin → Setup → Recorder Boxes → Add box). You can delete the DEVICE_TOKEN line."
-    );
-  }
+  // ENROLL_KEY has no recognisable shape: mask it in every log line from here on
+  registerSecret(settings.enrollKey);
+  for (const line of leftoverWarnings(settings)) log.warn(line);
 
   const ffmpegMajor = await checkFfmpeg(settings, log);
 
@@ -148,15 +164,15 @@ async function main() {
   log.info(`ffmpeg ${ffmpegMajor}.x, clip encoder: ${encoder}`);
 
   const api = createApi({ apiUrl: settings.apiUrl, userAgent: USER_AGENT });
-  const pairingLog = createLogger("pairing");
-  const credentialArgs = { settings, api, agentVersion: AGENT_VERSION, log: pairingLog };
+  const enrollLog = createLogger("enroll");
+  const credentialArgs = { settings, api, agentVersion: AGENT_VERSION, log: enrollLog };
   const creds = await resolveCredentials(credentialArgs).catch((err) =>
-    exitIfNoKey(err, pairingLog)
+    exitIfNoKey(err, enrollLog)
   );
   api.setToken(creds.token);
   if (creds.device) {
     log.info(
-      `recorder box ${creds.device.name || ""} (paired ${creds.device.pairedAt || "earlier"})`
+      `recorder box ${creds.device.name || ""} (enrolled ${creds.device.enrolledAt || creds.device.pairedAt || "earlier"})`
     );
   }
   const recorders = new RecorderManager({
@@ -203,19 +219,19 @@ async function main() {
     await recorders.stopAll();
   };
 
-  // A 401: the box was revoked. Stop recording and job work, forget the token,
-  // and try a NEW PAIRING_CODE once (pm2 restarts the process with the new
-  // pairing).
+  // A 401: the box was revoked. Stop recording and job work, forget the token
+  // and the cached config, write revoked.json (no automatic re-enrolment —
+  // a person deletes it), then exit.
   api.onUnauthorized = () => {
     if (shuttingDown) return;
     shuttingDown = true;
     stopWork()
-      .then(() => recoverFromRevoked(credentialArgs))
-      .then(() => {
-        log.info("paired again — restarting with the new key");
-        process.exit(0);
-      })
-      .catch((err) => exitIfNoKey(err, pairingLog));
+      .then(() => markRevoked({ settings, device: creds.device }))
+      .then((message) => exitAfterPause(message, enrollLog))
+      .catch((err) => {
+        log.error("could not record the revocation", err);
+        process.exit(1);
+      });
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));

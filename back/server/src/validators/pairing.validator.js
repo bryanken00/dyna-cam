@@ -7,12 +7,6 @@ const pairingCode = z
   .transform((value) => value.replace(/[\s-]/g, ""))
   .pipe(z.string().regex(/^\d{6}$/, "Enter the 6-digit pairing key"));
 
-// POST /admin/pairing-codes/recorders
-export const createPairingCodeSchema = z.object({
-  venueId: z.string().min(1, "Venue is required").max(50),
-  name: z.string().trim().min(1, "Name is required").max(100),
-});
-
 // POST /admin/sessions/:sessionId/pairing-codes — a key for a session device
 export const createSessionPairingCodeSchema = z.object({
   name: z.string().trim().min(1, "Name the device, e.g. Court 1 tablet").max(100),
@@ -25,8 +19,10 @@ export const pairAppSchema = z.object({
   appVersion: optionalString(50),
 });
 
-// POST /pair/device
-export const pairDeviceSchema = z.object({
-  code: pairingCode,
+// POST /pair/enroll — a recorder box set up from its .env (PLAN-002 Phase I)
+export const enrollDeviceSchema = z.object({
+  enrollKey: z.string().trim().min(1).max(500),
+  venueId: z.string().trim().regex(/^[A-Za-z0-9-]{1,50}$/, "Invalid venue ID"),
+  name: optionalString(100),
   agentVersion: optionalString(50),
 });

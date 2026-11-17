@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
@@ -8,14 +9,14 @@ import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.
 import { hashToken, randomToken } from "../../../utils/crypto/tokens.js";
 import { findLivePairingCode, markPairingCodeUsed } from "../../../utils/pairing.js";
 import { loadDeviceSession, toDeviceSession } from "../../../utils/sessionDevices.js";
-import { pairAppSchema, pairDeviceSchema } from "../../../validators/pairing.validator.js";
+import { enrollDeviceSchema, pairAppSchema } from "../../../validators/pairing.validator.js";
 
 /**
  * Pairing (PLAN-002) — mounted at /api/v1/pair with NO login: the 6-digit key
  * is the credential, once.
  *
  *   POST /app      a session device redeems a session key → its token (shown once)
- *   POST /device   a recorder box redeems a RECORDER key → its token (shown once)
+ *   POST /enroll   a recorder box enrols with RECORDER_ENROLL_KEY → its token (Phase I)
  *
  * Guessing: a key is single-use and lives 10 minutes; each IP gets
  * RATE_LIMIT_PAIR_POINTS tries per minute and RATE_LIMIT_PAIR_HOURLY_POINTS per
@@ -136,54 +137,92 @@ router.post(
 );
 
 /**
- * POST /device — pair a recorder box (replaces copying DEVICE_TOKEN by hand)
+ * The enrol key from back/.env (PLAN-002 Phase I), as a fixed-length digest
+ * for a constant-time compare; null = enrolment off (unset or too short).
+ */
+const enrollDigest = () => {
+  const key = String(process.env.RECORDER_ENROLL_KEY || "").trim();
+  if (key.length < 32) return null;
+  return crypto.createHash("sha256").update(key).digest();
+};
+
+/**
+ * POST /enroll — a recorder box set up from its .env (PLAN-002 Phase I):
+ * { enrollKey, venueId, name?, agentVersion? } → its own token, once.
+ * The key never travels again; the box keeps the token in DATA_DIR/device.json.
  */
 router.post(
-  "/device",
+  "/enroll",
   pairingPaused,
   perMinute,
   perHour,
-  validateBody(pairDeviceSchema),
+  validateBody(enrollDeviceSchema),
   catchAsync(async (req, res) => {
-    const { code, agentVersion } = req.body;
-    const now = getCurrentTimestampLocal();
+    const expected = enrollDigest();
+    if (!expected) {
+      return res.sendError(
+        "Recorder box enrolment is off — set RECORDER_ENROLL_KEY in the API's .env",
+        null,
+        403,
+        ERROR_CODES.ENROLLMENT_DISABLED
+      );
+    }
+    const { enrollKey, venueId, name, agentVersion } = req.body;
+    const given = crypto.createHash("sha256").update(enrollKey).digest();
+    const keyOk = crypto.timingSafeEqual(given, expected);
 
+    const now = getCurrentTimestampLocal();
     let conn;
     let result = null;
     try {
       conn = await req.db.beginTransaction();
-      const key = await findLivePairingCode(conn, { code, kind: "RECORDER" });
-      if (!key) {
+      const [venues] = keyOk
+        ? await conn.execute(
+            `SELECT venueId, name FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1`,
+            [venueId]
+          )
+        : [[]];
+      if (venues.length === 0) {
         await req.db.rollback(conn);
       } else {
         const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
         const deviceId = uuidRow[0].id;
         const token = `dcb_${randomToken(32)}`;
+        const boxName = name || "Recorder box";
         await conn.execute(
           `INSERT INTO devices
              (deviceId, venueId, name, tokenHash, lastSeenAt, agentVersion, status, dateCreated,
               dateUpdated)
            VALUES (?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
-          [deviceId, key.venueId, key.name, hashToken(token), now, agentVersion || null, now, now]
+          [deviceId, venueId, boxName, hashToken(token), now, agentVersion || null, now, now]
         );
-        await markPairingCodeUsed(conn, key.pairingCodeId, deviceId);
         await req.db.commit(conn);
-        result = { token, key, deviceId };
+        result = { token, deviceId, name: boxName, venue: venues[0] };
       }
     } catch (err) {
       await req.db.rollback(conn);
       throw err;
     }
 
-    if (!result) return wrongKey(req, res, "RECORDER");
+    if (!result) {
+      failures.push(Date.now());
+      logger.warn("Recorder box enrolment refused", { ip: req.ip, keyOk });
+      return res.sendError(
+        "That enrol key or venue isn't accepted",
+        null,
+        400,
+        ERROR_CODES.INVALID_INPUT
+      );
+    }
 
-    noIdempotencyCache(res);
+    noIdempotencyCache(res); // the token must never sit in the cache table
+    logger.info("Recorder box enrolled", { deviceId: result.deviceId, venueId });
     return res.sendSuccess(
-      "This recorder box is paired",
+      "This recorder box is enrolled",
       {
         token: result.token,
-        device: { deviceId: result.deviceId, name: result.key.name },
-        venue: { venueId: result.key.venueId, name: result.key.venueName },
+        device: { deviceId: result.deviceId, name: result.name },
+        venue: { venueId: result.venue.venueId, name: result.venue.name },
       },
       201
     );

@@ -95,13 +95,9 @@ describe("session devices", () => {
         cameraRtspUrl: "rtsp://u:p@10.0.0.9:554/stream1",
       });
       target.courtId = court.data.courtId;
-      const key = await call("POST", "/admin/pairing-codes/recorders", {
-        venueId: target.venueId,
-        name: "Box",
-      });
-      const box = await ctx.api("POST", "/pair/device", { body: { code: key.data.code } });
+      const box = await ctx.pairBox(admin.token, target.venueId, "Box");
       target.device = asDevice(box.data.token);
-      target.deviceId = box.data.device?.deviceId;
+      target.deviceId = box.data.deviceId;
     }
   });
   after(() => ctx?.stop());
@@ -158,8 +154,8 @@ describe("session devices", () => {
         home.venueId,
       ]);
       assert.ok(!String(row.liveKey).includes(LIVE_KEY));
-      const boxes = await call("GET", `/admin/devices?venueId=${home.venueId}`);
-      assert.ok(!JSON.stringify(boxes.body).includes(LIVE_KEY));
+      const courts = await call("GET", `/admin/courts?venueId=${home.venueId}`);
+      assert.ok(!JSON.stringify(courts.body).includes(LIVE_KEY));
     });
 
     it("is listed on the session with its live keys", async () => {

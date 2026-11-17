@@ -7,8 +7,8 @@ import {
   connectToServer,
   dropTestDatabase,
   newTestDatabaseName,
-  runScript,
   OWNER,
+  runScript,
   startTestApp,
 } from "./helpers/testApp.js";
 

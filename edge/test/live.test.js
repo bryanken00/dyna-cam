@@ -608,7 +608,7 @@ describe("heartbeat", () => {
 });
 
 describe("config", () => {
-  const base = { API_URL: "https://x.test" };
+  const base = { API_URL: "https://x.test", ENROLL_KEY: "k".repeat(40), VENUE_ID: "ven-1" };
   it("has the live view on 8090 by default, off with an empty/0 LIVE_PORT", () => {
     assert.equal(loadConfig(base).livePort, 8090);
     assert.equal(loadConfig(base).liveHost, null);

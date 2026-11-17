@@ -57,48 +57,68 @@ and falls back to `libx264`. The startup log says which encoder it picked.
 
 ## Configure
 
-1. In the **Admin portal → Setup → Recorder Boxes**, click **Add box**. It shows a **6-digit
-   pairing key**, valid for 10 minutes and usable once.
-2. In the Admin portal, give each court its camera's RTSP URL (see
+Recorder boxes are set up from `.env` only — there is no screen for them in the Admin portal.
+
+1. In the Admin portal, give each court its camera's RTSP URL (see
    [Tapo C200 setup](#tapo-c200-setup)).
-3. On the box, within those 10 minutes:
+2. Get the venue's ID: **Admin portal → Setup → Venues → the venue → Copy ID**.
+3. Get the **enrol key**: the API's `RECORDER_ENROLL_KEY` (in `back/.env`, 64 hex characters; ask
+   whoever runs the API). Treat it like a password.
+4. On the box:
 
 ```bash
 cp .env.example .env
-nano .env        # API_URL=https://api.your-domain   PAIRING_CODE=123456
+nano .env        # API_URL=https://api.your-domain
+                 # ENROLL_KEY=<the API's RECORDER_ENROLL_KEY>
+                 # VENUE_ID=<Copy ID from the venue page>
+                 # BOX_NAME=Bry's Table      (optional; default the hostname)
 pm2 start ecosystem.config.cjs   # or: npm start
 ```
 
-On first start the box redeems the key, logs `Paired as <name> for <venue> — you can remove
-PAIRING_CODE from .env`, and keeps its own token in `data/device.json` (mode 600). After that the
-key is not needed: delete the `PAIRING_CODE` line. A key that was used or refused is never sent
-again, even after a restart (only its hash is kept, in `data/pairing-used.json`).
+On first start the box enrols (`POST /api/v1/pair/enroll`), logs `Enrolled as <name> for
+<venue>`, and keeps its own token in `data/device.json` (mode 600). After that it never sends the
+enrol key again; it stays in `.env` only so the box can enrol again after a reset. The key never
+appears in the log.
 
 The box picks its credentials in this order:
 
-1. `data/device.json` (from an earlier pairing);
-2. `PAIRING_CODE`.
+1. `data/device.json` (from an earlier enrolment — boxes paired before Phase I keep working);
+2. `ENROLL_KEY` + `VENUE_ID` in `.env`.
 
-`DEVICE_TOKEN`, the long token older boxes copied from the portal, is no longer used. A box that
-still has it in `.env` logs a warning and ignores it; pair it once with a key.
+- **Refused** (*"The API refused this box's ENROLL_KEY / VENUE_ID"*): the key doesn't match the
+  API's, or the venue ID is wrong or deleted. The box remembers that pair (only a hash, in
+  `data/enroll-refused.json`) and won't send it again — fix `.env`, then
+  `pm2 restart dyna-cam-edge`. A changed key or venue is tried at once.
+- **Enrolment turned off** (*"Enrolment is turned off on the API"*): the API has no
+  `RECORDER_ENROLL_KEY`. The box tries again every 5 min.
+- **Paused** (429): too many wrong keys from somewhere; the box waits as the API asks.
+- `PAIRING_CODE` and `DEVICE_TOKEN` (older setups) are no longer read: a box that still has one in
+  `.env` logs a warning and ignores it.
 
-With none of these it stops and says: *"Add the box in Admin → Setup → Recorder Boxes and put its
-6-digit key in .env as PAIRING_CODE, then restart."*
+**Revoked boxes.** A box is blocked from the API's command line
+(`npm run boxes:revoke -- <name or id>` in `back/`). The revoked box:
 
-**Revoked boxes.** If the box is revoked in the Admin portal, a paired box:
+1. stops recording and job work;
+2. deletes `data/device.json` and the cached camera config (it holds the camera passwords);
+3. writes `data/revoked.json` (`revokedAt`, `deviceId`, `name`; mode 600);
+4. logs *"This box was revoked — delete data/revoked.json (and check .env) to enrol it again"*
+   and exits.
 
-1. logs *"This box was revoked — add it again in Admin to get a new pairing key"*;
-2. stops recording and job work;
-3. deletes `device.json` and the cached camera config.
+It does **not** enrol again by itself: while `data/revoked.json` exists, every start logs the same
+line, waits a minute (so pm2 doesn't restart it in a tight loop) and exits. To bring it back,
+delete `data/revoked.json` and run `pm2 restart dyna-cam-edge`: it enrols again as a new box.
 
-If `.env` holds a new, unused `PAIRING_CODE`, the box tries it once and restarts with the new
-pairing (under pm2). Otherwise it exits until you add a new key and run
-`pm2 restart dyna-cam-edge`.
+**A stolen box** holds the enrol key. Revoke it **and** rotate the key: set a new
+`RECORDER_ENROLL_KEY` in `back/.env` (`openssl rand -hex 32`) and restart the API. Enrolled boxes
+keep working (they don't need the key again); update `ENROLL_KEY` in the other boxes' `.env` so
+they can enrol again after a reset.
 
 | Variable | Default | What |
 | --- | --- | --- |
 | `API_URL` | — (required) | Base URL of the API, without `/api` |
-| `PAIRING_CODE` | — | The 6-digit key from Admin → Setup → Recorder Boxes (spaces/dashes OK). Only needed until the box has paired. |
+| `ENROLL_KEY` | — (required until enrolled) | The API's `RECORDER_ENROLL_KEY` (at least 32 characters). Never logged. |
+| `VENUE_ID` | — (required with `ENROLL_KEY`) | The venue's ID: Admin → Setup → Venues → the venue → **Copy ID** |
+| `BOX_NAME` | the hostname | How the box is named in the API (≤ 100 characters) |
 | `DATA_DIR` | `./data` | Buffer, job folders, `queue.json` and the cached config |
 | `SEGMENT_SECONDS` | `2` | Target segment length. Segments are cut on keyframes, so the real length follows the camera (1.7–6 s on a Tapo C200). |
 | `BUFFER_SECONDS` | `180` | Footage kept per court. A clip needs 65 s plus the time the job takes to arrive. |
@@ -555,12 +575,14 @@ clip from the court's QR page.
 | Symptom | Check |
 | --- | --- |
 | `[config] Missing API_URL` | `.env` is in `edge/` and filled in |
-| *The pairing key was not accepted* | The key was mistyped, expired (10 min) or already used. Make a new one in Admin → Setup → Recorder Boxes, put it in `.env` as `PAIRING_CODE`, then `pm2 restart dyna-cam-edge`. |
-| *The PAIRING_CODE in .env was already used* | The box only tries a key once. Put a new key in `.env`. |
-| *pairing is paused by the API* | Too many wrong keys (here or anywhere). The box waits as the API asks and tries again. |
-| *This box was revoked* | Someone removed the box in Admin. Add it again, put the new key in `.env`, then `pm2 restart dyna-cam-edge`. |
-| `DEVICE TOKEN REJECTED (401)` in the log | The box was revoked or removed in Admin. Add it again, put its key in `.env` as `PAIRING_CODE`, then restart. |
-| *DEVICE_TOKEN in .env is no longer used* | Harmless — delete the line. Boxes pair with a 6-digit key now. |
+| `[config] Missing ENROLL_KEY` | Set `ENROLL_KEY` and `VENUE_ID` in `.env` (a box with `data/device.json` doesn't need them). |
+| *The API refused this box's ENROLL_KEY / VENUE_ID* | `ENROLL_KEY` must be exactly the API's `RECORDER_ENROLL_KEY` (no quotes, no spaces) and `VENUE_ID` the venue's **Copy ID**. Fix `.env`, then `pm2 restart dyna-cam-edge`. |
+| *The API already refused this ENROLL_KEY / VENUE_ID* | The same values were refused before, so they aren't sent again. Fix `.env` and restart. |
+| *Enrolment is turned off on the API* | Set `RECORDER_ENROLL_KEY` in `back/.env` and restart the API. The box retries every 5 min. |
+| *enrolling is paused by the API* | Too many wrong keys (here or anywhere). The box waits as the API asks and tries again. |
+| *This box was revoked* | It was blocked with `npm run boxes:revoke`. If that was a mistake (or it's back from repair), delete `data/revoked.json` and `pm2 restart dyna-cam-edge` — it enrols as a new box. |
+| `DEVICE TOKEN REJECTED (401)` in the log | The box was revoked; it records that in `data/revoked.json` and stops. See the row above. |
+| *DEVICE_TOKEN / PAIRING_CODE in .env is no longer used* | Harmless — delete the line. Boxes enrol with `ENROLL_KEY` and `VENUE_ID` now. |
 | 403 `BOT_BLOCKED` | Something stripped the `User-Agent` (a proxy?). The box sends `DynaCamRecorder/<version>`. |
 | Court shows *Camera not reachable — check Wi-Fi/power* | Camera powered? Same network? `ping <camera-ip>`. Weak 2.4 GHz signal at the court? |
 | *Camera rejected the username/password* | Use the Tapo **Camera Account**, not the cloud login |

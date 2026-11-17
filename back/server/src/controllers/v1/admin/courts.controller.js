@@ -75,6 +75,9 @@ const liveCameras = async (db, venueIds) => {
       live.set(liveKey(camera.courtId, camera.camera || 1), {
         status: camera.status,
         message: camera.message || null,
+        // The venue's court stream (reported on camera 1's entry): off/starting/live/error
+        streamStatus: camera.streamStatus || null,
+        streamMessage: camera.streamMessage || null,
         video: camera.video || null,
         audio: camera.audio || null,
         boxName: device.name,

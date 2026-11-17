@@ -74,7 +74,6 @@ async function main() {
       // PLAN-001 — also inserted by migrations 001/002 on existing databases
       { module: "venues", submodule: "list", description: "Venues management" },
       { module: "venues", submodule: "courts", description: "Courts and cameras management" },
-      { module: "venues", submodule: "devices", description: "Recorder boxes management" },
       { module: "clips", submodule: null, description: "Replay clips" },
       { module: "payments", submodule: null, description: "Clip payments (cash)" },
       // (PLAN-002's paired_apps was retired by migration 010 — devices pair to a session)

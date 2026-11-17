@@ -93,10 +93,9 @@ describe("live streaming", () => {
       ],
     });
     assert.equal(hb.status, 200, JSON.stringify(hb.body));
-    const devices = await call("GET", `/admin/devices?venueId=${home.venueId}`);
-    const camera = devices.data.devices[0].cameras[0];
-    assert.equal(camera.streamStatus, "error");
-    assert.equal(camera.streamMessage, "Bad key");
+    const court = (await call("GET", `/admin/courts/${home.courtId}`)).data.court;
+    assert.equal(court.camera.live.streamStatus, "error");
+    assert.equal(court.camera.live.streamMessage, "Bad key");
   });
 
   it("links players to the live stream while it is on", async () => {

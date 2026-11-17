@@ -108,7 +108,7 @@ function envelopeError(method, pathname, res, envelope) {
  * Client for /api/v1/device. Every response is `{ success, message, data }`;
  * each method returns `data` and throws ApiError otherwise.
  *
- * The token can be set later (`setToken`, after pairing). `onUnauthorized` is
+ * The token can be set later (`setToken`, after enrolling). `onUnauthorized` is
  * called on every 401 from a device route — a revoked box (index.js).
  */
 export function createApi({
@@ -171,14 +171,14 @@ export function createApi({
     },
 
     /**
-     * Redeem a 6-digit RECORDER pairing key (no Authorization header).
+     * Enrol with the shared ENROLL_KEY (no Authorization header).
      * → { token, device: { deviceId, name }, venue: { venueId, name } }
      */
-    pairDevice: (code, agentVersion) =>
-      request("POST", "/device", {
+    enroll: ({ enrollKey, venueId, name, agentVersion }) =>
+      request("POST", "/enroll", {
         root: `${apiUrl}/api/v1/pair`,
         auth: false,
-        json: { code, agentVersion },
+        json: { enrollKey, venueId, ...(name ? { name } : {}), agentVersion },
       }),
 
     getConfig: (signal) => request("GET", "/config", { signal }),

@@ -48,6 +48,21 @@ const importFromBack = (relativePath) => import(pathToFileURL(path.join(BACK, re
  * Run a script from back/scripts against the given database.
  * @returns {{ ok: boolean, output: string }}
  */
+/** Like runScript, with command-line arguments (e.g. `boxes.js revoke <name>`). */
+export const runScriptArgs = (script, args = [], env = {}) => {
+  try {
+    const output = execFileSync("node", [path.join("scripts", script), ...args], {
+      cwd: BACK,
+      env: { ...process.env, ...env },
+      encoding: "utf-8",
+      stdio: "pipe",
+    });
+    return { ok: true, output };
+  } catch (err) {
+    return { ok: false, output: `${err.stdout || ""}${err.stderr || ""}` };
+  }
+};
+
 export const runScript = (script, env = {}) => {
   try {
     const output = execFileSync("node", [path.join("scripts", script)], {
@@ -83,6 +98,9 @@ export const dropTestDatabase = async (connection, name) => {
   await connection.query(`DROP DATABASE IF EXISTS \`${name}\``);
 };
 
+/** The enrol key every test app runs with (a file can override it via `env`). */
+export const TEST_ENROLL_KEY = "test-enroll-key-0123456789abcdef0123456789abcdef";
+
 /** Load back/.env (if present) and apply the settings every test run needs. */
 export const loadTestEnv = (overrides = {}) => {
   dotenv.config({ path: path.join(BACK, ".env"), quiet: true });
@@ -99,6 +117,8 @@ export const loadTestEnv = (overrides = {}) => {
     RATE_LIMIT_UPLOAD_POINTS: "1000",
     RATE_LIMIT_PWRESET_POINTS: "1000",
     UPLOAD_URL_SECRET: crypto.randomBytes(32).toString("hex"),
+    // Recorder boxes enrol with this (PLAN-002 Phase I); ctx.pairBox() uses it
+    RECORDER_ENROLL_KEY: TEST_ENROLL_KEY,
     SMTP_HOST: "", // never send real email
     OWNER_EMAIL: OWNER.email,
     OWNER_PASSWORD: OWNER.password,
@@ -315,31 +335,27 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
   };
 
   /**
-   * Add a recorder box to a venue the only way there is (PLAN-002 Phase F): a
-   * 6-digit key from the Admin portal, redeemed at /pair/device. Each call
-   * comes from its own documentation-range IP, so the per-IP pairing limits
-   * don't trip in suites that add several boxes.
+   * Add a recorder box to a venue the only way there is (PLAN-002 Phase I): it
+   * enrols itself with RECORDER_ENROLL_KEY at /pair/enroll. Each call comes from
+   * its own documentation-range IP, so the per-IP limits don't trip in suites
+   * that add several boxes. (`adminToken` is unused, kept so call sites read the
+   * same as before.)
    * @returns {Promise<{ status: number, data: { token: string, deviceId: string, name: string } }>}
    */
   let boxCount = 0;
-  const pairBox = async (adminToken, venueId, name = "Box") => {
-    const key = await api("POST", "/admin/pairing-codes/recorders", {
-      token: adminToken,
-      body: { venueId, name },
-    });
-    if (key.status !== 201) return key;
+  const pairBox = async (_adminToken, venueId, name = "Box") => {
     boxCount += 1;
-    const paired = await api("POST", "/pair/device", {
-      body: { code: key.data.code, agentVersion: "test" },
+    const enrolled = await api("POST", "/pair/enroll", {
+      body: { enrollKey: process.env.RECORDER_ENROLL_KEY, venueId, name, agentVersion: "test" },
       headers: { "X-Forwarded-For": `198.51.100.${boxCount % 250}` },
     });
-    if (paired.status !== 201) return paired;
+    if (enrolled.status !== 201) return enrolled;
     return {
       status: 201,
       data: {
-        token: paired.data.token,
-        deviceId: paired.data.device.deviceId,
-        name: paired.data.device.name,
+        token: enrolled.data.token,
+        deviceId: enrolled.data.device.deviceId,
+        name: enrolled.data.device.name,
       },
     };
   };

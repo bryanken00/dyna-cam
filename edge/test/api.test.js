@@ -40,10 +40,10 @@ before(async () => {
       if (req.url.startsWith("/api/v1/device/courts/court-1/snapshot")) {
         return send(200, { success: true, message: "Snapshot saved", data: { snapshotAt: "x" } });
       }
-      if (req.url === "/api/v1/pair/device") {
+      if (req.url === "/api/v1/pair/enroll") {
         return send(201, {
           success: true,
-          message: "This recorder box is paired",
+          message: "This recorder box is enrolled",
           data: {
             token: "dcb_new",
             device: { deviceId: "d", name: "Box" },
@@ -99,14 +99,27 @@ describe("device API client", () => {
     assert.deepEqual(JSON.parse(seen.at(-1).body), { pressedAtMs: 1794881000123 });
   });
 
-  it("pairs without an Authorization header, then uses the new token", async () => {
+  it("enrols without an Authorization header, then uses the new token", async () => {
     const client = createApi({ apiUrl: baseUrl, userAgent: "DynaCamRecorder/1.0.0" });
-    const data = await client.pairDevice("123456", "1.0.0");
+    const enrollKey = "e".repeat(64);
+    const data = await client.enroll({
+      enrollKey,
+      venueId: "ven-1",
+      name: "Court box",
+      agentVersion: "1.0.0",
+    });
     assert.equal(data.token, "dcb_new");
     const req = seen.at(-1);
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/api/v1/pair/enroll");
     assert.equal(req.headers.authorization, undefined);
     assert.equal(req.headers["user-agent"], "DynaCamRecorder/1.0.0");
-    assert.deepEqual(JSON.parse(req.body), { code: "123456", agentVersion: "1.0.0" });
+    assert.deepEqual(JSON.parse(req.body), {
+      enrollKey,
+      venueId: "ven-1",
+      name: "Court box",
+      agentVersion: "1.0.0",
+    });
     client.setToken("dcb_new");
     await client.getConfig();
     assert.equal(seen.at(-1).headers.authorization, "Device dcb_new");

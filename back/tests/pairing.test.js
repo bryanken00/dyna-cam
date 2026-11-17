@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { startTestApp } from "./helpers/testApp.js";
+import { startTestApp, TEST_ENROLL_KEY } from "./helpers/testApp.js";
 
 describe("pairing", () => {
   let ctx;
@@ -21,12 +21,6 @@ describe("pairing", () => {
     (method, url, options = {}) =>
       ctx.api(method, url, { ...options, headers: { Authorization: `Device ${token}` } });
 
-  /** A key for a recorder box (`recorders`) of a venue. */
-  const newKey = async (kind, venueId, name) => {
-    const res = await call("POST", `/admin/pairing-codes/${kind}`, { venueId, name });
-    assert.equal(res.status, 201, JSON.stringify(res.body));
-    return res.data;
-  };
   /** A key for a device of a session. */
   const sessionKey = async (sessionId, name, who = admin) => {
     const res = await call("POST", `/admin/sessions/${sessionId}/pairing-codes`, { name }, who);
@@ -142,17 +136,21 @@ describe("pairing", () => {
       );
     });
 
-    it("of one kind don't pair the other kind", async () => {
+    it("are for session devices only — boxes enrol from .env (Phase I)", async () => {
+      assert.equal(
+        (await call("POST", "/admin/pairing-codes/recorders", { venueId: home.venueId, name: "x" }))
+          .status,
+        404
+      );
       const appKey = await sessionKey(sessionId, "Phone");
       assert.equal(
         (await ctx.api("POST", "/pair/device", { body: { code: appKey.code } })).status,
-        400
+        404
       );
-      const boxKey = await newKey("recorders", home.venueId, "Box");
-      assert.equal(
-        (await ctx.api("POST", "/pair/app", { body: { code: boxKey.code } })).status,
-        400
-      );
+      const enrol = await ctx.api("POST", "/pair/enroll", {
+        body: { enrollKey: appKey.code, venueId: home.venueId },
+      });
+      assert.equal(enrol.status, 400, "a session key is not an enrol key");
     });
 
     it("accept the key typed with a space or dash", async () => {
@@ -169,7 +167,8 @@ describe("pairing", () => {
       );
       const nobody = await ctx.createStaff("Nobody");
       assert.equal(
-        (await call("GET", "/admin/pairing-codes/recorders", undefined, nobody)).status,
+        (await call("POST", `/admin/sessions/${sessionId}/pairing-codes`, { name: "x" }, nobody))
+          .status,
         403
       );
     });
@@ -184,19 +183,48 @@ describe("pairing", () => {
     });
   });
 
-  describe("a recorder box", () => {
-    it("pairs with a key instead of a copied token", async () => {
-      const key = await newKey("recorders", home.venueId, "Paired box");
-      const res = await ctx.api("POST", "/pair/device", {
-        body: { code: key.code, agentVersion: "1.2.0" },
+  describe("a recorder box (Phase I: enrols from .env)", () => {
+    const enrol = (body, ip = "203.0.113.50") =>
+      ctx.api("POST", "/pair/enroll", { body, headers: { "X-Forwarded-For": ip } });
+
+    it("enrols with the API's key and its venue, once, for its own token", async () => {
+      const res = await enrol({
+        enrollKey: TEST_ENROLL_KEY,
+        venueId: home.venueId,
+        name: "Bry's Table",
+        agentVersion: "1.2.0",
       });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       assert.match(res.data.token, /^dcb_/);
-      assert.equal(res.data.venue.venueId, home.venueId);
+      assert.deepEqual(res.data.venue, { venueId: home.venueId, name: "Pair Courts" });
       home.device = asDevice(res.data.token);
       const config = await home.device("GET", "/device/config");
       assert.equal(config.status, 200);
-      assert.equal(config.data.device.name, "Paired box");
+      assert.equal(config.data.device.name, "Bry's Table");
+      const [[row]] = await ctx.sql.query(
+        `SELECT tokenHash, agentVersion FROM devices WHERE deviceId = ?`,
+        [res.data.device.deviceId]
+      );
+      assert.notEqual(row.tokenHash, res.data.token);
+      assert.equal(row.agentVersion, "1.2.0");
+      const [cached] = await ctx.sql.query(`SELECT responseBody FROM idempotency_keys`);
+      assert.ok(!JSON.stringify(cached).includes(res.data.token));
+    });
+
+    it("refuses a wrong key, an unknown venue, and a deleted one alike", async () => {
+      const gone = (await call("POST", "/admin/venues", { name: "Closed Courts" })).data.venueId;
+      await call("DELETE", `/admin/venues/${gone}`);
+      const cases = [
+        [{ enrollKey: "x".repeat(48), venueId: home.venueId }, "203.0.113.51"],
+        [{ enrollKey: TEST_ENROLL_KEY, venueId: "00000000-0000-0000-0000-000000000000" }, "203.0.113.52"],
+        [{ enrollKey: TEST_ENROLL_KEY, venueId: gone }, "203.0.113.53"],
+      ];
+      for (const [body, ip] of cases) {
+        const res = await enrol(body, ip);
+        assert.equal(res.status, 400, JSON.stringify(body));
+        assert.match(res.body.message, /isn't accepted/);
+      }
+      assert.equal((await enrol({ enrollKey: TEST_ENROLL_KEY }, "203.0.113.54")).status, 400);
     });
   });
 });

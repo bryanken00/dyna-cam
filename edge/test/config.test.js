@@ -1,41 +1,94 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { ConfigError, loadConfig, parsePairingCode, ROOT_DIR, USER_AGENT } from "../src/config.js";
+import {
+  ConfigError,
+  leftoverWarnings,
+  loadConfig,
+  parseEnrollment,
+  ROOT_DIR,
+  USER_AGENT,
+} from "../src/config.js";
 
-const base = { API_URL: "https://api.example.com/" };
+const KEY = "k".repeat(40);
+const base = { API_URL: "https://api.example.com/", ENROLL_KEY: KEY, VENUE_ID: "ven-1" };
+
+/** A DATA_DIR with or without device.json (the box enrolled before). */
+const dataDir = (enrolled) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edge-cfg-"));
+  if (enrolled) fs.writeFileSync(path.join(dir, "device.json"), "{}");
+  return dir;
+};
 
 describe("loadConfig", () => {
-  it("fails fast without API_URL; DEVICE_TOKEN is only noticed, never used", () => {
+  it("fails fast without API_URL; DEVICE_TOKEN and PAIRING_CODE are only noticed, never used", () => {
     assert.throws(
       () => loadConfig({}),
       (err) => {
         assert.ok(err instanceof ConfigError);
         assert.match(err.message, /Missing API_URL/);
-        assert.match(err.message, /PAIRING_CODE/);
+        assert.match(err.message, /ENROLL_KEY/);
         return true;
       }
     );
-    const cfg = loadConfig({ API_URL: "https://x.test" });
-    assert.equal(cfg.pairingCode, null);
+    const cfg = loadConfig(base);
     assert.equal(cfg.ignoredDeviceToken, false);
+    assert.equal(cfg.ignoredPairingCode, false);
     assert.equal(cfg.deviceToken, undefined, "DEVICE_TOKEN is no longer read");
-    const old = loadConfig({ API_URL: "https://x.test", DEVICE_TOKEN: "dcb_old" });
+    assert.equal(cfg.pairingCode, undefined, "PAIRING_CODE is no longer read");
+    const old = loadConfig({ ...base, DEVICE_TOKEN: "dcb_old", PAIRING_CODE: "123 456" });
     assert.equal(old.ignoredDeviceToken, true);
+    assert.equal(old.ignoredPairingCode, true);
     assert.ok(!JSON.stringify(old).includes("dcb_old"), "the old token isn't kept");
+    assert.ok(!JSON.stringify(old).includes("123 456"), "the old key isn't kept");
+    const warnings = leftoverWarnings(old);
+    assert.equal(warnings.length, 2);
+    assert.match(warnings[0], /DEVICE_TOKEN in \.env is no longer used/);
+    assert.match(warnings[1], /PAIRING_CODE in \.env is no longer used/);
+    assert.ok(warnings.every((w) => !w.includes("dcb_old") && !w.includes("123 456")));
+    assert.deepEqual(leftoverWarnings(cfg), []);
   });
 
-  it("reads PAIRING_CODE as typed (spaces and dashes) and rejects anything but 6 digits", () => {
-    assert.equal(parsePairingCode("123 456"), "123456");
-    assert.equal(parsePairingCode(" 123-456 "), "123456");
-    assert.equal(parsePairingCode(""), null);
-    assert.equal(parsePairingCode(undefined), null);
-    assert.equal(
-      loadConfig({ API_URL: "https://x.test", PAIRING_CODE: "000 042" }).pairingCode,
-      "000042"
+  it("reads ENROLL_KEY, VENUE_ID and BOX_NAME (default the hostname, ≤ 100 chars)", () => {
+    const cfg = loadConfig({ ...base, ENROLL_KEY: `  ${KEY} `, BOX_NAME: " Bry's Table " });
+    assert.equal(cfg.enrollKey, KEY);
+    assert.equal(cfg.venueId, "ven-1");
+    assert.equal(cfg.boxName, "Bry's Table");
+    const dir = dataDir(false);
+    assert.equal(parseEnrollment(base, dir, { hostname: () => "n100-box" }).boxName, "n100-box");
+    assert.equal(parseEnrollment({ ...base, BOX_NAME: "x".repeat(150) }, dir).boxName.length, 100);
+  });
+
+  it("needs ENROLL_KEY + VENUE_ID until the box has device.json", () => {
+    const fresh = dataDir(false);
+    const done = dataDir(true);
+    const env = { API_URL: "https://x.test" };
+    assert.throws(() => loadConfig({ ...env, DATA_DIR: fresh }), /Missing ENROLL_KEY/);
+    const enrolled = loadConfig({ ...env, DATA_DIR: done });
+    assert.equal(enrolled.enrollKey, null);
+    assert.equal(enrolled.venueId, null);
+    assert.throws(
+      () => loadConfig({ ...env, DATA_DIR: fresh, ENROLL_KEY: KEY }),
+      /Missing VENUE_ID/
     );
-    for (const bad of ["12345", "1234567", "12a456"]) {
-      assert.throws(() => parsePairingCode(bad), /6-digit key/, bad);
+  });
+
+  it("rejects a short ENROLL_KEY and a malformed VENUE_ID, without echoing the key", () => {
+    const short = "s3cr3t-but-short";
+    assert.throws(
+      () => loadConfig({ ...base, ENROLL_KEY: short }),
+      (err) => {
+        assert.ok(err instanceof ConfigError);
+        assert.match(err.message, /at least 32 characters/);
+        assert.match(err.message, /RECORDER_ENROLL_KEY/);
+        assert.ok(!err.message.includes(short));
+        return true;
+      }
+    );
+    for (const bad of ["ven 1", "ven/1", "x".repeat(51), "vén"]) {
+      assert.throws(() => loadConfig({ ...base, VENUE_ID: bad }), /VENUE_ID must be/, bad);
     }
   });
 
@@ -49,6 +102,7 @@ describe("loadConfig", () => {
     assert.equal(cfg.configRefreshSeconds, 60);
     assert.equal(cfg.recordAudio, true);
     assert.equal(cfg.dataDir, path.join(ROOT_DIR, "data"));
+    assert.equal(cfg.maxStackedStreams, 2);
   });
 
   it("turns the button listener on by default and off with an empty/0 port", () => {
