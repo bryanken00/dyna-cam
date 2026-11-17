@@ -242,6 +242,52 @@
 - [x] `back` lint + test (161), `front` lint + build, `edge` lint + test (154); changelog;
       commit. Tests pair boxes with a key; a freshly paired box counts as online
 
+## Phase G — Player's own live stream (Facebook / YouTube)
+
+> Plan: [section 6](plan.md#6-players-own-live-stream-phase-g). Build waits for the
+> requester's go-ahead.
+
+### G1 · Backend
+
+- [ ] Migration `011_session_streams.sql`: `recording_sessions.streamUrl` (encrypted),
+      `streamPlatform`, `streamUpdatedAt`, `streamSetupTokenHash`, `streamSetupExpiresAt`
+- [ ] Device: `POST /app/session/stream-link`, `POST /app/session/stream/stop`; `/app/session`
+      adds `stream`
+- [ ] Public `/public/stream-setup/:code` GET / PUT / DELETE (rate-limited; Facebook / YouTube
+      key or a full RTMP(S) address; only while the session is to come or recording)
+- [ ] `/device/config` sessions carry `stream.url` while recording; heartbeat
+      `sessionStreams[]` status; the key is cleared when the session ends
+- [ ] Admin session detail: stream platform / status / masked address, **Stop stream**
+- [ ] Tests: code expiry and single session; key never returned (masked); refused after the
+      end; cleared at the end; box gets it only while recording; status round trip; 404s
+
+### G1 · Recorder box
+
+- [ ] Session restream process: ffmpeg reads the court's signed live HLS on 127.0.0.1 →
+      `-c copy -f flv` to the player's address; starts/stops with the session; retries with
+      backoff; reports status in the heartbeat; never logs the key
+- [ ] Tests + smoke (restream to a local RTMP-less sink, e.g. `-f null`, from the smoke
+      recording); README
+
+### G2 · Web
+
+- [ ] Public `/stream/:code` page for the player's phone: platform, key, help, Start / Stop,
+      live status
+- [ ] Session detail: stream line + Stop stream
+- [ ] `npm run lint && npm run build`
+
+### G3 · App
+
+- [ ] Session screen: **Stream to your Facebook / YouTube** → sheet with the setup QR; streaming
+      chip with status and **Stop streaming**
+- [ ] Demo mode; `npx expo export --platform android --clear`
+
+### Phase G wrap-up
+
+- [ ] Migration `011` applied locally (ask first); changelog; commit G1, G2, G3
+- [ ] Tried for real: session on Court 1 → player scans the stream QR → pastes a Facebook key →
+      the session appears live on Facebook → Stop
+
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,

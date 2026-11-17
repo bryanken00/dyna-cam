@@ -330,6 +330,82 @@ an HLS live playlist — no new camera connection, no re-encoding:
 - Recorder box pairing (Setup → Recorder Boxes → Add box) and `DEVICE_TOKEN` stay as built.
 - Sessions stay free; the session's player link and its 5-minute parts work as before.
 
+### 6. Player's own live stream (Phase G)
+
+The requester (2026-11-17): *"Can we make it on the app, individual can set up their own live
+stream? They will manually add the stream address."* A player streams **their session** to
+**their own** Facebook or YouTube, alongside the venue's court stream if that is on.
+
+```
+SESSION DEVICE (venue tablet)              PLAYER'S PHONE                         RECORDER BOX
+─────────────────────────────              ──────────────                         ────────────
+[ Stream to your Facebook / YouTube ]
+  → sheet with a QR (15 min, this session) ─▶ scans → dynacam…/stream/<code>
+                                              Court 1 · DGSI · 4:00–5:00 PM
+                                              Platform: (Facebook ▾)  Stream key: [paste]
+                                              [ Start streaming ] ──────────────────▶ /device/config:
+                                                                                      session stream on
+● Streaming to Facebook · live  [Stop]  ◀── status ── "Live on Facebook ✓" ◀──────── heartbeat: live
+```
+
+**Decisions (answered 2026-11-17):**
+
+| Question | Answer |
+| --- | --- |
+| Where is the key entered | On the **player's own phone**: the session device shows a short-lived QR that opens a page where they paste it from their Facebook/YouTube app |
+| The venue's court stream during the session | **Both run** — the venue's stream keeps going and the player's runs alongside (about 2 Mbit/s of upload each) |
+
+#### 6.1 How the box streams without a gap
+
+Turning on a court's stream restarts its recorder, which the box refuses while a session part
+is being recorded. A player's stream is therefore **its own small ffmpeg process** on the box:
+it reads the court's live view from the box itself (the signed LAN HLS of
+[5.4](#54-recorder-box-live-view-over-the-venue-wi-fi), on `127.0.0.1`) and copies it to the
+player's RTMP/RTMPS address (`-c copy -f flv`, no re-encode). No recorder restart, no second
+camera connection, no gap in the recording. It runs about 10 s behind the court, starts and
+stops on its own with the session, and a failure there never touches the recording. With
+`LIVE_PORT=0` (live view off) a player's stream reports "not available on this box".
+
+#### 6.2 Database (migration `011_session_streams.sql`)
+
+On `recording_sessions`:
+
+- `streamUrl` — the player's full RTMP(S) address including the key, **encrypted** like camera
+  URLs; never returned (only a masked form: `rtmps://live-api-s.facebook.com/…/•••k2N`). Cleared
+  as soon as the session ends.
+- `streamPlatform` (`FACEBOOK` / `YOUTUBE` / `OTHER`), `streamUpdatedAt`.
+- `streamSetupTokenHash` + `streamSetupExpiresAt` — the QR's code (only its SHA-256 is stored),
+  15 minutes, this session only.
+
+The stream's status (starting / live / error + message) comes from the box's heartbeat, like the
+court streams.
+
+#### 6.3 API
+
+- **Device:** `POST /app/session/stream-link` → `{ url, expiresAt }` (a fresh setup code; the
+  old one stops working). `POST /app/session/stream/stop`. `GET /app/session` adds
+  `stream: { platform, status, message, maskedUrl } | null`.
+- **Player's page** (public, rate-limited, the code is the credential):
+  `GET /public/stream-setup/:code` → court, venue, session times, current stream (masked);
+  `PUT /public/stream-setup/:code` `{ platform, streamKey }` or `{ url }` → saves it (only
+  while the session is to come or recording); `DELETE` → stops it.
+  - Facebook: `rtmps://live-api-s.facebook.com:443/rtmp/` + key; YouTube:
+    `rtmp://a.rtmp.youtube.com/live2/` + key; **Other**: a full `rtmp://` / `rtmps://` address.
+- **Box:** `/device/config` sessions carry `stream: { url }` while recording;
+  the heartbeat reports `sessionStreams: [{ sessionId, status, message }]`.
+- **Admin:** the session detail shows the stream's platform, status and masked address (no
+  key), with **Stop stream**.
+
+#### 6.4 Screens
+
+- **Session device:** a **Stream to your Facebook / YouTube** button opens a sheet with the
+  setup QR + short link and "Scan with your phone and paste your stream key". While streaming,
+  a chip "● Streaming to Facebook · live" with **Stop streaming** (confirm).
+- **Player's phone** (`front/`, public route `/stream/:code`, works on a phone): court and time,
+  platform picker, the key field (paste), short help on where to find the key in each app,
+  **Start streaming**, then the live status ("Live on Facebook ✓" / the error) and **Stop**.
+- **Web Admin:** the session detail's stream line.
+
 ### Alternatives considered
 
 - **Drop the token entirely** (trust the venue network): anyone who can reach the API could read
@@ -371,6 +447,8 @@ an HLS live playlist — no new camera connection, no re-encoding:
 - Re-pairing a recorder box remotely. It needs someone at the box to type a new key.
 - (Phase E) Live view outside the venue Wi-Fi, recording audio-only/video-only devices, and
   charging for sessions — sessions stay free; paid 60-second clips are taken at the counter.
+- (Phase G) More than one personal stream per session; Instagram and TikTok (no plain RTMP for
+  ordinary accounts); scoreboards or overlays on the player's stream.
 
 ## Risks
 
@@ -391,6 +469,13 @@ an HLS live playlist — no new camera connection, no re-encoding:
   (`expo-video`, cleartext/Local Network settings).
 - **(Phase E) Every recorder box must be updated** for the live view; an old box keeps
   recording but devices show "Live view unavailable".
+- **(Phase G) A player's stream key is a password to their page:** entered only on their own
+  phone, stored encrypted, never shown again (masked), deleted when the session ends, and the
+  setup QR expires in 15 minutes. The setup page is rate-limited.
+- **(Phase G) Upload:** venue stream + player stream ≈ 4 Mbit/s for one court. On a weak line
+  the streams stutter; recording is unaffected (separate processes).
+- **(Phase G) Facebook's "keyframe frequency" warning:** the C200 doesn't send a keyframe every
+  2 s; Facebook warns but plays.
 
 ## Open questions
 
@@ -441,4 +526,9 @@ an HLS live playlist — no new camera connection, no re-encoding:
   box's `DEVICE_TOKEN` setting are gone. A box keeps its token in `DATA_DIR/device.json`; a box
   that was set up with `DEVICE_TOKEN` must be paired once with a key. (This also answers the
   2026-11-17 question that started this plan.)
+- 2026-11-17: **Phase G — player's own live stream** (section 6). Requester: a player can set up
+  their own live stream for their session by adding the stream address. Answers: the key is
+  entered on the player's own phone via a short-lived QR on the session device; the venue's
+  court stream keeps running alongside. Streamed by a separate process on the box from its own
+  live view, so the recording never restarts. Document first; build waits for the go-ahead.
 
