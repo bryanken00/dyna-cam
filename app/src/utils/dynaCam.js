@@ -144,6 +144,27 @@ export const formatDuration = (seconds) => {
   return `${Math.floor(s / 60)}:${pad(s % 60)}`;
 };
 
+/** A running timer: 754 → "12:34", 3754 → "1:02:34". */
+export const formatElapsed = (seconds) => {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${pad(m)}:${pad(s % 60)}`;
+};
+
+/**
+ * A server "seconds" value, ticked forward locally since the response
+ * arrived: `elapsedSeconds` + (now − dataUpdatedAt). The phone's clock and
+ * zone don't matter — only the time since the answer does.
+ */
+export const tickSeconds = (seconds, dataUpdatedAt, now = Date.now()) =>
+  Number(seconds || 0) +
+  Math.max(0, Math.floor((now - (dataUpdatedAt || now)) / 1000));
+
+/** A game's length for a label: 2520 → "42 min", 5400 → "1 h 30 min". */
+export const formatGameLength = (seconds) =>
+  formatMinutes(Math.max(1, Math.round((Number(seconds) || 0) / 60)));
+
 /** 1536000 → "1.5 MB". */
 export const formatBytes = (bytes) => {
   const n = Number(bytes);

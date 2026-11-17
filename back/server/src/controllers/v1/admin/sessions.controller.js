@@ -6,6 +6,7 @@ import { randomToken } from "../../../utils/crypto/tokens.js";
 import { sessionShareUrl } from "../../../utils/clips.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
+  endSessionNow,
   materializeSessionParts,
   partCount,
   SESSION_MAX_DAYS_AHEAD,
@@ -30,11 +31,14 @@ const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
          s.dateCreated, s.dateUpdated,
+         COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
            AS partsReady
   FROM recording_sessions s
   JOIN venues v ON v.venueId = s.venueId
-  JOIN courts c ON c.courtId = s.courtId`;
+  JOIN courts c ON c.courtId = s.courtId
+  LEFT JOIN users u ON u.accountId = s.createdByAccountId
+  LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId`;
 
 const toSession = (row) => {
   const { shareToken, ...session } = row;
@@ -282,28 +286,13 @@ router.post(
   "/:sessionId/end",
   checkPermission("clips", null, "write"),
   catchAsync(async (req, res) => {
-    const nowM = moment().tz(TIMEZONE);
-    const now = nowM.format(FORMAT);
-    const rows = await req.db.query(
-      `SELECT startAt, status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
-      [req.params.sessionId]
-    );
-    if (rows.length === 0) return res.sendError("Session not found", 404);
-    const session = rows[0];
-    if (!["Scheduled", "Recording"].includes(session.status) || session.startAt > now) {
-      return res.sendError("Only a session that is recording can be ended", 409);
+    const result = await endSessionNow(req.db, req.params.sessionId);
+    if (!result.ok) {
+      return result.status === 404
+        ? res.sendError("Session not found", 404)
+        : res.sendError("Only a session that is recording can be ended", 409);
     }
-    // A session is at least a minute long, so it always has one part
-    const minEnd = moment.tz(session.startAt, FORMAT, TIMEZONE).add(1, "minute");
-    const endLocal = moment.max(nowM, minEnd).format(FORMAT);
-
-    await req.db.query(
-      `UPDATE recording_sessions SET endAt = ?, dateUpdated = ?
-       WHERE sessionId = ? AND status IN ('Scheduled', 'Recording') AND endAt > ?`,
-      [endLocal, now, req.params.sessionId, endLocal]
-    );
-    await materializeSessionParts(req.db, {});
-    return res.sendSuccess("Session ended — its footage is being saved", { endAt: endLocal });
+    return res.sendSuccess("Session ended — its footage is being saved", { endAt: result.endAt });
   })
 );
 

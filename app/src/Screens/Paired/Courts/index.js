@@ -2,6 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { Banknote, ChevronRight, MapPin, Settings2 } from "lucide-react-native";
 import { FlatList, Pressable, RefreshControl, View } from "react-native";
 import ConnectionBanner from "@/components/ConnectionBanner";
+import ElapsedTimer from "@/components/ElapsedTimer";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import QueryState from "@/components/QueryState";
 import ScreenHeader from "@/components/ScreenHeader";
@@ -10,13 +11,37 @@ import { EmptyState } from "@/components/pattern";
 import { Text } from "@/components/ui/text";
 import { SCREEN_NAVIGATION } from "@/constants/navigations";
 import { useThemeColors } from "@/hooks/useTheme";
+import { cn } from "@/lib/utils";
 import { isConnectionError } from "@/utils/dynaCam";
 import PairedSettingsSheet from "../PairedSettingsSheet";
 import { pairedCourtState } from "../courtState";
 import { usePairedCourts } from "./usePairedCourts";
 
+/**
+ * "● Recording · 12:34" — filled red, unlike the outlined status chips, so a
+ * court that is recording a whole game stands out in the list. Ticks locally.
+ */
+const RecordingBadge = ({ recording, since }) => (
+  <View className="bg-destructive flex-row items-center gap-2 self-start rounded-full px-3 py-1">
+    <View className="bg-destructive-foreground h-2 w-2 rounded-full" />
+    <Text className="text-destructive-foreground font-sans-semibold text-[13px]">
+      Recording ·
+    </Text>
+    <ElapsedTimer
+      seconds={recording.elapsedSeconds}
+      since={since}
+      limit={
+        recording.endsInSeconds != null
+          ? recording.elapsedSeconds + recording.endsInSeconds
+          : undefined
+      }
+      className="text-destructive-foreground text-[13px]"
+    />
+  </View>
+);
+
 /** One big tappable court — read from a step away, hit with a thumb. */
-const CourtCard = ({ court, onPress }) => {
+const CourtCard = ({ court, since, onPress }) => {
   const colors = useThemeColors();
   const state = pairedCourtState(court);
   return (
@@ -24,13 +49,20 @@ const CourtCard = ({ court, onPress }) => {
       onPress={() => onPress(court)}
       accessibilityRole="button"
       accessibilityLabel={`${court.name}, ${state.label}`}
-      className="border-border bg-card min-h-[96px] flex-row items-center gap-4 rounded-[18px] border px-5 py-5 active:bg-secondary/60"
+      className={cn(
+        "bg-card min-h-[96px] flex-row items-center gap-4 rounded-[18px] border px-5 py-5 active:bg-secondary/60",
+        court.recording ? "border-destructive" : "border-border",
+      )}
     >
       <View className="min-w-0 flex-1 gap-2">
         <Text className="font-sans-semibold text-[24px]" numberOfLines={1}>
           {court.name}
         </Text>
-        <StatusChip label={state.label} tone={state.tone} />
+        {court.recording ? (
+          <RecordingBadge recording={court.recording} since={since} />
+        ) : (
+          <StatusChip label={state.label} tone={state.tone} />
+        )}
       </View>
       <ChevronRight size={26} color={colors.mutedForeground} />
     </Pressable>
@@ -39,7 +71,8 @@ const CourtCard = ({ court, onPress }) => {
 
 /**
  * Paired mode home — the venue's courts as big cards with whether each can
- * record right now. Tap one to Record. The header carries the venue name,
+ * record right now, and a ticking red badge on any court recording a whole
+ * game. Tap one to Start / End recording or save the last 60 s. The header carries the venue name,
  * Take payment, and "This phone" (settings / unpair).
  */
 const PairedCourtsScreen = () => {
@@ -102,7 +135,9 @@ const PairedCourtsScreen = () => {
       <FlatList
         data={m.courts}
         keyExtractor={(c) => c.courtId}
-        renderItem={({ item }) => <CourtCard court={item} onPress={openCourt} />}
+        renderItem={({ item }) => (
+          <CourtCard court={item} since={m.recordingSince} onPress={openCourt} />
+        )}
         ItemSeparatorComponent={() => <View className="h-3" />}
         ListHeaderComponent={
           <ConnectionBanner error={m.error} className="mb-4" />

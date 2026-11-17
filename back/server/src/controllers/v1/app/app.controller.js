@@ -1,11 +1,24 @@
 import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
-import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
+import {
+  CLIP_DURATION_SECONDS,
+  clipShareUrl,
+  sessionShareUrl,
+  toEpochMs,
+} from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { recordCashPayment } from "../../../utils/payments.js";
+import {
+  endSessionNow,
+  findRunningSession,
+  materializeSessionParts,
+  partCount,
+  settleSessions,
+  startSessionNow,
+} from "../../../utils/sessions.js";
 import {
   appCreatePaymentSchema,
   appPayCodeQuerySchema,
@@ -20,7 +33,11 @@ import {
  *   GET  /me                       the phone's name and venue
  *   GET  /courts                   the venue's active courts
  *   POST /courts/:courtId/clips    Record — save the last 60 s (STAFF clip)
- *   GET  /courts/:courtId/clips    that court's recent clips (show a QR again)
+ *   GET  /courts/:courtId/clips    that court's recent 60-second clips (show a QR again)
+ *   POST /courts/:courtId/recording      Start recording the whole game
+ *   POST /courts/:courtId/recording/end  End recording → the game's QR
+ *   GET  /courts/:courtId/sessions recent games on the court
+ *   GET  /sessions/:sessionId      a game's status + share link (QR screen)
  *   GET  /clips/:clipId            a clip's status + share link (QR screen)
  *   GET  /payments/lookup?payCode= the clip a player wants to pay for
  *   POST /payments                 record cash for it
@@ -44,6 +61,63 @@ const toAppClip = (row) => ({
   paymentStatus: row.paymentStatus,
   payCode: row.paymentStatus === "Unpaid" ? row.payCode : null,
 });
+
+/** Whole seconds from Manila timestamp `from` to `to` (default: now), never negative. */
+const secondsBetween = (from, to) =>
+  Math.max(0, Math.round(((to ? toEpochMs(to) : Date.now()) - toEpochMs(from)) / 1000));
+
+/** Whole seconds from now until Manila timestamp `at`, never negative. */
+const secondsUntil = (at) => Math.max(0, Math.round((toEpochMs(at) - Date.now()) / 1000));
+
+const SESSION_COLUMNS = `s.sessionId, s.courtId, c.name AS courtName, s.startAt, s.endAt, s.status,
+  s.failureReason, s.shareToken,
+  COALESCE(pa.name, CONCAT(u.firstName, ' ', u.lastName)) AS startedBy,
+  (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
+    AS partsReady`;
+
+const SESSION_FROM = `FROM recording_sessions s
+  JOIN courts c ON c.courtId = s.courtId
+  LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId
+  LEFT JOIN users u ON u.accountId = s.createdByAccountId`;
+
+/** A whole-game recording as the phone sees it. Games are free. */
+const toAppSession = (row) => {
+  const running = ["Scheduled", "Recording"].includes(row.status);
+  return {
+    sessionId: row.sessionId,
+    courtId: row.courtId,
+    courtName: row.courtName,
+    startAt: row.startAt,
+    endAt: row.endAt,
+    durationSeconds: running ? secondsBetween(row.startAt) : secondsBetween(row.startAt, row.endAt),
+    status: row.status,
+    partsReady: Number(row.partsReady || 0),
+    partsTotal: partCount(row.startAt, row.endAt),
+    shareUrl: sessionShareUrl(row.shareToken),
+    failureReason: row.failureReason || null,
+    startedBy: row.startedBy || null,
+  };
+};
+
+/** A court's running recording, for /courts and the Start reply. */
+const toRecording = (row) => ({
+  sessionId: row.sessionId,
+  startAt: row.startAt,
+  endAt: row.endAt,
+  elapsedSeconds: secondsBetween(row.startAt),
+  endsInSeconds: secondsUntil(row.endAt),
+  startedBy: row.startedBy || null,
+  shareUrl: sessionShareUrl(row.shareToken),
+});
+
+const loadSession = async (db, sessionId, venueId) => {
+  const rows = await db.query(
+    `SELECT ${SESSION_COLUMNS} ${SESSION_FROM}
+     WHERE s.sessionId = ? AND s.venueId = ? LIMIT 1`,
+    [sessionId, venueId]
+  );
+  return rows[0] || null;
+};
 
 const CLIP_COLUMNS = `cl.clipId, cl.courtId, c.name AS courtName, cl.source, cl.requestedAt,
   cl.durationSeconds, cl.status, cl.shareToken, cl.thumbnailPath, cl.price, cl.paymentStatus,
@@ -86,6 +160,15 @@ router.get(
        ORDER BY c.name ASC`,
       [onlineSince(), req.pairedApp.venueId]
     );
+    const now = getCurrentTimestampLocal();
+    const running = await req.db.query(
+      `SELECT ${SESSION_COLUMNS} ${SESSION_FROM}
+       WHERE s.venueId = ? AND s.status IN ('Scheduled', 'Recording')
+         AND s.startAt <= ? AND s.endAt > ?
+       ORDER BY s.startAt ASC`,
+      [req.pairedApp.venueId, now, now]
+    );
+    const recordingByCourt = new Map(running.map((row) => [row.courtId, toRecording(row)]));
     return res.sendSuccess("Courts", {
       courts: courts.map((court) => ({
         courtId: court.courtId,
@@ -93,6 +176,7 @@ router.get(
         hasCamera: Boolean(court.hasCamera),
         recorderOnline: Boolean(court.recorderOnline),
         canRecord: Boolean(court.hasCamera) && Boolean(court.recorderOnline),
+        recording: recordingByCourt.get(court.courtId) ?? null,
       })),
     });
   })
@@ -167,12 +251,160 @@ router.get(
     const clips = await req.db.query(
       `SELECT ${CLIP_COLUMNS}
        FROM clips cl JOIN courts c ON c.courtId = cl.courtId
-       WHERE cl.courtId = ? AND cl.status != 'Deleted'
+       WHERE cl.courtId = ? AND cl.sessionId IS NULL AND cl.status != 'Deleted'
        ORDER BY cl.requestedAt DESC
        LIMIT ?`,
       [req.params.courtId, Number(req.query.limit || 10)]
     );
     return res.sendSuccess("Recent clips", { clips: clips.map(toAppClip) });
+  })
+);
+
+const COURT_NOT_FOUND = "Court not found";
+
+/** The court (this venue's, active) with COURT_RECORDING_COLUMNS, locked. */
+const lockCourt = async (conn, courtId, venueId) => {
+  const [courts] = await conn.execute(
+    `SELECT ${COURT_RECORDING_COLUMNS}
+     FROM courts c
+     JOIN venues v ON v.venueId = c.venueId
+     WHERE c.courtId = ? AND c.venueId = ? AND c.status = 'Active' AND v.status = 'Active'
+     LIMIT 1 FOR UPDATE`,
+    [onlineSince(), courtId, venueId]
+  );
+  return courts[0] || null;
+};
+
+/**
+ * POST /courts/:courtId/recording — Start recording the whole game. Runs until
+ * End, or stops by itself after 3 h or at the court's next booking. Already
+ * recording (another phone, a double tap) → 200 with the running one.
+ */
+router.post(
+  "/courts/:courtId/recording",
+  catchAsync(async (req, res) => {
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      const court = await lockCourt(conn, req.params.courtId, req.pairedApp.venueId);
+      if (!court) {
+        await req.db.rollback(conn);
+        return res.sendError(COURT_NOT_FOUND, 404);
+      }
+      result = await startSessionNow(conn, court, { pairedAppId: req.pairedApp.pairedAppId });
+      if (result.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok && result.reason === "CAMERA_OFFLINE") {
+      return res.sendError(
+        "This court's camera or recorder box is offline — tell the manager",
+        null,
+        503,
+        ERROR_CODES.CAMERA_OFFLINE
+      );
+    }
+    if (!result.ok) {
+      const at = moment(result.bookedAt, "YYYY-MM-DD HH:mm:ss").format("h:mm A");
+      return res.sendError(`This court is booked from ${at} — start after that booking`, 409);
+    }
+
+    const row = await loadSession(req.db, result.sessionId, req.pairedApp.venueId);
+    const body = { recording: { ...toRecording(row), already: !result.started } };
+    return result.started
+      ? res.sendSuccess("Recording the game", body, 201)
+      : res.sendSuccess("Already recording", body);
+  })
+);
+
+/**
+ * POST /courts/:courtId/recording/end — End recording. The game so far is
+ * saved and its share link (the QR) works straight away.
+ */
+router.post(
+  "/courts/:courtId/recording/end",
+  catchAsync(async (req, res) => {
+    let conn;
+    let running;
+    try {
+      conn = await req.db.beginTransaction();
+      const [courts] = await conn.execute(
+        `SELECT courtId FROM courts WHERE courtId = ? AND venueId = ? AND status != 'Deleted'
+         LIMIT 1`,
+        [req.params.courtId, req.pairedApp.venueId]
+      );
+      if (courts.length === 0) {
+        await req.db.rollback(conn);
+        return res.sendError(COURT_NOT_FOUND, 404);
+      }
+      running = await findRunningSession(conn, req.params.courtId);
+      await req.db.commit(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+    if (!running) {
+      return res.sendError("This court isn't recording", 409);
+    }
+
+    const result = await endSessionNow(req.db, running.sessionId);
+    if (!result.ok) {
+      return res.sendError("This court isn't recording", 409);
+    }
+    const row = await loadSession(req.db, running.sessionId, req.pairedApp.venueId);
+    return res.sendSuccess("Recording ended — the game is being saved", {
+      session: toAppSession(row),
+    });
+  })
+);
+
+/**
+ * GET /courts/:courtId/sessions?limit=10 — recent games on a court
+ */
+router.get(
+  "/courts/:courtId/sessions",
+  validateQuery(recentClipsQuerySchema),
+  catchAsync(async (req, res) => {
+    const courts = await req.db.query(
+      `SELECT courtId FROM courts WHERE courtId = ? AND venueId = ? AND status != 'Deleted' LIMIT 1`,
+      [req.params.courtId, req.pairedApp.venueId]
+    );
+    if (courts.length === 0) {
+      return res.sendError(COURT_NOT_FOUND, 404);
+    }
+    // Bring statuses up to date (parts due, games finished saving)
+    await materializeSessionParts(req.db, { venueId: req.pairedApp.venueId });
+    await settleSessions(req.db);
+
+    const now = getCurrentTimestampLocal();
+    const sessions = await req.db.query(
+      `SELECT ${SESSION_COLUMNS} ${SESSION_FROM}
+       WHERE s.courtId = ? AND s.startAt <= ? AND s.status != 'Cancelled'
+       ORDER BY s.startAt DESC
+       LIMIT ?`,
+      [req.params.courtId, now, Number(req.query.limit || 10)]
+    );
+    return res.sendSuccess("Recent games", { sessions: sessions.map(toAppSession) });
+  })
+);
+
+/**
+ * GET /sessions/:sessionId — a game's status + share link (QR screen)
+ */
+router.get(
+  "/sessions/:sessionId",
+  catchAsync(async (req, res) => {
+    await materializeSessionParts(req.db, { venueId: req.pairedApp.venueId });
+    await settleSessions(req.db, req.params.sessionId);
+    const row = await loadSession(req.db, req.params.sessionId, req.pairedApp.venueId);
+    if (!row) {
+      return res.sendError("Game not found", 404);
+    }
+    return res.sendSuccess("Game", { session: toAppSession(row) });
   })
 );
 

@@ -36,6 +36,8 @@ export const usePairedCourts = () => {
     venueName: venue?.name ?? "Courts",
     phoneName: pairedApp?.name,
     courts,
+    // When the courts' `recording` seconds were measured — timers tick from here
+    recordingSince: courtsQuery.dataUpdatedAt,
     isLoading: courtsQuery.isLoading,
     // A real API answer that isn't a connection problem (rare: 4xx)
     error: courtsQuery.error,

@@ -262,3 +262,10 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   require a token) and `/admin/pairing-codes/{apps,recorders}`. Added `POST /api/v1/app/unpair`
   so "Unpair this phone" in the app also revokes it on the server, and `failureReason` on
   `/app/clips` for a failed clip's QR screen.
+- 2026-11-17: Requester: "Why only 60 secs? It must save the whole game — on the app, Start
+  recording starts it, End recording ends it." Added **Phase D**: a paired phone starts and ends
+  a whole-game recording on a court. It reuses PLAN-001's recording sessions (5-minute parts, one
+  share link for the game): Start creates a session from now, capped at 3 hours (or the court's
+  next booking) so a forgotten recording stops itself; End finishes it now and shows the game's
+  QR. The 60-second save stays as a smaller secondary button; the court sign and button are
+  unchanged. Migration `009` records which phone started a session.

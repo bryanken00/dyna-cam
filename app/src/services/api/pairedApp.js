@@ -40,7 +40,13 @@ export const getPairedMeApi = async () => {
 
 /**
  * The venue's active courts.
- * data: { courts: [{ courtId, name, hasCamera, recorderOnline, canRecord }] }
+ * data: { courts: [{ courtId, name, hasCamera, recorderOnline, canRecord,
+ *         recording: null | AppRecording }] }
+ *
+ * AppRecording = { sessionId, startAt, endAt, elapsedSeconds, endsInSeconds,
+ *   startedBy } — the whole-game recording running on that court now.
+ *   `endAt` is when it stops by itself (≤ 3 h, or sooner if the court is
+ *   booked); the two "seconds" are as of the response (tick locally from it).
  */
 export const getPairedCourtsApi = async () => {
   const response = await axiosPaired.get(`${BASE}/courts`);
@@ -59,7 +65,8 @@ export const recordClipApi = async (courtId) => {
 };
 
 /**
- * A court's recent clips, newest first (limit ≤ 30).
+ * A court's recent 60-second clips, newest first (limit ≤ 30). Session
+ * parts are left out — games come from getCourtSessionsApi.
  * data: { clips: [AppClip] } where AppClip = { clipId, courtId, courtName,
  *   source, requestedAt, durationSeconds, status ("Pending" while saving |
  *   "Ready" | "Failed" | "Expired"), shareUrl, thumbnailUrl, price,
@@ -104,5 +111,49 @@ export const createPairedPaymentApi = async (payload) => {
  */
 export const unpairPairedAppApi = async () => {
   const response = await axiosPaired.post(`${BASE}/unpair`);
+  return response.data;
+};
+
+// ── Whole-game recording (PLAN-002 Phase D) ─────────────────────────────────
+//
+// AppSession = { sessionId, courtId, courtName, startAt, endAt,
+//   durationSeconds, status (Scheduled | Recording | Processing | Ready |
+//   Failed | Cancelled), partsReady, partsTotal, shareUrl, failureReason,
+//   startedBy }. A game is cut into 5-minute parts; one share link opens all
+//   of them, and works before they are ready. Games are free.
+
+/**
+ * Start recording the whole game on a court.
+ * 201 data: { recording: AppRecording & { shareUrl } }
+ * 200 same shape with `recording.already: true` — another phone or a double tap
+ * 503 code CAMERA_OFFLINE · 409 a booking starts within 5 min · 404 not this venue's
+ */
+export const startRecordingApi = async (courtId) => {
+  const response = await axiosPaired.post(`${BASE}/courts/${courtId}/recording`);
+  return response.data;
+};
+
+/**
+ * End the court's running recording. The footage so far is kept (at least
+ * 10 seconds — the court can still show `recording` for those few seconds). 200 data: { session: AppSession } · 409 "This court isn't recording"
+ */
+export const endRecordingApi = async (courtId) => {
+  const response = await axiosPaired.post(
+    `${BASE}/courts/${courtId}/recording/end`,
+  );
+  return response.data;
+};
+
+/** data: { session: AppSession } */
+export const getPairedSessionApi = async (sessionId) => {
+  const response = await axiosPaired.get(`${BASE}/sessions/${sessionId}`);
+  return response.data;
+};
+
+/** A court's games, newest first. data: { sessions: AppSession[] } */
+export const getCourtSessionsApi = async (courtId, limit = 10) => {
+  const response = await axiosPaired.get(`${BASE}/courts/${courtId}/sessions`, {
+    params: { limit },
+  });
   return response.data;
 };

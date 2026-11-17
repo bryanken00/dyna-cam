@@ -15,45 +15,44 @@ import { useShareQr } from "./useShareQr";
 /** "https://dynacam.ph/clip/Ab3…" → "dynacam.ph/clip/Ab3…" — what's worth reading out. */
 const shortLink = (url) => String(url ?? "").replace(/^https?:\/\//, "");
 
-/** Saving… → Ready, in large type under the QR. */
-const StatusLine = ({ status, failureReason }) => {
+/** The status under the QR, in large type: Saving… → Ready (or why not). */
+const StatusLine = ({ status }) => {
   const colors = useThemeColors();
-  if (status === "Pending") {
-    return (
+  const { tone, text, note } = status;
+  return (
+    <View className="items-center gap-1">
       <View className="flex-row items-center gap-2">
-        <Text className="font-sans-semibold text-[20px]">Saving</Text>
-        <DotsLoader color={colors.foreground} size={20} />
-      </View>
-    );
-  }
-  if (status === "Ready") {
-    return (
-      <View className="flex-row items-center gap-2">
-        <CheckCircle2 size={22} color={colors.foreground} />
-        <Text className="font-sans-semibold text-[20px]">Ready</Text>
-      </View>
-    );
-  }
-  if (status === "Failed" || status === "Expired") {
-    return (
-      <View className="flex-row items-center gap-2">
-        <AlertTriangle size={20} color={colors.destructive} />
-        <Text className="text-destructive font-sans-semibold text-[17px]">
-          {status === "Failed"
-            ? failureReason
-              ? `This clip couldn't be saved — ${failureReason}`
-              : "This clip couldn't be saved"
-            : "This clip has expired"}
+        {tone === "ready" ? (
+          <CheckCircle2 size={22} color={colors.foreground} />
+        ) : tone === "failed" ? (
+          <AlertTriangle size={20} color={colors.destructive} />
+        ) : tone === "recording" ? (
+          <View className="bg-destructive h-3 w-3 rounded-full" />
+        ) : null}
+        <Text
+          className={
+            tone === "failed"
+              ? "text-destructive shrink text-center font-sans-semibold text-[17px]"
+              : "shrink text-center font-sans-semibold text-[20px]"
+          }
+        >
+          {text}
         </Text>
+        {tone === "saving" ? (
+          <DotsLoader color={colors.foreground} size={20} />
+        ) : null}
       </View>
-    );
-  }
-  return null;
+      {note ? (
+        <Text className="text-muted-foreground text-center text-[13px]">{note}</Text>
+      ) : null}
+    </View>
+  );
 };
 
 /**
- * Full-screen QR of a clip's share link, for the player to photograph (iOS
- * Photos and Google Lens read QR codes in photos) or scan live.
+ * Full-screen QR of a clip's — or a whole game's — share link, for the player
+ * to photograph (iOS Photos and Google Lens read QR codes in photos) or scan
+ * live. Params `{ kind: "clip" | "session", id, … }` (see useShareQr).
  *
  *  • As large as the screen allows, black on white in both themes (QrCode),
  *    so it reads from about a metre away.
@@ -83,14 +82,10 @@ const ShareQrScreen = () => {
     }
   };
 
-  const clip = m.clip;
-  const unpaid =
-    clip && clip.paymentStatus === "Unpaid" && clip.price > 0 && clip.payCode;
-
   return (
     <View className="bg-background flex-1">
       <ScreenHeader
-        title={m.courtName ? `${m.courtName} · clip` : "Clip"}
+        title={m.courtName ? `${m.courtName} · ${m.noun}` : m.isGame ? "Game" : "Clip"}
         onBack={navigation.goBack}
       />
 
@@ -102,7 +97,7 @@ const ShareQrScreen = () => {
 
         {m.notFound ? (
           <Text className="text-muted-foreground mt-10 text-center text-[15px]">
-            This clip is no longer available.
+            {`This ${m.noun} is no longer available.`}
           </Text>
         ) : m.shareUrl ? (
           <>
@@ -121,8 +116,14 @@ const ShareQrScreen = () => {
             </Text>
 
             <View className="mt-4 min-h-[32px] items-center">
-              <StatusLine status={m.status} failureReason={m.failureReason} />
+              <StatusLine status={m.status} />
             </View>
+
+            {m.isGame ? (
+              <Text className="text-muted-foreground mt-2 text-center text-[13px]">
+                The link works now — the game's parts appear on it as they're saved.
+              </Text>
+            ) : null}
 
             {m.merged ? (
               <Text className="text-muted-foreground mt-2 text-center text-[13px]">
@@ -130,16 +131,16 @@ const ShareQrScreen = () => {
               </Text>
             ) : null}
 
-            {unpaid ? (
+            {m.unpaid ? (
               <View className="border-border bg-card mt-4 w-full max-w-[480px] rounded-xl border px-4 py-3">
                 <Text className="text-center text-[15px]">
-                  {`Player pays ${formatPeso(clip.price)} at the desk`}
+                  {`Player pays ${formatPeso(m.unpaid.price)} at the desk`}
                 </Text>
                 <Text className="mt-0.5 text-center font-mono text-[18px]">
-                  {`code ${formatPayCode(clip.payCode)}`}
+                  {`code ${formatPayCode(m.unpaid.payCode)}`}
                 </Text>
               </View>
-            ) : clip?.paymentStatus === "Paid" ? (
+            ) : m.paid ? (
               <Text className="text-muted-foreground mt-3 text-[13px]">Paid</Text>
             ) : null}
           </>

@@ -77,8 +77,10 @@ save nothing. Demo pay codes to try in Take payment: `K7QM2P` (unpaid),
 `H3XR9A` (already paid).
 
 Paired mode works in demo too: on "Pair this phone" any 6-digit key pairs
-the phone to the first demo venue (`000000` answers like a wrong key), and a
-Record goes from Saving… to Ready after a few seconds.
+the phone to the first demo venue (`000000` answers like a wrong key). Court 2
+starts out recording a whole game; Start recording / End recording work on any
+court with a camera, and an ended game goes Saving… → Ready after about 8 s.
+"Save last 60 s" goes Saving… → Ready after a few seconds.
 
 The switch is an `IS_DEMO` check inside each hook in
 [src/services/requests/](src/services/requests/); fixtures live

@@ -311,6 +311,14 @@ export const useSessionHooks = () => {
                 {formatPhoneDisplay(record.phone)}
               </div>
             )}
+            {record.startedBy && (
+              <div
+                className="truncate"
+                style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+              >
+                Started by {decodeHTML(record.startedBy)}
+              </div>
+            )}
           </div>
         ),
       },

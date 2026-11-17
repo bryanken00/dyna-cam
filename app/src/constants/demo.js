@@ -305,6 +305,7 @@ export const demoPairedCourts = () =>
     hasCamera: Boolean(c.camera?.configured),
     recorderOnline: c.recorderOnline,
     canRecord: Boolean(c.camera?.configured) && c.recorderOnline,
+    recording: demoRecordingOn(c.courtId),
   }));
 
 /** An admin clip fixture → the paired API's clip shape (toAppClip). */
@@ -373,5 +374,129 @@ export const demoCourtClips = (courtId) => [
     .reverse()
     .map(demoAppClip)
     .filter((c) => c.courtId === courtId),
-  ...DEMO_CLIPS.filter((c) => c.courtId === courtId).map((c) => toDemoAppClip(c)),
+  // Session parts are games' footage, not 60-second clips — the API leaves them out
+  ...DEMO_CLIPS.filter((c) => c.courtId === courtId && c.source !== "SESSION").map(
+    (c) => toDemoAppClip(c),
+  ),
 ];
+
+// ── Whole-game recording (PLAN-002 Phase D) ──────────────────────────────────
+// Start creates a running game; End turns it Processing, with parts becoming
+// ready one by one, then Ready after DEMO_GAME_SAVE_MS. Court 2 starts out
+// already recording (started by a staff member 12 minutes before launch).
+
+const DEMO_GAME_MAX_MS = 3 * 3600000;
+const DEMO_GAME_SAVE_MS = 8000;
+const PART_MS = 5 * 60000;
+
+/** A Manila "YYYY-MM-DD HH:mm:ss" for an epoch time. */
+const stampAt = (ms) => {
+  const w = new Date(ms + 8 * 3600000);
+  return `${w.getUTCFullYear()}-${pad2(w.getUTCMonth() + 1)}-${pad2(w.getUTCDate())} ${pad2(w.getUTCHours())}:${pad2(w.getUTCMinutes())}:${pad2(w.getUTCSeconds())}`;
+};
+
+/** sessionId → { courtId, courtName, startMs, stopMs, endedMs, startedBy } */
+const demoGames = new Map();
+const demoRunning = new Map(); // courtId → sessionId
+
+const addDemoGame = (court, startedBy, startMs = Date.now()) => {
+  const sessionId = `demo-game-${demoGames.size + 1}`;
+  demoGames.set(sessionId, {
+    sessionId,
+    courtId: court.courtId,
+    courtName: court.name,
+    startMs,
+    stopMs: startMs + DEMO_GAME_MAX_MS,
+    endedMs: null,
+    startedBy,
+  });
+  demoRunning.set(court.courtId, sessionId);
+  return sessionId;
+};
+
+addDemoGame(DEMO_COURTS[1], "Ana (staff)", Date.now() - 12 * 60000);
+
+/** A running game's AppRecording (GET /courts' `recording`), or null. */
+export const demoRecordingOn = (courtId) => {
+  const game = demoGames.get(demoRunning.get(courtId));
+  if (!game) return null;
+  const now = Date.now();
+  if (now >= game.stopMs) {
+    // Stopped by itself at its automatic end
+    game.endedMs = game.stopMs;
+    demoRunning.delete(courtId);
+    return null;
+  }
+  return {
+    sessionId: game.sessionId,
+    startAt: stampAt(game.startMs),
+    endAt: stampAt(game.stopMs),
+    elapsedSeconds: Math.floor((now - game.startMs) / 1000),
+    endsInSeconds: Math.floor((game.stopMs - now) / 1000),
+    startedBy: game.startedBy,
+  };
+};
+
+/** A demo game as the API's AppSession. */
+export const demoAppSession = (sessionId) => {
+  const game = demoGames.get(sessionId);
+  if (!game) return null;
+  const now = Date.now();
+  const endMs = game.endedMs ?? game.stopMs;
+  const durationMs = Math.max(10000, (game.endedMs ?? now) - game.startMs);
+  const partsTotal = Math.max(1, Math.ceil(durationMs / PART_MS));
+  let status = "Recording";
+  let partsReady = Math.floor(durationMs / PART_MS); // finished parts so far
+  if (game.endedMs) {
+    const saving = (now - game.endedMs) / DEMO_GAME_SAVE_MS;
+    status = saving >= 1 ? "Ready" : "Processing";
+    partsReady = saving >= 1 ? partsTotal : Math.min(partsTotal - 1, Math.floor(saving * partsTotal));
+  }
+  return {
+    sessionId,
+    courtId: game.courtId,
+    courtName: game.courtName,
+    startAt: stampAt(game.startMs),
+    endAt: stampAt(endMs),
+    durationSeconds: Math.round(durationMs / 1000),
+    status,
+    partsReady,
+    partsTotal,
+    shareUrl: `${DEMO_APP_URL}/session/${sessionId}`,
+    failureReason: null,
+    startedBy: game.startedBy,
+  };
+};
+
+/**
+ * Start a game on a court; an already-running one is returned as-is (the
+ * API's 200 "Already recording"). → { recording, already }
+ */
+export const demoStartRecording = (court, startedBy) => {
+  const running = demoRecordingOn(court.courtId);
+  if (running) {
+    return { recording: { ...running, shareUrl: demoAppSession(running.sessionId).shareUrl }, already: true };
+  }
+  const sessionId = addDemoGame(court, startedBy);
+  return {
+    recording: { ...demoRecordingOn(court.courtId), shareUrl: demoAppSession(sessionId).shareUrl },
+    already: false,
+  };
+};
+
+/** End a court's game → its AppSession, or null if it wasn't recording. */
+export const demoEndRecording = (courtId) => {
+  const game = demoGames.get(demoRunning.get(courtId));
+  if (!game) return null;
+  // The API keeps at least 10 seconds of footage
+  game.endedMs = Math.max(Date.now(), game.startMs + 10000);
+  demoRunning.delete(courtId);
+  return demoAppSession(game.sessionId);
+};
+
+/** A court's games, newest first: this session's demo games. */
+export const demoCourtSessions = (courtId) =>
+  [...demoGames.values()]
+    .filter((g) => g.courtId === courtId)
+    .sort((a, b) => b.startMs - a.startMs)
+    .map((g) => demoAppSession(g.sessionId));

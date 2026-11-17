@@ -130,9 +130,45 @@
       effort, then forgets the token); a failed clip's QR screen shows the reason
 - [x] Changelog entry; commit Phase C
 
+## Phase D — Whole-game recording from the staff app (Start / End)
+
+### Backend
+
+- [x] Migration `009_add_session_paired_app.sql`: `recording_sessions.pairedAppId` (who started it
+      from a phone)
+- [x] `utils/sessions.js`: shared `startSessionNow` (now → min(now + 3 h, the court's next
+      booking); refuses when a booking starts within 5 min) and `endSessionNow` (the admin
+      `/end` route uses it too)
+- [x] `/api/v1/app`: `POST /courts/:courtId/recording` (start; already recording → 200 with the
+      running one; camera/box offline → 503), `POST /courts/:courtId/recording/end`,
+      `GET /sessions/:sessionId`, `GET /courts/:courtId/sessions`; `/courts` adds each court's
+      running `recording`; recent clips leave out session parts
+- [x] Admin sessions show "started by <phone> (phone)"
+- [x] Tests (`tests/app-recording.test.js`, 6): start → running on `/courts` → end → parts and
+      Ready; double start converges; no camera 503; a booking soon → 409, a later one shortens
+      the game; another venue's court/game 404; End right after Start keeps a short game.
+      An ended game now keeps at least 10 s (was 1 min) so the court frees up straight away
+
+### App
+
+- [x] Court screen: big **Start recording** / **End recording** with a running timer;
+      "Save last 60 s" as a secondary button
+- [x] Courts list shows "Recording · 12:34" on a court that's recording
+- [x] End → full-screen QR of the game's link, Saving… → Ready (parts ready / total)
+- [x] Recent on a court: games and 60-second clips, tap → QR again
+- [x] Demo mode; `npx expo export --platform android --clear`
+
+### Phase D wrap-up
+
+- [x] Start reply carries `recording.already`; End keeps at least 1 s (not 10 s), so a Start
+      right after End is a new game
+- [x] `cd back && npm run lint && npm test` (163); front lint + build; app export; changelog
+      entry; commit Phase D
+- [ ] Tried on a phone with the real C200: Start → play a few minutes → End → QR opens the game
+
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
       `edge/README.md`
-- [x] Migration applied (`007`, `008` on the local DB), and noted in the changelog for deploy
+- [ ] Migration applied (`007`, `008` on the local DB; `009` pending), and noted in the changelog for deploy
 - [ ] `plan.md` status set to `Done`

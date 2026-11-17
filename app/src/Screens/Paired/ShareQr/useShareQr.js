@@ -1,24 +1,52 @@
 import { useRoute } from "@react-navigation/native";
-import { useGetPairedClip } from "@/services/requests/pairedApp";
+import {
+  useGetPairedClip,
+  useGetPairedSession,
+} from "@/services/requests/pairedApp";
+import { describeClip, describeGame } from "./shareStatus";
 
 /**
- * State for the QR screen. The link comes in with the navigation params
- * (Record's response, or the recent-clips row), so the QR draws instantly;
- * GET /app/clips/:id then fills in the status — polled every 3 s while
- * "Pending" (saving) and every 5 s while the API can't be reached.
+ * State for the QR screen, for either thing a player can be handed:
+ *
+ *   params: { kind: "clip" | "session", id, shareUrl?, courtName?, merged? }
+ *
+ *  • a 60-second clip — GET /app/clips/:id, polled every 3 s while saving;
+ *  • a whole game     — GET /app/sessions/:id, polled every 5 s while
+ *    Recording or Processing (its parts upload for a few minutes after End).
+ *
+ * The link comes in with the params (Record / End's response, or the recent
+ * row), so the QR draws instantly — the player can photograph it before the
+ * footage is ready; the share page fills in as it is saved. Both queries are
+ * called every render (hooks can't be conditional); the one that doesn't
+ * apply is disabled by its null ID.
  */
 export const useShareQr = () => {
-  const { clipId, shareUrl, courtName, merged } = useRoute().params ?? {};
-  const query = useGetPairedClip(clipId);
-  const clip = query.data?.data?.clip ?? null;
+  const params = useRoute().params ?? {};
+  const isGame = params.kind === "session";
+  const id = params.id ?? params.clipId; // `clipId`: older callers
+
+  const clipQuery = useGetPairedClip(isGame ? null : id);
+  const gameQuery = useGetPairedSession(isGame ? id : null);
+  const query = isGame ? gameQuery : clipQuery;
+  const item = isGame ? query.data?.data?.session : query.data?.data?.clip;
+
+  const unpaid =
+    !isGame &&
+    item?.paymentStatus === "Unpaid" &&
+    item.price > 0 &&
+    item.payCode
+      ? { price: item.price, payCode: item.payCode }
+      : null;
 
   return {
-    clip,
-    shareUrl: clip?.shareUrl ?? shareUrl ?? null,
-    courtName: clip?.courtName ?? courtName,
-    merged: Boolean(merged),
-    status: clip?.status ?? (query.isLoading ? "Pending" : null),
-    failureReason: clip?.failureReason ?? null,
+    isGame,
+    noun: isGame ? "game" : "clip",
+    shareUrl: item?.shareUrl ?? params.shareUrl ?? null,
+    courtName: item?.courtName ?? params.courtName,
+    merged: Boolean(params.merged),
+    status: isGame ? describeGame(item) : describeClip(item),
+    unpaid,
+    paid: !isGame && item?.paymentStatus === "Paid",
     error: query.error,
     notFound: query.error?.response?.status === 404,
   };

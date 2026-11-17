@@ -15,8 +15,10 @@
  *
  * ── Demo mode ───────────────────────────────────────────────────────────────
  * Every hook resolves from `constants/demo.js` with no network: any 6-digit
- * key pairs (000000 is "wrong"), recordings go Pending → Ready after a few
- * seconds, payments succeed and save nothing.
+ * key pairs (000000 is "wrong"), 60-second clips go Pending → Ready after a
+ * few seconds, a game started with Start recording runs until End and is
+ * then Processing → Ready after ~8 s (Court 2 starts out recording), and
+ * payments succeed and save nothing.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Platform } from "react-native";
@@ -26,12 +28,16 @@ import {
   DEMO_CLIPS,
   DEMO_WRONG_PAIRING_KEY,
   demoAppClip,
+  demoAppSession,
   demoCourtClips,
+  demoCourtSessions,
   demoDelay,
   demoEnvelope,
   demoError,
   demoPairedCourts,
+  demoEndRecording,
   demoRecordClip,
+  demoStartRecording,
   makeDemoPairing,
   toDemoAppClip,
 } from "../../constants/demo";
@@ -40,13 +46,17 @@ import { usePairedStore } from "../../store/usePairedStore";
 import { isConnectionError } from "../../utils/dynaCam";
 import {
   createPairedPaymentApi,
+  endRecordingApi,
   getCourtRecentClipsApi,
+  getCourtSessionsApi,
   getPairedClipApi,
   getPairedCourtsApi,
   getPairedMeApi,
+  getPairedSessionApi,
   lookupPairedPaymentApi,
   pairAppApi,
   recordClipApi,
+  startRecordingApi,
   unpairPairedAppApi,
 } from "../api/pairedApp";
 
@@ -58,6 +68,8 @@ const OFFLINE_RETRY_MS = 5000;
 const CLIP_POLL_MS = 3000;
 /** How often the court list refreshes camera status on its own. */
 const COURTS_REFRESH_MS = 30000;
+/** How often a game's QR screen asks how its parts are doing. */
+const SESSION_POLL_MS = 5000;
 
 /** Poll while the last attempt couldn't reach the API; stop on a real answer. */
 const retryWhileOffline = (query) =>
@@ -169,6 +181,8 @@ export const useGetPairedCourts = () => {
       }
       return getPairedCourtsApi();
     },
+    // A game this phone just ended can still show as recording for a moment
+    select: hideEndedRecordings,
     enabled: Boolean(token),
     // Camera status changes on its own; keep it fresh while the list is up,
     // and retry quickly while the API can't be reached.
@@ -367,4 +381,193 @@ export const revokeThisPhone = async () => {
   } catch {
     // Never log it — an axios error carries the token in its request headers
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Whole-game recording (PLAN-002 Phase D) — Start / End on a court
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The game statuses that are still changing on their own. */
+const LIVE_SESSION = ["Recording", "Processing"];
+
+/**
+ * Games this phone has ended. End keeps at least a second of footage, so for
+ * a moment after End the API can still list the court as recording (a
+ * refetch already in flight can also answer with the old state); either
+ * would flip the button back to "End recording".
+ * `useGetPairedCourts` hides a recording whose game is in here.
+ */
+const endedSessions = new Set();
+
+/** Drops recordings this phone already ended (see `endedSessions`). */
+const hideEndedRecordings = (response) => {
+  const courts = response?.data?.courts;
+  if (!courts || endedSessions.size === 0) return response;
+  return {
+    ...response,
+    data: {
+      ...response.data,
+      courts: courts.map((c) =>
+        c.recording && endedSessions.has(c.recording.sessionId)
+          ? { ...c, recording: null }
+          : c,
+      ),
+    },
+  };
+};
+
+/** Put a court's running recording (or null) straight into the cached list. */
+const patchCourtRecording = (queryClient, courtId, recording) =>
+  queryClient.setQueryData([KEY, "courts"], (old) =>
+    old?.data?.courts
+      ? {
+          ...old,
+          data: {
+            ...old.data,
+            courts: old.data.courts.map((c) =>
+              c.courtId === courtId ? { ...c, recording } : c,
+            ),
+          },
+        }
+      : old,
+  );
+
+/**
+ * Start recording the whole game. The caller reads `data.data.recording`
+ * and `data.message` ("Already recording" when another phone — or a double
+ * tap — got there first: same game, nothing new started).
+ *
+ * Errors are NOT toasted: the Court screen shows them inline under the
+ * button (503 camera offline, 409 a booking starts soon, connection).
+ */
+export const useStartRecording = () => {
+  const queryClient = useQueryClient();
+  const phoneName = usePairedStore((s) => s.pairedApp?.name);
+
+  return useMutation({
+    mutationFn: async (court) => {
+      if (IS_DEMO) {
+        await demoDelay();
+        if (!court.canRecord) {
+          throw demoError(
+            503,
+            "This court's camera or recorder box is offline — tell the manager",
+            "CAMERA_OFFLINE",
+          );
+        }
+        const { recording, already } = demoStartRecording(
+          court,
+          phoneName ?? "This phone",
+        );
+        return demoEnvelope(already ? "Already recording" : "Recording started", {
+          recording: { ...recording, already },
+        });
+      }
+      return startRecordingApi(court.courtId);
+    },
+    retry: false,
+    onSuccess: (response, court) => {
+      const { shareUrl, ...recording } = response.data?.recording ?? {};
+      // Show the running timer at once; the refetch confirms it
+      patchCourtRecording(queryClient, court.courtId, recording);
+      queryClient.invalidateQueries({ queryKey: [KEY, "courts"] });
+    },
+  });
+};
+
+/**
+ * End the court's game. `data.data.session` is the AppSession (Processing
+ * while its parts upload) — the caller opens its QR. Errors are inline, as
+ * for Start.
+ */
+export const useEndRecording = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (courtId) => {
+      if (IS_DEMO) {
+        await demoDelay();
+        const session = demoEndRecording(courtId);
+        if (!session) throw demoError(409, "This court isn't recording");
+        return demoEnvelope("Recording ended — the game is being saved", {
+          session,
+        });
+      }
+      return endRecordingApi(courtId);
+    },
+    retry: false,
+    onSuccess: (response, courtId) => {
+      const session = response.data?.session;
+      if (session?.sessionId) endedSessions.add(session.sessionId);
+      patchCourtRecording(queryClient, courtId, null);
+      if (session) {
+        // Seed the game's QR screen with it (same envelope as GET /sessions/:id)
+        queryClient.setQueryData([KEY, "sessions", session.sessionId], {
+          success: true,
+          message: response.message,
+          data: { session },
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: [KEY, "courts"] });
+    },
+    onError: (error) => {
+      // 409 "This court isn't recording" — it stopped by itself or on another
+      // phone; refresh so the button turns back into Start
+      if (error?.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: [KEY, "courts"] });
+      }
+    },
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useGetPairedSession — a game, polled every 5 s while Recording/Processing
+// ─────────────────────────────────────────────────────────────────────────────
+export const useGetPairedSession = (sessionId) => {
+  const token = usePairedStore((s) => s.token);
+  return useQuery({
+    queryKey: [KEY, "sessions", sessionId],
+    queryFn: async () => {
+      if (IS_DEMO) {
+        await new Promise((r) => setTimeout(r, 300));
+        const session = demoAppSession(sessionId);
+        if (!session) throw demoError(404, "Session not found");
+        return demoEnvelope("Session", { session });
+      }
+      return getPairedSessionApi(sessionId);
+    },
+    enabled: Boolean(token && sessionId),
+    staleTime: 0,
+    refetchInterval: (query) =>
+      LIVE_SESSION.includes(query.state.data?.data?.session?.status)
+        ? SESSION_POLL_MS
+        : retryWhileOffline(query),
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useGetCourtSessions — a court's games, newest first
+// ─────────────────────────────────────────────────────────────────────────────
+export const useGetCourtSessions = (courtId, limit = 10) => {
+  const token = usePairedStore((s) => s.token);
+  return useQuery({
+    queryKey: [KEY, "courts", courtId, "sessions", limit],
+    queryFn: async () => {
+      if (IS_DEMO) {
+        await demoDelay();
+        return demoEnvelope("Sessions", {
+          sessions: demoCourtSessions(courtId).slice(0, limit),
+        });
+      }
+      return getCourtSessionsApi(courtId, limit);
+    },
+    enabled: Boolean(token && courtId),
+    // A game that's saving changes quickly; a running one only gains parts
+    refetchInterval: (query) => {
+      const sessions = query.state.data?.data?.sessions ?? [];
+      if (sessions.some((x) => x.status === "Processing")) return SESSION_POLL_MS;
+      if (sessions.some((x) => x.status === "Recording")) return COURTS_REFRESH_MS;
+      return retryWhileOffline(query);
+    },
+  });
 };

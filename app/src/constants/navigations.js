@@ -33,7 +33,7 @@ export const SCREEN_NAVIGATION = {
   Paired: {
     Courts: "PairedCourts",
     Court: "PairedCourt", // { courtId, courtName }
-    ShareQr: "PairedShareQr", // { clipId, shareUrl?, courtName?, merged? }
+    ShareQr: "PairedShareQr", // { kind: "clip" | "session", id, shareUrl?, courtName?, merged? }
     TakePayment: "PairedTakePayment",
   },
 
