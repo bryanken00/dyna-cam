@@ -223,6 +223,26 @@ describe("venues, courts and recorder boxes", () => {
       assert.equal((await device("GET", "/device/config", token)).status, 401);
     });
 
+    it("never stores a box token in the idempotency cache", async () => {
+      // The web app sends an Idempotency-Key on every change; the cache table is plain text
+      const created = await ctx.api("POST", "/admin/devices", {
+        token: admin.token,
+        body: { venueId, name: "Cached box" },
+        headers: { "Idempotency-Key": "add-box-key-1" },
+      });
+      assert.equal(created.status, 201);
+      const reissued = await ctx.api("POST", `/admin/devices/${created.data.deviceId}/token`, {
+        token: admin.token,
+        headers: { "Idempotency-Key": "reissue-key-1" },
+      });
+      assert.equal(reissued.status, 200);
+
+      const [rows] = await ctx.sql.query(`SELECT responseBody FROM idempotency_keys`);
+      const stored = rows.map((r) => JSON.stringify(r.responseBody)).join("\n");
+      assert.ok(!stored.includes(created.data.token), "first token must not be cached");
+      assert.ok(!stored.includes(reissued.data.token), "re-issued token must not be cached");
+    });
+
     it("refuses requests without a device token", async () => {
       assert.equal((await ctx.api("GET", "/device/config")).status, 401);
       assert.equal((await device("GET", "/device/config", "dcb_not-a-real-token")).status, 401);

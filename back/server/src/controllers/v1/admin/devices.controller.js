@@ -2,7 +2,8 @@ import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { isOnline } from "../../../utils/clips.js";
+import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
+import { isOnline, toEpochMs } from "../../../utils/clips.js";
 import { hashToken, randomToken } from "../../../utils/crypto/tokens.js";
 import {
   createDeviceSchema,
@@ -41,6 +42,11 @@ const toDevice = (row) => {
   return {
     ...row,
     online: row.status === "Active" && isOnline(row.lastSeenAt),
+    // Relative to now on the server, so "last seen 2 min ago" is right in any
+    // browser time zone (timestamps are Manila local, with no zone attached)
+    lastSeenSecondsAgo: row.lastSeenAt
+      ? Math.max(0, Math.round((Date.now() - toEpochMs(row.lastSeenAt)) / 1000))
+      : null,
     cameras: Array.isArray(lastStatus?.cameras) ? lastStatus.cameras : [],
     lastStatus: undefined,
   };
@@ -120,6 +126,22 @@ router.get(
 );
 
 /**
+ * GET /options
+ * Live venues for this page's venue picker and filter — under this route
+ * group's own permission, so it works without the Venues permission.
+ */
+router.get(
+  "/options",
+  checkPermission("venues", "devices", "read"),
+  catchAsync(async (req, res) => {
+    const venues = await req.db.query(
+      `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
+    );
+    return res.sendSuccess("Venue options", { venues });
+  })
+);
+
+/**
  * GET /:deviceId
  */
 router.get(
@@ -177,6 +199,7 @@ router.post(
       );
 
       await req.db.commit(conn);
+      noIdempotencyCache(res); // the token must never sit in the cache table
       return res.sendSuccess(
         "Recorder box added — copy its token now, it will not be shown again",
         { deviceId, token },
@@ -233,6 +256,7 @@ router.post(
       return res.sendError("Recorder box not found", 404);
     }
 
+    noIdempotencyCache(res); // the token must never sit in the cache table
     return res.sendSuccess("New token issued — copy it now, it will not be shown again", {
       deviceId: req.params.deviceId,
       token,

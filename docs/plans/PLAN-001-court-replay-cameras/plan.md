@@ -499,3 +499,26 @@ The checklist follows these phases. Each phase is shippable on its own.
 - 2026-11-17: Tested the venue's real C200 (720p, H.264 + A-law audio). The full recording and
   watermarked-clip pipeline worked. Found that segment timing is irregular, so the recorder must
   time segments by real receive time; added a checklist item for it.
+- 2026-11-17: Phase 1 finished and run end to end on the real C200 (throwaway database). Changes
+  made along the way:
+  - **Recorder timing:** `-use_wallclock_as_timestamps` halved the frame count in cut clips. The
+    recorder now times each segment from `segments.csv` plus the closed file's mtime, and trims
+    with output-side `-ss`/`-t`.
+  - **Real frame rate:** the C200 really sends 15 fps (its stated ~30 is nominal).
+  - **Security fix:** the one-time recorder-box token was being stored in the idempotency cache.
+    Added `noIdempotencyCache(res)`, with a test that fails without it.
+  - **Exclusive claims:** only one box can make a given clip, so two boxes at one venue can't
+    both cut it.
+  - **Picker options:** added a per-page options endpoint so the venue and court pickers don't
+    need the Venues permission.
+  - **New fields:** courts now carry `venueLogoUrl`, devices `lastSeenSecondsAgo`, and clips
+    `downloadUrl`, which serves the file as a `Content-Disposition` attachment.
+  - **Ignore-rule fixes:** `back/.gitignore` and `back/eslint.config.js` ignored every folder
+    named `public`. That kept `controllers/v1/public/` out of git (the Phase 1 API commit missed
+    `public.controller.js`) and out of lint. Both now ignore only the top-level `public/` folder.
+  - **Deferred to later phases:**
+    - The API's 120 s server timeout against slow uplinks; clips are about 6–13 MB, so low risk
+      for now.
+    - No `Retry-After` header on 429 responses.
+    - The heartbeat has no field for box-level problems (disk, clock).
+    - The 6-court load test, which needs the box hardware.

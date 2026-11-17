@@ -4,7 +4,7 @@ import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { clipShareUrl } from "../../../utils/clips.js";
 import { removeClipFiles } from "../../../utils/file/clipFiles.js";
-import { signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { listClipsQuerySchema } from "../../../validators/clips.validator.js";
 
 /**
@@ -29,6 +29,7 @@ const toClip = (row) => {
     ...clip,
     shareUrl: clipShareUrl(shareToken),
     videoUrl: playable ? signUploadUrl(videoPath) : null,
+    downloadUrl: playable ? signedDownloadUrl(videoPath) : null,
     thumbnailUrl: playable ? signUploadUrl(thumbnailPath) : null,
   };
 };
@@ -111,6 +112,28 @@ router.get(
         totalPages: Math.ceil(total / pageSize),
       },
     });
+  })
+);
+
+/**
+ * GET /options
+ * Venues and courts for the Clips filters — under the clips permission, so
+ * the page works without the Venues or Courts permissions.
+ */
+router.get(
+  "/options",
+  checkPermission("clips", null, "read"),
+  catchAsync(async (req, res) => {
+    const [venues, courts] = await Promise.all([
+      req.db.query(`SELECT venueId, name FROM venues WHERE status != 'Deleted' ORDER BY name ASC`),
+      req.db.query(
+        `SELECT c.courtId, c.name, c.venueId, v.name AS venueName
+         FROM courts c JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+         WHERE c.status != 'Deleted'
+         ORDER BY v.name ASC, c.name ASC`
+      ),
+    ]);
+    return res.sendSuccess("Clip filter options", { venues, courts });
   })
 );
 

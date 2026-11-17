@@ -5,6 +5,7 @@ import { checkPermission } from "../../../middlewares/checkPermission.middleware
 import { courtQrUrl, DEVICE_ONLINE_SECONDS, secondsAgoLocal } from "../../../utils/clips.js";
 import { decryptSecret, encryptSecret, maskStreamUrl } from "../../../utils/crypto/secretBox.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
+import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
   createCourtSchema,
   listCourtsQuerySchema,
@@ -22,7 +23,8 @@ import {
 const router = express.Router();
 
 const COURT_SELECT = `
-  SELECT c.courtId, c.venueId, v.name AS venueName, c.name, c.cameraRtspUrl, c.qrToken,
+  SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
+         c.cameraRtspUrl, c.qrToken,
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -36,6 +38,7 @@ const toCourt = (row) => {
   const plain = decryptSecret(cameraRtspUrl);
   return {
     ...court,
+    venueLogoUrl: signUploadUrl(row.venueLogoUrl),
     recorderOnline: Boolean(row.recorderOnline),
     qrUrl: courtQrUrl(row.qrToken),
     camera: {
@@ -115,6 +118,22 @@ router.get(
         totalPages: Math.ceil(total / pageSize),
       },
     });
+  })
+);
+
+/**
+ * GET /options
+ * Live venues for this page's venue picker and filter — under this route
+ * group's own permission, so it works without the Venues permission.
+ */
+router.get(
+  "/options",
+  checkPermission("venues", "courts", "read"),
+  catchAsync(async (req, res) => {
+    const venues = await req.db.query(
+      `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
+    );
+    return res.sendSuccess("Venue options", { venues });
   })
 );
 

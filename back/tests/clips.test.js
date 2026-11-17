@@ -103,6 +103,7 @@ describe("clips", () => {
 
     const box = await call("GET", `/admin/devices/${home.deviceId}`);
     assert.equal(box.data.device.agentVersion, "0.1.0");
+    assert.ok(box.data.device.lastSeenSecondsAgo >= 0 && box.data.device.lastSeenSecondsAgo < 60);
     assert.deepEqual(
       box.data.device.cameras.map((c) => c.courtId),
       [home.courtId]
@@ -215,6 +216,14 @@ describe("clips", () => {
     assert.equal(ranged.status, 206);
     assert.equal(Buffer.from(await ranged.arrayBuffer()).length, 10);
 
+    // The download link makes the browser save the file instead of opening it
+    const download = await ctx.get(page.data.clip.downloadUrl);
+    assert.equal(download.status, 200);
+    assert.equal(
+      download.headers.get("content-disposition"),
+      "attachment; filename=dyna-cam-replay.mp4"
+    );
+
     // The bare path is refused
     const bare = await ctx.get(page.data.clip.videoUrl.split("?")[0]);
     assert.equal(bare.status, 403);
@@ -231,6 +240,37 @@ describe("clips", () => {
       form: uploadForm(),
     });
     assert.equal(again.status, 409);
+  });
+
+  it("lets only one box at a venue make a clip", async () => {
+    const second = await call("POST", "/admin/devices", { venueId: home.venueId, name: "Box 2" });
+    const box2 = asDevice(second.data.token);
+    await ageClips(home.courtId);
+    const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
+    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
+      save.data.shareToken,
+    ]);
+
+    assert.equal((await home.device("POST", `/device/clips/${row.clipId}/processing`)).status, 200);
+    assert.equal(
+      (await home.device("POST", `/device/clips/${row.clipId}/processing`)).status,
+      200,
+      "the claiming box may retry its claim"
+    );
+    assert.equal((await box2("POST", `/device/clips/${row.clipId}/processing`)).status, 409);
+    assert.equal(
+      (await box2("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() })).status,
+      409
+    );
+    assert.equal(
+      (await box2("POST", `/device/clips/${row.clipId}/fail`, { body: { reason: "x" } })).status,
+      409
+    );
+    assert.equal(
+      (await home.device("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() }))
+        .status,
+      200
+    );
   });
 
   it("records a clip the box could not make as failed", async () => {
@@ -313,6 +353,32 @@ describe("clips", () => {
     ]);
     assert.equal(after.status, "Deleted");
     assert.equal(after.courtId, home.courtId);
+  });
+
+  it("gives each page its picker options under its own permission", async () => {
+    const courtsOnly = await ctx.createStaff("Courts only");
+    // grant just venues/courts read via a role built through the API
+    const perms = (await call("GET", "/admin/permissions")).data.permissions;
+    const pick = (module, submodule) =>
+      perms.find((p) => p.module === module && (p.submodule ?? null) === submodule).permissionId;
+    const assign = await call("POST", `/admin/roles/${courtsOnly.roleId}/permissions`, {
+      permissions: [{ permissionId: pick("venues", "courts"), accessLevel: "read" }],
+    });
+    assert.equal(assign.status, 200, JSON.stringify(assign.body));
+
+    const asCourts = (url) => ctx.api("GET", url, { token: courtsOnly.token });
+    assert.equal((await asCourts("/admin/venues")).status, 403);
+    const options = await asCourts("/admin/courts/options");
+    assert.equal(options.status, 200);
+    assert.ok(options.data.venues.some((v) => v.venueId === home.venueId));
+    assert.equal((await asCourts("/admin/devices/options")).status, 403);
+
+    const court = await asCourts(`/admin/courts/${home.courtId}`);
+    assert.equal(court.data.court.venueLogoUrl, null);
+
+    const clipOptions = await call("GET", "/admin/clips/options");
+    assert.equal(clipOptions.status, 200);
+    assert.ok(clipOptions.data.courts.some((c) => c.courtId === home.courtId));
   });
 
   it("rejects malformed links", async () => {

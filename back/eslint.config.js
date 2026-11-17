@@ -13,7 +13,9 @@ export default [
       "**/coverage/**",
       "**/.env*",
       "**/logs/**",
-      "**/public/**",
+      // The served-files folder only — not every folder named "public"
+      // (server/src/controllers/v1/public/ is code and must be linted)
+      "public/**",
       "**/uploads/**",
     ],
   },

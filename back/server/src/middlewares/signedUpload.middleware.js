@@ -33,6 +33,16 @@ export const requireSignedUpload = (req, res, next) => {
 
   // The link is personal and short-lived — let the browser cache it, not proxies
   res.setHeader("Cache-Control", `private, max-age=${secondsLeft}`);
+
+  // `&download=1` asks the browser to save the file instead of opening it. The
+  // HTML `download` attribute is ignored on cross-origin links (web app and API
+  // on different hosts), so this is how a "Download" button works everywhere.
+  // Not part of the signature: it changes how the same file is delivered.
+  if (req.query.download === "1") {
+    // A friendly name for the saved file (the stored one is 64 random hex characters)
+    const extension = storedPath.slice(storedPath.lastIndexOf("."));
+    res.attachment(`dyna-cam-replay${extension}`);
+  }
   next();
 };
 

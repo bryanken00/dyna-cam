@@ -1,8 +1,10 @@
 node_modules
 auth-keys
-public
-!public/uploads/
-!public/uploads/**/.gitkeep
+# The served-files folder at the root of back/ only — not every folder named
+# "public" (server/src/controllers/v1/public/ is code)
+/public
+!/public/uploads/
+!/public/uploads/**/.gitkeep
 logs
 .claude*
 .env

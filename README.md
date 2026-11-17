@@ -11,13 +11,13 @@ portal out of the box — users, roles, per-user permissions, settings, and a da
 **Owner** account that holds every permission, with role-based access control, an audit trail,
 private file uploads, a hardened Express API, and an API test suite.
 
-The repository is a **monorepo of three independent apps** (a fourth, `edge/` — the on-site
-recorder box — arrives with PLAN-001 Phase 1):
+The repository is a **monorepo of four independent apps**:
 
 | Path               | App                         | Stack                                                                                          |
 | ------------------ | --------------------------- | ---------------------------------------------------------------------------------------------- |
 | [`front/`](front/) | React SPA (the Admin portal) | React 19 · Vite · shadcn/ui (Radix + Tailwind) · Tailwind CSS v4 · Zustand · TanStack Query · react-hook-form + zod · React Router v8 |
 | [`back/`](back/)   | REST API server             | Node · Express · MySQL (`mysql2`) · Passport JWT · Zod                                         |
+| [`edge/`](edge/)   | Recorder box (one per venue) | Node 20 · ffmpeg · pm2 — records every court camera (RTSP) and cuts, watermarks and uploads clips |
 | [`app/`](app/)     | Mobile staff app            | Expo SDK 58 · React Native 0.88 · React Native Reusables on NativeWind · Zustand · TanStack Query · expo-sqlite |
 
 > Coding conventions live in the [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md),
@@ -111,10 +111,12 @@ recorder box — arrives with PLAN-001 Phase 1):
 │   ├── frontend-conventions/  ← 8 frontend topic docs, loaded on demand
 │   ├── backend-conventions/   ← 7 backend topic docs, loaded on demand
 │   ├── mobile-conventions/    ← 7 mobile-app topic docs, loaded on demand
+│   ├── edge-conventions/      ← the recorder box's rules, loaded on demand
 │   ├── new-module/            ← scaffolds a CRUD module end to end
 │   ├── new-mobile-module/     ← scaffolds a screen module in the mobile app
 │   └── plan-doc, change-request, bug-report, changelog, publish
 ├── docs/                      ← plans, bug reports, change requests, changelog, reviews (all apps)
+├── edge/                      ← recorder box: Node + ffmpeg, one per venue (see edge/README.md)
 ├── app/                       ← Expo React Native staff app
 │   ├── CLAUDE.md              ← stack + pointer to mobile-conventions
 │   ├── app.json · eas.json    ← Expo config + EAS build profiles

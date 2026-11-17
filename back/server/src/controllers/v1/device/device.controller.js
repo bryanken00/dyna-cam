@@ -210,7 +210,7 @@ router.get(
  */
 const loadOpenClip = catchAsync(async (req, res, next) => {
   const rows = await req.db.query(
-    `SELECT clipId, venueId, status FROM clips
+    `SELECT clipId, venueId, status, deviceId FROM clips
      WHERE clipId = ? AND venueId = ? AND status != 'Deleted'
      LIMIT 1`,
     [req.params.clipId, req.device.venueId]
@@ -225,6 +225,14 @@ const loadOpenClip = catchAsync(async (req, res, next) => {
       ERROR_CODES.INVALID_STATUS
     );
   }
+  // Only one box makes a clip: once claimed, other boxes at the venue are refused
+  if (
+    rows[0].status === "Processing" &&
+    rows[0].deviceId &&
+    rows[0].deviceId !== req.device.deviceId
+  ) {
+    throw new APIError("Another recorder box is making this clip", 409, ERROR_CODES.INVALID_STATUS);
+  }
   req.clip = rows[0];
   next();
 });
@@ -236,11 +244,21 @@ router.post(
   "/clips/:clipId/processing",
   loadOpenClip,
   catchAsync(async (req, res) => {
-    await req.db.query(
+    // Atomic claim: a Pending clip, or one this box already holds (a retry).
+    // Two boxes claiming at once — exactly one update matches.
+    const result = await req.db.query(
       `UPDATE clips SET status = 'Processing', deviceId = ?, dateUpdated = ?
-       WHERE clipId = ? AND status IN ('Pending', 'Processing')`,
-      [req.device.deviceId, getCurrentTimestampLocal(), req.clip.clipId]
+       WHERE clipId = ?
+         AND (status = 'Pending' OR (status = 'Processing' AND deviceId = ?))`,
+      [req.device.deviceId, getCurrentTimestampLocal(), req.clip.clipId, req.device.deviceId]
     );
+    if (result.affectedRows === 0) {
+      throw new APIError(
+        "Another recorder box is making this clip",
+        409,
+        ERROR_CODES.INVALID_STATUS
+      );
+    }
     return res.sendSuccess("Clip claimed");
   })
 );

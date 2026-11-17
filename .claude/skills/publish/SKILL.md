@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Cut a release. Rolls every entry in docs/changelog/unpublished/ into one plain-language, client-facing release note at docs/changelog/published/vX.Y.Z.md, picks the next semantic version from the entries' impact (major/minor/patch), bumps the one product version in front/ and back/ package.json and in app/ (package.json, app.json, src/constants/version.js), updates the release index, and clears the queue. Only when the user runs /publish.
+description: Cut a release. Rolls every entry in docs/changelog/unpublished/ into one plain-language, client-facing release note at docs/changelog/published/vX.Y.Z.md, picks the next semantic version from the entries' impact (major/minor/patch), bumps the one product version in front/, back/ and edge/ package.json and in app/ (package.json, app.json, src/constants/version.js), updates the release index, and clears the queue. Only when the user runs /publish.
 argument-hint: "[major|minor|patch|X.Y.Z] [--dry-run]"
 disable-model-invocation: true
 ---
@@ -16,8 +16,8 @@ Arguments: **$ARGUMENTS**
 
 1. **Entries**: every `*.md` in `docs/changelog/unpublished/` (ignore `.gitkeep`). If there are
    none, stop and say "Nothing to publish: the unpublished queue is empty."
-2. **Current version**: the product has one version, kept in five places:
-   - `version` in `front/package.json` and `back/package.json`
+2. **Current version**: the product has one version, kept in six places:
+   - `version` in `front/package.json`, `back/package.json` and `edge/package.json`
    - `version` in `app/package.json`
    - `expo.version` in `app/app.json` (what the App Store and Play Store show)
    - `VERSION` in `app/src/constants/version.js` (what the mobile app displays)
@@ -123,11 +123,11 @@ text works there. Count the characters and cut until it fits.
 2. Bump every part (this updates their lockfiles too and doesn't touch git):
 
    ```bash
-   (cd front && npm version X.Y.Z --no-git-tag-version) && (cd back && npm version X.Y.Z --no-git-tag-version) && (cd app && npm version X.Y.Z --no-git-tag-version)
+   (cd front && npm version X.Y.Z --no-git-tag-version) && (cd back && npm version X.Y.Z --no-git-tag-version) && (cd app && npm version X.Y.Z --no-git-tag-version) && (cd edge && npm version X.Y.Z --no-git-tag-version)
    ```
 
    then edit `"version"` under `expo` in `app/app.json`, and `VERSION` in
-   `app/src/constants/version.js`. Those five are the only places the version lives.
+   `app/src/constants/version.js`. Those six are the only places the version lives.
    `vite.config.js` injects `front/package.json`'s version as `import.meta.env.APP_VERSION` (the
    Sentry release tag), so there's no env var to update.
 
@@ -157,7 +157,7 @@ Run `git diff --stat`, then report:
 **Don't commit or tag on your own.** Offer:
 
 ```bash
-git add docs/changelog front/package*.json back/package*.json app/package*.json app/app.json app/src/constants/version.js
+git add docs/changelog front/package*.json back/package*.json edge/package*.json app/package*.json app/app.json app/src/constants/version.js
 git commit -m "chore(release): vX.Y.Z"
 git tag vX.Y.Z
 ```

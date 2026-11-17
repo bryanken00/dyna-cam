@@ -124,78 +124,81 @@
 
 ### Recorder box (`edge/`)
 
-- [ ] Scaffold `edge/` (Node 20, ESM, eslint + prettier matching `back/`), `edge/.env.example`
-      (`API_URL`, `DEVICE_TOKEN`, `DATA_DIR`), pm2 `ecosystem.config.cjs`
-- [ ] Config sync: fetch `/device/config` on start + every 60s; start/stop one ffmpeg ring-buffer
-      process per active court (`-c copy`, 2s segments, ~3 min ring); auto-restart on exit
-- [ ] Heartbeat every 30s with agent version + per-court camera status
-- [ ] Job loop: long-poll `/device/jobs`; for each clip job select segments for
-      `[requestedAt − 60s, requestedAt + 5s]`, concat, overlay venue logo, encode MP4
-      (hw encoder if present, else `libx264 veryfast`), thumbnail, upload with retry/backoff
-- [ ] Local queue persisted to disk so pending uploads survive a reboot
-- [ ] `edge/README.md` (install on a mini PC, NTP, camera setup) + `edge/CLAUDE.md` pointer +
-      `.claude/skills/edge-conventions/SKILL.md`; add `edge/` to root `CLAUDE.md` layout table
+- [x] Scaffold `edge/` (Node ≥ 20.12, ESM, eslint + prettier matching `back/`), `edge/.env.example`
+      (`API_URL`, `DEVICE_TOKEN`, `DATA_DIR`, encoder, buffer, intervals), pm2 `ecosystem.config.cjs`
+- [x] Config sync: `/device/config` on start + every 60 s (cached for a dead API); one ffmpeg
+      ring-buffer recorder per active court, restart with backoff (2 → 30 s), stalled-stream kill
+- [x] Heartbeat every 30 s with agent version + per-court camera status and readable, masked
+      messages ("Camera not reachable — check Wi-Fi/power", wrong password, wrong path)
+- [x] Job loop: long-poll `/device/jobs` → claim → wait for the post window → select segments by
+      real time → concat → trim → logo overlay (bottom-right, 12 %) → H.264 (hardware if present,
+      else `libx264 veryfast`) + AAC, faststart → JPEG thumbnail → upload with retry/backoff;
+      `fail` with a reason when the buffer doesn't cover the moment
+- [x] Local queue persisted to disk (`queue.json`) so cut-but-not-uploaded clips survive a reboot
+- [x] `edge/README.md` (install, NTP, Tapo C200 setup, fake-camera testing, troubleshooting) +
+      `edge/CLAUDE.md` + `.claude/skills/edge-conventions/SKILL.md`; `edge/` added to root
+      `CLAUDE.md`, `README.md` and the shared product version in `/publish`
+- [x] `npm run lint` clean, `npm test` 58/58, `npm run smoke` (real ffmpeg record → cut → watermark
+      with A-law audio and irregular keyframes; also `--encoder libx264` and `--bursty`) OK
 - [ ] Load test: 6 courts recording, 3 simultaneous clip jobs on the target box — record CPU and
-      job time in `edge/README.md`
+      job time in `edge/README.md` *(needs the real box hardware; table left as TODO)*
 
 ### Frontend
 
-- [ ] `services/api/admin/{venues,courts,devices,clips}.js` + `services/requests/admin/*`
-- [ ] `pages/Admin/Venues/` (list + drawer, logo upload, prices, retention days, phone)
-- [ ] `pages/Admin/Courts/` (list filtered by venue + drawer; "Print QR" printable A5 sign;
-      "Rotate QR")
-- [ ] `pages/Admin/Devices/` (list with online/offline from `lastSeenAt`; "Add device" shows the
-      token once with copy; revoke)
-- [ ] `pages/Admin/Clips/` (thumbnail column, preview player sheet, filters, copy link, delete)
-- [ ] Register all four in [`AdminRoute.jsx`](../../../front/src/routes/pageRoutes/AdminRoute.jsx)
-      with matching `<ProtectedRoute module/submodule>`
-- [ ] `services/api/public/*` (no auth header) + `pages/Public/Court/` (`/court/:qrToken`,
-      "Save last 60 seconds", privacy notice) + `pages/Public/Clip/` (`/clip/:shareToken`,
-      status polling, player, download, Web Share); routes in
+- [x] `services/api/admin/{venues,courts,devices,clips}.js` + `services/requests/admin/*`
+- [x] `pages/Admin/DynaCam/Venues/` (list + drawer, logo upload, retention days, phone)
+- [x] `pages/Admin/DynaCam/Courts/` (venue filter, camera chip, recorder dot, drawer with the
+      Tapo helper; Print QR A5 sign via `qrcode.react` 4.2.0; Rotate QR; copy/open player link)
+- [x] `pages/Admin/DynaCam/Devices/` (online/offline + "seen … ago", cameras, token dialog shown
+      once with the box's `.env` lines; revoke / re-issue / delete)
+- [x] `pages/Admin/DynaCam/Clips/` (thumbnails, filters, preview player, download, copy link, delete)
+- [x] Registered in [`AdminRoute.jsx`](../../../front/src/routes/pageRoutes/AdminRoute.jsx) under
+      a "Dyna Cam" sidebar group with matching `<ProtectedRoute module/submodule>`
+- [x] `services/api/public/*` + `pages/Public/Court/` (`/court/:qrToken`) + `pages/Public/Clip/`
+      (`/clip/:shareToken`, polling, player, download, Web Share); routes in
       [`routes/index.jsx`](../../../front/src/routes/index.jsx)
+- [x] API follow-ups from the frontend review: per-page picker endpoints
+      (`/courts/options`, `/devices/options`, `/clips/options`), `venueLogoUrl` on courts,
+      `lastSeenSecondsAgo` on devices, `downloadUrl` (`Content-Disposition: attachment`)
+- [x] `npm run lint` (0 errors, the 9 pre-existing warnings) and `npm run build` pass
 
 ### Tapo cameras (added 2026-11-17 — venue uses Tapo C200, Wi-Fi)
 
-- [ ] `edge/`: record with `-c:v copy -c:a aac` (Tapo A-law audio can't be stream-copied into
-      `.ts` — it silently becomes unplayable data); unit test asserts the args; smoke test uses an
-      A-law source and checks the final mp4 has AAC audio
-- [ ] `edge/`: input timeout so a dropped Wi-Fi stream ends ffmpeg instead of hanging; reconnect
-      with backoff (≤ 30 s); heartbeat reports "Camera not reachable" with the reason
-- [ ] `edge/README.md`: "Tapo C200 setup" — camera account (Tapo app → Advanced settings →
-      Camera Account, 6–32 chars), DHCP reservation, privacy mode / motion tracking / patrol off,
-      fixed pan-tilt position, 2.4 GHz signal check, the SD / Tapo Care / RTSP two-of-three rule,
-      battery Tapo models unsupported
-- [ ] Courts drawer: "Tapo camera" helper (camera IP + camera-account username + password +
-      quality `stream1`/`stream2`) that builds `rtsp://user:pass@ip:554/streamN` with URL-encoded
-      credentials; "Other RTSP camera" keeps the raw URL field. No API change.
-- [x] Probe the venue's real C200 (hardware 2.0, firmware 1.3.17) from a laptop on the same LAN,
-      2026-11-17. Results:
-      - `stream1`: H.264 High 1280×720, about 30 fps. `stream2`: 640×360. Audio on both: G.711
-        A-law (`pcm_alaw`) 8 kHz mono.
-      - The first try was refused (401). It works with the Camera Account, not the Tapo login.
-      - A 30 s recording with video copied and audio converted to AAC: 13 segments, all
-        H.264 + AAC.
-      - A 20 s cut with the logo overlay and libx264: exactly 20.000 s, 1280×720, about
-        0.75 Mbps, so a 65 s clip is about 6 MB.
-- [ ] `edge/`: give segments real wall-clock start/end times and pick segments by those, not by
-      file name. On the real C200, segments split only on keyframes (1.7–6.1 s long), and the
-      buffered burst at connect made file names run up to a few seconds ahead of their content.
-      Use `-use_wallclock_as_timestamps 1` plus a segment list, or probe each segment. Unit test
-      with uneven durations.
-- [ ] Confirm a full clip end to end with the real C200 through the API (QR save → box cuts →
-      clip plays on `/clip/:shareToken`)
+- [x] `edge/`: record with `-c:v copy -c:a aac` (Tapo A-law audio can't be stream-copied into
+      `.ts`); unit test asserts the args; smoke uses an A-law source and checks AAC in the mp4
+- [x] `edge/`: input timeout + stalled-stream kill so a dropped Wi-Fi stream restarts; backoff
+      ≤ 30 s; heartbeat reports "Camera not reachable" with the reason
+- [x] `edge/README.md`: "Tapo C200 setup" section (camera account, DHCP reservation, privacy /
+      tracking / patrol off, 2.4 GHz, two-of-three rule, battery models unsupported, OSD)
+- [x] Courts drawer: "Tapo camera" helper (IP + camera-account username/password + quality) →
+      `rtsp://user:pass@ip:554/streamN` with URL-encoded credentials; "Other RTSP camera" keeps
+      the raw URL. No API change.
+- [x] Probe the venue's real C200 (hardware 2.0, firmware 1.3.17), 2026-11-17: `stream1` H.264 High
+      1280×720 (nominal ~30 fps, **actually 15 fps** — 150 frames in 10 s), `stream2` 640×360,
+      audio G.711 A-law 8 kHz mono. Works with the Camera Account, not the Tapo login.
+- [x] `edge/`: segments timed by real time, not file names — segments.csv (camera timestamps) +
+      each closed file's mtime as the wall-clock anchor, keeping the smallest offset per run so
+      connect bursts are discarded. (`-use_wallclock_as_timestamps` was tried and rejected: it
+      halved the frames in cut clips.) Unit-tested with irregular durations.
+- [x] Full clip end to end with the real C200 through the API (throwaway database): QR save →
+      box cut → **Ready 9 s later**, 65.0 s, 1280×720 H.264 + AAC, 972 frames (= the camera's
+      15 fps), download header `attachment; filename=dyna-cam-replay.mp4`. Camera password found
+      in no log.
 - [ ] Install guide: set the C200's video quality to 1080p in the Tapo app if the venue wants it
-      (it was sending 720p). Optionally turn off the camera's own date/time stamp; it and the
-      "tapo" logo are burned into the video, which is why our watermark goes bottom-right.
+      (it was sending 720p); optionally turn off its date/time OSD *(venue decision — documented in
+      `edge/README.md`, nothing to build)*
 
 ### Phase 1 wrap-up
 
-- [ ] `cd back && npm run lint && npm test` passes
-- [ ] `cd front && npm run lint && npm run build` passes
-- [ ] Migrations applied locally (`npm run db:migrate`), or noted as pending for deploy
-- [ ] Tried end to end: create venue → court → device → run `edge/` against the venue's Tapo
-      C200 → scan court QR on a phone → clip with logo plays on `/clip/:shareToken`
-- [ ] Changelog entry (`ref: PLAN-001`, added: QR replay clips)
+- [x] `cd back && npm run lint && npm test` passes (102 tests)
+- [x] `cd front && npm run lint && npm run build` passes
+- [x] `cd edge && npm run lint && npm test && npm run smoke` passes
+- [x] Migrations noted as pending for deploy: `001`, `002` not applied to the local `dyna-cam`
+      database yet (`cd back && npm run db:migrate`) — the end-to-end run used a throwaway database
+- [x] Tried end to end: venue → court → device → `edge/` recording the venue's Tapo C200 → QR save
+      → clip ready and playable with a working download link (the phone-scan step was simulated
+      with the same HTTP calls the court page makes)
+- [x] Changelog entry (`ref: PLAN-001`, added: QR replay clips)
 
 ## Phase 2: Physical button + staff save
 

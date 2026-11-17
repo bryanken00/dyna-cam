@@ -18,6 +18,7 @@ per-user overrides.
 | `front/`          | React 19 + Vite client (shadcn/ui, Tailwind v4, Zustand, React Query) | [front/CLAUDE.md](front/CLAUDE.md) → `frontend-conventions` skill             |
 | `back/`           | Node + Express API (MySQL via `mysql2`, Passport JWT, Zod) + API tests | [back/CLAUDE.md](back/CLAUDE.md) → `backend-conventions` skill                |
 | `app/`            | Expo SDK 58 / React Native staff app (NativeWind, Zustand, React Query) | [app/CLAUDE.md](app/CLAUDE.md) → `mobile-conventions` skill                 |
+| `edge/`           | Recorder box: Node + ffmpeg, records each court camera and cuts clips | [edge/CLAUDE.md](edge/CLAUDE.md) → `edge-conventions` skill                 |
 | `docs/`           | Repo-level Markdown for every part: plans, CRs, bugs, changelog, notes | [docs/README.md](docs/README.md)                                             |
 | `.claude/skills/` | Claude Code skills checked into the repo                              | [.claude/skills/](.claude/skills/)                                           |
 
@@ -32,6 +33,7 @@ in every session. **Load the relevant skill before writing code** — the rules 
 | [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md) | Anything under `front/src` — pages, hooks, components, forms, services, stores, routes. 8 topic docs. |
 | [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md) | Anything under `back/server`, `back/database` or `back/tests` — controllers, routes, validators, migrations, uploads, tests. 7 topic docs. |
 | [`mobile-conventions`](.claude/skills/mobile-conventions/SKILL.md) | Anything under `app/` — screens, hooks, components, sheets, services, stores, SQLite, navigation, `app.json`. 7 topic docs; start with `architecture-and-traps.md`. |
+| [`edge-conventions`](.claude/skills/edge-conventions/SKILL.md) | Anything under `edge/` — the recorder box: device API client, ffmpeg recording and clip cutting, segment timing, the job queue, tests and smoke run. |
 | [`new-module`](.claude/skills/new-module/SKILL.md) | A whole new CRUD module end to end: table + migration, permission row, validator, controller, routes, services, list page, form drawer, sidebar registration. Drives the frontend and backend skills in the right order. |
 | [`new-mobile-module`](.claude/skills/new-mobile-module/SKILL.md) | A new list/detail screen module in `app/`: screen, state hook, form sheet, data source, route, Menu row. Runs after `new-module` when the module also needs a table and API. |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | **Automatic** for a fully new feature or module (also `/plan-doc`) — plan + checklist in `docs/plans/PLAN-NNN-<slug>/`. |
@@ -42,7 +44,7 @@ in every session. **Load the relevant skill before writing code** — the rules 
 
 ## Work tracking is automatic
 
-Every request to build, change, or fix something under `front/`, `back/` or `app/` gets its tracking doc
+Every request to build, change, or fix something under `front/`, `back/`, `app/` or `edge/` gets its tracking doc
 **before any code is written**, without the user typing a slash command. Classify it:
 
 | The request is… | Doc | Skill |
@@ -121,6 +123,8 @@ Every request to build, change, or fix something under `front/`, `back/` or `app
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run
   `npm run lint` and `npm test` yourself before reporting a backend change done.
+- **Recorder box changes are tested:** `cd edge && npm run lint && npm test`, and `npm run smoke` (a real
+  ffmpeg record → cut → watermark run) when recording or clip cutting changes.
 - **App changes are bundled, not unit-tested:** `app/` has no test runner or linter. Verify with
   `cd app && npx expo-doctor@latest && npx expo export --platform android --clear`, and try the
   flow on a device or emulator against the API on port `4021` (use the machine's LAN IP).
@@ -130,11 +134,11 @@ Every request to build, change, or fix something under `front/`, `back/` or `app
   **immutable once implemented** (committed or applied): never edit, rename or delete it, even
   to fix it — add another migration. The real schema is `schema.sql` + every migration in order.
 - **Every shipped change gets a changelog entry:** when you finish a plan, CR, or bug checklist
-  (or any other change under `front/`, `back/` or `app/` that will ship), add one entry to
+  (or any other change under `front/`, `back/`, `app/` or `edge/` that will ship), add one entry to
   `docs/changelog/unpublished/` via the `changelog` skill **before reporting done** — one per
   finished checklist / logical change, not per file. Docs/`.claude/`-only changes
   don't get one. **Never bump `version` by hand** — `/publish` picks it from the entries' impact
-  and bumps `front/`, `back/` and `app/` together.
+  and bumps `front/`, `back/`, `edge/` and `app/` together.
 - **One product version:** the web frontend reads `version` from `front/package.json`, injected
   by `vite.config.js` as `import.meta.env.APP_VERSION`. The mobile app keeps the same version in
   `app/package.json`, `app/app.json` (`expo.version`) and `app/src/constants/version.js`. There is

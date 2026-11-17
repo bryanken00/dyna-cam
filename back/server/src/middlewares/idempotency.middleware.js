@@ -30,7 +30,10 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly
  * so a meaningful request hash cannot be computed here.
  *
  * Skipped entirely for auth routes (anything under `/auth/`): their responses
- * contain tokens, which must never be written to the cache table.
+ * contain tokens, which must never be written to the cache table. Any other
+ * handler whose response carries a secret (e.g. a recorder box's one-time
+ * token) calls `noIdempotencyCache(res)` before responding, and the response
+ * is not stored either.
  *
  * All timestamps in `idempotency_keys` are Asia/Manila local.
  *
@@ -89,9 +92,7 @@ export const idempotencyMiddleware = (options = {}) => {
 
         if (record.expiresAt < now) {
           // Expired — delete and process as a fresh request (Manila strings)
-          await req.db.query(`DELETE FROM idempotency_keys WHERE idempotencyKey = ?`, [
-            scopedKey,
-          ]);
+          await req.db.query(`DELETE FROM idempotency_keys WHERE idempotencyKey = ?`, [scopedKey]);
         } else {
           if (record.requestHash !== requestHash) {
             throw new APIError(
@@ -118,7 +119,7 @@ export const idempotencyMiddleware = (options = {}) => {
       res.json = function (data) {
         const responseCode = res.statusCode || 200;
 
-        if (responseCode >= 200 && responseCode < 300) {
+        if (responseCode >= 200 && responseCode < 300 && !res.locals.noIdempotencyCache) {
           const storedAt = getCurrentTimestampLocal();
           const expiresAt = toTimestampLocal(Date.now() + ttlHours * 60 * 60 * 1000);
 
@@ -147,6 +148,15 @@ export const idempotencyMiddleware = (options = {}) => {
       next(error);
     }
   };
+};
+
+/**
+ * Mark this response as carrying a secret: the idempotency cache will not store
+ * it (the cache table is plain text). Call before `res.sendSuccess(...)`.
+ * A retried request with the same key then simply runs again.
+ */
+export const noIdempotencyCache = (res) => {
+  res.locals.noIdempotencyCache = true;
 };
 
 /**

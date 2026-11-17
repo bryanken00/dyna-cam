@@ -1,0 +1,73 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+/**
+ * Hide the password in every URL inside `text`:
+ * `rtsp://admin:secret@10.0.0.5/stream1` → `rtsp://admin:***@10.0.0.5/stream1`.
+ * The userinfo runs up to the LAST "@" before the first "/", so a raw "@" in a
+ * password is still covered.
+ */
+export function maskCredentials(text) {
+  if (text === null || text === undefined) return text;
+  return String(text).replace(/([a-z][a-z0-9+.-]{0,20}:\/\/)([^\s/]*)@/gi, (_m, scheme, info) => {
+    const colon = info.indexOf(":");
+    return colon === -1 ? `${scheme}***@` : `${scheme}${info.slice(0, colon)}:***@`;
+  });
+}
+
+/** A business ID that is safe as a folder name; anything else is hashed. */
+export function safeId(id) {
+  const value = String(id ?? "");
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(value)) return value;
+  return `id-${crypto.createHash("sha1").update(value).digest("hex").slice(0, 16)}`;
+}
+
+/** Truncate to `max` characters (the API caps reasons/messages at 255). */
+export const truncate = (text, max = 255) => {
+  const value = String(text ?? "").trim();
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+};
+
+/** Sleep that ends early (without throwing) when `signal` aborts. */
+export function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/** Exponential backoff: base·2^(attempt-1), capped. attempt starts at 1. */
+export const backoffMs = (attempt, baseMs, maxMs) =>
+  Math.min(maxMs, baseMs * 2 ** Math.max(0, Math.min(attempt - 1, 20)));
+
+/** Write JSON atomically (tmp file + rename), so a power cut never leaves half a file. */
+export async function writeJsonAtomic(file, value, mode = 0o600) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
+  await fs.rename(tmp, file);
+}
+
+/** Read JSON; `fallback` when the file is missing. A corrupt file is moved aside. */
+export async function readJson(file, fallback) {
+  let text;
+  try {
+    text = await fs.readFile(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return fallback;
+    throw err;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (_err) {
+    await fs.rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {});
+    return fallback;
+  }
+}

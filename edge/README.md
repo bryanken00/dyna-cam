@@ -1,0 +1,237 @@
+# Dyna Cam — recorder box
+
+The small computer at each venue that records every court's camera and cuts the replays players
+save. It keeps a rolling ~3-minute buffer per court. When a player taps **Save last 60 seconds**,
+the API queues a clip job. The box picks the job up, cuts 60 s before the tap plus 5 s after,
+burns the venue logo in bottom-right, makes a JPEG thumbnail and uploads both.
+
+The box only makes **outbound** HTTPS calls to the API. The venue needs no port-forwarding and no
+public IP. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
+product.
+
+**Stack:** Node 20.12+ (plain ESM JavaScript, no runtime dependencies) · ffmpeg 5+ · pm2.
+Conventions live in the [`edge-conventions`](../.claude/skills/edge-conventions/SKILL.md) skill.
+
+```
+IP camera ──RTSP──▶ ffmpeg (-c:v copy) ──▶ data/buffer/<courtId>/<epoch>.ts   (rolling, ~180 s)
+                                                         │
+API ──GET /jobs (long-poll)──▶ job ──▶ cut + logo + H.264 ──▶ POST /clips/:id/upload
+```
+
+---
+
+## Hardware
+
+- **Mini PC:** an Intel N100-class box (4 cores, Quick Sync) with 8 GB RAM. Recording is stream
+  copy, so it costs almost no CPU. Only cutting a clip encodes video, and the N100's `h264_qsv`
+  encoder does that in a few seconds.
+- **SSD:** at least 128 GB. The buffer is small (about 6 courts × 180 s × 2–4 Mbps ≈ 0.5 GB), but
+  it is rewritten all day, so don't use an SD card or a USB stick.
+- **Wired network:** plug the box into the router with a cable. The cameras may be on Wi-Fi; the
+  box should not be.
+- **Power:** a small UPS is worth it. The queue survives a reboot, but footage from during the
+  outage does not exist.
+
+## Install (Ubuntu 24.04 / Debian 12)
+
+```bash
+# Node 20+ (NodeSource or nvm), ffmpeg 5+, and time sync
+sudo apt install -y ffmpeg chrony
+node -v      # v20.12 or newer
+ffmpeg -version | head -1   # 5.x or newer (4.x is handled with -stimeout but untested)
+
+# The clock matters: clips are matched to the camera footage by wall-clock time
+sudo systemctl enable --now chrony
+chronyc tracking             # "System time" should be within a few ms
+
+sudo npm install -g pm2
+git clone <repo> /opt/dyna-cam && cd /opt/dyna-cam/edge
+npm install --omit=dev
+```
+
+For Intel hardware encoding, also install the VA/QSV drivers:
+`sudo apt install -y intel-media-va-driver-non-free vainfo` (check with `vainfo`). With
+`ENCODER=auto` the box tries `h264_qsv`, then `h264_vaapi` (then `h264_videotoolbox` on a Mac),
+and falls back to `libx264`. The startup log says which encoder it picked.
+
+## Configure
+
+1. In the **Admin portal → Recorder boxes**, add a box for the venue. The token is shown **once**,
+   so copy it.
+2. In the Admin portal, give each court its camera's RTSP URL (see
+   [Tapo C200 setup](#tapo-c200-setup)).
+3. On the box:
+
+```bash
+cp .env.example .env
+nano .env        # API_URL=https://api.your-domain   DEVICE_TOKEN=<the token>
+```
+
+| Variable | Default | What |
+| --- | --- | --- |
+| `API_URL` | — (required) | Base URL of the API, without `/api` |
+| `DEVICE_TOKEN` | — (required) | The box's token from the Admin portal |
+| `DATA_DIR` | `./data` | Buffer, job folders, `queue.json` and the cached config |
+| `SEGMENT_SECONDS` | `2` | Target segment length. Segments are cut on keyframes, so the real length follows the camera (1.7–6 s on a Tapo C200). |
+| `BUFFER_SECONDS` | `180` | Footage kept per court. A clip needs 65 s plus the time the job takes to arrive. |
+| `ENCODER` | `auto` | `auto`, `libx264`, `h264_qsv`, `h264_vaapi` or `h264_videotoolbox` |
+| `VAAPI_DEVICE` | `/dev/dri/renderD128` | Only for `h264_vaapi` |
+| `RECORD_AUDIO` | `true` | Keep camera audio (transcoded to AAC while recording) |
+| `CLIP_CONCURRENCY` / `UPLOAD_CONCURRENCY` | `1` / `1` | Clips cut / uploaded at the same time |
+| `HEARTBEAT_SECONDS` | `30` | Heartbeat interval (the portal shows a box offline after 90 s) |
+| `CONFIG_REFRESH_SECONDS` | `60` | How often courts, camera URLs and the logo are re-read |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
+
+The box refuses to start without `API_URL` and `DEVICE_TOKEN`, and says why.
+
+## Run
+
+```bash
+npm start                         # foreground, Ctrl-C stops every ffmpeg cleanly
+pm2 start ecosystem.config.cjs    # as a service
+pm2 save && pm2 startup           # start on boot (run the command it prints)
+pm2 logs dyna-cam-edge
+pm2 install pm2-logrotate         # keep the logs from filling the disk
+```
+
+On start the box loads its config, starts one recorder per court, and begins long-polling for
+jobs. Within a minute each court shows **ok** in the Admin portal. If the API can't be reached, it
+records from the last cached config (`data/config.json`, mode 600, which holds the camera
+passwords).
+
+## Tapo C200 setup
+
+The venues use TP-Link **Tapo C200** cameras (Wi-Fi, indoor pan/tilt). On firmware 1.3.17,
+`stream1` is H.264 High 1280×720 at about 30 fps with G.711 A-law audio, and `stream2` is
+640×360. Always use `stream1`.
+
+1. **Create the camera account.** In the Tapo app, go to the camera → Settings → Advanced
+   settings → **Camera Account**. Set a username and password (6–32 characters). This is a
+   separate login just for RTSP, not your Tapo cloud login.
+2. **Reserve the camera's IP.** In the venue router, make a DHCP reservation for the camera, so the
+   RTSP URL never changes.
+3. **The RTSP URL** to enter for the court in the Admin portal is
+   `rtsp://<camera-account-user>:<password>@<camera-ip>:554/stream1`. The box always uses TCP.
+   The URL is stored encrypted, and the box never logs the password.
+4. **Keep the view fixed on the court.** Turn **off** Privacy Mode, Motion Tracking /
+   Auto-Tracking and Patrol. Aim the camera, then leave it alone.
+5. **Wi-Fi:** the C200 is **2.4 GHz only**. Check the signal at the court (the Tapo app shows it)
+   before mounting, and add an access point if it's weak. Drop-outs show in the portal as
+   *"Camera not reachable — check Wi-Fi/power"*, and the box reconnects by itself (backoff capped
+   at 30 s).
+6. **Pick two of three.** Tapo's own rule is that **SD-card recording, Tapo Care (cloud) and
+   RTSP/NVR can't all run at once**. Only two of the three work together, and RTSP is the one we
+   need.
+7. **On-screen text:** the camera burns its own date/time (top-left) and a "tapo" logo
+   (bottom-left) into the picture. Our watermark goes bottom-**right** so they don't collide. If
+   the venue wants a clean picture, turn the on-screen display (OSD) off in the camera's
+   settings in the Tapo app.
+8. **Battery Tapo models** (the C4xx battery cameras, C425 and similar) **don't support RTSP** and
+   can't be used.
+
+Other RTSP cameras work the same way. H.264 or H.265 is fine, since the clip is re-encoded to
+H.264 anyway.
+
+## Test without real hardware
+
+```bash
+npm run lint
+npm test          # node:test, no network: window math, segment selection, ffmpeg args, masking, queue, job loop, API client
+npm run smoke     # ~2 min, ffmpeg only, no API, no camera
+```
+
+`npm run smoke` makes a Tapo-like source (H.264 with keyframes 1.7–6.1 s apart + **pcm_alaw**
+audio). It plays the source in real time through the real recorder (only the RTSP input is
+swapped for a pipe), cuts a 65 s clip with a logo, and checks:
+
+- the duration is about 65 s;
+- there is H.264 video and AAC audio;
+- every frame is kept;
+- `moov` comes before `mdat` (faststart);
+- the thumbnail is a JPEG.
+
+Options: `-- --encoder libx264`, `-- --bursty` (packets arrive in ~1 s bursts, like bad Wi-Fi),
+and `-- --keep` (keep the temp folder).
+
+### A fake RTSP camera (end-to-end with a local API)
+
+Use [mediamtx](https://github.com/bluenviron/mediamtx) as the RTSP server and ffmpeg as the
+camera:
+
+```bash
+./mediamtx &                                   # listens on rtsp://localhost:8554
+ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=sample_rate=8000 \
+  -pix_fmt yuv420p -c:v libx264 -preset ultrafast -g 60 -bf 0 -c:a pcm_alaw \
+  -f rtsp -rtsp_transport tcp rtsp://localhost:8554/court1
+```
+
+Point a court's camera URL at `rtsp://localhost:8554/court1` (on a test API, `cd back && npm run
+dev`), add a recorder box in the Admin portal, put its token in `.env`, `npm start`, then save a
+clip from the court's QR page.
+
+## How it works (short)
+
+- **Recording** (`src/recorder.js`): one ffmpeg per court, `-rtsp_transport tcp -timeout 10s
+  -c:v copy -c:a aac -f segment`. Video is never re-encoded, and audio is transcoded because
+  MPEG-TS can't carry the Tapo's A-law. When ffmpeg exits or produces no video for 20 s, it is
+  restarted with backoff from 2 s up to 30 s. Segments older than `BUFFER_SECONDS` are deleted.
+- **Timing** (`src/segments.js`): segment lengths are irregular and the `%s` file name drifts. So
+  each closed segment's real wall-clock span comes from ffmpeg's `segments.csv` (camera content
+  times) anchored by when the segment was closed (its mtime). This is kept in `index.json`.
+- **Clips** (`src/clipper.js`):
+  1. Wait until the window `[tap − 60 s, tap + 5 s]` is on disk.
+  2. Pick the covering segments; holes up to 7 s are allowed.
+  3. Concat them on a wall-clock timeline, then trim.
+  4. Overlay the logo at 12% of the width, bottom-right.
+  5. Encode H.264 at up to 1080p with AAC audio and `+faststart`.
+  6. Make the thumbnail from the middle frame.
+- **Jobs** (`src/jobs.js`):
+  1. Long-poll `GET /jobs?wait=25`.
+  2. Persist the job to `data/queue.json`, then claim it.
+  3. Cut the clip, then upload it, retrying with backoff.
+  4. A window the buffer doesn't cover is reported with `POST /fail` (for example "Camera was not
+     recording at that time").
+  5. 404 or 409 means the clip is gone or already done, so the job is dropped.
+  6. A cut clip that wasn't uploaded yet is re-uploaded after a reboot.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `[config] Missing API_URL and DEVICE_TOKEN` | `.env` is in `edge/` and filled in |
+| `DEVICE TOKEN REJECTED (401)` in the log | The box was revoked or the token is wrong. Add it again in the Admin portal and update `.env`. The box keeps retrying slowly. |
+| 403 `BOT_BLOCKED` | Something stripped the `User-Agent` (a proxy?). The box sends `DynaCamRecorder/<version>`. |
+| Court shows *Camera not reachable — check Wi-Fi/power* | Camera powered? Same network? `ping <camera-ip>`. Weak 2.4 GHz signal at the court? |
+| *Camera rejected the username/password* | Use the Tapo **Camera Account**, not the cloud login |
+| *Camera stream not found* | The path must be `/stream1` |
+| Clips fail with *Camera was not recording at that time* | The court was in error at that moment. Check the camera and the heartbeat history. |
+| Clips fail with *…too late — already overwritten* | The box was busy or offline for minutes. Raise `BUFFER_SECONDS` or check the network. |
+| `box clock is …s behind/ahead of the server` | NTP isn't working: `chronyc tracking`, `timedatectl` |
+| Clips cut a few seconds off | Check the clock (above), then the camera's own time. |
+| Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
+| Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
+
+Test a camera by hand (the password stays out of the box's logs, but not your shell history):
+
+```bash
+ffprobe -rtsp_transport tcp -i 'rtsp://user:pass@192.168.1.50:554/stream1'
+```
+
+## Load test (6 courts) — TODO
+
+Not done yet. Run it on the real N100 box with 6 cameras (or 6 mediamtx test streams at 1080p)
+before the first venue goes live.
+
+| Measure | Target | Result |
+| --- | --- | --- |
+| CPU while recording 6 courts (no clips) | < 15% | TODO |
+| RAM (node + 6 ffmpeg) | < 1 GB | TODO |
+| Disk write rate / buffer size | ~0.5 GB steady | TODO |
+| Time to cut one 65 s clip, `h264_qsv` | < 15 s | TODO |
+| Time to cut one 65 s clip, `libx264` | < 60 s | TODO |
+| 6 clips saved at once: last clip Ready after | < 2 min | TODO |
+| Clip size (65 s, 720p / 1080p) | < 30 MB | TODO |
+| Upload time on the venue's uplink | < 60 s | TODO |
+| Recording gaps during a clip burst | none | TODO |
+| 24 h soak: memory growth, restarts | flat, 0 | TODO |

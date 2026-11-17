@@ -1,4 +1,4 @@
-import { Home, User } from "lucide-react";
+import { Home, User, Video } from "lucide-react";
 import { FileText, Settings } from "lucide-react";
 import { Suspense, lazy } from "react";
 import { Route, Routes } from "react-router";
@@ -18,6 +18,14 @@ const Roles = lazy(() => import("../../pages/Admin/UserManagement/Roles"));
 const SettingsPage = lazy(() => import("../../pages/Admin/Settings"));
 const AuditTrail = lazy(() => import("../../pages/Admin/AuditTrail"));
 const AccountSettings = lazy(() => import("../../pages/Admin/AccountSettings"));
+// Dyna Cam (PLAN-001)
+const Venues = lazy(() => import("../../pages/Admin/DynaCam/Venues"));
+const Courts = lazy(() => import("../../pages/Admin/DynaCam/Courts"));
+const CourtSign = lazy(
+  () => import("../../pages/Admin/DynaCam/Courts/PrintSign"),
+);
+const Devices = lazy(() => import("../../pages/Admin/DynaCam/Devices"));
+const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 
 const AdminRoute = () => {
   const navigations = [
@@ -94,6 +102,108 @@ const AdminRoute = () => {
             submodule: "roles",
             accessLevel: "read",
           },
+          isFilter: true,
+          isShow: true,
+        },
+      ],
+    },
+    {
+      key: "dyna-cam",
+      name: "Dyna Cam",
+      label: "Dyna Cam",
+      icon: <Video className="h-5 w-5" />,
+      permission: {
+        anyOf: [
+          { module: "venues", submodule: "list", accessLevel: "read" },
+          { module: "venues", submodule: "courts", accessLevel: "read" },
+          { module: "venues", submodule: "devices", accessLevel: "read" },
+          { module: "clips", submodule: null, accessLevel: "read" },
+        ],
+      },
+      isFilter: true,
+      isShow: true,
+      children: [
+        {
+          route: "/venues",
+          name: "Venues",
+          label: "Venues",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="venues"
+                submodule="list"
+                accessLevel="read"
+              >
+                <Venues />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "venues",
+            submodule: "list",
+            accessLevel: "read",
+          },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/courts",
+          name: "Courts",
+          label: "Courts",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="venues"
+                submodule="courts"
+                accessLevel="read"
+              >
+                <Courts />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "venues",
+            submodule: "courts",
+            accessLevel: "read",
+          },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/devices",
+          name: "Recorder boxes",
+          label: "Recorder boxes",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="venues"
+                submodule="devices"
+                accessLevel="read"
+              >
+                <Devices />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "venues",
+            submodule: "devices",
+            accessLevel: "read",
+          },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/clips",
+          name: "Clips",
+          label: "Clips",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="clips" accessLevel="read">
+                <Clips />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "clips", submodule: null, accessLevel: "read" },
           isFilter: true,
           isShow: true,
         },
@@ -185,6 +295,22 @@ const AdminRoute = () => {
       </Route>
 
       <Route element={<Auth store={useAdminAuthStore} redirect="/admin" />}>
+        {/* Printable A5 court sign — full page, outside the sidebar layout.
+            Opened in a new tab from Courts → "Print QR sign". */}
+        <Route
+          path="dyna-cam/courts/:courtId/print"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="venues"
+                submodule="courts"
+                accessLevel="read"
+              >
+                <CourtSign />
+              </ProtectedRoute>
+            </Suspense>
+          }
+        />
         <Route
           element={
             <BasicLayout navigations={navigations} store={useAdminAuthStore} />

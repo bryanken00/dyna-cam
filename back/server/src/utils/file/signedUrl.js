@@ -73,6 +73,16 @@ export const signUploadUrl = (value) => {
 };
 
 /**
+ * A signed link that makes the browser save the file (Content-Disposition:
+ * attachment) instead of opening it. `null` when there is no file.
+ */
+export const signedDownloadUrl = (value) => {
+  const storedPath = toStoredPath(value);
+  if (!isUploadPath(storedPath)) return null;
+  return `${signUploadUrl(storedPath)}&download=1`;
+};
+
+/**
  * Check a signed link.
  * @returns {number} seconds until the link expires, or 0 when it is not valid
  */

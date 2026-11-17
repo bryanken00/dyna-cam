@@ -1,0 +1,399 @@
+import { useState, useCallback, useMemo } from "react";
+import { toast } from "sonner";
+import { Copy, ExternalLink, Film, Play, Trash2 } from "lucide-react";
+import RowActions from "../../../../components/RowActions";
+import StatusDot from "../../../../components/StatusDot";
+import { usePermissions } from "../../../../hooks/usePermissions";
+import { decodeHTML } from "../../../../utils/decode-html";
+import { copyText } from "../../../../utils/clipboard";
+import { getImageUrl } from "../../../../utils/upload";
+import {
+  CLIP_SOURCE_LABEL,
+  CLIP_STATUS_TONE,
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDuration,
+} from "../../../../utils/dynaCam";
+import { confirm } from "../../../../store/confirmStore";
+import {
+  useGetClips,
+  useGetClipOptions,
+  useDeleteClip,
+} from "../../../../services/requests/admin/clips";
+
+const EMPTY_FILTERS = {
+  venueId: "",
+  courtId: "",
+  source: "",
+  status: "",
+  dateFrom: "",
+  dateTo: "",
+};
+
+export const useClipHooks = () => {
+  const { hasPermission } = usePermissions();
+  const canWrite = hasPermission("clips", null, "write");
+
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+
+  // ─── Preview Sheet State ───────────────────────────────────────────
+  const [previewClip, setPreviewClip] = useState(null);
+
+  // ─── API Hooks ─────────────────────────────────────────────────────
+  const {
+    data: apiData,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useGetClips({
+    page: pagination.current,
+    pageSize: pagination.pageSize,
+    ...filters,
+  });
+
+  // Venue + court filter options — under the clips permission
+  const { data: optionsData } = useGetClipOptions();
+
+  const deleteMutation = useDeleteClip();
+
+  const venueOptions = useMemo(
+    () =>
+      (optionsData?.data?.venues || []).map((v) => ({
+        value: v.venueId,
+        label: decodeHTML(v.name),
+      })),
+    [optionsData],
+  );
+
+  // Courts of the chosen venue (all courts when no venue is picked)
+  const courtOptions = useMemo(
+    () =>
+      (optionsData?.data?.courts || [])
+        .filter((c) => !filters.venueId || c.venueId === filters.venueId)
+        .map((c) => ({
+          value: c.courtId,
+          label: decodeHTML(c.name),
+          // Several venues can each have a "Court 1"
+          hint: filters.venueId ? undefined : decodeHTML(c.venueName),
+        })),
+    [optionsData, filters.venueId],
+  );
+
+  // ─── Handlers ──────────────────────────────────────────────────────
+  const handleTableChange = useCallback((next) => {
+    setPagination({ current: next.current, pageSize: next.pageSize });
+  }, []);
+
+  const handleFilterChange = useCallback((key, value) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      // A court belongs to one venue — a new venue clears the court pick
+      if (key === "venueId") next.courtId = "";
+      return next;
+    });
+    setPagination((prev) => ({ ...prev, current: 1 }));
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setFilters(EMPTY_FILTERS);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+  }, []);
+
+  const handlePreview = useCallback((record) => {
+    setPreviewClip(record);
+  }, []);
+
+  const handlePreviewClose = useCallback(() => {
+    setPreviewClip(null);
+  }, []);
+
+  const handleCopyShareLink = useCallback(async (record) => {
+    const ok = await copyText(record.shareUrl);
+    if (ok) toast.success("Share link copied");
+    else toast.error("Couldn't copy the link");
+  }, []);
+
+  const handleOpenSharePage = useCallback((record) => {
+    window.open(record.shareUrl, "_blank", "noopener");
+  }, []);
+
+  const handleDeleteRequest = useCallback(
+    async (record) => {
+      const ok = await confirm({
+        title: "Delete clip",
+        description: `Delete this clip from ${decodeHTML(
+          record.courtName,
+        )} (${formatDateTime(
+          record.requestedAt,
+        )})? Its video is removed and its share link stops working. This can't be undone.`,
+        confirmText: "Delete clip",
+        cancelText: "Cancel",
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        await deleteMutation.mutateAsync(record.clipId);
+        setPreviewClip((prev) =>
+          prev?.clipId === record.clipId ? null : prev,
+        );
+      } catch (err) {
+        // the mutation's onError already surfaced a toast
+        console.error("Delete clip error:", err);
+      }
+    },
+    [deleteMutation],
+  );
+
+  // ⋮ menu: Preview, share-link actions, divider, Delete (danger)
+  const getActionItems = useCallback(
+    (record) => {
+      if (record.status === "Deleted") return [];
+      const items = [];
+      if (record.status === "Ready") {
+        items.push({
+          key: "preview",
+          label: "Preview",
+          icon: <Play className="w-4 h-4" />,
+          onClick: () => handlePreview(record),
+        });
+      }
+      items.push(
+        {
+          key: "copy",
+          label: "Copy share link",
+          icon: <Copy className="w-4 h-4" />,
+          onClick: () => handleCopyShareLink(record),
+        },
+        {
+          key: "open",
+          label: "Open share page",
+          icon: <ExternalLink className="w-4 h-4" />,
+          onClick: () => handleOpenSharePage(record),
+        },
+      );
+      if (canWrite) {
+        items.push(
+          { type: "divider" },
+          {
+            key: "delete",
+            label: "Delete clip",
+            icon: <Trash2 className="w-4 h-4" />,
+            danger: true,
+            onClick: () => handleDeleteRequest(record),
+          },
+        );
+      }
+      return items;
+    },
+    [
+      canWrite,
+      handlePreview,
+      handleCopyShareLink,
+      handleOpenSharePage,
+      handleDeleteRequest,
+    ],
+  );
+
+  const { current, pageSize } = pagination;
+
+  // ─── Columns ───────────────────────────────────────────────────────
+  // # · thumbnail · court + venue · requested + source · length · status ·
+  // expires · size · ⋮
+  const columns = useMemo(
+    () => [
+      {
+        title: "#",
+        key: "index",
+        width: 56,
+        render: (_, __, index) => (
+          <span
+            className="font-mono"
+            style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+          >
+            {String((current - 1) * pageSize + index + 1).padStart(2, "0")}
+          </span>
+        ),
+      },
+      {
+        title: "Clip",
+        key: "thumbnail",
+        width: 104,
+        render: (_, record) => {
+          const ready = record.status === "Ready" && record.thumbnailUrl;
+          return (
+            <button
+              type="button"
+              disabled={!ready}
+              onClick={() => handlePreview(record)}
+              aria-label={ready ? "Preview clip" : undefined}
+              className="relative overflow-hidden flex items-center justify-center group disabled:cursor-default cursor-pointer"
+              style={{
+                width: 80,
+                height: 45,
+                borderRadius: 6,
+                border: "1px solid var(--color-line)",
+                background: "var(--color-surface-sunken)",
+                color: "var(--color-text-muted)",
+              }}
+            >
+              {ready ? (
+                <>
+                  <img
+                    src={getImageUrl(record.thumbnailUrl)}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    width={80}
+                    height={45}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <Play
+                    className="absolute w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: "var(--color-text-color)" }}
+                    fill="currentColor"
+                  />
+                </>
+              ) : (
+                <Film className="w-4 h-4" strokeWidth={1.6} />
+              )}
+            </button>
+          );
+        },
+      },
+      {
+        title: "Court",
+        dataIndex: "courtName",
+        key: "courtName",
+        render: (_, record) => (
+          <div className="min-w-0">
+            <div
+              className="truncate"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "var(--color-text-dark)",
+              }}
+            >
+              {decodeHTML(record.courtName)}
+            </div>
+            <div
+              className="truncate"
+              style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+            >
+              {decodeHTML(record.venueName)}
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: "Requested",
+        dataIndex: "requestedAt",
+        key: "requestedAt",
+        width: 180,
+        render: (requestedAt, record) => (
+          <div>
+            <div style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+              {formatDateTime(requestedAt)}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+              {CLIP_SOURCE_LABEL[record.source] || record.source}
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: "Length",
+        dataIndex: "durationSeconds",
+        key: "durationSeconds",
+        width: 80,
+        render: (seconds) => (
+          <span
+            className="font-mono"
+            style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}
+          >
+            {formatDuration(seconds)}
+          </span>
+        ),
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        width: 170,
+        render: (status, record) => (
+          <div className="min-w-0">
+            <StatusDot tone={CLIP_STATUS_TONE[status] || "muted"}>
+              {status}
+            </StatusDot>
+            {status === "Failed" && record.failureReason && (
+              <div
+                className="truncate mt-0.5"
+                style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+                title={record.failureReason}
+              >
+                {record.failureReason}
+              </div>
+            )}
+          </div>
+        ),
+      },
+      {
+        title: "Expires",
+        dataIndex: "expiresAt",
+        key: "expiresAt",
+        width: 120,
+        render: (expiresAt) => (
+          <span style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+            {formatDate(expiresAt)}
+          </span>
+        ),
+      },
+      {
+        title: "Size",
+        dataIndex: "sizeBytes",
+        key: "sizeBytes",
+        width: 90,
+        render: (bytes) => (
+          <span style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+            {formatBytes(bytes)}
+          </span>
+        ),
+      },
+      {
+        title: "",
+        key: "actions",
+        width: 60,
+        align: "right",
+        render: (_, record) => <RowActions items={getActionItems(record)} />,
+      },
+    ],
+    [getActionItems, handlePreview, current, pageSize],
+  );
+
+  const clips = apiData?.data?.clips || [];
+
+  return {
+    // apiData = { success, message, data: { clips, pagination } }
+    data: clips,
+    pagination: { ...pagination, total: apiData?.data?.pagination?.total || 0 },
+    filters,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+    canWrite,
+    venueOptions,
+    courtOptions,
+    columns,
+    handleTableChange,
+    handleFilterChange,
+    handleClearFilters,
+    previewClip,
+    handlePreviewClose,
+    handleCopyShareLink,
+    handleDeleteRequest,
+  };
+};
