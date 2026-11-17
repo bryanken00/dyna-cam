@@ -15,10 +15,12 @@ the frontend half in the right order.
 
 Node + Express · MySQL via a custom `Database` class wrapping `mysql2/promise` (`server/config/database.js`,
 injected as `req.db`) · Passport JWT auth · Zod validators. One Admin portal (`/api/v1/admin/*`) plus
-the shared `/api/v1/upload/*`, and two Dyna Cam route families that don't use a user login:
+the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a user login:
 `/api/v1/device/*` (recorder boxes, `Authorization: Device <token>`, every query scoped to
-`req.device.venueId`) and `/api/v1/public/*` (players, no login — the court QR / clip share token
-is the credential). Queries see the whole database (soft deletes aside); the seeded
+`req.device.venueId`), `/api/v1/app/*` (paired staff phones, `Authorization: App <token>`, scoped
+to `req.pairedApp.venueId`), `/api/v1/pair/*` (a 6-digit pairing key → a phone or box token;
+rate-limited) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
+credential). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.

@@ -77,9 +77,13 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
   pending-password-change guard — never a bare `passport.authenticate`.
 - **An account created for someone else** is inserted with `mustChangePassword = 1`, and its
   password goes through `newPassword()` (schema) and `passwordProblem()` (handler).
-- **Device and public routes have no `req.user`.** `/api/v1/device/*` sits behind `requireDevice`
-  (`middlewares/deviceAuth.middleware.js`): scope every query to `req.device.venueId` and answer
-  another venue's record with 404. `/api/v1/public/*` has no auth at all: return only what the
+- **Device, paired-app, pairing and public routes have no `req.user`.** `/api/v1/device/*` sits
+  behind `requireDevice` (`middlewares/deviceAuth.middleware.js`) and `/api/v1/app/*` behind
+  `requirePairedApp` (`middlewares/pairedAppAuth.middleware.js`): scope every query to
+  `req.device.venueId` / `req.pairedApp.venueId` and answer another venue's record with 404.
+  `/api/v1/pair/*` trades a 6-digit key (`utils/pairing.js`, stored as a keyed HMAC) for a token:
+  keep its per-IP and global limits, and send every token-bearing reply with
+  `noIdempotencyCache(res)`. `/api/v1/public/*` has no auth at all: return only what the
   player's page shows (no business IDs, no camera details), rate-limit writes, and validate the
   token param with `validateParams`. Neither uses `checkPermission` or `auditTrail` (both need a
   user). Tokens that grant access come from `utils/crypto/tokens.js`, never `SELECT UUID()`.

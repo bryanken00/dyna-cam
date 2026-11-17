@@ -35,17 +35,19 @@ const notPayableReason = (clip) => {
 };
 
 /**
- * Take payment — cash at the front desk. The player reads out (or shows) the
+ * Take payment — cash at the front desk. `TakePaymentView` is the layout,
+ * shared with the paired phone's screen (Screens/Paired/TakePayment); each
+ * mode passes the state from its own `useTakePayment(...)` call.
+ * The player reads out (or shows) the
  * pay code from their clip page; staff look it up, check it is the right
  * clip (court, time, thumbnail, price), and record the cash. The clip
  * unlocks for the player at once.
  *
  * Case and spaces in the code don't matter ("k7q m2p" = "K7QM2P").
  */
-const TakePaymentScreen = () => {
+export const TakePaymentView = ({ m, title = "Take payment", right }) => {
   const colors = useThemeColors();
   const navigation = useNavigation();
-  const m = useTakePayment();
   const clip = m.clip;
 
   const confirmRecord = () =>
@@ -60,7 +62,7 @@ const TakePaymentScreen = () => {
 
   return (
     <View className="bg-background flex-1">
-      <ScreenHeader title="Take payment" onBack={navigation.goBack} />
+      <ScreenHeader title={title} onBack={navigation.goBack} right={right} />
 
       <KeyboardAvoidingView className="flex-1" behavior="padding">
         <ScrollView
@@ -143,7 +145,10 @@ const TakePaymentScreen = () => {
                             {clip.courtName}
                           </Text>
                           <Text className="text-muted-foreground text-[12.5px]" numberOfLines={1}>
-                            {`${clip.venueName} · ${formatDateTime(clip.requestedAt)}`}
+                            {/* The paired API's clip has no venueName (one venue) */}
+                            {[clip.venueName, formatDateTime(clip.requestedAt)]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </Text>
                         </View>
                         <Text className="font-sans-semibold text-[26px] leading-none">
@@ -216,5 +221,8 @@ const TakePaymentScreen = () => {
     </View>
   );
 };
+
+/** The staff-account screen: permission-gated, any venue. */
+const TakePaymentScreen = () => <TakePaymentView m={useTakePayment()} />;
 
 export default TakePaymentScreen;

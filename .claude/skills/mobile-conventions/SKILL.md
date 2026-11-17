@@ -85,6 +85,11 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
   hint, same as the web app and the API — use `utils/phoneFormat.js`
   (`PHONE_PLACEHOLDER`, `formatPhoneOnChange`, `isValidPhoneNumber`,
   `formatPhoneDisplay`).
+- **Two credentials, never mixed.** A staff account (`useUserAuthStore`,
+  Bearer, `/admin/*`) and a paired phone (`usePairedStore` in
+  expo-secure-store, `Authorization: App`, `/app/*`). A paired phone unpairs
+  **only** on 401 `TOKEN_INVALID` — never on a network error or 5xx — and its
+  token is never logged. See architecture-and-traps.md.
 - **Gate on permissions like the web does.** `usePermissions().can(module,
   submodule, level)` (`hooks/usePermissions.js`) checks the same
   `GET /admin/permissions/user` rows as the web portal. A Menu row needs

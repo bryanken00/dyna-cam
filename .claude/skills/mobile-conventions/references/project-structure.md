@@ -10,6 +10,8 @@ src/
 ├─ Navigation/        Stack navigator, auth-gated
 ├─ Screens/
 │  ├─ Login/          Reference implementation for the design guidelines
+│  ├─ Pair/           "Pair this phone" — 6-digit key (first screen when unpaired)
+│  ├─ Paired/         Paired-phone mode: Courts, Court (Record), ShareQr, TakePayment
 │  ├─ Account/        Change password (forced and voluntary)
 │  ├─ Courts/         List + CourtDetail/ (Save clip now, court QR) — read-only variant
 │  ├─ Clips/          List + ClipDetail/ (play, share, take payment)
@@ -74,6 +76,7 @@ module; the conventions are in [module-pattern.md](module-pattern.md).
 | `ShareLink` · `ShareLinkSheet` | A player link with QR + share sheet; the sheet is the full-screen result after a save/booking |
 | `DetailCard` + `DetailRow` | Read-only label/value card on detail screens (empty values are skipped) |
 | `QueryState` | Loading / error-with-retry for a single-record screen |
+| `ConnectionBanner` | "Can't reach Dyna Cam — retrying" for a connection error (no response / 5xx); nothing otherwise |
 | `ClipThumb` | 16:9 clip thumbnail from a signed link, with a placeholder |
 
 Helpers: `utils/dynaCam.js` (Manila time, ₱, pay codes, status tones,

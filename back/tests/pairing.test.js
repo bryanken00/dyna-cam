@@ -297,6 +297,17 @@ describe("pairing", () => {
       assert.equal(row.name, "To delete");
     });
 
+    it("can unpair itself, which revokes it on the server", async () => {
+      const paired = await pairPhone(home, "Self unpair");
+      const self = asApp(paired.token);
+      assert.equal((await self("POST", "/app/unpair")).status, 200);
+      const refused = await self("GET", "/app/me");
+      assert.equal(refused.status, 401);
+      assert.equal(refused.body.code, "TOKEN_INVALID");
+      const listed = await call("GET", `/admin/paired-apps/${paired.pairedApp.pairedAppId}`);
+      assert.equal(listed.data.pairedApp.status, "Revoked");
+    });
+
     it("can't use a user's login or nothing at all", async () => {
       assert.equal((await ctx.api("GET", "/app/courts")).status, 401);
       assert.equal((await ctx.api("GET", "/app/courts", { token: admin.token })).status, 401);

@@ -262,3 +262,17 @@ export const fileUrl = (path) => {
   if (/^https?:\/\//.test(path)) return path;
   return `${BASE_URL}${path}`;
 };
+
+/* ── Connection ──────────────────────────────────────────────────────────── */
+
+/**
+ * True when an error means "couldn't reach the API" rather than "the API
+ * said no": no response at all (Wi-Fi down, server unreachable, timeout) or
+ * a 5xx. Paired screens show "Can't reach Dyna Cam — retrying" for these and
+ * keep retrying; they never unpair the phone over one.
+ */
+export const isConnectionError = (error) => {
+  if (!error) return false;
+  const status = error.response?.status;
+  return !status || status >= 500;
+};

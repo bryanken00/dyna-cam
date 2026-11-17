@@ -280,3 +280,98 @@ export const DEMO_SESSIONS = [
   }),
   demoSession(4, DEMO_COURTS[3], -60 * 50, 90, { status: "Cancelled" }),
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paired phone fixtures (PLAN-002) — shaped like /api/v1/pair/app and
+// /api/v1/app/* (back/server/src/controllers/v1/{pairing,app}/*.controller.js).
+// In demo mode any 6-digit key pairs, except 000000, which answers like a
+// wrong key so the error state can be seen.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEMO_WRONG_PAIRING_KEY = "000000";
+
+/** POST /pair/app's `data`. Not a real token — demo mode sends it nowhere. */
+export const makeDemoPairing = () => ({
+  token: "demo-paired-token-not-real",
+  pairedApp: { pairedAppId: "demo-phone-1", name: "Front desk phone" },
+  venue: { venueId: DEMO_VENUES[0].venueId, name: DEMO_VENUES[0].name },
+});
+
+/** The paired venue's courts, as GET /app/courts returns them. */
+export const demoPairedCourts = () =>
+  DEMO_COURTS.filter((c) => c.venueId === DEMO_VENUES[0].venueId).map((c) => ({
+    courtId: c.courtId,
+    name: c.name,
+    hasCamera: Boolean(c.camera?.configured),
+    recorderOnline: c.recorderOnline,
+    canRecord: Boolean(c.camera?.configured) && c.recorderOnline,
+  }));
+
+/** An admin clip fixture → the paired API's clip shape (toAppClip). */
+export const toDemoAppClip = (clip, { alwaysPayCode = false } = {}) => ({
+  clipId: clip.clipId,
+  courtId: clip.courtId,
+  courtName: clip.courtName,
+  source: clip.source,
+  requestedAt: clip.requestedAt,
+  durationSeconds: clip.durationSeconds,
+  status: clip.status === "Processing" ? "Pending" : clip.status,
+  shareUrl: clip.shareUrl,
+  thumbnailUrl: clip.thumbnailUrl,
+  price: clip.price,
+  paymentStatus: clip.paymentStatus,
+  payCode:
+    alwaysPayCode || clip.paymentStatus === "Unpaid" ? clip.payCode : null,
+});
+
+/**
+ * Clips "recorded" in this demo session: Pending for a few seconds, then
+ * Ready — so the QR screen's Saving… → Ready switch can be seen.
+ */
+const demoRecordings = new Map();
+const DEMO_SAVE_MS = 6000;
+
+export const demoRecordClip = (court) => {
+  const n = demoRecordings.size + 1;
+  const clipId = `demo-recording-${n}`;
+  const w = new Date(Date.now() + 8 * 3600000);
+  demoRecordings.set(clipId, {
+    at: Date.now(),
+    clip: {
+      clipId,
+      courtId: court.courtId,
+      courtName: court.name,
+      source: "STAFF",
+      requestedAt: `${w.getUTCFullYear()}-${pad2(w.getUTCMonth() + 1)}-${pad2(w.getUTCDate())} ${pad2(w.getUTCHours())}:${pad2(w.getUTCMinutes())}:00`,
+      durationSeconds: 60,
+      shareUrl: `${DEMO_APP_URL}/clip/demo-recording-${n}`,
+      thumbnailUrl: null,
+      price: 0,
+      paymentStatus: "Free",
+      payCode: null,
+    },
+  });
+  return demoRecordings.get(clipId).clip;
+};
+
+/** A paired-API clip by ID: a demo recording (with its live status) or a fixture. */
+export const demoAppClip = (clipId) => {
+  const rec = demoRecordings.get(clipId);
+  if (rec) {
+    return {
+      ...rec.clip,
+      status: Date.now() - rec.at > DEMO_SAVE_MS ? "Ready" : "Pending",
+    };
+  }
+  const clip = DEMO_CLIPS.find((c) => c.clipId === clipId);
+  return clip ? toDemoAppClip(clip) : null;
+};
+
+/** A court's recent clips: this session's recordings first, then fixtures. */
+export const demoCourtClips = (courtId) => [
+  ...[...demoRecordings.keys()]
+    .reverse()
+    .map(demoAppClip)
+    .filter((c) => c.courtId === courtId),
+  ...DEMO_CLIPS.filter((c) => c.courtId === courtId).map((c) => toDemoAppClip(c)),
+];

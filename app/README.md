@@ -28,11 +28,15 @@ npx expo start
 ```
 
 On a physical phone, `localhost` is the phone itself — set `EXPO_PUBLIC_API_URL` to your
-computer's LAN IP, e.g. `http://192.168.1.20:4021`. Sign in with an Admin portal account.
+computer's LAN IP, e.g. `http://192.168.1.20:4021`. The first screen is **Pair this phone**:
+enter a 6-digit key from the Admin portal (Dyna Cam → Paired Apps → Pair a phone), or tap
+"Sign in with a staff account instead" and use an Admin portal account.
 
 Press `a` for Android, `i` for iOS, or scan the QR code with Expo Go.
 
 Some dependencies need native code, so **Expo Go will not run everything**.
+Paired mode keeps its token in `expo-secure-store` (native, added in PLAN-002), so a dev
+build made before it **must be rebuilt** — an old build fails as soon as the app starts.
 For a full build:
 
 ```bash
@@ -71,6 +75,10 @@ two venues, four courts, a handful of clips and sessions, every permission at
 write level. Writes (save clip, book, cancel, end, record cash) succeed and
 save nothing. Demo pay codes to try in Take payment: `K7QM2P` (unpaid),
 `H3XR9A` (already paid).
+
+Paired mode works in demo too: on "Pair this phone" any 6-digit key pairs
+the phone to the first demo venue (`000000` answers like a wrong key), and a
+Record goes from Saving… to Ready after a few seconds.
 
 The switch is an `IS_DEMO` check inside each hook in
 [src/services/requests/](src/services/requests/); fixtures live

@@ -6,7 +6,9 @@ import {
   Lock,
   Mail,
   ShieldCheck,
+  Smartphone,
 } from "lucide-react-native";
+import { useNavigation } from "@react-navigation/native";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -38,6 +40,7 @@ import { isValidEmail } from "@/utils/regex";
  * layout, form state and submit.
  */
 const Login = () => {
+  const navigation = useNavigation();
   const { mutate, isPending } = useLoginAuth();
   const colors = useThemeColors();
   // The store owns the toggle; classes handle the palette.
@@ -283,6 +286,21 @@ const Login = () => {
               </View>
             </AnimatedField>
           </View>
+
+          {/* Reached from "Pair this phone" (PLAN-002): the way back to it */}
+          {navigation.canGoBack() ? (
+            <TouchableOpacity
+              onPress={navigation.goBack}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="link"
+              className="mt-6 flex-row items-center gap-1.5 py-2"
+            >
+              <Smartphone size={15} color={colors.mutedForeground} strokeWidth={2} />
+              <Text className="text-muted-foreground text-[13.5px]">
+                Pair this phone with a key instead
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

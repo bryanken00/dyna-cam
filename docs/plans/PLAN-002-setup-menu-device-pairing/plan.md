@@ -1,6 +1,6 @@
 # PLAN-002 · Setup menu, camera setup, and 6-digit device pairing
 
-> **Status:** Approved · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
+> **Status:** In progress · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
 > **Related:** [PLAN-001](../PLAN-001-court-replay-cameras/plan.md) (builds on its venues, courts,
 > recorder boxes, clips and staff app)
 
@@ -110,12 +110,13 @@ that pauses all pairing briefly. Keys live 10 minutes and are few at a time, so 
 roughly a 1-in-a-million chance and an attacker gets very few guesses.
 
 **Endpoints:**
-- `POST /api/v1/admin/pairing-codes` with `{kind, venueId, name}` (permission `paired_apps` for
-  APP, `venues/devices` for RECORDER) returns `{code, expiresAt}`. `DELETE /:id` cancels a key.
-- `POST /api/v1/app/pair` with `{code, platform, appVersion}` (public, rate-limited) creates a
+- `POST /api/v1/admin/pairing-codes/apps` (permission `paired_apps`) and
+  `/admin/pairing-codes/recorders` (`venues/devices`) with `{venueId, name}` return
+  `{code, expiresAt}`. `DELETE /:id` cancels a key.
+- `POST /api/v1/pair/app` with `{code, platform, appVersion}` (public, rate-limited) creates a
   `paired_apps` row and returns `{token, pairedApp: {name}, venue: {venueId, name}}`. The token
   is shown only in that one response.
-- `POST /api/v1/device/pair` with `{code, agentVersion}` (public, rate-limited) creates a
+- `POST /api/v1/pair/device` with `{code, agentVersion}` (public, rate-limited) creates a
   `devices` row (as "Add box" does today) and returns `{token, device, venue}`.
 - Admin `/api/v1/admin/paired-apps` (permission `paired_apps`): list (with online / last seen),
   rename, revoke, delete.
@@ -207,7 +208,7 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
 | --- | --- | --- |
 | Database | `back/database/migrations/007_add_device_pairing.sql` | `pairing_codes`, `paired_apps`, `clips.pairedAppId`, `courts.previewWantedUntil` / `snapshotPath` / `snapshotAt`, permission `paired_apps` |
 | API — admin | `controllers/v1/admin/{pairing-codes,paired-apps}.controller.js`, `courts.controller.js` (snapshot + camera details + preview request) | New routes; court response adds `camera.live` |
-| API — pairing | `controllers/v1/public/pairing.controller.js` (or in `app/`, `device/`), `middlewares/rateLimiter.js` profile | `POST /app/pair`, `POST /device/pair`, brute-force limits |
+| API — pairing | `controllers/v1/public/pairing.controller.js` (or in `app/`, `device/`), `middlewares/rateLimiter.js` profile | `POST /pair/app`, `POST /pair/device` (own `/pair` mount), brute-force limits |
 | API — paired app | `middlewares/pairedAppAuth.middleware.js`, `controllers/v1/app/app.controller.js`, `routes/route.js` | `/api/v1/app/*` |
 | API — device | `device.controller.js`, `device-api.validator.js` | heartbeat camera details, snapshot upload, `/device/pair` |
 | Web | `front/src/routes/pageRoutes/AdminRoute.jsx`, `pages/Admin/Setup/{Venues,VenueDetail,CourtSetup,RecorderBoxes}/`, `pages/Admin/DynaCam/PairedApps/` | Menu restructure, venue → courts drill-down, guided camera setup with live preview, pairing-key dialogs |
@@ -257,3 +258,7 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   - **Paired phones** can also show recent clips' QR again and take cash payments for their
     venue; payments get `payments.pairedAppId`.
   - **Staff sign-in** stays in the app alongside pairing.
+- 2026-11-17: Built as `/api/v1/pair/{app,device}` (its own mount, since `/app` and `/device`
+  require a token) and `/admin/pairing-codes/{apps,recorders}`. Added `POST /api/v1/app/unpair`
+  so "Unpair this phone" in the app also revokes it on the server, and `failureReason` on
+  `/app/clips` for a failed clip's QR screen.

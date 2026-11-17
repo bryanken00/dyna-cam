@@ -24,6 +24,19 @@ export const SCREEN_NAVIGATION = {
   Home: "Home",
   Login: "Login",
 
+  // Neither paired nor signed in: the first screen (PLAN-002). Login is
+  // pushed from it ("Sign in with a staff account instead").
+  Pair: "Pair",
+
+  // A paired staff phone (PLAN-002) — its own stack, swapped in by
+  // Navigation when the phone holds a pairing token.
+  Paired: {
+    Courts: "PairedCourts",
+    Court: "PairedCourt", // { courtId, courtName }
+    ShareQr: "PairedShareQr", // { clipId, shareUrl?, courtName?, merged? }
+    TakePayment: "PairedTakePayment",
+  },
+
   // The signed-in user's own account.
   Account: {
     ChangePassword: "ChangePassword",

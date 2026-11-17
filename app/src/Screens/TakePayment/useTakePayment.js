@@ -21,8 +21,20 @@ import {
  * normalised code being looked up, set only when Find is tapped, so the query
  * doesn't fire on every keystroke. Opened from a clip (`{ payCode }`), it
  * looks the code up straight away.
+ *
+ * Shared by both modes — the staff-account screen (permission-gated, any
+ * venue) and the paired phone's (its venue only, always allowed to record).
+ * Each passes its own request hooks; both return the same envelope shapes.
+ *
+ * @param {Function} useLookup  - (payCode) => useQuery of `{ data: { clip } }`
+ * @param {Function} useRecord  - () => useMutation taking `{ payCode }`
+ * @param {boolean}  [canRecord] - omit to use the staff permission check
  */
-export const useTakePayment = () => {
+export const useTakePayment = ({
+  useLookup = useLookupPayCode,
+  useRecord = useRecordCashPayment,
+  canRecord,
+} = {}) => {
   const routeCode = normalizePayCode(useRoute().params?.payCode);
   const startCode = PAY_CODE_PATTERN.test(routeCode) ? routeCode : null;
 
@@ -33,8 +45,8 @@ export const useTakePayment = () => {
   // { amount, courtName } after a payment is recorded; null = not yet
   const [done, setDone] = useState(null);
 
-  const lookup = useLookupPayCode(submitted);
-  const record = useRecordCashPayment();
+  const lookup = useLookup(submitted);
+  const record = useRecord();
 
   const normalized = normalizePayCode(code);
   const codeError = !normalized
@@ -80,7 +92,7 @@ export const useTakePayment = () => {
         : null,
     payable,
     // record
-    canRecord: can("payments", null, "write"),
+    canRecord: canRecord ?? can("payments", null, "write"),
     recording: record.isPending,
     recordPayment: () =>
       record.mutate(

@@ -24,6 +24,7 @@ import {
  *   GET  /clips/:clipId            a clip's status + share link (QR screen)
  *   GET  /payments/lookup?payCode= the clip a player wants to pay for
  *   POST /payments                 record cash for it
+ *   POST /unpair                   the phone revokes itself ("Unpair this phone")
  */
 const router = express.Router();
 
@@ -36,6 +37,7 @@ const toAppClip = (row) => ({
   durationSeconds: row.durationSeconds,
   // To staff a clip being cut is still "saving"
   status: row.status === "Processing" ? "Pending" : row.status,
+  failureReason: row.status === "Failed" ? row.failureReason : null,
   shareUrl: clipShareUrl(row.shareToken),
   thumbnailUrl: row.status === "Ready" ? signUploadUrl(row.thumbnailPath) : null,
   price: Number(row.price),
@@ -45,7 +47,7 @@ const toAppClip = (row) => ({
 
 const CLIP_COLUMNS = `cl.clipId, cl.courtId, c.name AS courtName, cl.source, cl.requestedAt,
   cl.durationSeconds, cl.status, cl.shareToken, cl.thumbnailPath, cl.price, cl.paymentStatus,
-  cl.payCode`;
+  cl.payCode, cl.failureReason`;
 
 /**
  * GET /me
@@ -251,6 +253,22 @@ router.post(
       { paymentId: result.paymentId, clipId: result.clipId, amount: result.amount },
       201
     );
+  })
+);
+
+/**
+ * POST /unpair — "Unpair this phone": the phone revokes its own pairing, so the
+ * token stops working on the server too (not just forgotten on the phone)
+ */
+router.post(
+  "/unpair",
+  catchAsync(async (req, res) => {
+    await req.db.query(
+      `UPDATE paired_apps SET status = 'Revoked', dateUpdated = ?
+       WHERE pairedAppId = ? AND status = 'Active'`,
+      [getCurrentTimestampLocal(), req.pairedApp.pairedAppId]
+    );
+    return res.sendSuccess("Phone unpaired");
   })
 );
 

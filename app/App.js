@@ -13,6 +13,7 @@ import Navigation from "./src/Navigation";
 import { CustomDialogProvider } from "./src/hooks/useCustomDialog";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { initDatabase } from "./src/store/database/initDatabase";
+import { usePairedStore } from "./src/store/usePairedStore";
 import useThemeStore from "./src/store/useThemeStore";
 
 /**
@@ -60,12 +61,28 @@ const AppContent = () => {
     initDatabase();
   }, []);
 
+  // The paired-phone token is read from the secure store asynchronously.
+  // Hold the splash until it has been, so a paired phone opens straight on
+  // its courts instead of flashing "Pair this phone". If the store never
+  // answers, give up after a few seconds rather than hang on the splash.
+  const pairedHydrated = usePairedStore((s) => s.hydrated);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (!usePairedStore.getState().hydrated) {
+        usePairedStore.setState({ hydrated: true });
+      }
+    }, 4000);
+    return () => clearTimeout(id);
+  }, []);
+
   // Drop the splash once fonts settle. `fontError` is included deliberately:
   // if a font fails we still show the app in a fallback face rather than
   // hanging on the splash forever.
   useEffect(() => {
-    if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
-  }, [fontsLoaded, fontError]);
+    if ((fontsLoaded || fontError) && pairedHydrated) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded, fontError, pairedHydrated]);
 
   if (!fontsLoaded && !fontError) return null;
 

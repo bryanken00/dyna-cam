@@ -74,6 +74,10 @@ Demo-mode fixtures return the same envelope (see `demoEnvelope()` in
 
 ### Auth, CSRF and sessions
 
+(The staff-account rules. A **paired phone** uses neither CSRF nor refresh —
+see architecture-and-traps.md, "Two credentials, never mixed", and
+`createPairedAxiosInstance()` at the end of `axios.js`.)
+
 `services/api/axios.js` mirrors the web client's rules for this API — don't
 re-implement them per call:
 
@@ -94,10 +98,11 @@ re-implement them per call:
 
 ## React Query (v5)
 
-`App.js` creates the one `QueryClient`. It has **no defaults yet**
-([engineering-checklist §10](engineering-checklist.md)):
-`staleTime: 0` refetches on every mount and `retry: 3` retries 4xx errors.
-Set per-query `staleTime` where it matters until someone sets global defaults.
+`App.js` creates the one `QueryClient`, with defaults: `staleTime` 15s, and
+`retry` only for no response or a 5xx (a 4xx is final). Override per query
+where it matters — permissions 10 min, pay-code lookups 0, and the paired
+queries poll with `refetchInterval` (a saving clip every 3s, courts every
+30s, anything every 5s while the API can't be reached).
 
 ### Query keys
 
@@ -181,8 +186,12 @@ inlined at build time: a release built with demo mode on ships with it on.
 
 ## Zustand stores (`src/store/`)
 
-- Two stores: `useUserAuthStore` (session) and `useThemeStore` (theme). Both
-  persist to AsyncStorage under the names `user-auth` and `theme-storage`.
+- Three stores: `useUserAuthStore` (staff-account session) and
+  `useThemeStore` (theme) persist to AsyncStorage under `user-auth` and
+  `theme-storage`; `usePairedStore` (a paired phone's token + venue, PLAN-002)
+  persists to **expo-secure-store** under `paired-app`, because that token is
+  the shared phone's only credential. Anything secret goes in secure store,
+  never AsyncStorage (unencrypted).
 - **Server data never goes in a store.** It goes in React Query.
 - Read with a selector: `useUserAuthStore((s) => s.isAuthenticated)`. Outside
   React (interceptors), use `getState()`.

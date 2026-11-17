@@ -105,8 +105,36 @@ rather than a network request.
 
 ### Navigation
 
-`Navigation/index.js` swaps the **entire navigator** on `isAuthenticated`
-rather than pushing a screen, so logout cannot be navigated back into. Route
+`Navigation/index.js` swaps the **entire navigator** on who is using the
+phone rather than pushing a screen, so signing out or unpairing cannot be
+navigated back into. Four stacks, in this order:
+
+1. staff account with a temporary password → ChangePassword only
+2. staff account signed in (`useUserAuthStore.isAuthenticated`) → the full app
+3. phone paired to a venue (`usePairedStore.token`, PLAN-002) → paired mode:
+   `Screens/Paired/` (Courts → Court → Share QR, Take payment)
+4. neither → `Screens/Pair/` ("Pair this phone"), with Login pushed from it
+
+Nothing renders until `usePairedStore.hydrated` (the secure store is read
+asynchronously); `App.js` holds the splash until then, so a paired phone
+never flashes the Pair screen.
+
+### Two credentials, never mixed
+
+| | Staff account | Paired phone (PLAN-002) |
+| --- | --- | --- |
+| Store | `useUserAuthStore` (AsyncStorage) | `usePairedStore` (**expo-secure-store**) |
+| API | `/api/v1/admin/*` | `/api/v1/app/*` (one venue), `POST /api/v1/pair/app` to pair |
+| Header | `Authorization: Bearer <jwt>` + CSRF + refresh | `Authorization: App <token>` — no CSRF, no refresh |
+| axios | `createAxiosInstanceWithInterceptor()` | `createPairedAxiosInstance()`; `axiosPair` (no auth) to pair |
+| Ends when | refresh fails / sign out | **only** a 401 `TOKEN_INVALID` from `/app/*`, or "Unpair this phone" |
+| Gating | `usePermissions().can()` | none — the API scopes everything to the venue |
+
+A paired phone must **never unpair on a network error or a 5xx** — those show
+`components/ConnectionBanner` ("Can't reach Dyna Cam — retrying") while the
+queries keep polling. The paired token and `POST /pair/app`'s response are
+secrets: never `console.*` an axios error or response on those paths (an
+axios error carries `config.headers`). Route
 names live in `constants/navigations.js` as `SCREEN_NAVIGATION` — navigate with
 the constant, never a string literal.
 

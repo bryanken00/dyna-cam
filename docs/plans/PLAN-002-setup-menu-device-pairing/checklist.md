@@ -112,25 +112,27 @@
 
 ## Phase C — Staff app paired mode
 
-- [ ] `npx expo install expo-secure-store` (**new dev build needed**); token stored there
-- [ ] Root navigator: paired → paired mode; signed in → full app; neither → "Pair this phone"
-- [ ] `Screens/Pair/`: 6-digit input → `POST /app/pair` → store token; errors: wrong/expired key,
+- [x] `npx expo install expo-secure-store` (**new dev build needed**); token stored there
+- [x] Root navigator: paired → paired mode; signed in → full app; neither → "Pair this phone"
+- [x] `Screens/Pair/`: 6-digit input → `POST /pair/app` → store token; errors: wrong/expired key,
       too many attempts
-- [ ] `Screens/Paired/Courts/` (venue's courts, big cards, camera status) → `Court/` (large
+- [x] `Screens/Paired/Courts/` (venue's courts, big cards, camera status) → `Court/` (large
       **Record**, offline state) → `ShareQr/` (full-screen high-contrast QR of the share link +
       short link text, Saving… → Ready by polling)
-- [ ] Paired extras: court's **Recent clips** (tap → its QR again) and **Take payment** (pay code
+- [x] Paired extras: court's **Recent clips** (tap → its QR again) and **Take payment** (pay code
       → record cash, this venue)
-- [ ] Unpair only on 401 `TOKEN_INVALID` from `/app/*`; network / 5xx keep the token and show
+- [x] Unpair only on 401 `TOKEN_INVALID` from `/app/*`; network / 5xx keep the token and show
       "Can't reach Dyna Cam — retrying"
-- [ ] `npx expo-doctor@latest` + `npx expo export --platform android --clear`
+- [x] `npx expo-doctor@latest` + `npx expo export --platform android --clear`
 - [ ] Tried on a phone on the venue Wi-Fi: pair with a key from the web → Courts → Court 1 →
       Record → QR photographed by another phone opens the clip
-- [ ] Changelog entry; commit Phase C
+- [x] "Unpair this phone" revokes the phone on the server too (`POST /app/unpair`, best
+      effort, then forgets the token); a failed clip's QR screen shows the reason
+- [x] Changelog entry; commit Phase C
 
 ## Wrap-up
 
-- [ ] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
+- [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
       `edge/README.md`
-- [ ] Migration applied, or noted as pending for deploy
+- [x] Migration applied (`007`, `008` on the local DB), and noted in the changelog for deploy
 - [ ] `plan.md` status set to `Done`
