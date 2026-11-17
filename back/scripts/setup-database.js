@@ -77,6 +77,8 @@ async function main() {
       { module: "venues", submodule: "devices", description: "Recorder boxes management" },
       { module: "clips", submodule: null, description: "Replay clips" },
       { module: "payments", submodule: null, description: "Clip payments (cash)" },
+      // PLAN-002
+      { module: "paired_apps", submodule: null, description: "Paired staff phones (pairing keys)" },
     ];
 
     let seeded = 0;

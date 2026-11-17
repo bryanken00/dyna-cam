@@ -59,48 +59,83 @@ async function multipart(parts) {
 export const uploadTimeoutMs = (bytes) =>
   Math.min(15 * 60_000, Math.max(120_000, Math.ceil(bytes / 256_000) * 1000));
 
+/** fetch with a timeout covering the body too; network failures become ApiError (status 0). */
+async function call(fetchImpl, url, init, timeoutMs, signal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const res = await fetchImpl(url, { ...init, signal: controller.signal });
+    // The body is read inside the timeout too
+    const body = init.raw ? Buffer.from(await res.arrayBuffer()) : await res.text();
+    return { res, body };
+  } catch (err) {
+    let reason = err.cause?.code || err.cause?.message || err.message;
+    if (timedOut) reason = `timed out after ${Math.round(timeoutMs / 1000)}s`;
+    else if (signal?.aborted) reason = "aborted";
+    throw new ApiError(`${init.method} ${new URL(url).pathname}: ${reason}`, { cause: err });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+const parseEnvelope = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch (_err) {
+    return null;
+  }
+};
+
+/** A non-2xx (or `success: false`) answer as an ApiError carrying the server's message. */
+function envelopeError(method, pathname, res, envelope) {
+  const message = envelope?.message || `HTTP ${res.status}`;
+  return new ApiError(`${method} ${pathname}: ${message}`, {
+    status: res.ok ? 502 : res.status,
+    code: envelope?.code ?? null,
+    detail: message,
+    retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+  });
+}
+
 /**
  * Client for /api/v1/device. Every response is `{ success, message, data }`;
  * each method returns `data` and throws ApiError otherwise.
+ *
+ * The token can be set later (`setToken`, after pairing). `onUnauthorized` is
+ * called on every 401 from a device route — a revoked box (index.js).
  */
-export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalThis.fetch }) {
+export function createApi({
+  apiUrl,
+  deviceToken = null,
+  userAgent,
+  fetchImpl = globalThis.fetch,
+  onUnauthorized = null,
+}) {
   const base = `${apiUrl}/api/v1/device`;
   const apiOrigin = new URL(apiUrl).origin;
-  const baseHeaders = {
-    Authorization: `Device ${deviceToken}`,
+  let token = deviceToken;
+  const hooks = { onUnauthorized };
+  const headersFor = (auth = true) => ({
+    ...(auth && token ? { Authorization: `Device ${token}` } : {}),
     "User-Agent": userAgent,
     Accept: "application/json",
-  };
+  });
 
-  async function call(url, init, timeoutMs, signal) {
-    const controller = new AbortController();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeoutMs);
-    const onAbort = () => controller.abort();
-    signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      const res = await fetchImpl(url, { ...init, signal: controller.signal });
-      // The body is read inside the timeout too
-      const body = init.raw ? Buffer.from(await res.arrayBuffer()) : await res.text();
-      return { res, body };
-    } catch (err) {
-      let reason = err.cause?.code || err.cause?.message || err.message;
-      if (timedOut) reason = `timed out after ${Math.round(timeoutMs / 1000)}s`;
-      else if (signal?.aborted) reason = "aborted";
-      throw new ApiError(`${init.method} ${new URL(url).pathname}: ${reason}`, { cause: err });
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-    }
-  }
-
-  async function request(method, pathname, { query, json, form, timeoutMs = 15_000, signal } = {}) {
-    const url = new URL(base + pathname);
+  async function request(
+    method,
+    pathname,
+    { query, json, form, timeoutMs = 15_000, signal, root = base, auth = true } = {}
+  ) {
+    const url = new URL(root + pathname);
     for (const [key, value] of Object.entries(query || {})) url.searchParams.set(key, value);
-    const headers = { ...baseHeaders };
+    const headers = headersFor(auth);
     let body;
     if (json !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -109,21 +144,17 @@ export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalTh
       body = form; // fetch sets the multipart boundary
     }
 
-    const { res, body: text } = await call(url, { method, headers, body }, timeoutMs, signal);
-    let envelope = null;
-    try {
-      envelope = JSON.parse(text);
-    } catch (_err) {
-      envelope = null;
-    }
+    const { res, body: text } = await call(
+      fetchImpl,
+      url,
+      { method, headers, body },
+      timeoutMs,
+      signal
+    );
+    const envelope = parseEnvelope(text);
     if (!res.ok || !envelope || envelope.success === false) {
-      const message = envelope?.message || `HTTP ${res.status}`;
-      throw new ApiError(`${method} ${pathname}: ${message}`, {
-        status: res.ok ? 502 : res.status,
-        code: envelope?.code ?? null,
-        detail: message,
-        retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
-      });
+      if (res.status === 401 && auth) hooks.onUnauthorized?.();
+      throw envelopeError(method, pathname, res, envelope);
     }
     return envelope.data ?? {};
   }
@@ -131,6 +162,25 @@ export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalTh
   const clipPath = (clipId, action) => `/clips/${encodeURIComponent(clipId)}/${action}`;
 
   return {
+    setToken(next) {
+      token = next;
+    },
+
+    set onUnauthorized(fn) {
+      hooks.onUnauthorized = fn;
+    },
+
+    /**
+     * Redeem a 6-digit RECORDER pairing key (no Authorization header).
+     * → { token, device: { deviceId, name }, venue: { venueId, name } }
+     */
+    pairDevice: (code, agentVersion) =>
+      request("POST", "/device", {
+        root: `${apiUrl}/api/v1/pair`,
+        auth: false,
+        json: { code, agentVersion },
+      }),
+
     getConfig: (signal) => request("GET", "/config", { signal }),
 
     heartbeat: (payload) => request("POST", "/heartbeat", { json: payload }),
@@ -179,8 +229,13 @@ export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalTh
     async downloadFile(link, destPath, { maxBytes = 10 * 1024 * 1024 } = {}) {
       const url = new URL(link, `${apiUrl}/`);
       const headers =
-        url.origin === apiOrigin ? { ...baseHeaders, Accept: "*/*" } : { "User-Agent": userAgent };
-      const { res, body } = await call(url, { method: "GET", headers, raw: true }, 30_000);
+        url.origin === apiOrigin ? { ...headersFor(), Accept: "*/*" } : { "User-Agent": userAgent };
+      const { res, body } = await call(
+        fetchImpl,
+        url,
+        { method: "GET", headers, raw: true },
+        30_000
+      );
       if (!res.ok) {
         throw new ApiError(`GET ${url.pathname}: HTTP ${res.status}`, { status: res.status });
       }

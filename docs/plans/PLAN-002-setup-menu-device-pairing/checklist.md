@@ -84,26 +84,31 @@
 
 ### Edge
 
-- [ ] `PAIRING_CODE` in `.env` → `/device/pair` on first start → token saved to
+- [x] `PAIRING_CODE` in `.env` → `/device/pair` on first start → token saved to
       `DATA_DIR/device.json` (0600); `DEVICE_TOKEN` still accepted; 401 → stop and log
       "re-pair needed"
-- [ ] README: install with a pairing key; tests
+- [x] README: install with a pairing key; tests (125); used keys remembered so a
+      stale `PAIRING_CODE` is never retried; revoke removes `device.json` and the cached config
 
 ### Frontend
 
-- [ ] Recorder Boxes "Add box" shows a 6-digit key + countdown and the `.env` lines
+- [x] Recorder Boxes "Add box" shows a 6-digit key + countdown and the `.env` lines
       (`API_URL`, `PAIRING_CODE`)
-- [ ] `pages/Admin/DynaCam/PairedApps/`: list (venue, name, platform, last seen, status), "Pair a
+- [x] `pages/Admin/DynaCam/PairedApps/`: list (venue, name, platform, last seen, status), "Pair a
       phone" (venue + name → 6-digit key + countdown), rename, revoke, delete
-- [ ] Clips shows "Staff · <phone name>" for paired-app saves
-- [ ] `npm run lint && npm run build`
+- [x] Clips shows "Staff · <phone name>" for paired-app saves
+- [x] `npm run lint && npm run build`
 
 ### Phase B wrap-up
 
-- [ ] `cd back && npm run lint && npm test` passes
+- [x] `cd back && npm run lint && npm test` passes
 - [ ] Recorder box paired with a 6-digit key on this Mac against the local API (no
       `DEVICE_TOKEN`), recording the real C200
-- [ ] Changelog entry; commit Phase B
+- [x] Real pairing run (throwaway DB, the real `edge/` process, no camera): recorder key →
+      box paired from `PAIRING_CODE` alone → `device.json` 0600, box online, key used up; phone
+      paired → `/app/courts`; box revoked → it stopped within 18 s and removed its credentials;
+      no token in the log — 2026-11-17
+- [x] Changelog entry; commit Phase B
 
 ## Phase C — Staff app paired mode
 

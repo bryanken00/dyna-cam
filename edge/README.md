@@ -56,21 +56,49 @@ and falls back to `libx264`. The startup log says which encoder it picked.
 
 ## Configure
 
-1. In the **Admin portal → Recorder boxes**, add a box for the venue. The token is shown **once**,
-   so copy it.
+1. In the **Admin portal → Setup → Recorder Boxes**, click **Add box**. It shows a **6-digit
+   pairing key**, valid for 10 minutes and usable once.
 2. In the Admin portal, give each court its camera's RTSP URL (see
    [Tapo C200 setup](#tapo-c200-setup)).
-3. On the box:
+3. On the box, within those 10 minutes:
 
 ```bash
 cp .env.example .env
-nano .env        # API_URL=https://api.your-domain   DEVICE_TOKEN=<the token>
+nano .env        # API_URL=https://api.your-domain   PAIRING_CODE=123456
+pm2 start ecosystem.config.cjs   # or: npm start
 ```
+
+On first start the box redeems the key, logs `Paired as <name> for <venue> — you can remove
+PAIRING_CODE from .env`, and keeps its own token in `data/device.json` (mode 600). After that the
+key is not needed: delete the `PAIRING_CODE` line. A key that was used or refused is never sent
+again, even after a restart (only its hash is kept, in `data/pairing-used.json`).
+
+The box picks its credentials in this order:
+
+1. `data/device.json` (from an earlier pairing);
+2. `DEVICE_TOKEN` in `.env`: **the older way**, for boxes set up before pairing keys, using the
+   long token the portal showed once;
+3. `PAIRING_CODE`.
+
+With none of these it stops and says: *"Add the box in Admin → Setup → Recorder Boxes and put its
+6-digit key in .env as PAIRING_CODE, then restart."*
+
+**Revoked boxes.** If the box is revoked in the Admin portal, a paired box:
+
+1. logs *"This box was revoked — add it again in Admin to get a new pairing key"*;
+2. stops recording and job work;
+3. deletes `device.json` and the cached camera config.
+
+If `.env` holds a new, unused `PAIRING_CODE`, the box tries it once and restarts with the new
+pairing (under pm2). Otherwise it exits until you add a new key and run
+`pm2 restart dyna-cam-edge`. A box configured with `DEVICE_TOKEN` behaves as before: it logs the
+rejection loudly and keeps retrying slowly.
 
 | Variable | Default | What |
 | --- | --- | --- |
 | `API_URL` | — (required) | Base URL of the API, without `/api` |
-| `DEVICE_TOKEN` | — (required) | The box's token from the Admin portal |
+| `PAIRING_CODE` | — | The 6-digit key from Admin → Setup → Recorder Boxes (spaces/dashes OK). Only needed until the box has paired. |
+| `DEVICE_TOKEN` | — | The older way: the long token from the portal. Leave empty when pairing. |
 | `DATA_DIR` | `./data` | Buffer, job folders, `queue.json` and the cached config |
 | `SEGMENT_SECONDS` | `2` | Target segment length. Segments are cut on keyframes, so the real length follows the camera (1.7–6 s on a Tapo C200). |
 | `BUFFER_SECONDS` | `180` | Footage kept per court. A clip needs 65 s plus the time the job takes to arrive. |
@@ -88,7 +116,7 @@ nano .env        # API_URL=https://api.your-domain   DEVICE_TOKEN=<the token>
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
 
-The box refuses to start without `API_URL` and `DEVICE_TOKEN`, and says why.
+The box refuses to start without `API_URL`, or without any credentials (above), and says why.
 
 ## Run
 
@@ -401,8 +429,12 @@ clip from the court's QR page.
 
 | Symptom | Check |
 | --- | --- |
-| `[config] Missing API_URL and DEVICE_TOKEN` | `.env` is in `edge/` and filled in |
-| `DEVICE TOKEN REJECTED (401)` in the log | The box was revoked or the token is wrong. Add it again in the Admin portal and update `.env`. The box keeps retrying slowly. |
+| `[config] Missing API_URL` | `.env` is in `edge/` and filled in |
+| *The pairing key was not accepted* | The key was mistyped, expired (10 min) or already used. Make a new one in Admin → Setup → Recorder Boxes, put it in `.env` as `PAIRING_CODE`, then `pm2 restart dyna-cam-edge`. |
+| *The PAIRING_CODE in .env was already used* | The box only tries a key once. Put a new key in `.env`. |
+| *pairing is paused by the API* | Too many wrong keys (here or anywhere). The box waits as the API asks and tries again. |
+| *This box was revoked* | Someone removed the box in Admin. Add it again, put the new key in `.env`, then `pm2 restart dyna-cam-edge`. |
+| `DEVICE TOKEN REJECTED (401)` in the log | A `DEVICE_TOKEN` box was revoked or the token is wrong. Add it again in Admin, put its key in `.env` as `PAIRING_CODE`, empty `DEVICE_TOKEN`, then restart. The box keeps retrying slowly until then. |
 | 403 `BOT_BLOCKED` | Something stripped the `User-Agent` (a proxy?). The box sends `DynaCamRecorder/<version>`. |
 | Court shows *Camera not reachable — check Wi-Fi/power* | Camera powered? Same network? `ping <camera-ip>`. Weak 2.4 GHz signal at the court? |
 | *Camera rejected the username/password* | Use the Tapo **Camera Account**, not the cloud login |

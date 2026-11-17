@@ -33,5 +33,14 @@ router.use("/v1/device", requireDevice, deviceRoute);
 import publicRoute from "../controllers/v1/public/public.controller.js";
 router.use("/v1/public", publicRoute);
 
+// PLAN-002 pairing — a 6-digit key is the credential, once (no login)
+import pairingRoute from "../controllers/v1/pairing/pairing.controller.js";
+router.use("/v1/pair", pairingRoute);
+
+// PLAN-002 paired staff phones — Authorization: App <token>, scoped to one venue
+import appRoute from "../controllers/v1/app/app.controller.js";
+import { requirePairedApp } from "../middlewares/pairedAppAuth.middleware.js";
+router.use("/v1/app", requirePairedApp, appRoute);
+
 // Exporting the router to be used in the main app
 export default router;

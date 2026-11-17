@@ -17,6 +17,9 @@ export function maskCredentials(text) {
         const colon = info.indexOf(":");
         return colon === -1 ? `${scheme}***@` : `${scheme}${info.slice(0, colon)}:***@`;
       })
+      // Device tokens: "dcb_…" from pairing, and anything after "Device " in a header
+      .replace(/\bdcb_[A-Za-z0-9_-]{4,}/g, "dcb_****")
+      .replace(/\b(Device )[A-Za-z0-9_-]{12,}/g, "$1****")
       // RTMP ingest URLs carry the stream key in the path: keep the app, show ≤ 4 chars of the key
       .replace(/(rtmps?:\/\/[^\s/'"|\])]+)(\/[^\s'"|\]),]*)/gi, (_m, base, pathPart) => {
         const parts = pathPart.slice(1).split("/");

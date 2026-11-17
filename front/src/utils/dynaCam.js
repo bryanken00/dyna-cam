@@ -195,13 +195,24 @@ export const courtSetupPath = (venueId, courtId) =>
 /** The printable A5 sign — full page, opened in its own tab. */
 export const courtSignPath = (courtId) => `/admin/setup/courts/${courtId}/print`;
 
-/** 4 → "4 s ago", 125 → "2 min ago", 7300 → "2 h ago". */
+/** 4 → "4 s ago", 125 → "2 min ago", 7300 → "2 h ago", 200000 → "2 days ago". */
 export const formatAgo = (seconds) => {
   if (seconds === null || seconds === undefined) return "";
   if (seconds < 60) return `${seconds} s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  return `${Math.floor(seconds / 3600)} h ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+  const days = Math.floor(seconds / 86400);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 };
+
+/* ── Pairing keys (PLAN-002) ─────────────────────────────────────────────── */
+
+/** A pairing key works once, for this long after it is created. */
+export const PAIRING_KEY_TTL_MS = 10 * 60 * 1000;
+
+/** "482913" → "482 913" — easier to read out and type. */
+export const formatPairingKey = (code) =>
+  String(code || "").replace(/^(\d{3})(\d{3})$/, "$1 $2");
 
 /* ── Camera health (from the venue's recorder box) ───────────────────────── */
 

@@ -344,7 +344,11 @@ export const useClipHooks = () => {
         key: "source",
         width: 140,
         render: (source, record) => (
-          <SourceChip source={source} partIndex={record.partIndex} />
+          <SourceChip
+            source={source}
+            partIndex={record.partIndex}
+            pairedAppName={record.pairedAppName}
+          />
         ),
       },
       {

@@ -154,7 +154,11 @@ const ClipPreviewSheet = ({
                   },
                   {
                     label: "Saved by",
-                    value: <SourceChip source={clip?.source} partIndex={clip?.partIndex} />,
+                    value: <SourceChip
+                        source={clip?.source}
+                        partIndex={clip?.partIndex}
+                        pairedAppName={clip?.pairedAppName}
+                      />,
                   },
                   {
                     label: "Payment",

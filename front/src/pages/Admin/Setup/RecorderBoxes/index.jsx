@@ -12,6 +12,8 @@ import {
 import { useDeviceHooks } from "./hooks";
 import DeviceFormDrawer from "./components/DeviceFormDrawer";
 import DeviceTokenDialog from "./components/DeviceTokenDialog";
+import PairingKeyDialog from "../../../../components/PairingKeyDialog";
+import PendingPairingKeys from "../../../../components/PendingPairingKeys";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -47,6 +49,8 @@ const DevicesPage = () => {
     handleDrawerSuccess,
     issuedToken,
     handleTokenDialogClose,
+    pairingKey,
+    handlePairingDialogClose,
   } = useDeviceHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -79,8 +83,8 @@ const DevicesPage = () => {
     <div className="p-8 space-y-5">
       {/* 1. HEADER */}
       <PageHeader
-        title="Recorder boxes"
-        subtitle="The on-site boxes that record each venue's court cameras."
+        title="Recorder Boxes"
+        subtitle="The on-site boxes that record each venue's court cameras. Add one with a 6-digit pairing key."
         actions={
           canWrite && (
             <Button onClick={handleCreate}>
@@ -112,6 +116,13 @@ const DevicesPage = () => {
           icon={<WifiOff className="w-4.25 h-4.25" strokeWidth={1.8} />}
         />
       </div>
+
+      {/* Keys created but not used yet */}
+      <PendingPairingKeys
+        kind="recorders"
+        canWrite={canWrite}
+        refetchInterval={pairingKey ? 10 * 1000 : 60 * 1000}
+      />
 
       {/* 3. TABLE CARD */}
       <div
@@ -226,6 +237,14 @@ const DevicesPage = () => {
         entity={selectedDevice}
         onClose={handleDrawerClose}
         onSuccess={handleDrawerSuccess}
+      />
+
+      <PairingKeyDialog
+        key={pairingKey?.code || "none"}
+        open={!!pairingKey}
+        kind="recorder"
+        pairingKey={pairingKey}
+        onClose={handlePairingDialogClose}
       />
 
       <DeviceTokenDialog

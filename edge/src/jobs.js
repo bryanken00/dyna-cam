@@ -127,7 +127,7 @@ export class JobRunner {
       const delay = backoffMs(attempt, 30_000, 300_000);
       this.log.error(
         `DEVICE TOKEN REJECTED (401): this recorder box was revoked or DEVICE_TOKEN is wrong. ` +
-          `Add the box again in Admin → Recorder boxes and put the new token in .env. Retrying in ${Math.round(delay / 1000)}s`
+          `Add it again in Admin → Setup → Recorder Boxes, put its 6-digit key in .env as PAIRING_CODE, remove DEVICE_TOKEN and restart. Retrying in ${Math.round(delay / 1000)}s`
       );
       return delay;
     }

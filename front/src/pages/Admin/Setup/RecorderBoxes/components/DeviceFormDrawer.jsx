@@ -28,9 +28,9 @@ import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import {
   useGetDeviceOptions,
-  useCreateDevice,
   useUpdateDevice,
 } from "../../../../../services/requests/admin/devices";
+import { useCreatePairingCode } from "../../../../../services/requests/admin/pairing-codes";
 
 // Mirrors devices.validator.js: create { venueId, name }, update { name }.
 const buildSchema = (isEditMode) =>
@@ -88,7 +88,8 @@ const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
     );
   }, [open, entity, form]);
 
-  const createMutation = useCreateDevice();
+  // A new box pairs itself with a 6-digit key (PLAN-002), no token to copy
+  const createMutation = useCreatePairingCode("recorders");
   const updateMutation = useUpdateDevice();
   const isPending = createMutation.isPending || updateMutation.isPending;
   const saveDisabled = isEditMode && !isDirty;
@@ -122,7 +123,11 @@ const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
           name: values.name,
         });
         markSaved();
-        onSuccess?.({ name: values.name, token: response?.data?.token });
+        onSuccess?.({
+          name: values.name,
+          venueName: venueOptions.find((o) => o.value === values.venueId)?.label,
+          code: response?.data?.code,
+        });
       }
     } catch (error) {
       // mutation errors already surface a toast via onError
@@ -274,9 +279,9 @@ const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                 >
                   <Info className="w-4 h-4 mt-0.5 shrink-0" style={mutedIcon} />
                   <span>
-                    After you add the box you&apos;ll get its sign-in token.
-                    It is shown only once — have the box&apos;s settings ready
-                    to paste it in.
+                    Next you&apos;ll get a 6-digit pairing key. Put it in the
+                    box&apos;s settings within 10 minutes — the box swaps it for
+                    its own sign-in token and appears here.
                   </span>
                 </div>
               )}
@@ -307,7 +312,7 @@ const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                       disabled={saveDisabled || isPending}
                     >
                       {isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-                      {isEditMode ? "Save Name" : "Add Box"}
+                      {isEditMode ? "Save Name" : "Create pairing key"}
                     </Button>
                   </span>
                 </TooltipTrigger>

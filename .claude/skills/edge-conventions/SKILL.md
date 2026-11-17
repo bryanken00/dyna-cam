@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, camera-setup details and previews, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -15,6 +15,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | File | Owns |
 | --- | --- |
 | `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid; `USER_AGENT`, `AGENT_VERSION` |
+| `credentials.js` | Token: `device.json` (0600) → `DEVICE_TOKEN` → redeem `PAIRING_CODE` once (`POST /pair/device`, no auth); revoked → cleanup |
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court (`CourtRecorder`), restart/backoff, stall watchdog, pruning, heartbeat status (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
@@ -36,22 +37,22 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Base `${API_URL}/api/v1/device`. Every request sends `Authorization: Device <token>` **and**
   `User-Agent: DynaCamRecorder/<version>`. The API returns 403 for a missing UA or one containing
   bot, crawler, spider or scraper.
-- Envelope `{ success, message, data }` → `data`; failures throw `ApiError` (`status` 0 = no answer).
-- Errors: **404/409** clip gone or done → drop. **401** token revoked → log loudly, back off
-  30 s → 5 min, keep trying (recording continues). **429** → `Retry-After`. **0/5xx** →
+- Envelope → `data`; failures throw `ApiError` (`status` 0 = no answer).
+- Errors: **404/409** clip gone or done → drop. **401**: a paired box (device.json) stops all work,
+  deletes device.json + config cache, tries a NEW `PAIRING_CODE` once, exits; a `DEVICE_TOKEN` box
+  logs loudly and retries 30 s → 5 min. Pairing: 400 final (key hash kept, never resent), 429 →
+  `Retry-After` or 60 s. Never log a token or key (`dcb_…` masked). **429** → `Retry-After`. **0/5xx** →
   exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
 - `logoUrl` is signed and **relative** (`new URL(logoUrl, API_URL)`, token only to the API's own
   origin); re-download only when its path (without the query) changes.
 - Use `requestedAtMs`, never parse `requestedAt`; a clip job > 15 min old is failed server-side →
   drop. Claim is best-effort but exclusive (another box's claim → 409 → drop).
-- Session parts are clip jobs with `sessionId`, `partIndex`, `windowStartMs` and `windowEndMs`
-  (null for ordinary clips). Cut exactly that window. It must be ≥ 80 % covered (holes → held
-  frames), otherwise fail with the coverage. Players' clips are cut before parts. `/config`
-  `sessions` keep their court's segments (window ± 10 s) until end + 30 min
-  (`retentionWindows`). Below `DISK_CRITICAL_MB` that keep is dropped, so recording never stops.
-- Button press: `POST /buttons/:code/press {pressedAtMs}` → 201 or 200 (merged) with `shareUrl`.
-  It is queued (`state: "press"`) and retried while under 100 s old (the API refuses > 120 s).
-  404, 409, 422 and 400 are final and logged in words.
+- Session parts = clip jobs with `sessionId`, `partIndex`, `windowStartMs/EndMs` (null for clips):
+  cut exactly that window, ≥ 80 % covered (holes → held frames) or fail with the coverage; clips
+  go first. `/config` `sessions` keep their segments (± 10 s) until end + 30 min
+  (`retentionWindows`), dropped below `DISK_CRITICAL_MB` so recording never stops.
+- Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
+  retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
 - Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
   (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion`. `/config` court
   `previewWanted` → one JPEG per ~30 s to `POST /courts/:id/snapshot` (`snapshot`, ≤ 3 MB),
@@ -84,8 +85,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s), session parts crf 26
     / max 1200k with 64k audio (≈ 45 MB per 5 min). Hardware encoders use `-b:v` with the same
     maxrate.
-  - If a hardware encoder fails, fall back to `libx264 -preset veryfast -crf 23` once.
-- `ENCODER=auto` test-encodes each listed hardware encoder (being listed is not enough).
+  - A failing hardware encoder → `libx264` once. `ENCODER=auto` test-encodes (listed ≠ working).
 
 ## Segment timing (`segments.js`)
 

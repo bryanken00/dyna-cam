@@ -3,6 +3,7 @@ import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsy
 import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { recordCashPayment } from "../../../utils/payments.js";
 import {
   createPaymentSchema,
   listPaymentsQuerySchema,
@@ -18,9 +19,6 @@ import {
  * the player shows or from the clip itself. Refunding locks the clip again.
  */
 const router = express.Router();
-
-/** Clips a payment can still be taken for: not failed, expired or deleted. */
-const PAYABLE = ["Pending", "Processing", "Ready"];
 
 const CLIP_FOR_PAYMENT = `
   SELECT cl.clipId, cl.venueId, v.name AS venueName, c.name AS courtName, cl.source,
@@ -75,12 +73,14 @@ router.get(
         `SELECT p.paymentId, p.clipId, p.venueId, v.name AS venueName, c.name AS courtName,
                 cl.payCode, cl.requestedAt, p.amount, p.method, p.status, p.note, p.paidAt,
                 p.refundedAt,
-                CONCAT(u.firstName, ' ', u.lastName) AS receivedBy
+                COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'))
+                  AS receivedBy
          FROM payments p
          JOIN venues v ON v.venueId = p.venueId
          JOIN clips cl ON cl.clipId = p.clipId
          JOIN courts c ON c.courtId = cl.courtId
          LEFT JOIN users u ON u.accountId = p.receivedByAccountId
+         LEFT JOIN paired_apps pa ON pa.pairedAppId = p.pairedAppId
          ${whereClause}
          ORDER BY p.paidAt DESC
          LIMIT ? OFFSET ?`,
@@ -166,72 +166,32 @@ router.post(
   validateBody(createPaymentSchema),
   catchAsync(async (req, res) => {
     const { payCode, clipId, note } = req.body;
-    const now = getCurrentTimestampLocal();
 
     let conn;
+    let result;
     try {
       conn = await req.db.beginTransaction();
-
-      const [rows] = await conn.execute(
-        `SELECT clipId, venueId, price, paymentStatus, status FROM clips
-         WHERE ${payCode ? "payCode" : "clipId"} = ? AND status != 'Deleted'
-         LIMIT 1 FOR UPDATE`,
-        [payCode || clipId]
-      );
-      if (rows.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError(payCode ? "No clip has that pay code" : "Clip not found", 404);
-      }
-      const clip = rows[0];
-      if (clip.paymentStatus !== "Unpaid") {
-        await req.db.rollback(conn);
-        return res.sendError(
-          clip.paymentStatus === "Paid" ? "This clip is already paid" : "This clip is free",
-          409
-        );
-      }
-      if (!PAYABLE.includes(clip.status)) {
-        await req.db.rollback(conn);
-        return res.sendError(
-          `This clip ${clip.status === "Expired" ? "has expired" : "could not be saved"} — don't take payment`,
-          409
-        );
-      }
-
-      const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
-      const paymentId = uuidRow[0].id;
-      await conn.execute(
-        `INSERT INTO payments
-           (paymentId, clipId, venueId, amount, method, receivedByAccountId, note, status, paidAt,
-            dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, 'CASH', ?, ?, 'Paid', ?, ?, ?)`,
-        [
-          paymentId,
-          clip.clipId,
-          clip.venueId,
-          clip.price,
-          req.user.accountId,
-          note || null,
-          now,
-          now,
-          now,
-        ]
-      );
-      await conn.execute(
-        `UPDATE clips SET paymentStatus = 'Paid', dateUpdated = ? WHERE clipId = ?`,
-        [now, clip.clipId]
-      );
-
-      await req.db.commit(conn);
-      return res.sendSuccess(
-        "Payment recorded — the clip is unlocked",
-        { paymentId, clipId: clip.clipId, amount: Number(clip.price) },
-        201
-      );
+      result = await recordCashPayment(conn, {
+        payCode,
+        clipId,
+        note,
+        accountId: req.user.accountId,
+      });
+      if (result.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
     } catch (err) {
       await req.db.rollback(conn);
       throw err;
     }
+
+    if (!result.ok) {
+      return res.sendError(result.message, result.status);
+    }
+    return res.sendSuccess(
+      "Payment recorded — the clip is unlocked",
+      { paymentId: result.paymentId, clipId: result.clipId, amount: result.amount },
+      201
+    );
   })
 );
 

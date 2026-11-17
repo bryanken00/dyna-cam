@@ -40,6 +40,17 @@ before(async () => {
       if (req.url === "/api/v1/device/courts/court-1/snapshot") {
         return send(200, { success: true, message: "Snapshot saved", data: { snapshotAt: "x" } });
       }
+      if (req.url === "/api/v1/pair/device") {
+        return send(201, {
+          success: true,
+          message: "This recorder box is paired",
+          data: {
+            token: "dcb_new",
+            device: { deviceId: "d", name: "Box" },
+            venue: { venueId: "v", name: "V" },
+          },
+        });
+      }
       if (req.url.endsWith("/processing"))
         return send(409, {
           success: false,
@@ -86,6 +97,33 @@ describe("device API client", () => {
     const data = await api().pressButton("court-1", 1794881000123);
     assert.equal(data.shareUrl, "https://app/clip/t");
     assert.deepEqual(JSON.parse(seen.at(-1).body), { pressedAtMs: 1794881000123 });
+  });
+
+  it("pairs without an Authorization header, then uses the new token", async () => {
+    const client = createApi({ apiUrl: baseUrl, userAgent: "DynaCamRecorder/1.0.0" });
+    const data = await client.pairDevice("123456", "1.0.0");
+    assert.equal(data.token, "dcb_new");
+    const req = seen.at(-1);
+    assert.equal(req.headers.authorization, undefined);
+    assert.equal(req.headers["user-agent"], "DynaCamRecorder/1.0.0");
+    assert.deepEqual(JSON.parse(req.body), { code: "123456", agentVersion: "1.0.0" });
+    client.setToken("dcb_new");
+    await client.getConfig();
+    assert.equal(seen.at(-1).headers.authorization, "Device dcb_new");
+  });
+
+  it("calls onUnauthorized on a 401 from a device route", async () => {
+    let calls = 0;
+    const client = createApi({
+      apiUrl: baseUrl,
+      deviceToken: "t",
+      userAgent: "DynaCamRecorder/1.0.0",
+    });
+    client.onUnauthorized = () => {
+      calls += 1;
+    };
+    await assert.rejects(client.failClip("abc", "x"), (err) => err.status === 401);
+    assert.equal(calls, 1);
   });
 
   it("long-polls with ?wait=", async () => {

@@ -43,17 +43,31 @@ const bool = (env, name, fallback) => {
   throw new ConfigError(`${name} must be true or false (got "${env[name]}")`);
 };
 
+/** PAIRING_CODE as typed ("123 456", "123-456") → "123456"; empty → null. */
+export function parsePairingCode(raw) {
+  const code = String(raw ?? "").replace(/[\s-]/g, "");
+  if (!code) return null;
+  if (!/^\d{6}$/.test(code)) {
+    throw new ConfigError(
+      "PAIRING_CODE must be the 6-digit key from Admin → Setup → Recorder Boxes"
+    );
+  }
+  return code;
+}
+
 /** Read and check the settings. Throws ConfigError with a message meant for a person. */
 export function loadConfig(env = process.env) {
   const apiUrl = String(env.API_URL ?? "")
     .trim()
     .replace(/\/+$/, "");
+  // Credentials (credentials.js): a token saved by pairing in DATA_DIR/device.json,
+  // else DEVICE_TOKEN (the older way), else a 6-digit PAIRING_CODE to redeem
   const deviceToken = String(env.DEVICE_TOKEN ?? "").trim();
-  const missing = [!apiUrl && "API_URL", !deviceToken && "DEVICE_TOKEN"].filter(Boolean);
-  if (missing.length) {
+  const pairingCode = parsePairingCode(env.PAIRING_CODE);
+  if (!apiUrl) {
     throw new ConfigError(
-      `Missing ${missing.join(" and ")}. Copy .env.example to .env and set them — the token comes ` +
-        "from the Admin portal → Recorder boxes."
+      "Missing API_URL. Copy .env.example to .env, set API_URL and the 6-digit PAIRING_CODE from " +
+        "the Admin portal → Setup → Recorder Boxes."
     );
   }
   let parsed;
@@ -75,6 +89,7 @@ export function loadConfig(env = process.env) {
   return Object.freeze({
     apiUrl,
     deviceToken,
+    pairingCode,
     dataDir: path.resolve(ROOT_DIR, env.DATA_DIR || "./data"),
     segmentSeconds: int(env, "SEGMENT_SECONDS", 2, 1, 10),
     // A clip needs 65 s plus the time the job takes to reach the box

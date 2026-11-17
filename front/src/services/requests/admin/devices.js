@@ -17,13 +17,14 @@ import {
 
 // Query: Get all recorder boxes (filter ?venueId=). Online status comes from
 // the box's heartbeat, so refresh it every 30 s while the page is open.
-export const useGetDevices = (filters = {}) => {
+export const useGetDevices = (filters = {}, options = {}) => {
   return useQuery({
     queryKey: ["devices", filters],
     queryFn: () => getDevicesApi(filters),
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
     placeholderData: keepPreviousData,
+    ...options,
   });
 };
 

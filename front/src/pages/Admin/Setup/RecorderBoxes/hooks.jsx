@@ -67,6 +67,8 @@ export const useDeviceHooks = () => {
   const [selectedDevice, setSelectedDevice] = useState(null);
   // { deviceName, token } — the one-time token to show, or null
   const [issuedToken, setIssuedToken] = useState(null);
+  // { code, name, venueName, receivedAt } — a new box's pairing key, or null
+  const [pairingKey, setPairingKey] = useState(null);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -75,13 +77,17 @@ export const useDeviceHooks = () => {
     isFetching,
     error,
     refetch,
-  } = useGetDevices({
-    page: pagination.current,
-    pageSize: pagination.pageSize,
-    search: debouncedSearch,
-    venueId: filters.venueId,
-    status: filters.status,
-  });
+  } = useGetDevices(
+    {
+      page: pagination.current,
+      pageSize: pagination.pageSize,
+      search: debouncedSearch,
+      venueId: filters.venueId,
+      status: filters.status,
+    },
+    // The new box shows up the moment it pairs — look every 10 s meanwhile
+    { refetchInterval: pairingKey ? 10 * 1000 : 30 * 1000 },
+  );
 
   // Venue filter options — under this page's own permission
   const { data: optionsData } = useGetDeviceOptions();
@@ -140,14 +146,16 @@ export const useDeviceHooks = () => {
     setSelectedDevice(null);
   }, []);
 
-  // The drawer hands back the create response; a new box carries its token,
-  // which is shown once in the token dialog.
+  // On create the drawer hands back the new pairing key, shown once
   const handleDrawerSuccess = useCallback((result) => {
     setDrawerOpen(false);
     setSelectedDevice(null);
-    if (result?.token) {
-      setIssuedToken({ deviceName: result.name, token: result.token });
-    }
+    // The countdown runs from when the key arrived (10 minutes)
+    if (result?.code) setPairingKey({ ...result, receivedAt: Date.now() });
+  }, []);
+
+  const handlePairingDialogClose = useCallback(() => {
+    setPairingKey(null);
   }, []);
 
   const handleTokenDialogClose = useCallback(() => {
@@ -226,7 +234,8 @@ export const useDeviceHooks = () => {
         },
         {
           key: "token",
-          label: revoked ? "Re-activate with new token" : "Issue new token",
+          // Advanced: pairing is the normal way; this re-issues the long token
+          label: revoked ? "Re-activate with new token (advanced)" : "Re-issue token (advanced)",
           icon: <KeyRound className="w-4 h-4" />,
           onClick: () => handleReissueRequest(record),
         },
@@ -467,6 +476,8 @@ export const useDeviceHooks = () => {
     handleDrawerClose,
     handleDrawerSuccess,
     issuedToken,
+    pairingKey,
+    handlePairingDialogClose,
     handleTokenDialogClose,
   };
 };

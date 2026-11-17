@@ -1,22 +1,38 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { ConfigError, loadConfig, ROOT_DIR, USER_AGENT } from "../src/config.js";
+import { ConfigError, loadConfig, parsePairingCode, ROOT_DIR, USER_AGENT } from "../src/config.js";
 
 const base = { API_URL: "https://api.example.com/", DEVICE_TOKEN: "tok" };
 
 describe("loadConfig", () => {
-  it("fails fast with a clear message when API_URL / DEVICE_TOKEN are missing", () => {
+  it("fails fast without API_URL, and needs no DEVICE_TOKEN (pairing replaces it)", () => {
     assert.throws(
       () => loadConfig({}),
       (err) => {
         assert.ok(err instanceof ConfigError);
-        assert.match(err.message, /API_URL and DEVICE_TOKEN/);
-        assert.match(err.message, /Recorder boxes/);
+        assert.match(err.message, /Missing API_URL/);
+        assert.match(err.message, /PAIRING_CODE/);
         return true;
       }
     );
-    assert.throws(() => loadConfig({ API_URL: "https://x.test" }), /Missing DEVICE_TOKEN/);
+    const cfg = loadConfig({ API_URL: "https://x.test" });
+    assert.equal(cfg.deviceToken, "");
+    assert.equal(cfg.pairingCode, null);
+  });
+
+  it("reads PAIRING_CODE as typed (spaces and dashes) and rejects anything but 6 digits", () => {
+    assert.equal(parsePairingCode("123 456"), "123456");
+    assert.equal(parsePairingCode(" 123-456 "), "123456");
+    assert.equal(parsePairingCode(""), null);
+    assert.equal(parsePairingCode(undefined), null);
+    assert.equal(
+      loadConfig({ API_URL: "https://x.test", PAIRING_CODE: "000 042" }).pairingCode,
+      "000042"
+    );
+    for (const bad of ["12345", "1234567", "12a456"]) {
+      assert.throws(() => parsePairingCode(bad), /6-digit key/, bad);
+    }
   });
 
   it("applies the defaults and strips the trailing slash", () => {

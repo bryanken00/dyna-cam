@@ -41,11 +41,12 @@ export const localFromEpochMs = (ms) => moment(ms).tz(TIMEZONE).format("YYYY-MM-
  * @param {Object} court - a row with COURT_RECORDING_COLUMNS
  * @param {Object} options
  * @param {"QR"|"BUTTON"|"STAFF"} options.source
+ * @param {string} [options.pairedAppId] - the paired staff phone that asked (PLAN-002)
  * @param {string} options.requestedAt - Manila timestamp of the moment to keep
  * @returns {Promise<{ ok: false, reason: "CAMERA_OFFLINE" }
  *   | { ok: true, merged: boolean, clipId: string, shareToken: string }>}
  */
-export const requestClip = async (conn, court, { source, requestedAt }) => {
+export const requestClip = async (conn, court, { source, requestedAt, pairedAppId = null }) => {
   if (!court.hasCamera || !court.recorderOnline) {
     return { ok: false, reason: "CAMERA_OFFLINE" };
   }
@@ -81,13 +82,14 @@ export const requestClip = async (conn, court, { source, requestedAt }) => {
     try {
       await conn.execute(
         `INSERT INTO clips
-           (clipId, venueId, courtId, source, requestedAt, durationSeconds, price, paymentStatus,
-            payCode, shareToken, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
+           (clipId, venueId, courtId, pairedAppId, source, requestedAt, durationSeconds, price,
+            paymentStatus, payCode, shareToken, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
         [
           clipId,
           court.venueId,
           court.courtId,
+          pairedAppId,
           source,
           requestedAt,
           CLIP_DURATION_SECONDS,
