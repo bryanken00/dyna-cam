@@ -25,12 +25,13 @@ export const useGetVenues = (filters = {}, options = {}) => {
 };
 
 // Query: Get single venue
-export const useGetVenueById = (venueId) => {
+export const useGetVenueById = (venueId, options = {}) => {
   return useQuery({
     queryKey: ["venues", venueId],
     queryFn: () => getVenueByIdApi(venueId),
-    enabled: !!venueId,
     staleTime: 10 * 60 * 1000, // 10 minutes
+    ...options,
+    enabled: !!venueId && (options.enabled ?? true),
   });
 };
 

@@ -15,7 +15,7 @@ import {
   daysFromNowLocal,
   toEpochMs,
 } from "../../../utils/clips.js";
-import { decryptSecret } from "../../../utils/crypto/secretBox.js";
+import { cameraVersion, decryptSecret } from "../../../utils/crypto/secretBox.js";
 import {
   clipUploadFolder,
   removeClipFiles,
@@ -30,6 +30,7 @@ import {
 } from "../../../utils/clipRequests.js";
 import { materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
 import { upload } from "../../../utils/file/uploads.js";
+import { removeSnapshotFile, snapshotUploadFolder } from "../../../utils/file/snapshotFiles.js";
 import {
   buttonParamsSchema,
   buttonPressSchema,
@@ -53,6 +54,7 @@ import {
  *   POST /clips/:clipId/upload         multipart: video (mp4) + thumbnail (jpeg)
  *   POST /clips/:clipId/fail           give up on a job, with a reason
  *   POST /buttons/:buttonCode/press    a court button was pressed (Phase 2)
+ *   POST /courts/:courtId/snapshot     a preview JPEG for camera setup (PLAN-002)
  */
 
 // A press the box could not relay straight away is still worth saving only
@@ -94,11 +96,12 @@ router.get(
         [venueId]
       ),
       req.db.query(
-        `SELECT courtId, name, cameraRtspUrl, streamEnabled, streamRtmpUrl
+        `SELECT courtId, name, cameraRtspUrl, streamEnabled, streamRtmpUrl,
+                previewWantedUntil > ? AS previewWanted
          FROM courts
          WHERE venueId = ? AND status = 'Active' AND cameraRtspUrl IS NOT NULL
          ORDER BY name ASC`,
-        [venueId]
+        [getCurrentTimestampLocal(), venueId]
       ),
       // Sessions whose footage the box must keep beyond its rolling buffer:
       // starting within a day, or ended in the last 30 minutes (parts may
@@ -119,12 +122,17 @@ router.get(
         courtId: court.courtId,
         name: court.name,
         cameraRtspUrl: decryptSecret(court.cameraRtspUrl),
+        // Changes whenever the camera address is saved; the box echoes it in
+        // its heartbeat so the setup page knows a report is about this address
+        cameraVersion: cameraVersion(court.cameraRtspUrl),
         // Phase 5: restream over the same camera connection (a Tapo camera
         // serves one RTSP client). null = not streaming.
         stream:
           court.streamEnabled && court.streamRtmpUrl
             ? { rtmpUrl: decryptSecret(court.streamRtmpUrl) }
             : null,
+        // PLAN-002: someone has this court's setup page open — send a snapshot
+        previewWanted: Boolean(court.previewWanted),
       }))
       // An unreadable URL (DEVICE_SECRET_KEY changed) cannot be recorded
       .filter((court) => court.cameraRtspUrl);
@@ -176,6 +184,9 @@ router.post(
         message: camera.message || null,
         streamStatus: camera.streamStatus || null,
         streamMessage: camera.streamMessage || null,
+        video: camera.video || null,
+        audio: camera.audio || null,
+        cameraVersion: camera.cameraVersion || null,
       }));
 
     const now = getCurrentTimestampLocal();
@@ -509,6 +520,65 @@ router.post(
     );
     if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
     return res.sendSuccess("Clip marked as failed");
+  })
+);
+
+/**
+ * Load a court of the box's venue into `req.court` (before multer, so nothing
+ * is written for a court the box may not touch).
+ */
+const loadOwnCourt = catchAsync(async (req, res, next) => {
+  const rows = await req.db.query(
+    `SELECT courtId, venueId, snapshotPath FROM courts
+     WHERE courtId = ? AND venueId = ? AND status != 'Deleted'
+     LIMIT 1`,
+    [req.params.courtId, req.device.venueId]
+  );
+  if (rows.length === 0) {
+    throw new APIError("Court not found", 404, ERROR_CODES.RESOURCE_NOT_FOUND);
+  }
+  req.court = rows[0];
+  next();
+});
+
+const snapshotUpload = upload({
+  filePath: (req) => snapshotUploadFolder(req.court.venueId, req.court.courtId),
+  allowedTypes: { "image/jpeg": [".jpg", ".jpeg"] },
+  maxFileSize: 3 * 1024 * 1024,
+});
+
+// At most one every few seconds per box (it sends one per court every ~30 s)
+const snapshotLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_DEVICE_SNAPSHOT_POINTS || "240", 10),
+  duration: 3600,
+  keyGenerator: (req) => `device-snapshot:${req.device.deviceId}`,
+  message: "Too many snapshots from this recorder box",
+});
+
+/**
+ * POST /courts/:courtId/snapshot
+ * multipart/form-data: `snapshot` (JPEG). Replaces the court's previous one.
+ */
+router.post(
+  "/courts/:courtId/snapshot",
+  snapshotLimiter,
+  loadOwnCourt,
+  snapshotUpload.single("snapshot"),
+  catchAsync(async (req, res) => {
+    if (!req.file) {
+      throw new APIError("A JPEG snapshot is required", 400, ERROR_CODES.VALIDATION_FAILED);
+    }
+    const storedPath = toStoredUploadPath(req.file);
+    const now = getCurrentTimestampLocal();
+    await req.db.query(
+      // Live status, not an edit — dateUpdated is left alone (like lastSeenAt)
+      `UPDATE courts SET snapshotPath = ?, snapshotAt = ? WHERE courtId = ?`,
+      [storedPath, now, req.court.courtId]
+    );
+    if (req.court.snapshotPath && req.court.snapshotPath !== storedPath) {
+      await removeSnapshotFile(req.court.snapshotPath);
+    }
+    return res.sendSuccess("Snapshot saved", { snapshotAt: now });
   })
 );
 

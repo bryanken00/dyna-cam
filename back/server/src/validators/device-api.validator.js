@@ -15,6 +15,24 @@ export const heartbeatSchema = z.object({
         // Phase 5 live stream for this court (omitted when not streaming)
         streamStatus: emptyToUndefined(z.enum(["off", "starting", "live", "error"]).optional()),
         streamMessage: optionalString(255),
+        // PLAN-002: which saved camera address this report is about (from /config)
+        cameraVersion: optionalString(32),
+        // PLAN-002: what the recorder actually receives, from its latest segment
+        video: z
+          .object({
+            codec: optionalString(30),
+            width: z.number().int().min(0).max(10000).optional(),
+            height: z.number().int().min(0).max(10000).optional(),
+            fps: z.number().min(0).max(240).optional(),
+          })
+          .optional(),
+        audio: z
+          .object({
+            codec: optionalString(30),
+            sampleRate: z.number().int().min(0).max(384000).optional(),
+          })
+          .nullable()
+          .optional(),
       })
     )
     .max(100)

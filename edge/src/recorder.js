@@ -10,6 +10,7 @@ import {
   SEGMENT_LIST,
   segmentsToPrune,
 } from "./segments.js";
+import { MediaProbe } from "./camera.js";
 import {
   classifyStreamLine,
   maskStreamKey,
@@ -142,6 +143,10 @@ export class CourtRecorder {
     this.courtId = court.courtId;
     this.name = court.name;
     this.rtspUrl = court.cameraRtspUrl;
+    // The court config this recorder runs with: echoed in the heartbeat so the
+    // setup page can tell a report about a new camera address from an old one
+    this.cameraVersion = court.cameraVersion ?? null;
+    this.createdAt = Date.now();
     this.streamUrl = court.stream?.rtmpUrl || null;
     this.streamHost = this.streamUrl ? hostOf(this.streamUrl) : null;
     this.streamStatus = this.streamUrl ? "starting" : "off";
@@ -323,6 +328,7 @@ export class CourtRecorder {
       courtId: this.courtId,
       status: this.state,
       message: truncate(this.message, 255),
+      ...(this.cameraVersion ? { cameraVersion: this.cameraVersion } : {}),
       streamStatus: this.streamStatus,
       ...(this.streamMessage ? { streamMessage: truncate(this.streamMessage, 255) } : {}),
     };
@@ -387,6 +393,8 @@ export class RecorderManager {
     this.timer = null;
     this.sessions = [];
     this.disk = { lowWarnedAt: 0, critical: false };
+    // What each camera really sends, read from its latest closed segment (camera.js)
+    this.media = new MediaProbe({ ffprobePath: settings.ffprobePath });
     /** Uncut clip/part windows of a court — set by index.js from the job queue. */
     this.pendingWindows = () => [];
   }
@@ -523,6 +531,8 @@ export class RecorderManager {
       } else {
         recorder.name = next.name;
         recorder.court = { ...next, stream: recorder.court.stream };
+        // Same address re-saved: this recorder already runs with it
+        recorder.cameraVersion = next.cameraVersion ?? null;
       }
     }
     for (const [courtId, court] of wanted) {
@@ -533,8 +543,27 @@ export class RecorderManager {
     }
   }
 
+  /**
+   * Heartbeat camera entries: recorder + stream status, plus `video` / `audio`
+   * (audio null = the stream has none) while they describe the last minute.
+   */
   statuses() {
-    return [...this.recorders.values()].map((r) => r.status());
+    return [...this.recorders.values()].map((r) => {
+      const info = this.media.current(r.dir);
+      // Only details read from this recorder's own segments (not the previous address's)
+      if (!info?.video || info.segmentAtMs < r.createdAt) return r.status();
+      return { ...r.status(), video: info.video, audio: info.audio };
+    });
+  }
+
+  /** Probe each running camera's latest closed segment (cached; ≤ every 30 s per court). */
+  async refreshMedia() {
+    for (const recorder of this.recorders.values()) {
+      if (!recorder.child) continue;
+      await this.media
+        .refresh(recorder.dir)
+        .catch((err) => this.log.debug(`could not probe ${recorder.courtId}`, err));
+    }
   }
 
   startTicker(intervalMs = 5000) {
@@ -551,6 +580,7 @@ export class RecorderManager {
           .catch((err) => this.log.warn(`tick failed for ${recorder.courtId}`, err));
       }
       await this.pruneOrphans().catch((err) => this.log.warn("prune failed", err));
+      await this.refreshMedia();
       await this.applyStreamRestarts().catch((err) => this.log.warn("stream restart failed", err));
       this.timer = setTimeout(run, intervalMs);
     };

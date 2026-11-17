@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useParams } from "react-router";
-import { decodeHTML } from "../../../../../utils/decode-html";
-import { useGetCourtById } from "../../../../../services/requests/admin/courts";
+import { decodeHTML } from "../../../../utils/decode-html";
+import { useGetCourtById } from "../../../../services/requests/admin/courts";
 
 /**
  * The printable court sign. A printed sign is always dark ink on white paper,

@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, camera-setup details and previews, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -23,6 +23,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
 | `stream.js` | RTMP via the recorder's own ffmpeg (tee + fifo slave): escaping, key masking, stderr → stream status, restart rule |
+| `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
@@ -35,24 +36,26 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Base `${API_URL}/api/v1/device`. Every request sends `Authorization: Device <token>` **and**
   `User-Agent: DynaCamRecorder/<version>`. The API returns 403 for a missing UA or one containing
   bot, crawler, spider or scraper.
-- Envelope `{ success, message, data }`: `api.js` returns `data`, throws `ApiError` (`status` 0 = no answer).
+- Envelope `{ success, message, data }` → `data`; failures throw `ApiError` (`status` 0 = no answer).
 - Errors: **404/409** clip gone or done → drop. **401** token revoked → log loudly, back off
   30 s → 5 min, keep trying (recording continues). **429** → `Retry-After`. **0/5xx** →
   exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
-- `logoUrl` is a signed **relative** path. Fetch it as `new URL(logoUrl, API_URL)`. Send the
-  device token only to the API's own origin. It expires, so re-read `/config` and download again
-  only when the path (without the query) changes.
-- Use `requestedAtMs` (epoch ms), never parse `requestedAt`. A job older than 15 min is failed
-  server-side, so drop it.
+- `logoUrl` is signed and **relative** (`new URL(logoUrl, API_URL)`, token only to the API's own
+  origin); re-download only when its path (without the query) changes.
+- Use `requestedAtMs`, never parse `requestedAt`; a clip job > 15 min old is failed server-side →
+  drop. Claim is best-effort but exclusive (another box's claim → 409 → drop).
 - Session parts are clip jobs with `sessionId`, `partIndex`, `windowStartMs` and `windowEndMs`
   (null for ordinary clips). Cut exactly that window. It must be ≥ 80 % covered (holes → held
   frames), otherwise fail with the coverage. Players' clips are cut before parts. `/config`
   `sessions` keep their court's segments (window ± 10 s) until end + 30 min
   (`retentionWindows`). Below `DISK_CRITICAL_MB` that keep is dropped, so recording never stops.
-- Claim (`/processing`) is best-effort but exclusive (another box's claim → 409 → drop).
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201 or 200 (merged) with `shareUrl`.
   It is queued (`state: "press"`) and retried while under 100 s old (the API refuses > 120 s).
   404, 409, 422 and 400 are final and logged in words.
+- Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
+  (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion`. `/config` court
+  `previewWanted` → one JPEG per ~30 s to `POST /courts/:id/snapshot` (`snapshot`, ≤ 3 MB),
+  skipped while clips are busy; config/heartbeat every 15 s meanwhile; 404 → stop that court.
 - Upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
 
 ## ffmpeg rules
@@ -67,14 +70,13 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   encoder drops them (half the frame rate). Keep the camera's timestamps.
 - **Mask credentials** (`maskCredentials`) in every log line and heartbeat message — RTSP passwords
   and RTMP stream keys (≤ last 4 chars shown; `maskStreamKey` on every stderr line).
-- **One RTSP connection per camera** (a C200 refuses a second). Streaming is a `tee` output of the
+- **One RTSP connection per camera** (a C200 refuses a second): probes and previews read segment files. Streaming is a `tee` output of the
   recorder: `[f=segment:…]…%s.ts|[f=flv:onfail=ignore:use_fifo=1:fifo_options=…]rtmp://…` —
   never a second ffmpeg on the camera. Tee values are escaped twice, file names once (`stream.js`).
   Recorders log `level+info`; stream lines set `streamStatus`, never the recording error.
   Restart for streaming only on a config change or a closed output (≤ every 5 min), and never
   while an uncut clip/part window reaches into the last 70 s (`streamRestartAllowed`).
-- Don't rely on `drawtext`, which some ffmpeg builds lack. The watermark is an image overlay:
-  12% of the width, bottom-**right** (Tapo burns its own OSD top-left and bottom-left).
+- No `drawtext` (missing in some builds). Watermark = image overlay, 12% width, bottom-**right**.
 - Clip encode:
   - Concat demuxer with per-file `duration` = wall-clock spacing.
   - **Output-side** `-ss/-t`. Input-side seeking on concat started the video ~1.5 s late.
@@ -91,10 +93,9 @@ Segments are cut on keyframes (1.7–6.1 s seen) and the `%s` name is only when 
 A closed segment's real span = **content times** from `segments.csv` (from 0 per ffmpeg run) +
 the run's **anchor** (smallest `mtime − content end` within ±120 s of that run).
 
-Rows are merged into `index.json` keyed by the run id in `run.json`, which is written before
-each spawn. They are merged before every restart, because ffmpeg truncates the list. A segment
-with no row falls back to its name → mtime. The file still being written is never used. Selection
-tolerates holes ≤ 7 s, and the window must be inside a closed segment before cutting.
+Rows merge into `index.json` keyed by the run id in `run.json` (written before each spawn; merged
+before every restart, as ffmpeg truncates the list). No row → name → mtime. The file still being
+written is never used. Clips tolerate holes ≤ 7 s; the window must end in a closed segment.
 
 ## Data and state
 `DATA_DIR` holds `buffer/<courtId>/` (segments, csv, index, run, pid), `jobs/<clipId>/` (segments
@@ -115,6 +116,5 @@ Unit-test every new pure function and API error path; report what can't be verif
 
 ## Related
 
-- README: install, Tapo C200, sessions/disk sizing, buttons, troubleshooting, load-test TODO.
-  The server side is backend work (`backend-conventions`); a contract change updates both sides.
-- Shipped changes get a `changelog` entry; plans, CRs and bugs live in the repo-root `docs/`.
+- README: install, Tapo, setup preview, sessions, streaming, buttons, troubleshooting, load test. The server side is backend work; a contract change updates both sides.
+- Shipped changes get a `changelog` entry; plans/CRs/bugs live in the repo-root `docs/`.

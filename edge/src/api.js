@@ -42,6 +42,19 @@ const parseRetryAfter = (value) => {
   return Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : null;
 };
 
+/** Files → FormData, streamed from disk. Parts with no path are left out. */
+async function multipart(parts) {
+  const form = new FormData();
+  let size = 0;
+  for (const [field, file, type, name] of parts) {
+    if (!file) continue;
+    const blob = await fs.openAsBlob(file, { type });
+    form.append(field, blob, name);
+    size += blob.size;
+  }
+  return { form, size };
+}
+
 /** Upload timeout: the time the file takes at ~256 KB/s, between 2 and 15 min (the API's limit). */
 export const uploadTimeoutMs = (bytes) =>
   Math.min(15 * 60_000, Math.max(120_000, Math.ceil(bytes / 256_000) * 1000));
@@ -139,17 +152,19 @@ export function createApi({ apiUrl, deviceToken, userAgent, fetchImpl = globalTh
     failClip: (clipId, reason) =>
       request("POST", clipPath(clipId, "fail"), { json: { reason: truncate(reason, 255) } }),
 
+    /** Camera-setup preview: multipart `snapshot` (image/jpeg, ≤ 3 MB). */
+    async uploadSnapshot(courtId, jpegPath) {
+      const { form } = await multipart([["snapshot", jpegPath, "image/jpeg", "snapshot.jpg"]]);
+      const pathname = `/courts/${encodeURIComponent(courtId)}/snapshot`;
+      return request("POST", pathname, { form, timeoutMs: 60_000 });
+    },
+
     /** multipart: `video` (video/mp4, *.mp4, required), `thumbnail` (image/jpeg, *.jpg). */
-    async uploadClip(clipId, { videoPath, thumbnailPath }, signal) {
-      const form = new FormData();
-      const video = await fs.openAsBlob(videoPath, { type: "video/mp4" });
-      form.append("video", video, "clip.mp4");
-      let size = video.size;
-      if (thumbnailPath) {
-        const thumbnail = await fs.openAsBlob(thumbnailPath, { type: "image/jpeg" });
-        form.append("thumbnail", thumbnail, "thumbnail.jpg");
-        size += thumbnail.size;
-      }
+    async uploadClip(clipId, files, signal) {
+      const { form, size } = await multipart([
+        ["video", files.videoPath, "video/mp4", "clip.mp4"],
+        ["thumbnail", files.thumbnailPath, "image/jpeg", "thumbnail.jpg"],
+      ]);
       return request("POST", clipPath(clipId, "upload"), {
         form,
         timeoutMs: uploadTimeoutMs(size),

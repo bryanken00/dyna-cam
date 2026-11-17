@@ -109,7 +109,9 @@ export const auditTrail = (moduleName) => {
 
     res.json = function (body) {
       // Only log successful operations (2xx status codes)
-      if (res.statusCode >= 200 && res.statusCode < 300 && req.user) {
+      // A route can opt out for requests that change no business data (e.g. a
+      // camera-setup page asking for a fresh preview every 90 s)
+      if (res.statusCode >= 200 && res.statusCode < 300 && req.user && !res.locals.skipAudit) {
         const action = METHOD_ACTION_MAP[req.method] || req.method;
         const module = moduleName || inferModule(req.originalUrl);
 
@@ -148,11 +150,7 @@ function inferModule(url) {
  * Build a human-readable description
  */
 function buildDescription(action, module, req) {
-  const entityId =
-    req.params?.userId ||
-    req.params?.roleId ||
-    req.params?.accountId ||
-    null;
+  const entityId = req.params?.userId || req.params?.roleId || req.params?.accountId || null;
 
   if (entityId) {
     return `${action} ${module} (${entityId})`;

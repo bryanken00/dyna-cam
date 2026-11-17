@@ -138,6 +138,14 @@ await req.db.query(
 );
 ```
 
+### Exception: live-status columns
+
+Columns that record **live status rather than an edit** — a device's `lastSeenAt`, a court's
+`previewWantedUntil` / `snapshotPath` / `snapshotAt`, a paired phone's `lastSeenAt` — are updated
+**without** touching `dateUpdated` (they change every few seconds; `dateUpdated` would stop meaning
+"last edited"). Requests that only change such columns also skip the audit trail
+(`res.locals.skipAudit = true`). Everything else follows the rule above.
+
 ### Never use:
 
 - `NOW()` in SQL

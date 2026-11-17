@@ -1,9 +1,16 @@
 import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { courtQrUrl, DEVICE_ONLINE_SECONDS, secondsAgoLocal } from "../../../utils/clips.js";
 import {
+  courtQrUrl,
+  DEVICE_ONLINE_SECONDS,
+  isOnline,
+  secondsAgoLocal,
+  toEpochMs,
+} from "../../../utils/clips.js";
+import {
+  cameraVersion,
   decryptSecret,
   encryptSecret,
   maskRtmpUrl,
@@ -30,7 +37,7 @@ const router = express.Router();
 const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
          c.cameraRtspUrl, c.qrToken, c.buttonCode, c.streamEnabled, c.streamRtmpUrl,
-         c.streamWatchUrl,
+         c.streamWatchUrl, c.snapshotPath, c.snapshotAt,
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -38,6 +45,47 @@ const COURT_SELECT = `
          ) AS recorderOnline
   FROM courts c
   JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'`;
+
+/** Seconds since a stored Manila timestamp, by the server's clock (null if none). */
+const secondsSince = (localTimestamp) =>
+  localTimestamp ? Math.max(0, Math.round((Date.now() - toEpochMs(localTimestamp)) / 1000)) : null;
+
+/**
+ * What each court's camera looks like to its venue's recorder box right now
+ * (PLAN-002 camera setup): the latest heartbeat entry for the court, from the
+ * most recently seen Active box of the venue.
+ * @returns {Promise<Map<string, Object>>} courtId → live camera info
+ */
+const liveCameras = async (db, venueIds) => {
+  const live = new Map();
+  if (venueIds.length === 0) return live;
+  const devices = await db.query(
+    `SELECT venueId, name, lastSeenAt, lastStatus FROM devices
+     WHERE status = 'Active' AND venueId IN (${venueIds.map(() => "?").join(", ")})
+     ORDER BY lastSeenAt ASC`,
+    venueIds
+  );
+  for (const device of devices) {
+    const status =
+      typeof device.lastStatus === "string" ? JSON.parse(device.lastStatus) : device.lastStatus;
+    for (const camera of status?.cameras || []) {
+      // Later rows (more recently seen boxes) win
+      live.set(camera.courtId, {
+        status: camera.status,
+        message: camera.message || null,
+        video: camera.video || null,
+        audio: camera.audio || null,
+        boxName: device.name,
+        boxOnline: isOnline(device.lastSeenAt),
+        reportedAt: status.reportedAt || null,
+        // Ages from the server's clock, not the browser's
+        reportedSecondsAgo: secondsSince(status.reportedAt),
+        cameraVersion: camera.cameraVersion || null,
+      });
+    }
+  }
+  return live;
+};
 
 /** Button codes are unique across every court (one press must reach one court). */
 const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
@@ -53,8 +101,16 @@ const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
   return rows.length > 0;
 };
 
-const toCourt = (row) => {
-  const { cameraRtspUrl, streamRtmpUrl, streamEnabled, streamWatchUrl, ...court } = row;
+const toCourt = (row, live = null) => {
+  const {
+    cameraRtspUrl,
+    streamRtmpUrl,
+    streamEnabled,
+    streamWatchUrl,
+    snapshotPath,
+    snapshotAt,
+    ...court
+  } = row;
   const plain = decryptSecret(cameraRtspUrl);
   return {
     ...court,
@@ -65,6 +121,13 @@ const toCourt = (row) => {
       configured: Boolean(cameraRtspUrl),
       // null when set but unreadable (DEVICE_SECRET_KEY changed) — re-enter it
       display: maskStreamUrl(plain),
+      // PLAN-002: what the venue's recorder box receives from this camera
+      live: live || null,
+      // Compare with live.cameraVersion: equal → the report is about this address
+      version: cameraVersion(cameraRtspUrl),
+      snapshotUrl: signUploadUrl(snapshotPath),
+      snapshotAt: snapshotAt || null,
+      snapshotSecondsAgo: secondsSince(snapshotAt),
     },
     stream: {
       enabled: Boolean(streamEnabled),
@@ -135,9 +198,10 @@ router.get(
     ]);
 
     const total = countRows[0]?.total || 0;
+    const live = await liveCameras(req.db, [...new Set(courts.map((c) => c.venueId))]);
 
     return res.sendSuccess("Courts retrieved successfully", {
-      courts: courts.map(toCourt),
+      courts: courts.map((court) => toCourt(court, live.get(court.courtId))),
       pagination: {
         page: Number(page),
         pageSize: Number(pageSize),
@@ -182,7 +246,10 @@ router.get(
       return res.sendError("Court not found", 404);
     }
 
-    return res.sendSuccess("Court retrieved successfully", { court: toCourt(rows[0]) });
+    const live = await liveCameras(req.db, [rows[0].venueId]);
+    return res.sendSuccess("Court retrieved successfully", {
+      court: toCourt(rows[0], live.get(rows[0].courtId)),
+    });
   })
 );
 
@@ -365,6 +432,35 @@ router.put(
       await req.db.rollback(conn);
       throw err;
     }
+  })
+);
+
+/**
+ * POST /:courtId/preview
+ * The camera setup page is open: ask the venue's recorder box for a snapshot
+ * every ~30 s for the next 2 minutes (the page calls this again while open).
+ */
+router.post(
+  "/:courtId/preview",
+  checkPermission("venues", "courts", "read"),
+  catchAsync(async (req, res) => {
+    const until = moment()
+      .tz(process.env.TIMEZONE || "Asia/Manila")
+      .add(2, "minutes")
+      .format("YYYY-MM-DD HH:mm:ss");
+    const result = await req.db.query(
+      `UPDATE courts c
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       SET c.previewWantedUntil = ?
+       WHERE c.courtId = ? AND c.status != 'Deleted'`,
+      // Live status, not an edit: dateUpdated and the audit trail are left alone
+      [until, req.params.courtId]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("Court not found", 404);
+    }
+    res.locals.skipAudit = true;
+    return res.sendSuccess("Preview requested", { previewWantedUntil: until });
   })
 );
 

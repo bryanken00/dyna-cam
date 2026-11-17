@@ -1,13 +1,14 @@
-import { Home, User, Video } from "lucide-react";
+import { Home, User, Video, Wrench } from "lucide-react";
 import { FileText, Settings } from "lucide-react";
 import { Suspense, lazy } from "react";
-import { Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useParams } from "react-router";
 import BasicLayout from "../../components/layout/BasicLayout";
 import { ComponentLoader } from "../../components/LoadingFallback";
 import NotFound from "../../components/NotFound";
 import { useAdminAuthStore } from "../../store/authStore";
 import { Auth, UnAuth } from "../ValidateAuth";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
+import { courtSignPath } from "../../utils/dynaCam";
 
 const Login = lazy(() => import("../../pages/Admin/Login"));
 const ForgotPassword = lazy(() => import("../../pages/Auth/ForgotPassword"));
@@ -18,16 +19,29 @@ const Roles = lazy(() => import("../../pages/Admin/UserManagement/Roles"));
 const SettingsPage = lazy(() => import("../../pages/Admin/Settings"));
 const AuditTrail = lazy(() => import("../../pages/Admin/AuditTrail"));
 const AccountSettings = lazy(() => import("../../pages/Admin/AccountSettings"));
-// Dyna Cam (PLAN-001)
-const Venues = lazy(() => import("../../pages/Admin/DynaCam/Venues"));
-const Courts = lazy(() => import("../../pages/Admin/DynaCam/Courts"));
-const CourtSign = lazy(
-  () => import("../../pages/Admin/DynaCam/Courts/PrintSign"),
+// Setup (PLAN-002): venues → courts → camera setup; recorder boxes
+const Venues = lazy(() => import("../../pages/Admin/Setup/Venues"));
+const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
+const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
+const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
+const RecorderBoxes = lazy(
+  () => import("../../pages/Admin/Setup/RecorderBoxes"),
 );
-const Devices = lazy(() => import("../../pages/Admin/DynaCam/Devices"));
+// Dyna Cam (PLAN-001): day-to-day work
 const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
+
+const VENUE_PAGE_ACCESS = [
+  { module: "venues", submodule: "list", accessLevel: "read" },
+  { module: "venues", submodule: "courts", accessLevel: "read" },
+];
+
+/** Old print-sign links (PLAN-001) → the Setup route, keeping the court. */
+const LegacyCourtSignRedirect = () => {
+  const { courtId } = useParams();
+  return <Navigate to={courtSignPath(courtId)} replace />;
+};
 
 const AdminRoute = () => {
   const navigations = [
@@ -110,72 +124,39 @@ const AdminRoute = () => {
       ],
     },
     {
-      key: "dyna-cam",
-      name: "Dyna Cam",
-      label: "Dyna Cam",
-      icon: <Video className="h-5 w-5" />,
+      key: "setup",
+      name: "Setup",
+      label: "Setup",
+      icon: <Wrench className="h-5 w-5" />,
       permission: {
         anyOf: [
-          { module: "venues", submodule: "list", accessLevel: "read" },
-          { module: "venues", submodule: "courts", accessLevel: "read" },
+          ...VENUE_PAGE_ACCESS,
           { module: "venues", submodule: "devices", accessLevel: "read" },
-          { module: "clips", submodule: null, accessLevel: "read" },
-          { module: "payments", submodule: null, accessLevel: "read" },
         ],
       },
       isFilter: true,
       isShow: true,
       children: [
         {
+          // Venue list → venue page (its courts) → court setup, below
           route: "/venues",
           name: "Venues",
           label: "Venues",
           component: (
             <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="venues"
-                submodule="list"
-                accessLevel="read"
-              >
+              <ProtectedRoute anyOf={VENUE_PAGE_ACCESS}>
                 <Venues />
               </ProtectedRoute>
             </Suspense>
           ),
-          permission: {
-            module: "venues",
-            submodule: "list",
-            accessLevel: "read",
-          },
+          permission: { anyOf: VENUE_PAGE_ACCESS },
           isFilter: true,
           isShow: true,
         },
         {
-          route: "/courts",
-          name: "Courts",
-          label: "Courts",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="venues"
-                submodule="courts"
-                accessLevel="read"
-              >
-                <Courts />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: {
-            module: "venues",
-            submodule: "courts",
-            accessLevel: "read",
-          },
-          isFilter: true,
-          isShow: true,
-        },
-        {
-          route: "/devices",
-          name: "Recorder boxes",
-          label: "Recorder boxes",
+          route: "/recorder-boxes",
+          name: "Recorder Boxes",
+          label: "Recorder Boxes",
           component: (
             <Suspense fallback={<ComponentLoader />}>
               <ProtectedRoute
@@ -183,7 +164,7 @@ const AdminRoute = () => {
                 submodule="devices"
                 accessLevel="read"
               >
-                <Devices />
+                <RecorderBoxes />
               </ProtectedRoute>
             </Suspense>
           ),
@@ -195,6 +176,23 @@ const AdminRoute = () => {
           isFilter: true,
           isShow: true,
         },
+      ],
+    },
+    {
+      key: "dyna-cam",
+      name: "Dyna Cam",
+      label: "Dyna Cam",
+      icon: <Video className="h-5 w-5" />,
+      permission: {
+        anyOf: [
+          { module: "clips", submodule: null, accessLevel: "read" },
+          { module: "payments", submodule: null, accessLevel: "read" },
+        ],
+      },
+      isFilter: true,
+      isShow: true,
+      // PLAN-002 Phase B adds Paired Apps here
+      children: [
         {
           route: "/clips",
           name: "Clips",
@@ -333,9 +331,9 @@ const AdminRoute = () => {
 
       <Route element={<Auth store={useAdminAuthStore} redirect="/admin" />}>
         {/* Printable A5 court sign — full page, outside the sidebar layout.
-            Opened in a new tab from Courts → "Print QR sign". */}
+            Opened in a new tab from a venue's courts or the court page. */}
         <Route
-          path="dyna-cam/courts/:courtId/print"
+          path="setup/courts/:courtId/print"
           element={
             <Suspense fallback={<ComponentLoader />}>
               <ProtectedRoute
@@ -348,6 +346,24 @@ const AdminRoute = () => {
             </Suspense>
           }
         />
+        {/* PLAN-001 routes → their Setup homes (bookmarks, printed links) */}
+        <Route
+          path="dyna-cam/courts/:courtId/print"
+          element={<LegacyCourtSignRedirect />}
+        />
+        <Route
+          path="dyna-cam/venues"
+          element={<Navigate to="/admin/setup/venues" replace />}
+        />
+        <Route
+          path="dyna-cam/courts"
+          element={<Navigate to="/admin/setup/venues" replace />}
+        />
+        <Route
+          path="dyna-cam/devices"
+          element={<Navigate to="/admin/setup/recorder-boxes" replace />}
+        />
+
         <Route
           element={
             <BasicLayout navigations={navigations} store={useAdminAuthStore} />
@@ -379,6 +395,32 @@ const AdminRoute = () => {
                 />
               );
             })}
+
+          {/* Setup detail pages — not sidebar items; "Venues" stays highlighted */}
+          <Route
+            path="setup/venues/:venueId"
+            element={
+              <Suspense fallback={<ComponentLoader />}>
+                <ProtectedRoute anyOf={VENUE_PAGE_ACCESS}>
+                  <VenueDetail />
+                </ProtectedRoute>
+              </Suspense>
+            }
+          />
+          <Route
+            path="setup/venues/:venueId/courts/:courtId"
+            element={
+              <Suspense fallback={<ComponentLoader />}>
+                <ProtectedRoute
+                  module="venues"
+                  submodule="courts"
+                  accessLevel="read"
+                >
+                  <CourtSetup />
+                </ProtectedRoute>
+              </Suspense>
+            }
+          />
 
           <Route
             path="account-settings"

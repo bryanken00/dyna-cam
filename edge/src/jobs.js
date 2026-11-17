@@ -359,6 +359,15 @@ export class JobRunner {
     if (entry.clipId) await fsp.rm(this.workDir(entry), { recursive: true, force: true });
   }
 
+  /** Clips are being cut/uploaded or waiting — lower-priority work (previews) should wait. */
+  isBusy() {
+    return (
+      this.busy.cut > 0 ||
+      this.busy.upload > 0 ||
+      this.queue.list().some((e) => e.clipId && e.state === "waiting")
+    );
+  }
+
   /** Windows of this court's clips/parts not cut yet (a recorder restart must not gap them). */
   pendingWindows(courtId) {
     return this.queue

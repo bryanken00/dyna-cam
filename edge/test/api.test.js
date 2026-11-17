@@ -37,6 +37,9 @@ before(async () => {
           data: { clipId: "c9", shareUrl: "https://app/clip/t", merged: false },
         });
       }
+      if (req.url === "/api/v1/device/courts/court-1/snapshot") {
+        return send(200, { success: true, message: "Snapshot saved", data: { snapshotAt: "x" } });
+      }
       if (req.url.endsWith("/processing"))
         return send(409, {
           success: false,
@@ -138,6 +141,22 @@ describe("device API client", () => {
       assert.match(
         body,
         /name="thumbnail"; filename="thumbnail\.jpg"\r\nContent-Type: image\/jpeg\r\n\r\nJPGDATA/
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("uploads a preview snapshot as multipart image/jpeg", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "edge-api-"));
+    try {
+      await fs.writeFile(path.join(dir, "preview.jpg"), "JPGDATA");
+      await api().uploadSnapshot("court-1", path.join(dir, "preview.jpg"));
+      const body = seen.at(-1).body.toString();
+      assert.equal(seen.at(-1).url, "/api/v1/device/courts/court-1/snapshot");
+      assert.match(
+        body,
+        /name="snapshot"; filename="snapshot\.jpg"\r\nContent-Type: image\/jpeg\r\n\r\nJPGDATA/
       );
     } finally {
       await fs.rm(dir, { recursive: true, force: true });

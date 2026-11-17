@@ -5,16 +5,20 @@ import ResultState from "./ResultState";
 
 /**
  * Protected Route Component
- * Checks if user has required permission before rendering children
+ * Checks if user has required permission before rendering children.
+ * Pass `anyOf` ([{ module, submodule, accessLevel }]) instead of `module` for a
+ * page several permissions can open (e.g. Setup → Venues: venues/list OR
+ * venues/courts).
  */
 export const ProtectedRoute = ({
   children,
   module,
   submodule = null,
   accessLevel = "read",
+  anyOf = null,
   fallbackPath = "/admin/dashboard",
 }) => {
-  const { hasPermission, isLoading, error } = usePermissions();
+  const { hasPermission, hasAnyPermission, isLoading, error } = usePermissions();
 
   if (isLoading) {
     return (
@@ -39,7 +43,11 @@ export const ProtectedRoute = ({
     );
   }
 
-  if (!hasPermission(module, submodule, accessLevel)) {
+  const allowed = anyOf
+    ? hasAnyPermission(anyOf)
+    : hasPermission(module, submodule, accessLevel);
+
+  if (!allowed) {
     return (
       <div className="flex items-center justify-center h-screen">
         <ResultState

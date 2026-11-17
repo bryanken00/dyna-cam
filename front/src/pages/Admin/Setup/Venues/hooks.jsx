@@ -1,12 +1,13 @@
 import { useState, useCallback, useMemo } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router";
+import { ArrowRight, Pencil, Trash2 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../../utils/phoneFormat";
-import { formatPeso } from "../../../../utils/dynaCam";
+import { formatPeso, venuePath } from "../../../../utils/dynaCam";
 import { getImageUrl } from "../../../../utils/upload";
 import { confirm } from "../../../../store/confirmStore";
 import {
@@ -17,8 +18,11 @@ import {
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export const useVenueHooks = () => {
+  const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission("venues", "list", "write");
+  // Courts-only users (no venues/list) get a venue picker instead of the list
+  const canList = hasPermission("venues", "list", "read");
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [filters, setFilters] = useState({ search: "", status: "" });
@@ -35,12 +39,15 @@ export const useVenueHooks = () => {
     isFetching,
     error,
     refetch,
-  } = useGetVenues({
-    page: pagination.current,
-    pageSize: pagination.pageSize,
-    search: debouncedSearch,
-    status: filters.status,
-  });
+  } = useGetVenues(
+    {
+      page: pagination.current,
+      pageSize: pagination.pageSize,
+      search: debouncedSearch,
+      status: filters.status,
+    },
+    { enabled: canList },
+  );
 
   const deleteMutation = useDeleteVenue();
 
@@ -105,10 +112,24 @@ export const useVenueHooks = () => {
   );
 
   // ⋮ menu: Edit, divider, Delete (danger)
+  const handleOpen = useCallback(
+    (record) => navigate(venuePath(record.venueId)),
+    [navigate],
+  );
+
+  // ⋮ menu: Open, Edit, divider, Delete (danger)
   const getActionItems = useCallback(
     (record) => {
-      if (!canWrite || record.status === "Deleted") return [];
+      if (record.status === "Deleted") return [];
+      const open = {
+        key: "open",
+        label: "Open venue",
+        icon: <ArrowRight className="w-4 h-4" />,
+        onClick: () => handleOpen(record),
+      };
+      if (!canWrite) return [open];
       return [
+        open,
         {
           key: "edit",
           label: "Edit venue",
@@ -125,7 +146,7 @@ export const useVenueHooks = () => {
         },
       ];
     },
-    [canWrite, handleEdit, handleDeleteRequest],
+    [canWrite, handleOpen, handleEdit, handleDeleteRequest],
   );
 
   const { current, pageSize } = pagination;
@@ -188,16 +209,32 @@ export const useVenueHooks = () => {
                 )}
               </span>
               <div className="min-w-0">
-                <div
-                  className="truncate"
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: "var(--color-text-dark)",
-                  }}
-                >
-                  {label}
-                </div>
+                {/* The name opens the venue page (its courts) */}
+                {record.status === "Deleted" ? (
+                  <div
+                    className="truncate"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "var(--color-text-dark)",
+                    }}
+                  >
+                    {label}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleOpen(record)}
+                    className="block max-w-full truncate text-left cursor-pointer hover:underline"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "var(--color-text-dark)",
+                    }}
+                  >
+                    {label}
+                  </button>
+                )}
                 <div
                   className="truncate"
                   style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
@@ -287,7 +324,7 @@ export const useVenueHooks = () => {
         render: (_, record) => <RowActions items={getActionItems(record)} />,
       },
     ],
-    [getActionItems, current, pageSize],
+    [getActionItems, handleOpen, current, pageSize],
   );
 
   const venues = apiData?.data?.venues || [];
@@ -302,6 +339,7 @@ export const useVenueHooks = () => {
     error,
     refetch,
     canWrite,
+    canList,
     columns,
     handleTableChange,
     handleSearch,

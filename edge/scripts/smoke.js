@@ -14,8 +14,10 @@
  * 3. Cuts a 65 s clip with makeClip() + a PNG logo and checks the result:
  *    duration ≈ 65 s, H.264 video + AAC audio, moov before mdat (faststart),
  *    JPEG thumbnail.
- * 4. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
- * 5. Meanwhile (skip with --no-stream) a second recorder records AND streams to
+ * 4. Camera setup: reads the camera's details and a preview JPEG from the
+ *    latest closed segment (no camera connection).
+ * 5. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
+ * 6. Meanwhile (skip with --no-stream) a second recorder records AND streams to
  *    a local ffmpeg RTMP server through the tee muxer: segments keep coming,
  *    the receiver gets video, killing the receiver leaves the recording running
  *    and reports a stream error, and a new receiver is picked up again.
@@ -24,6 +26,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { MediaProbe, PreviewSender } from "../src/camera.js";
 import { detectEncoder, makeClip } from "../src/clipper.js";
 import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
 import { createLogger } from "../src/log.js";
@@ -291,6 +294,34 @@ async function streamPhase({ dir, file, settings }) {
   }
 }
 
+/** Phase 4: camera details + a preview JPEG, read from the buffer (never from the camera). */
+async function cameraSetupPhase({ dir, bufferDir, settings }) {
+  const media = await new MediaProbe({ ffprobePath: FFPROBE }).refresh(bufferDir);
+  const kept = path.join(dir, "preview-uploaded.jpg");
+  const sender = new PreviewSender({
+    api: { uploadSnapshot: (_courtId, file) => fs.copyFile(file, kept) },
+    courtDir: () => bufferDir,
+    settings,
+    log: createLogger("preview"),
+  });
+  sender.setWanted([{ courtId: "court-smoke", previewWanted: true }]);
+  const sent = await sender.tick();
+  const jpeg = await fs.readFile(kept).catch(() => null);
+  const picture = jpeg ? (await probeFile(FFPROBE, kept)).streams[0] : null;
+  console.log(
+    `camera details: ${JSON.stringify({ video: media?.video, audio: media?.audio })}\n` +
+      `preview: sent for ${JSON.stringify(sent)}, ${jpeg ? `${jpeg.length} bytes, ${picture.codec} ${picture.width}x${picture.height}` : "none"}`
+  );
+  const v = media?.video;
+  if (v?.codec !== "h264" || v.width !== 1280 || v.height !== 720 || Math.abs(v.fps - 30) > 1) {
+    fail(`camera details ${JSON.stringify(media)}`);
+  }
+  if (media.audio?.codec !== "aac" || media.audio.sampleRate !== 8000)
+    fail(`audio ${JSON.stringify(media.audio)}`);
+  if (!jpeg || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || picture.width > 1280)
+    fail("no JPEG preview");
+}
+
 /** A session part: exactly [20 s, 80 s] of the recording, with the capped session bitrate. */
 async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings }) {
   const part = await makeClip(
@@ -436,6 +467,7 @@ async function main() {
       `clip OK — ${info.duration.toFixed(2)}s with ${result.encoder}, AAC audio, faststart, JPEG thumbnail`
     );
 
+    await cameraSetupPhase({ dir, bufferDir, settings });
     const partInfo = await cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings });
     const { kbps } = partInfo;
     const streamResult = await streaming;

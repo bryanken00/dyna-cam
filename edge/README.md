@@ -138,6 +138,39 @@ The venues use TP-Link **Tapo C200** cameras (Wi-Fi, indoor pan/tilt). On firmwa
 Other RTSP cameras work the same way. H.264 or H.265 is fine, since the clip is re-encoded to
 H.264 anyway.
 
+## Camera setup preview
+
+The Admin portal's **Set up camera** page shows whether the camera works, without anyone going to
+the box. The box can't open a second connection to the camera to test it, because a Tapo C200
+serves one RTSP client and the recorder holds it. So the box reports what its **own recording**
+contains:
+
+- **Camera details in the heartbeat.**
+  - Each court gets `video {codec, width, height, fps}` and `audio {codec, sampleRate}`, or
+    `audio: null` when the camera sends no sound.
+  - These are read with `ffprobe` from the court's newest **finished** segment, at most every
+    30 s per court and only when a new segment exists. They are dropped once the newest segment
+    is more than a minute old.
+  - The frame rate is the camera's claim when it matches the frames actually counted in the
+    segment; otherwise it is the counted rate. A C200 claims about 30 fps but sends 15.
+- **Which address the report is about.** Each heartbeat entry echoes the court's
+  `cameraVersion` from `/config`, but only the version the **running** recorder was started with.
+  After a new camera address is saved, the report switches once the recorder has restarted on it,
+  so the setup page never mistakes a report about the old address for the new one. Camera details
+  from the old address's segments are left out.
+- **Preview picture.**
+  - While someone has a court's setup page open, `/config` marks it `previewWanted`. The box
+    then takes one JPEG from that court's newest finished segment every ~30 s (at most 1280 px
+    wide) and uploads it with `POST /courts/:courtId/snapshot`. Staff can aim the pan/tilt while
+    watching it.
+  - It stops when the page closes.
+  - While a preview is wanted, config and heartbeat run every 15 s instead of 60/30, so the page
+    reacts quickly.
+- **Previews come last.**
+  - A snapshot is skipped whenever a clip is waiting, being cut or uploading, and only one is
+    made at a time.
+  - A 404 (the court no longer belongs to this venue) stops previews for that court.
+
 ## Sessions (full-session recording)
 
 Staff can book a court for a window of 5 min to 3 h (Admin portal → Sessions). The API splits the
@@ -294,7 +327,7 @@ Keep the board on wired USB power. Reconnect Wi-Fi in `loop()` if `WiFi.status()
 ```bash
 npm run lint
 npm test          # node:test, no internet: window math, segment selection, ffmpeg args, masking, queue, job loop, buttons, API client
-npm run smoke     # ~2 min, ffmpeg only, no API, no camera (includes a local RTMP streaming test)
+npm run smoke     # ~2 min, ffmpeg only, no API, no camera (includes camera details + preview, and a local RTMP streaming test)
 ```
 
 `npm run smoke` makes a Tapo-like source (H.264 with keyframes 1.7–6.1 s apart + **pcm_alaw**
@@ -346,6 +379,8 @@ clip from the court's QR page.
   4. Overlay the logo at 12% of the width, bottom-right.
   5. Encode H.264 at up to 1080p with AAC audio and `+faststart`.
   6. Make the thumbnail from the middle frame.
+- **Camera setup** (`src/camera.js`): camera details and preview JPEGs read from the buffer, never
+  from the camera.
 - **Sessions:** session windows from `/config` protect their segments from pruning
   (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
   `selectPartSegments`).
@@ -380,6 +415,7 @@ clip from the court's QR page.
 | Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
+| Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |
 | Stream *Can't reach the streaming service* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying every 10 s. |
 | Stream *rejected — check the stream key* | The key was reset or the live event ended. Paste the new ingest URL in Admin → Courts. |
 | Stream on, but the camera shows *not reachable* | Something else is connected to the camera (NVR, VLC, Tapo's own NVR mode). The C200 allows one RTSP client. |

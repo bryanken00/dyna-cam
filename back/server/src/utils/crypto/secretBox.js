@@ -73,6 +73,15 @@ export const decryptSecret = (stored) => {
 };
 
 /**
+ * A short fingerprint of a stored (encrypted) camera address. Every save
+ * re-encrypts with a fresh IV, so it changes whenever the address is saved —
+ * the recorder box echoes it so the setup page can tell a report about the new
+ * address from one about the old (PLAN-002).
+ */
+export const cameraVersion = (stored) =>
+  stored ? crypto.createHash("sha256").update(String(stored)).digest("hex").slice(0, 12) : null;
+
+/**
  * An RTMP ingest URL safe to show: the stream key (last path segment) hidden
  * except its last 4 characters, e.g.
  * `rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl` → `rtmp://a.rtmp.youtube.com/live2/••••ijkl`.

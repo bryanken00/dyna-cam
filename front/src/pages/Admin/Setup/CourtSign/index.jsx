@@ -2,9 +2,9 @@ import { QRCodeSVG } from "qrcode.react";
 import { Printer, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCourtSignHooks } from "./hooks";
-import ResultState from "../../../../../components/ResultState";
-import Spinner from "../../../../../components/Spinner";
-import { getImageUrl } from "../../../../../utils/upload";
+import ResultState from "../../../../components/ResultState";
+import Spinner from "../../../../components/Spinner";
+import { getImageUrl } from "../../../../utils/upload";
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 

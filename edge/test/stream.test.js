@@ -316,3 +316,91 @@ describe("recorder stream status", () => {
     await manager.stopAll();
   });
 });
+
+describe("cameraVersion in the heartbeat", () => {
+  let dir;
+  before(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "edge-camver-"));
+  });
+  after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const settings = {
+    segmentSeconds: 2,
+    bufferSeconds: 180,
+    recordAudio: true,
+    ffmpegPath: "ffmpeg",
+  };
+  const court = (url, cameraVersion) => ({
+    courtId: "court-1",
+    name: "Court 1",
+    cameraRtspUrl: url,
+    cameraVersion,
+    stream: null,
+  });
+  const waitFor = async (fn) => {
+    for (let i = 0; i < 100 && !fn(); i += 1) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(fn());
+  };
+
+  it("reports the version the running recorder was started with, switching only when it restarts on the new address", async () => {
+    const { spawnImpl, children } = fakeSpawn();
+    const manager = new RecorderManager({
+      dataDir: dir,
+      settings: { ...settings, ffprobePath: "ffprobe" },
+      ffmpegMajor: 9,
+      log: silent,
+      spawnImpl,
+    });
+    await manager.sync([court("rtsp://cam:pw@10.0.0.9/stream1", "aaaaaaaaaaaa")]);
+    await waitFor(() => children.length === 1);
+    assert.equal(manager.statuses()[0].cameraVersion, "aaaaaaaaaaaa");
+
+    // The same address saved again: no restart needed, this recorder already runs with it
+    await manager.sync([court("rtsp://cam:pw@10.0.0.9/stream1", "bbbbbbbbbbbb")]);
+    assert.equal(children.length, 1);
+    assert.equal(manager.statuses()[0].cameraVersion, "bbbbbbbbbbbb");
+
+    // A new address: the old recorder never reports the new version; the restarted one does
+    const old = manager.recorders.get("court-1");
+    await manager.sync([court("rtsp://cam:pw@10.0.0.10/stream1", "cccccccccccc")]);
+    assert.equal(old.status().cameraVersion, "bbbbbbbbbbbb");
+    await waitFor(() => children.length === 2);
+    assert.ok(children[1].args.includes("rtsp://cam:pw@10.0.0.10/stream1"));
+    assert.equal(manager.statuses()[0].cameraVersion, "cccccccccccc");
+    await manager.stopAll();
+  });
+
+  it("leaves out camera details read from the previous address's segments", async () => {
+    const { spawnImpl } = fakeSpawn();
+    const manager = new RecorderManager({
+      dataDir: dir,
+      settings: { ...settings, ffprobePath: "ffprobe" },
+      ffmpegMajor: 9,
+      log: silent,
+      spawnImpl,
+    });
+    await manager.sync([court("rtsp://cam:pw@10.0.0.9/stream1", "dddddddddddd")]);
+    const recorder = manager.recorders.get("court-1");
+    const video = { codec: "h264", width: 1280, height: 720, fps: 15 };
+    manager.media = {
+      current: () => ({ video, audio: null, segmentAtMs: recorder.createdAt - 1000 }),
+    };
+    assert.equal(manager.statuses()[0].video, undefined);
+    manager.media = {
+      current: () => ({ video, audio: null, segmentAtMs: recorder.createdAt + 1000 }),
+    };
+    assert.deepEqual(manager.statuses()[0].video, video);
+    await manager.stopAll();
+  });
+
+  it("omits cameraVersion when the API sends none", () => {
+    const rec = new CourtRecorder({
+      court: court("rtsp://x/stream1", undefined),
+      dir,
+      settings,
+      ffmpegMajor: 9,
+      log: silent,
+    });
+    assert.equal("cameraVersion" in rec.status(), false);
+  });
+});

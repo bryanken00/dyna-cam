@@ -12,6 +12,7 @@ import {
   createCourtApi,
   updateCourtApi,
   rotateCourtQrApi,
+  requestCourtPreviewApi,
   deleteCourtApi,
 } from "../../api/admin/courts";
 
@@ -36,13 +37,21 @@ export const useGetCourtOptions = (options = {}) => {
   });
 };
 
-// Query: Get single court
-export const useGetCourtById = (courtId) => {
+// Query: Get single court. `options` lets the camera setup page poll it.
+export const useGetCourtById = (courtId, options = {}) => {
   return useQuery({
     queryKey: ["courts", courtId],
     queryFn: () => getCourtByIdApi(courtId),
-    enabled: !!courtId,
     staleTime: 60 * 1000,
+    ...options,
+    enabled: !!courtId && (options.enabled ?? true),
+  });
+};
+
+// Mutation: ask the venue's box for preview pictures (silent — best effort)
+export const useRequestCourtPreview = () => {
+  return useMutation({
+    mutationFn: requestCourtPreviewApi,
   });
 };
 
@@ -69,9 +78,10 @@ export const useUpdateCourt = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // `successMessage` lets each court-page section say what it saved
     mutationFn: ({ courtId, courtData }) => updateCourtApi(courtId, courtData),
-    onSuccess: () => {
-      toast.success("Court updated successfully");
+    onSuccess: (_data, variables) => {
+      toast.success(variables?.successMessage || "Court updated successfully");
       queryClient.invalidateQueries({ queryKey: ["courts"] });
       queryClient.invalidateQueries({ queryKey: ["clips", "options"] });
     },

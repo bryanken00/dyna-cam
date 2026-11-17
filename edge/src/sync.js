@@ -14,7 +14,8 @@ const CLOCK_SKEW_WARN_MS = 2000;
  * still records.
  */
 export class DeviceSync {
-  constructor({ api, recorders, settings, agentVersion, log }) {
+  constructor({ api, recorders, settings, agentVersion, log, preview = null }) {
+    this.preview = preview;
     this.api = api;
     this.recorders = recorders;
     this.settings = settings;
@@ -90,6 +91,7 @@ export class DeviceSync {
     }
     this.recorders.setSessions(config.sessions || []);
     await this.recorders.sync(config.courts || []);
+    this.preview?.setWanted(fromCache ? [] : config.courts);
     if (!fromCache) await this.updateLogo(config.venue?.logoUrl ?? null);
   }
 
@@ -138,6 +140,11 @@ export class DeviceSync {
     });
   }
 
+  /** While a camera-setup page is open, config and heartbeat run every 15 s so it reacts fast. */
+  interval(seconds) {
+    return this.preview?.active ? Math.min(seconds, 15) : seconds;
+  }
+
   startTimers() {
     const every = (seconds, label, fn) => {
       const run = async () => {
@@ -146,9 +153,13 @@ export class DeviceSync {
         } catch (err) {
           if (!this.abort.signal.aborted) this.log.warn(`${label} failed`, err);
         }
-        if (!this.abort.signal.aborted) this.timers.push(setTimeout(run, seconds * 1000));
+        if (!this.abort.signal.aborted) {
+          this.timers.push(setTimeout(run, this.interval(seconds) * 1000));
+        }
       };
-      this.timers.push(setTimeout(run, label === "heartbeat" ? 2000 : seconds * 1000));
+      this.timers.push(
+        setTimeout(run, label === "heartbeat" ? 2000 : this.interval(seconds) * 1000)
+      );
     };
     every(this.settings.heartbeatSeconds, "heartbeat", () => this.heartbeat());
     every(this.settings.configRefreshSeconds, "config refresh", () => this.refresh());

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useVenueHooks } from "./hooks";
 import VenueFormDrawer from "./components/VenueFormDrawer";
+import VenuePicker from "./components/VenuePicker";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -29,6 +30,7 @@ const VenuesPage = () => {
     error,
     refetch,
     canWrite,
+    canList,
     columns,
     handleTableChange,
     handleSearch,
@@ -51,6 +53,9 @@ const VenuesPage = () => {
   const hasActiveFilters = Boolean(filters.search || filters.status);
   const isEmpty = !isLoading && (data?.length || 0) === 0;
 
+  // Courts access without Venues access: just pick a venue to open
+  if (!canList) return <VenuePicker />;
+
   if (error) {
     return (
       <div className="p-8">
@@ -70,7 +75,7 @@ const VenuesPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Venues"
-        subtitle="Pickleball venues, their watermark logo and how long clips are kept."
+        subtitle="Pickleball venues — open one to set up its courts and cameras."
         actions={
           canWrite && (
             <Button onClick={handleCreate}>
