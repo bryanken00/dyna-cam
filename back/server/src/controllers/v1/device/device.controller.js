@@ -28,6 +28,7 @@ import {
   onlineSince,
   requestClip,
 } from "../../../utils/clipRequests.js";
+import { materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
 import { upload } from "../../../utils/file/uploads.js";
 import {
   buttonParamsSchema,
@@ -85,7 +86,9 @@ router.get(
   catchAsync(async (req, res) => {
     const { venueId, deviceId, name } = req.device;
 
-    const [venueRows, courtRows] = await Promise.all([
+    await materializeSessionParts(req.db, { venueId });
+
+    const [venueRows, courtRows, sessionRows] = await Promise.all([
       req.db.query(
         `SELECT venueId, name, logoUrl, clipRetentionDays FROM venues WHERE venueId = ? LIMIT 1`,
         [venueId]
@@ -96,6 +99,17 @@ router.get(
          WHERE venueId = ? AND status = 'Active' AND cameraRtspUrl IS NOT NULL
          ORDER BY name ASC`,
         [venueId]
+      ),
+      // Sessions whose footage the box must keep beyond its rolling buffer:
+      // starting within a day, or ended in the last 30 minutes (parts may
+      // still be waiting to be cut)
+      req.db.query(
+        `SELECT sessionId, courtId, startAt, endAt
+         FROM recording_sessions
+         WHERE venueId = ? AND status IN ('Scheduled', 'Recording', 'Processing')
+           AND startAt <= DATE_ADD(?, INTERVAL 1 DAY)
+           AND endAt >= DATE_SUB(?, INTERVAL 30 MINUTE)`,
+        [venueId, getCurrentTimestampLocal(), getCurrentTimestampLocal()]
       ),
     ]);
 
@@ -118,6 +132,12 @@ router.get(
         logoUrl: signUploadUrl(venue.logoUrl),
       },
       courts,
+      sessions: sessionRows.map((row) => ({
+        sessionId: row.sessionId,
+        courtId: row.courtId,
+        startMs: toEpochMs(row.startAt),
+        endMs: toEpochMs(row.endAt),
+      })),
       clip: { preSeconds: CLIP_PRE_SECONDS, postSeconds: CLIP_POST_SECONDS },
       serverTime: Date.now(),
     });
@@ -188,7 +208,8 @@ router.get(
 
     const findJobs = () =>
       req.db.query(
-        `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source
+        `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source,
+                cl.sessionId, cl.partIndex, cl.windowStartAt, cl.windowEndAt
          FROM clips cl
          JOIN courts c ON c.courtId = cl.courtId AND c.status != 'Deleted'
          WHERE cl.venueId = ? AND cl.status = 'Pending'
@@ -197,10 +218,16 @@ router.get(
         [venueId]
       );
 
+    // Session parts become jobs when their window ends (utils/sessions.js);
+    // check for due parts now and every few seconds while waiting
+    await materializeSessionParts(req.db, { venueId });
     let rows = await findJobs();
+    let polls = 0;
     while (rows.length === 0 && !closed && Date.now() < deadline) {
       await sleep(1000);
       if (closed) break;
+      polls += 1;
+      if (polls % 5 === 0) await materializeSessionParts(req.db, { venueId });
       rows = await findJobs();
     }
 
@@ -217,6 +244,12 @@ router.get(
         durationSeconds: row.durationSeconds,
         preSeconds: CLIP_PRE_SECONDS,
         postSeconds: CLIP_POST_SECONDS,
+        // Session parts: cut exactly this window instead of the pre/post
+        // seconds around requestedAt
+        sessionId: row.sessionId || null,
+        partIndex: row.partIndex ?? null,
+        windowStartMs: toEpochMs(row.windowStartAt),
+        windowEndMs: toEpochMs(row.windowEndAt),
       })),
     });
   })
@@ -294,7 +327,7 @@ router.post(
  */
 const loadOpenClip = catchAsync(async (req, res, next) => {
   const rows = await req.db.query(
-    `SELECT clipId, venueId, status, deviceId FROM clips
+    `SELECT clipId, venueId, sessionId, status, deviceId FROM clips
      WHERE clipId = ? AND venueId = ? AND status != 'Deleted'
      LIMIT 1`,
     [req.params.clipId, req.device.venueId]
@@ -361,8 +394,18 @@ const clipUpload = upload({
  * multipart/form-data: `video` (mp4, required), `thumbnail` (jpeg, optional).
  * Marks the clip Ready; it stays downloadable for the venue's retention days.
  */
+// A clip or session part can take minutes to upload on a slow venue line —
+// longer than the server's default request timeout
+const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+const allowSlowUpload = (req, res, next) => {
+  req.setTimeout(UPLOAD_TIMEOUT_MS);
+  res.setTimeout(UPLOAD_TIMEOUT_MS);
+  next();
+};
+
 router.post(
   "/clips/:clipId/upload",
+  allowSlowUpload,
   deviceUploadLimiter,
   loadOpenClip,
   clipUpload.fields([
@@ -438,6 +481,7 @@ router.post(
       );
     }
 
+    if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
     return res.sendSuccess("Clip uploaded", { clipId: req.clip.clipId, status: "Ready" });
   })
 );
@@ -455,6 +499,7 @@ router.post(
        WHERE clipId = ? AND status IN ('Pending', 'Processing')`,
       [req.body.reason, req.device.deviceId, getCurrentTimestampLocal(), req.clip.clipId]
     );
+    if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
     return res.sendSuccess("Clip marked as failed");
   })
 );

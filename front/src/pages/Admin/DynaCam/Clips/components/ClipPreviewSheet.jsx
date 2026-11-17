@@ -143,7 +143,7 @@ const ClipPreviewSheet = ({
                   },
                   {
                     label: "Saved by",
-                    value: <SourceChip source={clip?.source} />,
+                    value: <SourceChip source={clip?.source} partIndex={clip?.partIndex} />,
                   },
                   { label: "Length", value: formatDuration(clip?.durationSeconds) },
                   { label: "File size", value: formatBytes(clip?.sizeBytes) },

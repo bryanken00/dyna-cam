@@ -259,3 +259,40 @@ describe("button presses", () => {
     assert.equal(queue.size, 0);
   });
 });
+
+describe("session parts", () => {
+  const partJob = (clipId, endMs) => ({
+    ...job(clipId, endMs),
+    source: "SESSION",
+    sessionId: "sess-1",
+    partIndex: 2,
+    windowStartMs: endMs - 300_000,
+    windowEndMs: endMs,
+    durationSeconds: 300,
+  });
+
+  it("keeps the part window on the queued job (and null for ordinary clips)", async () => {
+    const { runner, queue } = await makeRunner();
+    await runner.enqueue(partJob("part-1", NOW - 2000));
+    await runner.enqueue({ ...job("clip-1"), windowStartMs: null, windowEndMs: null });
+    assert.deepEqual(
+      ["sessionId", "partIndex", "windowStartMs", "windowEndMs"].map((k) => queue.get("part-1")[k]),
+      ["sess-1", 2, NOW - 302_000, NOW - 2000]
+    );
+    assert.equal(queue.get("clip-1").windowStartMs, null);
+  });
+
+  it("cuts players' clips before session parts", async () => {
+    const order = [];
+    const clip = async (entry) => {
+      order.push(entry.clipId);
+      return { status: "wait" };
+    };
+    const { runner } = await makeRunner({ clip });
+    await runner.enqueue(partJob("part-1", NOW - 60_000)); // older request
+    await runner.enqueue(job("clip-1", NOW - 10_000));
+    runner.dispatch();
+    await Promise.all(runner.active.values());
+    assert.deepEqual(order, ["clip-1"]);
+  });
+});

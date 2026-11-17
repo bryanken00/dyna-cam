@@ -226,16 +226,38 @@
 
 ## Phase 3: Full-session recording
 
-- [ ] Migration: `recording_sessions` table; `clips.sessionId` FK
-- [ ] Admin `/sessions` (list, create, cancel) behind `clips`; overlap check per court in one
-      transaction with `FOR UPDATE`
-- [ ] Device jobs include session start/stop; `POST /device/sessions/:sessionId/state`
-- [ ] `edge/`: copy segments to a session folder while active; concat + watermark + upload on end
-- [ ] `pages/Admin/Sessions/` (schedule with court, start, end, player name, optional phone via
-      `zPhone`/`formatPhoneOnChange`; cancel)
-- [ ] Tests: overlapping session → 409; cross-venue isolation on session state
-- [ ] Tried: schedule a 10-minute session → one `SESSION` clip delivered after it ends
-- [ ] Lint/test/build pass; changelog entry (`ref: PLAN-001`)
+- [x] Migration `004_create_recording_sessions.sql`: `recording_sessions` (window, player name,
+      phone, share token, status) + `clips.sessionId` / `partIndex` / `windowStartAt` /
+      `windowEndAt` (unique per session part)
+- [x] Design (changed from one big file, 2026-11-17): a session is delivered as **5-minute parts**,
+      each an ordinary clip (source `SESSION`) with an explicit window — reuses cut / watermark /
+      upload / expiry, keeps every upload ~40–50 MB. Parts are created when due (box polls
+      `/device/jobs` or `/device/config`, plus the hourly maintenance) — no scheduler
+- [x] Admin `/sessions` (list, get with parts, book, cancel before start, end early) behind
+      `clips`; booking checks camera, 5 min – 3 h, now … +14 days, no overlap per court (court row
+      locked)
+- [x] Device API: `/config` lists sessions to keep footage for; part jobs carry
+      `windowStartMs`/`windowEndMs`; upload/fail settle the session (Ready / Ready with a note /
+      Failed); upload route allows 15-minute requests (slow venue lines)
+- [x] Public `GET /public/sessions/:shareToken` (session + parts, signed links)
+- [x] `edge/`: keeps segments overlapping a booked window (±10 s) until 30 min after it ends;
+      cuts part windows exactly (made if ≥ 80 % covered, else `fail` with the %); players' clips
+      cut before parts; bitrate caps (part ≤ ~47 MB / 5 min, clip ≤ ~19.5 MB / 65 s); disk
+      warning < 2 GB, stops keeping session footage < 500 MB
+- [x] `pages/Admin/DynaCam/Sessions/` (list, book drawer in Manila time, booked-link dialog,
+      cancel / end now, detail sheet with parts) + player page `/session/:shareToken`; Clips list
+      shows "Session · part N"
+- [x] Tests (`tests/sessions.test.js`, 8): booking rules + overlap 409 + read-only 403; parts due
+      only after their window, home box only; Ready / partial / Failed settling; end early;
+      cancelled / invalid links 404
+- [x] Session parts get 60 min before the stale sweep fails them (clips keep 15) — the box keeps
+      their footage and cuts players' clips first
+- [x] Tried on the real C200 (throwaway database): booked a session starting now, ended it
+      after ~2 min → part Ready 10 s later, exactly 126.0 s, every frame (15 fps) + AAC, 6.2 MB
+      (≈ 15 MB per 5-min part); the public session page lists it Ready. Ordinary clips now 4.4 MB
+      per 65 s with the size caps
+- [x] Lint/test/build pass (API 121 tests, web lint + build, edge 81 tests + smoke); changelog
+      entry (`ref: PLAN-001`)
 
 ## Phase 4: Paid clips
 

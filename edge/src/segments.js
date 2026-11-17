@@ -62,10 +62,33 @@ export async function readSegmentEntries(dir) {
   return entries.filter(Boolean);
 }
 
-/** Segments whose last write is older than the buffer — safe to delete. */
-export const segmentsToPrune = (entries, nowMs, bufferMs) =>
+/** Footage around a session window is kept this much wider on each side. */
+export const SESSION_MARGIN_MS = 10_000;
+/** …and until this long after the session ends (the last part's job comes in by then). */
+export const SESSION_KEEP_AFTER_MS = 30 * 60_000;
+
+/**
+ * Windows of a court's footage that must outlive the rolling buffer: every
+ * session of `courtId` (± margin) that ended less than 30 min ago.
+ * → [{ fromMs, toMs }]
+ */
+export const retentionWindows = (sessions, courtId, nowMs) =>
+  (sessions || [])
+    .filter((s) => s.courtId === courtId && Number.isFinite(s.startMs) && Number.isFinite(s.endMs))
+    .filter((s) => nowMs < s.endMs + SESSION_KEEP_AFTER_MS)
+    .map((s) => ({ fromMs: s.startMs - SESSION_MARGIN_MS, toMs: s.endMs + SESSION_MARGIN_MS }));
+
+/**
+ * Segments that can be deleted: last written before the rolling buffer AND
+ * not overlapping any kept session window (a segment spans name → mtime).
+ */
+export const segmentsToPrune = (entries, nowMs, bufferMs, keep = []) =>
   entries
-    .filter((e) => segmentStartMs(e.name) !== null && e.mtimeMs < nowMs - bufferMs)
+    .filter((e) => {
+      const startMs = segmentStartMs(e.name);
+      if (startMs === null || e.mtimeMs >= nowMs - bufferMs) return false;
+      return !keep.some((w) => startMs < w.toMs && e.mtimeMs > w.fromMs);
+    })
     .map((e) => e.name);
 
 /** ffmpeg's CSV segment list → [{ name, startSec, endSec }]; malformed lines are skipped. */

@@ -5,10 +5,12 @@ import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
+import { materializeSessionParts, partCount, settleSessions } from "../../../utils/sessions.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
   clipTokenParamsSchema,
   courtTokenParamsSchema,
+  sessionTokenParamsSchema,
 } from "../../../validators/public.validator.js";
 
 /**
@@ -20,6 +22,7 @@ import {
  *   GET  /courts/:qrToken          the court page
  *   POST /courts/:qrToken/clips    save the last 60 seconds
  *   GET  /clips/:shareToken        the clip page (polls until Ready)
+ *   GET  /sessions/:shareToken     a recorded session's page (its parts)
  */
 const router = express.Router();
 
@@ -161,6 +164,69 @@ router.get(
         videoUrl: ready ? signUploadUrl(clip.videoPath) : null,
         downloadUrl: ready ? signedDownloadUrl(clip.videoPath) : null,
         thumbnailUrl: ready ? signUploadUrl(clip.thumbnailPath) : null,
+      },
+    });
+  })
+);
+
+/**
+ * GET /sessions/:shareToken
+ * A booked recording session: its window, status, and each 5-minute part as
+ * it becomes ready (the page polls while the session is still going).
+ */
+router.get(
+  "/sessions/:shareToken",
+  validateParams(sessionTokenParamsSchema),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName,
+              c.name AS courtName, v.name AS venueName, v.logoUrl, s.venueId
+       FROM recording_sessions s
+       JOIN courts c ON c.courtId = s.courtId
+       JOIN venues v ON v.venueId = s.venueId
+       WHERE s.shareToken = ? AND s.status != 'Cancelled'
+       LIMIT 1`,
+      [req.params.shareToken]
+    );
+    if (rows.length === 0) {
+      return res.sendError("This session link is not valid", 404);
+    }
+
+    // Bring the session up to date (parts due, settled status)
+    await materializeSessionParts(req.db, { venueId: rows[0].venueId });
+    await settleSessions(req.db, rows[0].sessionId);
+    const [session] = await req.db.query(
+      `SELECT status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      [rows[0].sessionId]
+    );
+
+    const parts = await req.db.query(
+      `SELECT partIndex, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
+              thumbnailPath, expiresAt
+       FROM clips
+       WHERE sessionId = ? AND status != 'Deleted'
+       ORDER BY partIndex ASC`,
+      [rows[0].sessionId]
+    );
+
+    const { sessionId: _sessionId, venueId: _venueId, logoUrl, ...info } = rows[0];
+    return res.sendSuccess("Session", {
+      session: {
+        ...info,
+        status: session.status,
+        venueLogoUrl: signUploadUrl(logoUrl),
+        partsTotal: partCount(info.startAt, info.endAt),
+        parts: parts.map(({ videoPath, thumbnailPath, ...part }) => {
+          const ready = part.status === "Ready";
+          return {
+            ...part,
+            // To the player a part being cut is still "saving"
+            status: part.status === "Processing" ? "Pending" : part.status,
+            videoUrl: ready ? signUploadUrl(videoPath) : null,
+            downloadUrl: ready ? signedDownloadUrl(videoPath) : null,
+            thumbnailUrl: ready ? signUploadUrl(thumbnailPath) : null,
+          };
+        }),
       },
     });
   })

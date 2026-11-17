@@ -75,6 +75,7 @@ export class DeviceSync {
       device: config.device,
       venue: { ...config.venue, logoUrl: null },
       courts: config.courts,
+      sessions: config.sessions || [],
       clip: config.clip,
     });
   }
@@ -87,6 +88,7 @@ export class DeviceSync {
         `${config.device?.name || "recorder box"} for ${config.venue?.name || "venue"}: ${config.courts.length} court(s) with a camera`
       );
     }
+    this.recorders.setSessions(config.sessions || []);
     await this.recorders.sync(config.courts || []);
     if (!fromCache) await this.updateLogo(config.venue?.logoUrl ?? null);
   }

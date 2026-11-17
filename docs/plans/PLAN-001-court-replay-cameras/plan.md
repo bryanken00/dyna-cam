@@ -522,3 +522,15 @@ The checklist follows these phases. Each phase is shippable on its own.
     - No `Retry-After` header on 429 responses.
     - The heartbeat has no field for box-level problems (disk, clock).
     - The 6-court load test, which needs the box hardware.
+- 2026-11-17: Phase 2 done and committed. Tested on the real C200: QR, button (pressed through
+  the box's LAN listener) and staff saves each gave a 65 s clip in about 9 s.
+- 2026-11-17: Phase 3 design changed. A session is no longer one big file. It is delivered as
+  **5-minute parts**, each an ordinary clip with an explicit time window. Why: on the real camera,
+  one hour is 0.7–1.3 GB, which is over the upload limit and the server's 120 s request timeout,
+  and the box's buffer is only about 3 minutes. With parts:
+  - The box keeps the booked window's segments.
+  - Each part is cut when it's due and uploads at about 40–50 MB (bitrate capped).
+  - Parts reuse the clip pipeline and expiry.
+  - Parts are created when a box polls, so no scheduler is needed.
+  - The player gets one session link listing every part.
+  - Sessions can also be ended early.

@@ -14,6 +14,7 @@
  * 3. Cuts a 65 s clip with makeClip() + a PNG logo and checks the result:
  *    duration ≈ 65 s, H.264 video + AAC audio, moov before mdat (faststart),
  *    JPEG thumbnail.
+ * 4. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -188,6 +189,41 @@ function check({ info, video, audio, boxes, frames, videoStart, thumb }) {
     fail("thumbnail is not a JPEG");
 }
 
+/** A session part: exactly [20 s, 80 s] of the recording, with the capped session bitrate. */
+async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings }) {
+  const part = await makeClip(
+    {
+      clipId: "smoke-part",
+      courtId: "court-smoke",
+      requestedAtMs: startedAt + 80_000,
+      windowStartMs: startedAt + 20_000,
+      windowEndMs: startedAt + 80_000,
+    },
+    {
+      segmentsDir: bufferDir,
+      courtKnown: true,
+      workDir: path.join(dir, "jobs", "smoke-part"),
+      logoPath: logo,
+      encoder,
+      settings,
+      log: createLogger("clip"),
+    }
+  );
+  if (part.status !== "done") fail(`session part not made: ${JSON.stringify(part)}`);
+  const partInfo = await probeFile(FFPROBE, part.videoPath);
+  const { size } = await fs.stat(part.videoPath);
+  const kbps = Math.round((size * 8) / partInfo.duration / 1000);
+  console.log(
+    `\nsession part: ${partInfo.duration.toFixed(3)}s, ${partInfo.streams.map((s) => s.codec).join("+")}, ` +
+      `${size} bytes (${kbps} kb/s), coverage ${(part.coverage * 100).toFixed(1)}%\n`
+  );
+  if (Math.abs(partInfo.duration - 60) > 1)
+    fail(`part duration ${partInfo.duration}s, expected 60s`);
+  if (!partInfo.streams.some((s) => s.codec === "aac")) fail("part has no AAC audio");
+  if (kbps > 1400) fail(`part bitrate ${kbps} kb/s is over the session cap`);
+  return { ...partInfo, kbps };
+}
+
 async function main() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dyna-cam-smoke-"));
   const settings = {
@@ -292,7 +328,13 @@ async function main() {
     if (recorder.lastStderr && !/^$/.test(recorder.lastStderr))
       log.info(`recorder's last stderr line: ${recorder.lastStderr}`);
     log.info(
-      `SMOKE OK — ${info.duration.toFixed(2)}s clip with ${result.encoder}, AAC audio, faststart, JPEG thumbnail`
+      `clip OK — ${info.duration.toFixed(2)}s with ${result.encoder}, AAC audio, faststart, JPEG thumbnail`
+    );
+
+    const partInfo = await cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings });
+    const { kbps } = partInfo;
+    log.info(
+      `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s`
     );
   } finally {
     await recorder?.stop();

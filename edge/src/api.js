@@ -42,8 +42,9 @@ const parseRetryAfter = (value) => {
   return Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : null;
 };
 
-/** Upload timeout: at least 2 min, or the time the file takes at ~256 KB/s. */
-export const uploadTimeoutMs = (bytes) => Math.max(120_000, Math.ceil(bytes / 256_000) * 1000);
+/** Upload timeout: the time the file takes at ~256 KB/s, between 2 and 15 min (the API's limit). */
+export const uploadTimeoutMs = (bytes) =>
+  Math.min(15 * 60_000, Math.max(120_000, Math.ceil(bytes / 256_000) * 1000));
 
 /**
  * Client for /api/v1/device. Every response is `{ success, message, data }`;

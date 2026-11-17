@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   loadTimeline,
   readSegmentEntries,
+  retentionWindows,
   RUN_FILE,
   SEGMENT_LIST,
   segmentsToPrune,
@@ -206,9 +207,9 @@ export class CourtRecorder {
   }
 
   /** Called every few seconds: prune old segments, update status, catch a stalled stream. */
-  async tick(now = Date.now()) {
+  async tick(now = Date.now(), keep = []) {
     const entries = await readSegmentEntries(this.dir);
-    await pruneEntries(this.dir, entries, now, this.settings.bufferSeconds * 1000);
+    await pruneEntries(this.dir, entries, now, this.settings.bufferSeconds * 1000, keep);
     if (this.child) await this.mergeIndex();
     const newest = entries.reduce((max, e) => Math.max(max, e.mtimeMs), 0);
     if (newest > this.startedAt) this.lastVideoAt = newest;
@@ -278,8 +279,8 @@ export class CourtRecorder {
   }
 }
 
-async function pruneEntries(dir, entries, now, bufferMs) {
-  for (const name of segmentsToPrune(entries, now, bufferMs)) {
+async function pruneEntries(dir, entries, now, bufferMs, keep) {
+  for (const name of segmentsToPrune(entries, now, bufferMs, keep)) {
     await fsp.rm(path.join(dir, name), { force: true });
   }
 }
@@ -294,6 +295,61 @@ export class RecorderManager {
     this.spawnImpl = spawnImpl;
     this.recorders = new Map();
     this.timer = null;
+    this.sessions = [];
+    this.disk = { lowWarnedAt: 0, critical: false };
+  }
+
+  /** Sessions from /config: their footage outlives the rolling buffer (segments.js). */
+  setSessions(sessions) {
+    const list = Array.isArray(sessions) ? sessions : [];
+    const ids = (l) => l.map((s) => `${s.sessionId}:${s.startMs}:${s.endMs}`).join(",");
+    if (ids(list) !== ids(this.sessions) && list.length) {
+      this.log.info(
+        `${list.length} session(s) booked — their footage is kept until 30 min after each ends`
+      );
+    }
+    this.sessions = list;
+  }
+
+  /** Kept windows for a court folder; none while disk space is critical (live recording first). */
+  keepFor(dirName, now) {
+    if (this.disk.critical) return [];
+    const courtIds = [...new Set(this.sessions.map((s) => s.courtId))].filter(
+      (id) => safeId(id) === dirName
+    );
+    return courtIds.flatMap((id) => retentionWindows(this.sessions, id, now));
+  }
+
+  /**
+   * Free space in DATA_DIR: warn under DISK_WARN_GB; under DISK_CRITICAL_MB
+   * session footage stops being kept, so recording can go on.
+   */
+  async checkDisk(now = Date.now()) {
+    let free;
+    try {
+      const stats = await fsp.statfs(this.root);
+      free = stats.bavail * stats.bsize;
+    } catch (_err) {
+      return;
+    }
+    const gb = (free / 1024 ** 3).toFixed(1);
+    const critical = free < (this.settings.diskCriticalMb ?? 500) * 1024 ** 2;
+    if (critical !== this.disk.critical) {
+      if (critical)
+        this.log.error(
+          `only ${gb} GB free in DATA_DIR — session footage is no longer kept beyond the rolling buffer`
+        );
+      else this.log.info(`${gb} GB free again — keeping session footage`);
+    }
+    this.disk.critical = critical;
+    if (
+      free < (this.settings.diskWarnGb ?? 2) * 1024 ** 3 &&
+      now - this.disk.lowWarnedAt > 10 * 60_000
+    ) {
+      this.disk.lowWarnedAt = now;
+      this.log.warn(`low disk: ${gb} GB free in ${this.root}`);
+    }
+    return free;
   }
 
   courtDir(courtId) {
@@ -339,10 +395,16 @@ export class RecorderManager {
   }
 
   startTicker(intervalMs = 5000) {
+    let lastDiskCheck = 0;
     const run = async () => {
+      const now = Date.now();
+      if (now - lastDiskCheck >= 60_000) {
+        lastDiskCheck = now;
+        await this.checkDisk(now);
+      }
       for (const recorder of this.recorders.values()) {
         await recorder
-          .tick()
+          .tick(now, this.keepFor(path.basename(recorder.dir), now))
           .catch((err) => this.log.warn(`tick failed for ${recorder.courtId}`, err));
       }
       await this.pruneOrphans().catch((err) => this.log.warn("prune failed", err));
@@ -359,7 +421,13 @@ export class RecorderManager {
       if (active.has(name)) continue;
       const dir = path.join(this.root, name);
       const entries = await readSegmentEntries(dir);
-      await pruneEntries(dir, entries, now, this.settings.bufferSeconds * 1000);
+      await pruneEntries(
+        dir,
+        entries,
+        now,
+        this.settings.bufferSeconds * 1000,
+        this.keepFor(name, now)
+      );
       const left = await fsp.readdir(dir).catch(() => null);
       if (left && !left.some((f) => f.endsWith(".ts")))
         await fsp.rm(dir, { recursive: true, force: true });

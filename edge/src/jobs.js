@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { isSessionPart } from "./clipper.js";
 import { queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
 
@@ -158,6 +159,11 @@ export class JobRunner {
       requestedAtMs,
       preSeconds: Number(job.preSeconds) || 60,
       postSeconds: Number(job.postSeconds) || 5,
+      // Session parts: cut exactly this window (null for ordinary clips)
+      sessionId: job.sessionId ?? null,
+      partIndex: job.partIndex ?? null,
+      windowStartMs: Number.isFinite(job.windowStartMs) ? job.windowStartMs : null,
+      windowEndMs: Number.isFinite(job.windowEndMs) ? job.windowEndMs : null,
       state: "waiting",
       claimed: false,
       attempts: 0,
@@ -165,9 +171,10 @@ export class JobRunner {
       receivedAt: now,
     };
     await this.queue.put(entry);
-    this.log.info(
-      `job ${entry.clipId}: court ${entry.courtId}, ${entry.source || "?"}, requested ${new Date(requestedAtMs).toISOString()}`
-    );
+    const what = isSessionPart(entry)
+      ? `session ${entry.sessionId} part ${entry.partIndex}, ${new Date(entry.windowStartMs).toISOString()} → ${new Date(entry.windowEndMs).toISOString()}`
+      : `${entry.source || "?"}, requested ${new Date(requestedAtMs).toISOString()}`;
+    this.log.info(`job ${entry.clipId}: court ${entry.courtId}, ${what}`);
     await this.claim(entry);
     this.wake();
   }
@@ -204,7 +211,12 @@ export class JobRunner {
 
   dispatch() {
     const now = this.now();
-    for (const entry of this.queue.list()) {
+    // Players' clips before session parts: a part's footage is kept until the
+    // session ends + 30 min, a clip's only for BUFFER_SECONDS
+    const ordered = this.queue
+      .list()
+      .sort((a, b) => Number(isSessionPart(a)) - Number(isSessionPart(b)));
+    for (const entry of ordered) {
       if (this.stopped) return;
       if (this.active.has(queueKey(entry)) || (entry.nextAttemptAt || 0) > now) continue;
       const kind = { ready: "upload", failing: "report", press: "press" }[entry.state] || "cut";

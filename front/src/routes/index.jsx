@@ -9,6 +9,7 @@ const ComponentGallery = lazy(() => import("../pages/ComponentGallery"));
 // Player pages (PLAN-001) — no login; the QR code / share link is the credential.
 const PublicCourt = lazy(() => import("../pages/Public/Court"));
 const PublicClip = lazy(() => import("../pages/Public/Clip"));
+const PublicSession = lazy(() => import("../pages/Public/Session"));
 
 const RootRoutes = () => {
   return (
@@ -43,6 +44,14 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicClip />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/session/:shareToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicSession />
             </Suspense>
           }
         />

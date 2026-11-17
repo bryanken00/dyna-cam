@@ -14,8 +14,19 @@ const MAX_HEIGHT = 1080;
 const LOGO_WIDTH_RATIO = 0.12;
 const LOGO_MARGIN_RATIO = 0.02;
 
-/** [requestedAt − pre, requestedAt + post] in epoch ms. */
-export function clipWindow({ requestedAtMs, preSeconds = 60, postSeconds = 5 }) {
+/** A session part carries its exact window; an ordinary clip has none. */
+export const isSessionPart = (entry) =>
+  Number.isFinite(entry?.windowStartMs) &&
+  Number.isFinite(entry?.windowEndMs) &&
+  entry.windowEndMs > entry.windowStartMs;
+
+/**
+ * The window to cut in epoch ms: a session part's [windowStart, windowEnd]
+ * exactly, otherwise [requestedAt − pre, requestedAt + post].
+ */
+export function clipWindow(entry) {
+  if (isSessionPart(entry)) return { startMs: entry.windowStartMs, endMs: entry.windowEndMs };
+  const { requestedAtMs, preSeconds = 60, postSeconds = 5 } = entry;
   return { startMs: requestedAtMs - preSeconds * 1000, endMs: requestedAtMs + postSeconds * 1000 };
 }
 
@@ -65,6 +76,47 @@ export function coverageReason(selection, { windowStartMs, nowMs, bufferMs }) {
   return "Camera was not recording at that time";
 }
 
+/** Share of a session part that must be on disk for the part to be made. */
+export const PART_MIN_COVERAGE = 0.8;
+
+/**
+ * Segments for a session part. Unlike a 65 s clip, a 5-min part is still
+ * worth having with holes in it: it is made when at least 80% of the window
+ * was recorded. Holes inside become held frames (wall-clock concat), and
+ * footage that starts late or stops early just makes the part shorter.
+ * → { ok: true, segments, offsetMs, durationMs, coverage } | { ok: false, reason, coverage }
+ */
+export function selectPartSegments(
+  timeline,
+  startMs,
+  endMs,
+  { minCoverage = PART_MIN_COVERAGE } = {}
+) {
+  const chosen = timeline.filter((s) => s.startMs < endMs && s.endMs > startMs);
+  const covered = chosen.reduce(
+    (sum, s) => sum + Math.max(0, Math.min(s.endMs, endMs) - Math.max(s.startMs, startMs)),
+    0
+  );
+  const coverage = covered / (endMs - startMs);
+  if (chosen.length === 0) return { ok: false, reason: "NO_FOOTAGE", coverage: 0 };
+  if (coverage < minCoverage) return { ok: false, reason: "LOW_COVERAGE", coverage };
+  const cutStart = Math.max(startMs, chosen[0].startMs);
+  const cutEnd = Math.min(endMs, chosen[chosen.length - 1].endMs);
+  return {
+    ok: true,
+    segments: chosen,
+    offsetMs: cutStart - chosen[0].startMs,
+    durationMs: cutEnd - cutStart,
+    coverage,
+  };
+}
+
+/** The fail reason for a session part the buffer does not cover. */
+export const partFailureReason = (selection) =>
+  selection.reason === "NO_FOOTAGE"
+    ? "Camera was not recording during this part of the session"
+    : `Camera recorded only ${Math.round(selection.coverage * 100)}% of this part of the session`;
+
 const even = (value) => Math.max(2, Math.round(value / 2) * 2);
 
 /** Output size: the camera's size, scaled down to fit 1920×1080, even numbers. */
@@ -79,9 +131,24 @@ export const logoLayout = (videoWidth) => ({
   margin: Math.max(8, Math.round(videoWidth * LOGO_MARGIN_RATIO)),
 });
 
+/**
+ * Bitrate caps per kind of output. A 65 s clip stays ≲ 20 MB and a 5-min
+ * session part ~40–50 MB (the C200 gave 13–24 MB per 65 s uncapped).
+ */
+export const QUALITY = {
+  clip: { crf: "23", bitrate: "2000k", maxrate: "2300k", bufsize: "4600k", audio: "96k" },
+  session: { crf: "26", bitrate: "1000k", maxrate: "1200k", bufsize: "2400k", audio: "64k" },
+};
+
 /** Per-encoder input options, last filter step and codec options. */
-export function encoderSettings(encoder, { vaapiDevice = "/dev/dri/renderD128" } = {}) {
-  const rate = ["-b:v", "5M", "-maxrate", "6M", "-bufsize", "10M"];
+export function encoderSettings(
+  encoder,
+  { vaapiDevice = "/dev/dri/renderD128", quality = "clip" } = {}
+) {
+  const q = QUALITY[quality];
+  if (!q) throw new Error(`Unknown quality "${quality}"`);
+  const cap = ["-maxrate", q.maxrate, "-bufsize", q.bufsize];
+  const rate = ["-b:v", q.bitrate, ...cap];
   switch (encoder) {
     case "h264_qsv":
       return {
@@ -99,7 +166,7 @@ export function encoderSettings(encoder, { vaapiDevice = "/dev/dri/renderD128" }
       return {
         input: [],
         tail: "format=yuv420p",
-        codec: ["-c:v", "h264_videotoolbox", "-b:v", "5M", "-profile:v", "high"],
+        codec: ["-c:v", "h264_videotoolbox", ...rate, "-profile:v", "high"],
       };
     case "libx264":
       return {
@@ -111,11 +178,8 @@ export function encoderSettings(encoder, { vaapiDevice = "/dev/dri/renderD128" }
           "-preset",
           "veryfast",
           "-crf",
-          "23",
-          "-maxrate",
-          "6M",
-          "-bufsize",
-          "12M",
+          q.crf,
+          ...cap,
           "-profile:v",
           "high",
         ],
@@ -161,9 +225,10 @@ export function buildClipArgs({
   height,
   encoder,
   vaapiDevice,
+  quality = "clip",
   outPath,
 }) {
-  const enc = encoderSettings(encoder, { vaapiDevice });
+  const enc = encoderSettings(encoder, { vaapiDevice, quality });
   const args = ["-hide_banner", "-nostdin", "-y", "-loglevel", "error", ...enc.input];
   args.push("-f", "concat", "-safe", "0", "-i", listPath);
   let filter;
@@ -182,7 +247,7 @@ export function buildClipArgs({
   // the audio in testing.
   args.push("-ss", seconds(offsetMs), "-t", seconds(durationMs));
   args.push("-filter_complex", filter, "-map", "[v]", "-map", "0:a?");
-  args.push(...enc.codec, "-c:a", "aac", "-b:a", "96k");
+  args.push(...enc.codec, "-c:a", "aac", "-b:a", QUALITY[quality].audio);
   args.push("-movflags", "+faststart", "-f", "mp4", outPath);
   return args;
 }
@@ -283,6 +348,7 @@ export async function cutClip({
   workDir,
   logoPath,
   encoder,
+  quality = "clip",
   settings,
   signal,
   log,
@@ -312,9 +378,10 @@ export async function cutClip({
           height,
           encoder: enc,
           vaapiDevice: settings.vaapiDevice,
+          quality,
           outPath: videoPath,
         }),
-        { timeoutMs: 10 * 60_000, signal }
+        { timeoutMs: 15 * 60_000, signal }
       );
     let used = encoder;
     try {
@@ -370,6 +437,24 @@ export async function makeClip(entry, ctx) {
 
   if (!courtKnown && timeline.length === 0) {
     return { status: "fail", reason: "This court's camera is not set up on the recorder box" };
+  }
+  const part = isSessionPart(entry);
+  if (part) {
+    const selection = selectPartSegments(timeline, window.startMs, window.endMs);
+    if (!selection.ok)
+      return { status: "fail", reason: partFailureReason(selection), detail: selection };
+    await fsp.mkdir(workDir, { recursive: true });
+    const result = await cutClip({
+      ...selection,
+      workDir,
+      logoPath,
+      encoder,
+      quality: "session",
+      settings,
+      signal,
+      log,
+    });
+    return { status: "done", coverage: selection.coverage, ...result };
   }
   const selection = selectSegments(timeline, window.startMs, window.endMs);
   if (!selection.ok) {

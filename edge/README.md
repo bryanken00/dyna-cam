@@ -80,6 +80,8 @@ nano .env        # API_URL=https://api.your-domain   DEVICE_TOKEN=<the token>
 | `CLIP_CONCURRENCY` / `UPLOAD_CONCURRENCY` | `1` / `1` | Clips cut / uploaded at the same time |
 | `HEARTBEAT_SECONDS` | `30` | Heartbeat interval (the portal shows a box offline after 90 s) |
 | `CONFIG_REFRESH_SECONDS` | `60` | How often courts, camera URLs and the logo are re-read |
+| `DISK_WARN_GB` | `2` | Log a warning when free space in `DATA_DIR` drops below this |
+| `DISK_CRITICAL_MB` | `500` | Below this, session footage is no longer kept beyond the rolling buffer, so live recording goes on |
 | `BUTTON_PORT` | `8089` | LAN port for court buttons. Set it empty or `0` to turn buttons off. |
 | `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
 | `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
@@ -135,6 +137,48 @@ The venues use TP-Link **Tapo C200** cameras (Wi-Fi, indoor pan/tilt). On firmwa
 
 Other RTSP cameras work the same way. H.264 or H.265 is fine, since the clip is re-encoded to
 H.264 anyway.
+
+## Sessions (full-session recording)
+
+Staff can book a court for a window of 5 min to 3 h (Admin portal → Sessions). The API splits the
+booking into **5-minute parts**. Each part becomes an ordinary clip job when its window ends, and
+the players get every part as its own clip.
+
+What the box does:
+
+1. **Keeps the footage.** `/config` lists the sessions that start within a day or ended less than
+   30 min ago. Every segment that overlaps a session window of its court, ±10 s, is kept until
+   30 min after the session ends instead of being pruned after `BUFFER_SECONDS`. A cached config
+   keeps this working across a reboot.
+2. **Cuts each part exactly.** A part covers `[windowStart, windowEnd]`, with no 60 s before or
+   5 s after. The box waits until the window end is in a closed segment, like an ordinary clip.
+3. **Caps the size.** Session parts use libx264 `-crf 26 -maxrate 1200k` (hardware encoders:
+   `-b:v 1000k -maxrate 1200k`) with 64k audio, so a 5-min part is at most about 47 MB. Ordinary
+   clips are capped at 2.3 Mbit/s, so a 65 s clip is at most about 20 MB.
+4. **Copes with camera drop-outs.**
+   - A part is made if **at least 80 %** of its window was recorded. Holes show as a held frame,
+     and footage that starts late or stops early makes the part shorter.
+   - Below 80 % the part is failed with "Camera recorded only N% of this part of the session".
+   - With no footage at all it fails with "Camera was not recording during this part of the
+     session".
+5. **Puts players first.** A player's clip is always cut before a session part, because a part's
+   footage is kept and a clip's isn't.
+
+**Disk sizing.** A C200 `stream1` records at about 1–2 Mbit/s, which is about 0.45–0.9 GB per
+court-hour, so a 3 h session keeps up to about 2.7 GB until 30 min after it ends. Plan for:
+
+> free space ≥ (courts booked at the same time) × (longest session in hours) × 0.9 GB + 2 GB margin
+
+For example, 6 courts with 3 h sessions at once is about 16 GB, so use a 128 GB SSD or larger.
+The box checks free space every minute:
+
+- Below `DISK_WARN_GB` (2 GB) it logs a warning every 10 min.
+- Below `DISK_CRITICAL_MB` (500 MB) it logs an error and stops keeping session footage, so
+  recording never stops.
+
+**Throughput.** At every 5-minute boundary each court in a session produces a part to encode. The
+API fails a part that isn't finished within 15 min, so with several courts in sessions use a
+hardware encoder (QSV/VAAPI). Measuring this is in the load test below.
 
 ## Court buttons
 
@@ -260,6 +304,9 @@ clip from the court's QR page.
   4. Overlay the logo at 12% of the width, bottom-right.
   5. Encode H.264 at up to 1080p with AAC audio and `+faststart`.
   6. Make the thumbnail from the middle frame.
+- **Sessions:** session windows from `/config` protect their segments from pruning
+  (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
+  `selectPartSegments`).
 - **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
   202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
@@ -287,6 +334,8 @@ clip from the court's QR page.
 | Clips cut a few seconds off | Check the clock (above), then the camera's own time. |
 | Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
 | Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
+| Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
+| `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
 | Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
 
 Test a camera by hand (the password stays out of the box's logs, but not your shell history):
@@ -308,7 +357,9 @@ before the first venue goes live.
 | Time to cut one 65 s clip, `h264_qsv` | < 15 s | TODO |
 | Time to cut one 65 s clip, `libx264` | < 60 s | TODO |
 | 6 clips saved at once: last clip Ready after | < 2 min | TODO |
-| Clip size (65 s, 720p / 1080p) | < 30 MB | TODO |
+| Clip size (65 s, 720p / 1080p) | ≤ 20 MB | TODO |
 | Upload time on the venue's uplink | < 60 s | TODO |
 | Recording gaps during a clip burst | none | TODO |
+| 6 courts in sessions: 6 × 5-min parts encoded per 5 min | < 5 min total | TODO |
+| 5-min session part size (720p / 1080p) | ≈ 40–50 MB | TODO |
 | 24 h soak: memory growth, restarts | flat, 0 | TODO |

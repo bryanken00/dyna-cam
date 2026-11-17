@@ -9,6 +9,7 @@ import {
   loadTimeline,
   mergeSegmentList,
   parseSegmentList,
+  retentionWindows,
   segmentStartMs,
   segmentsToPrune,
 } from "../src/segments.js";
@@ -159,5 +160,44 @@ describe("loadTimeline", () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("session retention", () => {
+  const now = 1_800_000_000_000;
+  const sessions = [
+    { sessionId: "s1", courtId: "court-1", startMs: now - 3_600_000, endMs: now - 600_000 }, // ended 10 min ago
+    { sessionId: "s2", courtId: "court-1", startMs: now - 9_000_000, endMs: now - 7_200_000 }, // ended 2 h ago
+    { sessionId: "s3", courtId: "court-2", startMs: now - 3_600_000, endMs: now },
+  ];
+
+  it("keeps windows of the court's sessions until 30 min after they end, ±10 s", () => {
+    assert.deepEqual(retentionWindows(sessions, "court-1", now), [
+      { fromMs: now - 3_600_000 - 10_000, toMs: now - 600_000 + 10_000 },
+    ]);
+    assert.deepEqual(retentionWindows(sessions, "court-1", now + 21 * 60_000), []);
+    assert.deepEqual(retentionWindows(undefined, "court-1", now), []);
+  });
+
+  it("keeps segments overlapping a session window and still prunes the others", () => {
+    const keep = retentionWindows(sessions, "court-1", now);
+    const seg = (startMs, lenMs = 2000) => ({
+      name: `${Math.floor(startMs / 1000)}.ts`,
+      mtimeMs: startMs + lenMs,
+    });
+    const entries = [
+      seg(now - 4_000_000), // before the session → pruned
+      seg(now - 3_600_000 - 9000), // inside the 10 s margin before the start → kept
+      seg(now - 2_000_000), // during the session → kept
+      seg(now - 600_000 + 5000), // just after the end, inside the margin → kept
+      seg(now - 500_000), // after the session → pruned
+      seg(now - 60_000), // inside the rolling buffer → kept
+    ];
+    assert.deepEqual(segmentsToPrune(entries, now, 180_000, keep), [
+      entries[0].name,
+      entries[4].name,
+    ]);
+    // without sessions everything older than the buffer goes
+    assert.equal(segmentsToPrune(entries, now, 180_000).length, 5);
   });
 });

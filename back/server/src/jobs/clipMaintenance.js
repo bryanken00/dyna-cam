@@ -1,7 +1,8 @@
 import { logger } from "../../config/logger.js";
-import { CLIP_STALE_MINUTES, secondsAgoLocal } from "../utils/clips.js";
+import { CLIP_STALE_MINUTES, secondsAgoLocal, SESSION_PART_STALE_MINUTES } from "../utils/clips.js";
 import { getCurrentTimestampLocal } from "../utils/dateUtils.js";
 import { removeClipFiles } from "../utils/file/clipFiles.js";
+import { materializeSessionParts, settleSessions } from "../utils/sessions.js";
 
 /**
  * Clip housekeeping (PLAN-001), run at startup and then every hour:
@@ -9,14 +10,18 @@ import { removeClipFiles } from "../utils/file/clipFiles.js";
  * 1. Expire: a Ready clip past its `expiresAt` (the venue's retention days)
  *    becomes Expired and its files are deleted. The row stays (soft), so the
  *    share link says "expired" instead of "not found".
- * 2. Give up: a clip still Pending/Processing after CLIP_STALE_MINUTES is
- *    marked Failed — the recorder box never answered, and its rolling buffer
- *    has long since overwritten that moment anyway.
+ * 2. Give up: a clip still Pending/Processing after CLIP_STALE_MINUTES (a
+ *    session part: SESSION_PART_STALE_MINUTES) is marked Failed — the recorder
+ *    box never answered, and its footage is gone by then anyway.
  *
  * @param {import("../../config/database.js").default} db
  * @returns {Promise<{ expired: number, failed: number }>}
  */
 export const runClipMaintenance = async (db) => {
+  // Sessions whose box never polled still get their parts (which then fail
+  // below if nobody cuts them), so no session is left hanging
+  await materializeSessionParts(db);
+
   const now = getCurrentTimestampLocal();
 
   const due = await db.query(
@@ -45,9 +50,16 @@ export const runClipMaintenance = async (db) => {
   const stale = await db.query(
     `UPDATE clips
      SET status = 'Failed', failureReason = 'The recorder did not respond in time', dateUpdated = ?
-     WHERE status IN ('Pending', 'Processing') AND requestedAt < ?`,
-    [now, secondsAgoLocal(CLIP_STALE_MINUTES * 60)]
+     WHERE status IN ('Pending', 'Processing')
+       AND requestedAt < IF(source = 'SESSION', ?, ?)`,
+    [
+      now,
+      secondsAgoLocal(SESSION_PART_STALE_MINUTES * 60),
+      secondsAgoLocal(CLIP_STALE_MINUTES * 60),
+    ]
   );
+
+  await settleSessions(db);
 
   return { expired, failed: stale.affectedRows || 0 };
 };

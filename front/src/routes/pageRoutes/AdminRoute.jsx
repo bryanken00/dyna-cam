@@ -26,6 +26,7 @@ const CourtSign = lazy(
 );
 const Devices = lazy(() => import("../../pages/Admin/DynaCam/Devices"));
 const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
+const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 
 const AdminRoute = () => {
   const navigations = [
@@ -200,6 +201,21 @@ const AdminRoute = () => {
             <Suspense fallback={<ComponentLoader />}>
               <ProtectedRoute module="clips" accessLevel="read">
                 <Clips />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "clips", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/sessions",
+          name: "Sessions",
+          label: "Sessions",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="clips" accessLevel="read">
+                <Sessions />
               </ProtectedRoute>
             </Suspense>
           ),

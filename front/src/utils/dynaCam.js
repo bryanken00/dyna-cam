@@ -87,3 +87,68 @@ export const suggestButtonCode = (venueName, courtName) => {
   const venuePart = venue.slice(0, room).replace(/-+$/, "");
   return `${venuePart}-${court}`;
 };
+
+/* ── Recording sessions ──────────────────────────────────────────────────── */
+
+/** Session status → StatusDot tone. Recording gets the live (glowing) dot. */
+export const SESSION_STATUS_TONE = {
+  Scheduled: "muted",
+  Recording: "success",
+  Processing: "warning",
+  Ready: "success",
+  Failed: "error",
+  Cancelled: "muted",
+};
+
+/** The length choices in the booking drawer, in minutes. */
+export const SESSION_DURATIONS = [30, 60, 90, 120, 180];
+export const SESSION_MIN_MINUTES = 5;
+export const SESSION_MAX_MINUTES = 180;
+export const SESSION_MAX_DAYS_AHEAD = 14;
+
+/** 90 → "1 h 30 min", 45 → "45 min". */
+export const formatMinutes = (minutes) => {
+  const m = Math.max(0, Math.round(Number(minutes) || 0));
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (!h) return `${rest} min`;
+  return rest ? `${h} h ${rest} min` : `${h} h`;
+};
+
+/** "2:00 PM – 3:30 PM" (both on one day) or with dates when it crosses midnight. */
+export const formatTimeRange = (startAt, endAt) => {
+  if (!startAt || !endAt) return "-";
+  const start = dayjs(startAt);
+  const end = dayjs(endAt);
+  return start.isSame(end, "day")
+    ? `${start.format("h:mm A")} – ${end.format("h:mm A")}`
+    : `${start.format("MMM D, h:mm A")} – ${end.format("MMM D, h:mm A")}`;
+};
+
+/** A session part's 1-based label: partIndex 0 → "Part 1". */
+export const partLabel = (partIndex) =>
+  `Part ${(Number(partIndex) || 0) + 1}`;
+
+/**
+ * "Now" as Manila wall-clock time — the zone the API books in — whatever the
+ * browser's own zone is. → { date: "YYYY-MM-DD", time: "HH:mm" }
+ */
+export const manilaNow = (offsetMinutes = 0) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(Date.now() + offsetMinutes * 60 * 1000))
+      .map((p) => [p.type, p.value]),
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+};

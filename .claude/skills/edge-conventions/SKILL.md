@@ -1,16 +1,14 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
 
-Node 20.12+ · plain ESM JavaScript · **no runtime dependencies** · ffmpeg 5+ · pm2 ·
-`node:test`. Never add runtime dependencies (`node:http` for the listener). The box records each court's RTSP camera into a rolling buffer and cuts the replays
-players save. Its only calls to the API are **outbound**; the one listener is LAN-only, for
-court buttons. The product context is in
-`docs/plans/PLAN-001-court-replay-cameras/plan.md` ("Recorder box"), and the server half is in
-`back/server/src/controllers/v1/device/device.controller.js`.
+Node 20.12+ · plain ESM JavaScript · **no runtime dependencies, never add one** · ffmpeg 5+ · pm2 ·
+`node:test`. The box records each court's RTSP camera into a rolling buffer and cuts the replays
+players save. API calls are **outbound** only; the one listener is LAN-only (court buttons).
+Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1/device/`.
 
 ## Module layout (`src/`)
 
@@ -29,7 +27,7 @@ court buttons. The product context is in
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
 | `index.js` | Wiring and graceful shutdown only |
 
-Keep logic in pure exported functions and inject side effects (`api`, `clip`, `spawnImpl`, `now`) so `test/` runs without ffmpeg or internet.
+Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `test/` needs no ffmpeg or internet.
 
 ## Device API contract (don't change it from here)
 
@@ -50,6 +48,11 @@ Keep logic in pure exported functions and inject side effects (`api`, `clip`, `s
   only when the path (without the query) changes.
 - Use `requestedAtMs` (epoch ms), never parse `requestedAt`. A job older than 15 min is failed
   server-side, so drop it.
+- Session parts are clip jobs with `sessionId`, `partIndex`, `windowStartMs` and `windowEndMs`
+  (null for ordinary clips). Cut exactly that window. It must be ≥ 80 % covered (holes → held
+  frames), otherwise fail with the coverage. Players' clips are cut before parts. `/config`
+  `sessions` keep their court's segments (window ± 10 s) until end + 30 min
+  (`retentionWindows`). Below `DISK_CRITICAL_MB` that keep is dropped, so recording never stops.
 - Claim (`/processing`) is best-effort, but exclusive: another box's claim → 409 → drop.
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201 or 200 (merged) with `shareUrl`.
   It is queued (`state: "press"`) and retried while under 100 s old (the API refuses > 120 s).
@@ -65,19 +68,18 @@ Keep logic in pure exported functions and inject side effects (`api`, `clip`, `s
 - RTSP input: `-rtsp_transport tcp -timeout 10000000` (µs, ffmpeg ≥ 5; `-stimeout` on 4.x,
   where `-timeout` means *listen*). The stall watchdog kills a run with no new video for 20 s.
   Restart backoff is 2 s → 30 s max.
-- **Never `-use_wallclock_as_timestamps`.** It clumps frames that arrive together, and the clip
-  encoder then drops them, giving choppy clips at half the frame rate. Keep the camera's
-  timestamps.
-- **Mask credentials.** Never log or report a camera URL without `maskCredentials`. The logger
-  masks every line as a safety net, and heartbeat messages go through `describeFailure`.
+- **Never `-use_wallclock_as_timestamps`**: it clumps frames that arrive together and the clip
+  encoder drops them (half the frame rate). Keep the camera's timestamps.
+- **Mask credentials** (`maskCredentials`) in every log line and heartbeat message.
 - Don't rely on `drawtext`, which some ffmpeg builds lack. The watermark is an image overlay:
   12% of the width, bottom-**right** (Tapo burns its own OSD top-left and bottom-left).
 - Clip encode:
   - Concat demuxer with per-file `duration` = wall-clock spacing.
   - **Output-side** `-ss/-t`. Input-side seeking on concat started the video ~1.5 s late.
-  - Scale to at most 1920×1080, and end the filter chain with `format=yuv420p` (or `nv12` /
-    `hwupload` for QSV and VAAPI).
-  - `-c:a aac`, `-movflags +faststart`.
+  - Scale to ≤ 1920×1080, end the filter with `format=yuv420p` (`nv12`/`hwupload` for QSV/VAAPI); `-c:a aac`, `+faststart`.
+  - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s), session parts crf 26
+    / max 1200k with 64k audio (≈ 45 MB per 5 min). Hardware encoders use `-b:v` with the same
+    maxrate.
   - If a hardware encoder fails, fall back to `libx264 -preset veryfast -crf 23` once.
 - `ENCODER=auto` test-encodes each listed hardware encoder. Being listed is not enough.
 
@@ -95,25 +97,24 @@ with no row falls back to its name → mtime. The file still being written is ne
 tolerates holes ≤ 7 s, and the window must be inside a closed segment before cutting.
 
 ## Data and state
-
 `DATA_DIR` holds `buffer/<courtId>/` (segments, csv, index, run, pid), `jobs/<clipId>/` (segments
 hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
-`config.json` (mode 600, holds camera passwords) and `logo/`.
-
-Every JSON write is atomic (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
+`config.json` (mode 600, holds camera passwords) and `logo/`. Every JSON write is atomic
+(`writeJsonAtomic`). Folder names from IDs go through `safeId`.
 
 ## Verification (run in `edge/` before reporting done)
 
 ```bash
 npm run lint     # eslint (security plugin) + prettier-compatible; must be clean
 npm test         # node:test — no network, no ffmpeg
-npm run smoke    # ~2 min: real recorder + clipper on a Tapo-like source (pcm_alaw, irregular GOP);
-                 # asserts ≈65 s, h264 + aac, every frame kept, faststart, JPEG thumbnail
+npm run smoke    # ~2 min: real recorder + clipper on a Tapo-like source (pcm_alaw, irregular GOP):
+                 # 65 s clip (h264+aac, all frames, faststart, JPEG) + a 60 s session part (capped)
 ```
 
-Add a unit test for every new pure function and API error path. What can't be verified here (real RTSP cameras, QSV/VAAPI, the 6-court load test) is reported as unverified.
+Unit-test every new pure function and API error path; report what can't be verified here (real cameras, QSV/VAAPI, load test).
 
 ## Related
 
-- README: install, Tapo C200 setup, troubleshooting, load-test TODO. The server side is backend work (`backend-conventions`); a contract change updates both sides.
-- Shipped changes get a `changelog` entry. Plans, CRs and bugs live in the repo-root `docs/`.
+- README: install, Tapo C200, sessions/disk sizing, buttons, troubleshooting, load-test TODO.
+  The server side is backend work (`backend-conventions`); a contract change updates both sides.
+- Shipped changes get a `changelog` entry; plans, CRs and bugs live in the repo-root `docs/`.

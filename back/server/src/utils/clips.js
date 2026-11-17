@@ -25,6 +25,14 @@ export const DEVICE_ONLINE_SECONDS = 90;
 /** A clip still Pending/Processing after this long is marked Failed. */
 export const CLIP_STALE_MINUTES = 15;
 
+/**
+ * Session parts get longer: the box keeps their footage until 30 minutes after
+ * the session ends, and with several courts in sessions their parts queue up
+ * behind players' clips (which are cut first — their footage only lasts the
+ * rolling buffer).
+ */
+export const SESSION_PART_STALE_MINUTES = 60;
+
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
 
 /** Manila timestamp `seconds` ago. */
@@ -60,3 +68,6 @@ export const courtQrUrl = (qrToken) => `${appUrl()}/court/${qrToken}`;
 
 /** Public page for a clip's share link. */
 export const clipShareUrl = (shareToken) => `${appUrl()}/clip/${shareToken}`;
+
+/** Public page for a recording session's share link (all its parts). */
+export const sessionShareUrl = (shareToken) => `${appUrl()}/session/${shareToken}`;

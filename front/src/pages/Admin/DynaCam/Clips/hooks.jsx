@@ -313,8 +313,10 @@ export const useClipHooks = () => {
         title: "Source",
         dataIndex: "source",
         key: "source",
-        width: 110,
-        render: (source) => <SourceChip source={source} />,
+        width: 140,
+        render: (source, record) => (
+          <SourceChip source={source} partIndex={record.partIndex} />
+        ),
       },
       {
         title: "Length",

@@ -86,6 +86,9 @@ export function loadConfig(env = process.env) {
     uploadConcurrency: int(env, "UPLOAD_CONCURRENCY", 1, 1, 4),
     heartbeatSeconds: int(env, "HEARTBEAT_SECONDS", 30, 5, 600),
     configRefreshSeconds: int(env, "CONFIG_REFRESH_SECONDS", 60, 10, 3600),
+    // Free space in DATA_DIR: warn below, stop keeping session footage below critical
+    diskWarnGb: int(env, "DISK_WARN_GB", 2, 0, 10_000),
+    diskCriticalMb: int(env, "DISK_CRITICAL_MB", 500, 0, 1_000_000),
     // Court buttons on the LAN: unset → 8089; set to "" or 0 → off
     buttonPort: env.BUTTON_PORT === undefined ? 8089 : int(env, "BUTTON_PORT", 0, 0, 65535),
     buttonHost: String(env.BUTTON_HOST || "0.0.0.0").trim(),

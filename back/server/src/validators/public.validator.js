@@ -11,3 +11,6 @@ export const courtTokenParamsSchema = z.object({ qrToken: token });
 
 // /clips/:shareToken
 export const clipTokenParamsSchema = z.object({ shareToken: token });
+
+// /sessions/:shareToken
+export const sessionTokenParamsSchema = z.object({ shareToken: token });
