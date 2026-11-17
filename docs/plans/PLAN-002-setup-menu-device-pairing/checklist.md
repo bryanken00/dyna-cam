@@ -336,6 +336,42 @@
 - [ ] Tried for real with two cameras (or the C200 twice via its two streams for a test):
       stacked stream on Facebook, Cam 2 only, a stacked 60-second clip
 
+## Phase I — Recorder boxes set up from `.env` only (no UI)
+
+> Plan: [section 8](plan.md#8-recorder-boxes-set-up-from-env-only-phase-i). Build waits for the
+> requester's go-ahead.
+
+### I1 · Backend
+
+- [ ] `RECORDER_ENROLL_KEY` (≥ 32 chars, else enrolment off) in `.env.example`; `POST
+      /api/v1/pair/enroll` (constant-time key check, pairing limits, venue must exist)
+- [ ] Remove `/admin/devices/*`, `/admin/pairing-codes/recorders*`, `/pair/device`; migration
+      `014`: `venues/devices` permission Inactive
+- [ ] `scripts/boxes.js`: `npm run boxes` (venue, name, status, last seen, agent, id) and
+      `npm run boxes:revoke -- <name or id>`
+- [ ] Tests: enrol ok / wrong key / unknown or deleted venue / enrolment off; token works;
+      revoked box 401; removed routes 404; `ctx.pairBox` enrols
+
+### I1 · Recorder box
+
+- [ ] `ENROLL_KEY`, `VENUE_ID`, `BOX_NAME` (default hostname); `PAIRING_CODE` removed (a leftover
+      one is only warned about); credentials: `device.json` → enrol
+- [ ] Revoked → delete `device.json`, write `revoked.json`, stop; no automatic re-enrol until a
+      person deletes it
+- [ ] Tests; README (install with `.env`, rotating the key, revoked boxes); skill
+
+### I2 · Web
+
+- [ ] Remove Setup → Recorder Boxes (page, route, menu, services, box pairing dialog)
+- [ ] Venue page: venue ID with **Copy**; court setup hint points to the box's `.env` setup
+- [ ] `npm run lint && npm run build`
+
+### Phase I wrap-up
+
+- [ ] Migration `014` applied locally (ask first); docs (root `CLAUDE.md` pairing line,
+      `back/CLAUDE.md`, skills); changelog; commit I1, I2
+- [ ] Your running box keeps working (it has `device.json`); a fresh box enrols from `.env`
+
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,

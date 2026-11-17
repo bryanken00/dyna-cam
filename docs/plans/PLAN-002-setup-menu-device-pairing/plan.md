@@ -489,6 +489,56 @@ Cam 2 like that — also have the option Cam 1 or Cam 2 only."*
   key field; shown again on the status card with **Change**.
 - **App:** no change (the device's live view stays Cam 1).
 
+### 8. Recorder boxes set up from `.env` only (Phase I)
+
+The requester (2026-11-17), looking at Setup → Recorder Boxes: *"Possible this only internal?
+Just ENV from back and edge? No UI?"* Recorder boxes are installed by us, not by venue staff, so
+adding one needs no screen.
+
+**Decisions (answered 2026-11-17):**
+
+| Question | Answer |
+| --- | --- |
+| How a box knows its venue | `VENUE_ID` in `edge/.env`; the venue page in Setup shows the ID with a **Copy** button |
+| The Recorder Boxes page | **Removed completely** (page, menu, Add box, pairing keys for boxes). Box health stays on each court's camera setup |
+| Removing / blocking a box | **API command line**: `npm run boxes` lists them, `npm run boxes:revoke -- <name or id>` blocks one |
+
+#### 8.1 How a box enrols
+
+```
+back/.env                         edge/.env
+RECORDER_ENROLL_KEY=<64 hex>      API_URL=https://api…
+                                  ENROLL_KEY=<the same 64 hex>
+                                  VENUE_ID=6f1c…            ← Setup → Venues → venue → Copy ID
+                                  BOX_NAME=Bry's Table      ← optional, default the hostname
+
+first start, no data/device.json:
+  box ── POST /api/v1/pair/enroll { enrollKey, venueId, name, agentVersion } ──▶ API
+      ◀── 201 { token, device, venue }   → saved to data/device.json (0600), as with pairing
+```
+
+- `RECORDER_ENROLL_KEY` unset (or under 32 characters) → enrolment is off (403).
+- The key is compared in constant time; wrong keys count towards the same per-IP limits and
+  global pause as pairing keys (3.x). The venue must exist and not be deleted.
+- After enrolling, the box never sends the key again; its token works as before.
+- **A revoked box doesn't re-enrol by itself:** on 401 it deletes `device.json`, writes
+  `data/revoked.json`, stops, and logs *"This box was revoked — delete data/revoked.json to
+  enrol it again"*. A person has to act, so `boxes:revoke` sticks.
+- **A stolen box** holds the enrol key: revoke it **and** change `RECORDER_ENROLL_KEY` (and the
+  other boxes' `ENROLL_KEY`; enrolled boxes keep working, they don't need the key again).
+
+#### 8.2 What is removed / added
+
+- **Removed:** Setup → Recorder Boxes (page, menu entry, services, the box pairing-key dialog),
+  `/api/v1/admin/devices/*`, `/api/v1/admin/pairing-codes/recorders*`, `POST /api/v1/pair/device`,
+  the box's `PAIRING_CODE`. The `venues/devices` permission is retired (migration `014`, set
+  Inactive). Session-device pairing (5.x) is unchanged.
+- **Added:** `POST /api/v1/pair/enroll`; `npm run boxes` / `boxes:revoke` in `back/`
+  (`scripts/boxes.js`, reads `DB_*` from `back/.env`); the venue ID with **Copy** on the venue
+  page; the court setup's "no recorder box online" hint now points to `edge/README.md` instead
+  of the removed page.
+- **Existing boxes** that already have `data/device.json` keep working with no change.
+
 ### Alternatives considered
 
 - **Drop the token entirely** (trust the venue network): anyone who can reach the API could read
@@ -632,3 +682,9 @@ Cam 2 like that — also have the option Cam 1 or Cam 2 only."*
   and whole-game videos are stacked; the player picks their stream's layout. The venue's court
   stream moves to the restream model so stream changes never restart the recorder. Document
   first; build waits for the go-ahead.
+- 2026-11-17: **Phase I — recorder boxes from `.env` only** (section 8). Requester: make
+  recorder boxes internal, set up with env on the API and the box, no UI. Answers: `VENUE_ID`
+  in the box's `.env`; the Recorder Boxes page is removed; boxes are listed and revoked from the
+  API's command line. Supersedes box pairing keys (3.x, Phase B) — session-device pairing stays.
+  Document first; build waits for the go-ahead.
+
