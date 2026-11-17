@@ -13,32 +13,25 @@ import {
 import { copyText } from "../utils/clipboard";
 import { PAIRING_KEY_TTL_MS, formatPairingKey } from "../utils/dynaCam";
 
-/** The API address a recorder box talks to — the same one this app uses. */
-const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(
-  /\/+$/,
-  "",
-);
-
 const mmss = (ms) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
 /**
- * Shows a new 6-digit pairing key — the only time its digits are visible —
- * with a live countdown to its expiry (counted from when the key arrived, so
- * the browser's clock/zone doesn't matter).
+ * Shows a new 6-digit key that pairs a phone or tablet to a session — the
+ * only time its digits are visible — with a live countdown to its expiry
+ * (counted from when the key arrived, so the browser's clock/zone doesn't
+ * matter). Recorder boxes don't pair here: they enrol from their `.env`.
  *
  * @param {boolean} open
  * @param {() => void} onClose
- * @param {"recorder"|"session"} kind  a recorder box also gets its `.env`
- *        lines; a session key pairs a phone or tablet at the court
- * @param {{ code, name, venueName?, courtName?, receivedAt, expiresInSeconds? }} pairingKey
+ * @param {{ code, name, courtName?, receivedAt, expiresInSeconds? }} pairingKey
  *        receivedAt: Date.now() when the API answered. expiresInSeconds (when
  *        the API sends it) wins over the default 10 minutes — a session key
  *        also stops when the session ends.
  */
-const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
+const PairingKeyDialog = ({ open, onClose, pairingKey }) => {
   const ttlSeconds = Number(pairingKey?.expiresInSeconds);
   const ttlMs = Number.isFinite(ttlSeconds) ? ttlSeconds * 1000 : PAIRING_KEY_TTL_MS;
   const expiresAtMs = (pairingKey?.receivedAt || 0) + ttlMs;
@@ -54,14 +47,12 @@ const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
   const left = expiresAtMs - now;
   const expired = left <= 0;
   const code = pairingKey?.code || "";
-  const isRecorder = kind === "recorder";
-  const envLines = `API_URL=${API_URL}\nPAIRING_CODE=${code}`;
 
-  const handleCopy = async (text, what) => {
-    const ok = await copyText(text);
+  const handleCopy = async () => {
+    const ok = await copyText(code);
     if (ok) {
       setCopied(true);
-      toast.success(`${what} copied`);
+      toast.success("Key copied");
     } else {
       toast.error("Couldn't copy — read the key off the screen instead");
     }
@@ -78,15 +69,11 @@ const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <KeyRound className="w-4.5 h-4.5" />
-            Pairing key for {pairingKey?.name || (isRecorder ? "the box" : "the device")}
+            Pairing key for {pairingKey?.name || "the device"}
           </DialogTitle>
           <DialogDescription>
-            {isRecorder
-              ? "On the recorder box, put these two lines in its .env file and start it. The box swaps the key for its own token and keeps it."
-              : "Type this key into the Dyna Cam app on the device."}
-            {isRecorder && pairingKey?.venueName && ` It pairs with ${pairingKey.venueName}.`}
-            {!isRecorder &&
-              pairingKey?.courtName &&
+            Type this key into the Dyna Cam app on the device.
+            {pairingKey?.courtName &&
               ` It pairs with this session on ${pairingKey.courtName}.`}
           </DialogDescription>
         </DialogHeader>
@@ -137,49 +124,17 @@ const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
           </div>
         </div>
 
-        {isRecorder && !expired && (
-          <div>
-            <div
-              className="mb-1.5"
-              style={{ fontSize: 12.5, fontWeight: 500, color: "var(--color-text-secondary)" }}
-            >
-              The box&apos;s .env file
-            </div>
-            <pre
-              className="font-mono m-0 whitespace-pre-wrap break-all select-all"
-              style={{
-                fontSize: 12.5,
-                lineHeight: 1.6,
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid var(--color-line)",
-                background: "var(--color-surface-sunken)",
-                color: "var(--color-text-dark)",
-              }}
-            >
-              {envLines}
-            </pre>
-          </div>
-        )}
-
         <p className="m-0" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-          {isRecorder
-            ? "The box appears under Recorder Boxes as soon as it pairs. "
-            : "It works until the session ends at the latest. The device shows under the session's Devices as soon as it pairs. "}
-          You won&apos;t see these digits again.
+          It works until the session ends at the latest. The device shows under
+          the session&apos;s Devices as soon as it pairs. You won&apos;t see these
+          digits again.
         </p>
 
         <DialogFooter>
           {!expired && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                isRecorder ? handleCopy(envLines, ".env lines") : handleCopy(code, "Key")
-              }
-            >
+            <Button type="button" variant="outline" onClick={handleCopy}>
               {copied ? <Check /> : <Copy />}
-              {isRecorder ? "Copy .env lines" : "Copy key"}
+              Copy key
             </Button>
           )}
           <Button type="button" onClick={onClose}>

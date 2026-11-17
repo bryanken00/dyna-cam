@@ -484,6 +484,7 @@ const CameraSection = ({ slot = "camera", court, canWrite, checking, justSaved, 
             Live check
           </StepLabel>
           <CameraLiveCheck
+            venueId={court.venueId}
             camera={camera}
             checking={checking}
             justSaved={justSaved}

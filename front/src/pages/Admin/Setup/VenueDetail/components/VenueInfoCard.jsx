@@ -1,5 +1,6 @@
 import { ImageOff } from "lucide-react";
 import StatusDot from "../../../../../components/StatusDot";
+import VenueIdCopy from "../../../../../components/VenueIdCopy";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../../../utils/phoneFormat";
 import { formatPeso } from "../../../../../utils/dynaCam";
@@ -76,6 +77,28 @@ const VenueInfoCard = ({ venue }) => {
             {venue.status}
           </StatusDot>
         </Fact>
+
+        {/* Recorder boxes have no screen: they enrol with this ID */}
+        <div className="col-span-full min-w-0">
+          <div
+            className="uppercase"
+            style={{
+              fontSize: 10.5,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            Venue ID
+          </div>
+          <div className="mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap min-w-0">
+            <VenueIdCopy venueId={venue.venueId} />
+            <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+              Put this in the recorder box&apos;s <code className="font-mono">.env</code> as{" "}
+              <code className="font-mono">VENUE_ID</code>.
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

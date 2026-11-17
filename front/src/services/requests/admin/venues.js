@@ -44,9 +44,8 @@ export const useCreateVenue = () => {
     onSuccess: () => {
       toast.success("Venue created successfully");
       queryClient.invalidateQueries({ queryKey: ["venues"] });
-      // The Courts / Devices / Clips venue pickers
+      // The Courts / Clips venue pickers
       queryClient.invalidateQueries({ queryKey: ["courts", "options"] });
-      queryClient.invalidateQueries({ queryKey: ["devices", "options"] });
       queryClient.invalidateQueries({ queryKey: ["clips", "options"] });
     },
     onError: (error) => {
@@ -64,9 +63,8 @@ export const useUpdateVenue = () => {
     onSuccess: () => {
       toast.success("Venue updated successfully");
       queryClient.invalidateQueries({ queryKey: ["venues"] });
-      // Courts, boxes and clips show the venue's name
+      // Courts and clips show the venue's name
       queryClient.invalidateQueries({ queryKey: ["courts"] });
-      queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["clips"] });
     },
     onError: (error) => {
@@ -85,7 +83,6 @@ export const useDeleteVenue = () => {
       toast.success("Venue deleted successfully");
       queryClient.invalidateQueries({ queryKey: ["venues"] });
       queryClient.invalidateQueries({ queryKey: ["courts"] });
-      queryClient.invalidateQueries({ queryKey: ["devices"] });
       queryClient.invalidateQueries({ queryKey: ["clips", "options"] });
     },
     onError: (error) => {

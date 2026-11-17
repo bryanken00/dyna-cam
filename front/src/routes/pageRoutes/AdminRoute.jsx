@@ -19,14 +19,12 @@ const Roles = lazy(() => import("../../pages/Admin/UserManagement/Roles"));
 const SettingsPage = lazy(() => import("../../pages/Admin/Settings"));
 const AuditTrail = lazy(() => import("../../pages/Admin/AuditTrail"));
 const AccountSettings = lazy(() => import("../../pages/Admin/AccountSettings"));
-// Setup (PLAN-002): venues → courts → camera setup; recorder boxes
+// Setup (PLAN-002): venues → courts → camera setup. Recorder boxes have no
+// screen (Phase I): they enrol from their .env with the venue's ID.
 const Venues = lazy(() => import("../../pages/Admin/Setup/Venues"));
 const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
 const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
 const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
-const RecorderBoxes = lazy(
-  () => import("../../pages/Admin/Setup/RecorderBoxes"),
-);
 // Dyna Cam (PLAN-001): day-to-day work
 const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
@@ -128,12 +126,7 @@ const AdminRoute = () => {
       name: "Setup",
       label: "Setup",
       icon: <Wrench className="h-5 w-5" />,
-      permission: {
-        anyOf: [
-          ...VENUE_PAGE_ACCESS,
-          { module: "venues", submodule: "devices", accessLevel: "read" },
-        ],
-      },
+      permission: { anyOf: VENUE_PAGE_ACCESS },
       isFilter: true,
       isShow: true,
       children: [
@@ -150,29 +143,6 @@ const AdminRoute = () => {
             </Suspense>
           ),
           permission: { anyOf: VENUE_PAGE_ACCESS },
-          isFilter: true,
-          isShow: true,
-        },
-        {
-          route: "/recorder-boxes",
-          name: "Recorder Boxes",
-          label: "Recorder Boxes",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="venues"
-                submodule="devices"
-                accessLevel="read"
-              >
-                <RecorderBoxes />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: {
-            module: "venues",
-            submodule: "devices",
-            accessLevel: "read",
-          },
           isFilter: true,
           isShow: true,
         },
@@ -358,9 +328,14 @@ const AdminRoute = () => {
           path="dyna-cam/courts"
           element={<Navigate to="/admin/setup/venues" replace />}
         />
+        {/* PLAN-002 Phase I: recorder boxes are set up from .env, no page */}
         <Route
           path="dyna-cam/devices"
-          element={<Navigate to="/admin/setup/recorder-boxes" replace />}
+          element={<Navigate to="/admin/setup/venues" replace />}
+        />
+        <Route
+          path="setup/recorder-boxes"
+          element={<Navigate to="/admin/setup/venues" replace />}
         />
         {/* PLAN-002 Phase E: devices are paired to a session now */}
         <Route

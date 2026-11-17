@@ -55,7 +55,7 @@ const defaultName = (session) => {
  *
  * On success `onSuccess` receives
  * `{ code, name, courtName, expiresInSeconds }` — the page stamps
- * `receivedAt` and shows it in `<PairingKeyDialog kind="session" />`.
+ * `receivedAt` and shows it in `<PairingKeyDialog />`.
  */
 const PairDeviceFormModal = ({ open, onClose, onSuccess, entity }) => {
   const req = <span style={{ color: "var(--color-error)" }}>*</span>;

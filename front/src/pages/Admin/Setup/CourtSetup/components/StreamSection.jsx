@@ -17,9 +17,14 @@ import { Input } from "@/components/ui/input";
 import SetupSection from "./SetupSection";
 import LiveChip from "../../components/LiveChip";
 import PasswordInput from "../../../../../components/PasswordInput";
+import StatusDot from "../../../../../components/StatusDot";
 import StatusToggle from "../../../../../components/StatusToggle";
 import StreamLayoutPicker from "../../../../../components/StreamLayoutPicker";
-import { STREAM_LAYOUTS, courtUpdatePayload } from "../../../../../utils/dynaCam";
+import {
+  STREAM_LAYOUTS,
+  courtStreamHealth,
+  courtUpdatePayload,
+} from "../../../../../utils/dynaCam";
 import { isRtmpUrl, isWebUrl } from "../../../../../utils/tapo";
 import { useUpdateCourt } from "../../../../../services/requests/admin/courts";
 
@@ -96,6 +101,8 @@ const StreamSection = ({ court, canWrite }) => {
   const stream = court.stream;
   const hasStoredStream = !!stream?.configured;
   const hasCamera2 = !!court.camera2?.configured;
+  // What the box reports about the running stream (refreshed with the court)
+  const streamHealth = stream?.enabled ? courtStreamHealth(court.camera?.live) : null;
   const schema = useMemo(() => buildSchema(hasStoredStream), [hasStoredStream]);
 
   const form = useForm({ resolver: zodResolver(schema), defaultValues: valuesFrom(court) });
@@ -157,6 +164,32 @@ const StreamSection = ({ court, canWrite }) => {
     >
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off">
+          {streamHealth && (
+            <div
+              className="mb-5 px-3.5 py-3"
+              aria-live="polite"
+              style={{
+                border: "1px solid var(--color-line)",
+                borderRadius: 10,
+                background: "var(--color-surface-sunken)",
+              }}
+            >
+              <StatusDot tone={streamHealth.tone}>
+                <span className="font-semibold" style={{ color: "var(--color-text-dark)" }}>
+                  {streamHealth.label}
+                </span>
+              </StatusDot>
+              {streamHealth.note && (
+                <div
+                  className="mt-1"
+                  style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+                >
+                  {streamHealth.note}
+                </div>
+              )}
+            </div>
+          )}
+
           <fieldset disabled={!canWrite} className="m-0 p-0 border-0 min-w-0">
             <FormField
               control={form.control}

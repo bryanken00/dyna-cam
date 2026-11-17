@@ -1,9 +1,8 @@
-import { Link } from "react-router";
 import { CircleCheck, Image as ImageIcon, Info, Loader2, Server } from "lucide-react";
 import StatusDot from "../../../../../components/StatusDot";
+import VenueIdCopy from "../../../../../components/VenueIdCopy";
 import { getImageUrl } from "../../../../../utils/upload";
 import {
-  RECORDER_BOXES_PATH,
   cameraFixHint,
   cameraHealth,
   formatAgo,
@@ -31,8 +30,10 @@ const noticeStyle = {
  * @param {boolean} justSaved  a camera was saved on this visit
  * @param {boolean} [showNextSteps]  "The camera works. Next: …" (camera 1 only)
  * @param {string}  [previewAlt]     alt text of the preview picture
+ * @param {string}  [venueId]        shown with Copy when no box is online
  */
 const CameraLiveCheck = ({
+  venueId,
   camera,
   checking,
   justSaved,
@@ -58,20 +59,28 @@ const CameraLiveCheck = ({
       {health.key === "nobox" ? (
         <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
           <Server className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
-          <span>
-            <strong className="font-semibold">
-              No recorder box is online for this venue
-            </strong>{" "}
-            — set one up in{" "}
-            <Link
-              to={RECORDER_BOXES_PATH}
-              className="hover:underline"
-              style={{ color: "var(--color-link)" }}
-            >
-              Recorder Boxes
-            </Link>
-            . The camera can only be checked through the venue&apos;s box.
-          </span>
+          <div className="min-w-0 space-y-2">
+            <div>
+              <strong className="font-semibold">
+                No recorder box is online for this venue.
+              </strong>{" "}
+              Start the venue&apos;s recorder box — it&apos;s set up with{" "}
+              <code className="font-mono">API_URL</code>,{" "}
+              <code className="font-mono">ENROLL_KEY</code> and{" "}
+              <code className="font-mono">VENUE_ID</code> in its{" "}
+              <code className="font-mono">.env</code> (see{" "}
+              <code className="font-mono">edge/README.md</code>). The camera can
+              only be checked through the venue&apos;s box.
+            </div>
+            {venueId && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                  VENUE_ID
+                </span>
+                <VenueIdCopy venueId={venueId} />
+              </div>
+            )}
+          </div>
         </div>
       ) : waiting ? (
         <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle} aria-live="polite">
@@ -92,16 +101,8 @@ const CameraLiveCheck = ({
           <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
           <span>
             The recorder box hasn&apos;t switched to this camera address yet —
-            the status it last reported is about the previous one. Check the box
-            is online in{" "}
-            <Link
-              to={RECORDER_BOXES_PATH}
-              className="hover:underline"
-              style={{ color: "var(--color-link)" }}
-            >
-              Recorder Boxes
-            </Link>
-            ; this page keeps checking.
+            the status it last reported is about the previous one. Check the
+            venue&apos;s box is running; this page keeps checking.
           </span>
         </div>
       ) : (

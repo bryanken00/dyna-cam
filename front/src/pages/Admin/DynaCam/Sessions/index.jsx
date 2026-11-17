@@ -283,7 +283,6 @@ const SessionsPage = () => {
       <PairingKeyDialog
         key={pairingKey?.code || "none"}
         open={!!pairingKey}
-        kind="session"
         pairingKey={pairingKey}
         onClose={handlePairingKeyClose}
       />

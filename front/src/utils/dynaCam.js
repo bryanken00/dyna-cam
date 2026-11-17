@@ -188,7 +188,6 @@ export const PAYMENT_STATUS_TONE = {
 /* ── Setup menu paths (PLAN-002) ─────────────────────────────────────────── */
 
 export const VENUES_PATH = "/admin/setup/venues";
-export const RECORDER_BOXES_PATH = "/admin/setup/recorder-boxes";
 export const venuePath = (venueId) => `${VENUES_PATH}/${venueId}`;
 export const courtSetupPath = (venueId, courtId) =>
   `${venuePath(venueId)}/courts/${courtId}`;
@@ -309,6 +308,40 @@ export const cameraHealth = (camera) => {
     return { key: "starting", label: "Connecting", tone: "warning", message: live.message };
   }
   return { key: "error", label: "Can't reach", tone: "error", message: live.message };
+};
+
+/**
+ * The venue's court stream as the recorder box reports it
+ * (`camera.live.streamStatus` / `streamMessage`) → { label, tone, note } for
+ * a StatusDot line. `note` is extra detail worth showing under it (e.g.
+ * "Live on YouTube", or a fallback like "Camera 2 has no video — showing
+ * Camera 1").
+ */
+export const courtStreamHealth = (live) => {
+  const message = String(live?.streamMessage || "").trim() || null;
+  switch (live?.streamStatus) {
+    case "starting":
+      return { label: "Connecting…", tone: "warning", note: message };
+    case "live":
+      return {
+        label: "Live",
+        tone: "success",
+        // "Live" alone adds nothing
+        note: message && message.toLowerCase() !== "live" ? message : null,
+      };
+    case "error":
+      return {
+        label: `Problem: ${message || "the stream stopped"}`,
+        tone: "error",
+        note: null,
+      };
+    default:
+      return {
+        label: "Not running — is the venue's recorder box on?",
+        tone: "muted",
+        note: null,
+      };
+  }
 };
 
 /** What to do about a camera error message from the box. */
