@@ -150,6 +150,11 @@ roughly a 1-in-a-million chance and an attacker gets very few guesses.
 
 ### 4. Staff app: paired mode
 
+> **Superseded by [section 5](#5-session-devices-phase-e) (Phase E, 2026-11-17).** Phones are no
+> longer paired to a venue; a device is paired to **one session** and unpaired when it ends. The
+> courts list, Record, Take payment and the staff sign-in leave the app. Kept below as the record
+> of what Phases B–D built.
+
 ```
 first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  Courts (venue)
                                                                        │ tap Court 1
@@ -188,6 +193,143 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   platform), with **Pair a phone** (choose venue and name, then show the 6-digit key and
   countdown), Rename, Revoke, and Delete.
 
+### 5. Session devices (Phase E)
+
+The requester's new process (2026-11-17): *"Staff will create a session, then pair the device.
+The device has a view of that session, like a live stream, and it still has the QR code so once
+they finish the game / stop recording they can download. Payment on the counter only, not on the
+app. The court list must be removed — we are now session based. Once the session ends, the device
+is unpaired. Clips must be view only."*
+
+```
+WEB (staff at the counter)                         DEVICE (phone / tablet at the court)
+──────────────────────────                         ────────────────────────────────────
+Sessions → Book session                            "Pair this device"  [ _ _ _ _ _ _ ]
+  Court 1 · Start now · 1 h                                   │ key
+  ▶ shows "Pair a device" key  482 913  (10 min) ──────────▶  ▼
+                                                   Court 1 · DGSI            ● REC 12:34
+                                                   ┌──────────────────┐  ┌─────────┐
+                                                   │  live video from │  │   QR    │ Scan to get
+                                                   │  the recorder box│  │         │ your game
+                                                   └──────────────────┘  └─────────┘
+                                                   Ends by itself at 4:09 PM  [ Stop recording ]
+                                                              │ Stop / end time / web End
+                                                              ▼
+                                                   Big QR · "Saving your game… 2 of 5 parts"
+                                                        → "Ready — scan to download"
+                                                   [ Done ]   This device unpairs in 9:41
+                                                              │ Done or 10 min
+                                                              ▼
+                                                   "Pair this device"
+```
+
+**Decisions (answered 2026-11-17):**
+
+| Question | Answer |
+| --- | --- |
+| Live view source | **From the recorder box over the venue Wi-Fi** (about 5 s behind; no internet upload, no second camera connection) |
+| Who stops recording | **The device's Stop recording button**, or the session's end time; staff can still End it on the web |
+| After the session ends | The device **keeps the download QR for 10 minutes** (or until Done), then unpairs itself |
+| Staff sign-in in the app | **Removed** — the app is only a session device; staff work happens on the web |
+| Payments | **At the counter only** (web Payments page). Nothing about payment in the app |
+
+#### 5.1 Web
+
+- **Sessions → Book session:** a new **Start now** choice (the default), next to picking a date
+  and time. After booking, the **Pair a device** dialog opens straight away with a 6-digit key,
+  a device name (default "Court 1 device") and the 10-minute countdown.
+- **Each session** (row ⋮ menu and the detail sheet) gets **Pair a device** while it is
+  Scheduled or Recording. The detail sheet lists the devices paired to it (name, platform, last
+  seen) with **Unpair**, and the live keys with **Cancel**. More than one device per session is
+  allowed (e.g. a tablet at the court and one at the counter).
+- **Dyna Cam → Paired Apps is removed** (page, route, menu entry, venue-wide "Pair a phone"). The
+  `paired_apps` permission is retired; pairing a device to a session needs **clips · write**,
+  the same permission as booking it.
+- **Clips becomes view only:** no **Save clip now** button and no **Delete**. Preview, Copy share
+  link and Open share page stay.
+- **Payments:** unchanged — cash is taken at the counter on the web.
+
+#### 5.2 Database (migration `010_session_devices.sql`)
+
+- `pairing_codes.sessionId` and `paired_apps.sessionId` (nullable FKs to
+  `recording_sessions.sessionId`). An APP key and a paired device now always belong to a session.
+- `devices.liveUrl` (the box's LAN address, e.g. `http://192.168.254.50:8090`) and
+  `devices.liveKey` (the box's live-view signing key, **encrypted** like camera URLs).
+- Existing venue-wide paired phones are revoked and their unused APP keys cancelled (they have
+  no session). The `paired_apps` permission row is set `Deleted` so it leaves the role editor.
+
+#### 5.3 API
+
+**Admin** (`clips` permission, read for GET, write for the rest):
+
+- `POST /admin/sessions` accepts `startNow: true` (start = now; `startAt` not needed).
+- `POST /admin/sessions/:sessionId/pairing-codes` `{ name }` → `{ code, expiresAt }` — only
+  while the session is Scheduled or Recording; the key expires after 10 min or at the session's
+  end, whichever is first. `DELETE …/pairing-codes/:pairingCodeId` cancels it.
+- `GET /admin/sessions/:sessionId` adds `devices[]` and `pairingCodes[]` (live keys, no digits).
+- `POST /admin/sessions/:sessionId/devices/:pairedAppId/unpair`.
+- Removed: `/admin/pairing-codes/apps`, `/admin/paired-apps/*`, and the Clips write routes
+  (`POST /admin/clips` staff save, `DELETE /admin/clips/:clipId`).
+
+**Pairing:** `POST /pair/app` redeems a session key → `{ token, device: { pairedAppId, name },
+session }`. A key for a session that has already ended is refused like a wrong key.
+
+**Device app** (`/api/v1/app/*`, `Authorization: App <token>`) — replaces the Phase B–D routes:
+
+- `GET /app/session` → `{ session: { sessionId, courtName, venueName, startAt, endAt, status,
+  startsInSeconds, elapsedSeconds, endsInSeconds, partsReady, partsTotal, shareUrl,
+  failureReason }, live: { hlsUrl, expiresAt } | null, unpairInSeconds | null }`.
+  - `live` is null when the session isn't recording, the box is offline, or the box hasn't
+    reported a LAN address.
+  - `unpairInSeconds` counts down the 10 minutes after the session ends.
+- `POST /app/session/stop` → ends the session now (same code as the web's End) and returns it.
+- `POST /app/unpair` (exists) — the Done button.
+- **Unpairing by itself:** the token works while the session is Scheduled or Recording and for
+  10 minutes after it ends. After that — or at once when staff cancel the session or unpair the
+  device — it answers 401 `TOKEN_INVALID` and the device goes back to "Pair this device".
+- Removed: `/app/me`, `/app/courts…`, `/app/clips/:id`, `/app/payments…`, `/app/sessions…`
+  (Phase B–D).
+
+#### 5.4 Recorder box: live view over the venue Wi-Fi
+
+The box already writes each court as 2-second `.ts` segments (H.264 + AAC) for its rolling
+buffer. A small HTTP server on the box (`LIVE_PORT`, default **8090**) turns the newest ones into
+an HLS live playlist — no new camera connection, no re-encoding:
+
+- `GET /live/:courtId/index.m3u8?exp=…&sig=…` → the last 5 closed segments (about 10 s);
+  `GET /live/:courtId/:segment.ts?exp=…&sig=…` → a segment from that court's folder only.
+- **Signed links:** the box makes a random `liveKey` once (saved in `DATA_DIR`, mode 0600) and
+  sends it with its LAN address in the heartbeat. The API signs `courtId.exp` with it
+  (HMAC-SHA256) when it hands a device its `hlsUrl`; the box checks the signature and expiry, so
+  only a device paired to a session on that court can watch, and only for a while.
+- The LAN address is detected from the box's network interfaces; `LIVE_HOST` overrides it.
+  `LIVE_PORT=0` turns the live view off.
+
+#### 5.5 The app (session device only)
+
+- **Screens:** **Pair this device** → **Session** (live + QR + timer + Stop) → **Ended** (QR +
+  saving progress + Done + unpair countdown) → back to Pair. Before a later session starts, the
+  Session screen shows "Starts at 3:00 PM" with the QR already visible.
+- **Live video:** `expo-video` playing the `hlsUrl`; when it can't load: "Live view needs the
+  venue Wi-Fi" — recording is unaffected. It re-reads `/app/session` for a fresh link before
+  the old one expires.
+- **QR:** the session's share link is on screen the whole time ("Scan to get your game — it's
+  ready to download when the game ends"), and full-screen after the end.
+- **Removed:** the staff sign-in and the whole staff-account app (Home, Clips, Courts, Recorder
+  Boxes, Sessions, Take payment, Account), and the paired Courts / Court / Take payment / Recent
+  screens.
+- **Native/OS changes (new dev build):** `expo-video`; Android allows plain-HTTP to the box
+  (`usesCleartextTraffic`); iOS gets `NSAllowsLocalNetworking` and a **Local Network**
+  permission prompt ("Dyna Cam shows the court's live video from the venue's recorder box").
+  Landscape is allowed for tablets.
+
+#### 5.6 Unchanged
+
+- Players' **court QR sign and button** still save the last 60 seconds as clips, priced as today;
+  they show on the (now view-only) Clips page and are paid for at the counter.
+- Recorder box pairing (Setup → Recorder Boxes → Add box) and `DEVICE_TOKEN` stay as built.
+- Sessions stay free; the session's player link and its 5-minute parts work as before.
+
 ### Alternatives considered
 
 - **Drop the token entirely** (trust the venue network): anyone who can reach the API could read
@@ -215,6 +357,11 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
 | Edge | `edge/src/{config,api,sync,recorder}.js` | `PAIRING_CODE` → stored token, camera details in heartbeat, snapshots on request |
 | App | `app/src/Navigation`, `Screens/Pair/`, `Screens/Paired/{Courts,Court,ShareQr}/`, `services/api/app.js`, `store/` | Pairing screen, paired-mode navigator, `expo-secure-store` |
 | Docs | root `CLAUDE.md` (route families), backend/mobile/edge skills, `edge/README.md` | New `/api/v1/app/*` family, pairing |
+| Phase E — Database | `migrations/010_session_devices.sql` | `pairing_codes.sessionId`, `paired_apps.sessionId`, `devices.liveUrl` / `liveKey`; venue-wide phones revoked; `paired_apps` permission retired |
+| Phase E — API | `admin/sessions.controller.js`, `admin/clips.controller.js`, `app/app.controller.js`, `pairing/pairing.controller.js`, `pairedAppAuth.middleware.js`, `device.controller.js`; remove `admin/{pairing-codes (apps),paired-apps}` | Session-bound pairing, `/app/session`, live links, Clips read-only |
+| Phase E — Web | `pages/Admin/DynaCam/{Sessions,Clips}/`, remove `PairedApps/`, `AdminRoute.jsx` | Start now, Pair a device, devices list, view-only Clips |
+| Phase E — Edge | new `edge/src/live.js`, `config.js`, `sync.js`/heartbeat, README | LAN HLS live view with signed links |
+| Phase E — App | `Navigation`, `Screens/{Pair,Session,Ended}`; remove staff screens and `Screens/Paired/*` | Session device only, `expo-video` |
 
 ## Out of scope
 
@@ -222,6 +369,8 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   the web.
 - QR-code pairing, and scanning a court's QR in the app.
 - Re-pairing a recorder box remotely. It needs someone at the box to type a new key.
+- (Phase E) Live view outside the venue Wi-Fi, recording audio-only/video-only devices, and
+  charging for sessions — sessions stay free; paid 60-second clips are taken at the counter.
 
 ## Risks
 
@@ -234,6 +383,14 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
 - **Snapshot load:** a 1280×720 JPEG every 30 s, only while someone has the setup page open, and
   expiring on its own (`previewWantedUntil`). Negligible.
 - **Existing recorder boxes:** `DEVICE_TOKEN` keeps working, so installed boxes need no change.
+- **(Phase E) Live view is LAN-only:** the device must be on the same network as the box. Guest
+  Wi-Fi with client isolation blocks it; the screen then says so and recording carries on. Each
+  viewer pulls about 1–2 Mbit/s from the box — fine for a few devices.
+- **(Phase E) Breaking change for the app:** venue-paired phones are unpaired by the migration,
+  and staff can no longer sign in to the app. Release as `major`. Needs a new dev/store build
+  (`expo-video`, cleartext/Local Network settings).
+- **(Phase E) Every recorder box must be updated** for the live view; an old box keeps
+  recording but devices show "Live view unavailable".
 
 ## Open questions
 
@@ -242,10 +399,12 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   payments**. It can't book sessions or refund (answered 2026-11-17).
 - [x] **Keep "Sign in with a staff account"?** Yes, both. Pairing is the default screen, and
   managers can still sign in (answered 2026-11-17).
-- [ ] **One paired phone per court, or per venue?** Proposed: per venue, with staff picking the
-  court.
-- [ ] **Should a paired phone's clips cost money** when the venue charges? Proposed: no; they're
-  `STAFF` saves, like today.
+- [x] **One paired phone per court, or per venue?** Neither — **per session** (Phase E,
+  2026-11-17).
+- [x] **Should a paired phone's clips cost money?** Moot — the device no longer saves 60-second
+  clips (Phase E).
+- [ ] **(Phase E) Should a session itself be paid for at the counter** (a price per session or
+  per hour)? Proposed: not now; sessions stay free.
 
 ## Revisions
 
@@ -269,3 +428,10 @@ first launch / unpaired ──▶  "Pair this phone"  (6-digit key)  ──▶  
   next booking) so a forgotten recording stops itself; End finishes it now and shows the game's
   QR. The 60-second save stays as a smaller secondary button; the court sign and button are
   unchanged. Migration `009` records which phone started a session.
+- 2026-11-17: **Phase E — session devices** (section 5). Requester: devices are paired to one
+  session by staff, show it live with its download QR, and unpair when it ends; payments at the
+  counter only; no courts list; no venue-wide Paired Apps; Clips view only. Answers: live view
+  from the recorder box over the venue Wi-Fi; Stop on the device or at the end time; QR stays 10
+  min after the end, then unpair; staff sign-in removed from the app. Supersedes the paired mode
+  of Phases B–D (section 4) and the Phase D Start/End-from-phone routes. Document written first,
+  build waits for the requester's go-ahead.
