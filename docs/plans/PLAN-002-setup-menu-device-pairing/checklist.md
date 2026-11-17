@@ -170,5 +170,5 @@
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
       `edge/README.md`
-- [ ] Migration applied (`007`, `008` on the local DB; `009` pending), and noted in the changelog for deploy
+- [x] Migration applied (`007`, `008`, `009` on the local DB), and noted in the changelog for deploy
 - [ ] `plan.md` status set to `Done`
