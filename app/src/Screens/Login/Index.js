@@ -31,7 +31,7 @@ import useThemeStore from "@/store/useThemeStore";
 import { isValidEmail } from "@/utils/regex";
 
 /**
- * Reference implementation for docs/DESIGN_GUIDELINES.md.
+ * Reference implementation for the mobile-conventions skill (design-guidelines.md).
  *
  * The reusable pieces live in src/components — LogoMark, AnimatedField,
  * StyledInput and DotsLoader. What stays here is only the login screen itself:

@@ -1,10 +1,12 @@
 ---
-name: new-module
-description: Scaffold a complete list/detail module in this Expo app — the list screen (ScreenHeader, stat row, DataList card, FilterBar, ListFooter, Fab), its use<Module>Module state hook, the create/edit FormSheet, its data source (in-memory, API via services/api + services/requests with demo-mode fixtures, or local SQLite via a table + db_ endpoints), the SCREEN_NAVIGATION route, stack registration, and the row under the Menu tab. Use whenever the user asks to add, create, or scaffold a new module, screen, entity, resource, list, or CRUD feature (e.g. "add a Products module", "new Customers screen", "scaffold Inventory CRUD"). Also use to add just the data layer or just the screen of such a module.
+name: new-mobile-module
+description: Scaffold a complete list/detail module in the Expo staff app (app/) — the list screen (ScreenHeader, stat row, DataList card, FilterBar, ListFooter, Fab), its use<Module>Module state hook, the create/edit FormSheet, its data source (in-memory, API via services/api + services/requests with demo-mode fixtures, or local SQLite via a table + db_ endpoints), the SCREEN_NAVIGATION route, stack registration, and the row under the Menu tab. Use whenever the user asks to add, create, or scaffold a new module, screen, list, or CRUD feature in the mobile app (e.g. "add a Clips screen to the app", "new Courts screen in the staff app"). Also use to add just the data layer or just the screen of such a module. For the web Admin portal and API half use new-module instead (it runs first when the module needs a new table or endpoint).
 argument-hint: "<module name> [fields…]"
 ---
 
-# New module scaffold
+# New mobile module scaffold
+
+All paths below are relative to `app/`.
 
 Builds one entity's full vertical slice — data source to Menu row — to this
 repo's conventions. `src/Screens/Example/` is the reference implementation and
@@ -17,11 +19,11 @@ Request: **$ARGUMENTS**
 
 Read before writing anything (they override this skill if they disagree):
 
-- The **`frontend-conventions`** skill, then both of its references
-  (`code-conventions.md`, `data-layer.md`)
-- [docs/MODULE_PATTERN.md](../../../docs/MODULE_PATTERN.md) — the screen,
+- The **`mobile-conventions`** skill, then its references
+  (`architecture-and-traps.md`, `code-conventions.md`, `data-layer.md`)
+- [module-pattern.md](../mobile-conventions/references/module-pattern.md) — the screen,
   row and sheet anatomy, and the per-module conversion checklist
-- [docs/ENGINEERING_CHECKLIST.md](../../../docs/ENGINEERING_CHECKLIST.md) — §2,
+- [engineering-checklist.md](../mobile-conventions/references/engineering-checklist.md) — §2,
   §3, §5 and §6 in particular
 - All three files in `src/Screens/Example/`
 
@@ -51,8 +53,10 @@ default. Every module also gets `entityId` and `status` (`"Active"` /
 ### Stop and ask if
 
 - The field list is missing or ambiguous (types, which are required).
-- The data source is `api` and you don't know the response shape. Ask for a
-  sample response or the server code — **don't invent an envelope**.
+- The data source is `api` and the endpoint doesn't exist yet. Build it first
+  with `new-module` (back end + web), then read its controller for the exact
+  keys. Every response is `{ success, message, data: { … } }` — **don't invent
+  a different envelope**.
 - The data source is `local+api`. Build `local` first, then the API hooks, and
   write the sync strategy (when unsynced rows are pushed, which side wins a
   conflict) as a plan with `plan-doc`. This skill doesn't scaffold sync.
@@ -60,7 +64,7 @@ default. Every module also gets `entityId` and `status` (`"Active"` /
   `components/` first (`DateRangePicker`, `useCamera`), then RNR via the CLI.
   A new dependency is the user's call.
 - The user wants it as a bottom tab. Modules are Menu rows by design
-  (MODULE_PATTERN §3); confirm it's deliberate.
+  (module-pattern.md §3); confirm it's deliberate.
 
 ## Step 2 — Build in this order
 

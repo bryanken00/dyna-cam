@@ -2,7 +2,7 @@
 
 Walk this before reporting the module done, together with the per-module
 conversion checklist in
-[MODULE_PATTERN.md §7](../../../../docs/MODULE_PATTERN.md), which covers the
+[module-pattern.md §7](../../mobile-conventions/references/module-pattern.md), which covers the
 screen, row and sheet anatomy. Anything unchecked gets reported to the user
 with the reason — don't silently drop it.
 
@@ -83,7 +83,7 @@ with the reason — don't silently drop it.
       `EXPO_PUBLIC_*` variable, or new native dependency
 - [ ] If this module created `hooks/useDebounce.js`, update the "Search is not
       debounced" row in
-      [ENGINEERING_CHECKLIST §10](../../../../docs/ENGINEERING_CHECKLIST.md)
+      [engineering-checklist §10](../../mobile-conventions/references/engineering-checklist.md)
       to say the module hooks debounce and `FilterBar` itself still doesn't
 
 ## Commands

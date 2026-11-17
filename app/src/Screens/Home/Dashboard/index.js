@@ -10,7 +10,7 @@ import { useUserAuthStore } from "@/store/useUserAuthStore";
 /**
  * Placeholder first tab — replace with your app's real home screen.
  *
- * Kept as a small worked example of docs/DESIGN_GUIDELINES.md:
+ * Kept as a small worked example of the mobile-conventions skill (design-guidelines.md):
  *   • colour comes from Tailwind tokens (bg-card, text-foreground), never hex
  *   • lucide icons, never emoji
  *   • content constrained with max-w-* and centred so it does not stretch

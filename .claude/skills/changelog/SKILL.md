@@ -1,6 +1,6 @@
 ---
 name: changelog
-description: Queue a finished change for the next release by adding one small file to docs/changelog/unpublished/ with its type, impact (major/minor/patch), audience, and a plain-language summary. Use AUTOMATICALLY, without being asked, EVERY TIME a plan (PLAN-NNN), change request (CR-NNN), or bug report (BUG-NNN) checklist is finished, and after any other finished change under front/ or back/ that will ship (feature, fix, UI change, removal, security fix, performance work, or internal refactor), before reporting the task done. Also use when the user runs /changelog or asks to add or update a changelog entry. Skip changes that only touch docs/, .claude/, README.md, CLAUDE.md, or comments.
+description: Queue a finished change for the next release by adding one small file to docs/changelog/unpublished/ with its type, impact (major/minor/patch), audience, and a plain-language summary. Use AUTOMATICALLY, without being asked, EVERY TIME a plan (PLAN-NNN), change request (CR-NNN), or bug report (BUG-NNN) checklist is finished, and after any other finished change under front/, back/, app/ or edge/ that will ship (feature, fix, UI change, removal, security fix, performance work, or internal refactor), before reporting the task done. Also use when the user runs /changelog or asks to add or update a changelog entry. Skip changes that only touch docs/, .claude/, README.md, CLAUDE.md, or comments.
 argument-hint: "[what changed] (defaults to the work just finished)"
 ---
 
@@ -19,8 +19,10 @@ Change: **$ARGUMENTS**. If that's empty, describe the work just finished in this
 entry right then, with `ref:` set to that doc's ID, before reporting done. Don't wait to be asked
 and don't batch several finished checklists into one entry.
 
-Also write one for any other change under `front/` or `back/` that is **finished and will ship**
-without a tracking doc. Don't write one for:
+Also write one for any other change under `front/`, `back/`, `app/` or `edge/` that is
+**finished and will ship** without a tracking doc. For `app/` that means anything that changes
+what a build contains: `src/`, `App.js`, `index.js`, `global.css`, the tailwind/babel/metro
+config, `app.json`, `assets/`, or a dependency in `package.json`. Don't write one for:
 
 - changes to docs, `.claude/`, README, CLAUDE.md, comments, or lint config only
 - work still in progress. Write the entry when the work is done, not after each step.
@@ -89,7 +91,16 @@ ref: PLAN-004
 
 Omit `ref` when the change didn't come from a plan, bug, or CR. Put anything a deploy needs
 ("run `npm run db:migrate`", "add `FOO_KEY` to `.env`") in Dev notes, because `/publish` surfaces
-those lines to whoever ships the release.
+those lines to whoever ships the release. Name the part (`app/`, `edge/`, …) on each line. For
+`app/` also note:
+
+- a new native module or config plugin → "needs a new build" (it can't reach an existing install)
+- a new `EXPO_PUBLIC_*` variable → its name and what to set it to
+- a local SQLite migration → its name and what it changes
+- a new OS permission → the prompt users will see
+- anything that signs users out or resets local data
+
+For `edge/`, note any change that needs the recorder box updated at every venue.
 
 ### Writing the summary
 
@@ -97,7 +108,8 @@ The summary is what the client eventually reads, so write it for them now while 
 fresh.
 
 - Write from the user's side: what they can now do, or what works now.
-- Say where: "on the Users page", "in Account Settings".
+- Say where: "on the Users page", "in Account Settings", "in the staff app". Name the platform
+  when only one is affected ("On Android, …").
 - Leave out file names, endpoints, component or library names, and table or column names. Also
   leave out jargon such as API, refactor, migration, backend, frontend, query, cache, null,
   endpoint, and deploy.

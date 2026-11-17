@@ -7,61 +7,73 @@
 
 ### Docs, skills, CLAUDE.md → root
 
-- [ ] Diff each `app/.claude/skills/{plan-doc,change-request,bug-report,changelog}/SKILL.md`
+- [x] Diff each `app/.claude/skills/{plan-doc,change-request,bug-report,changelog}/SKILL.md`
       against the root copy, fold any useful additions (e.g. `argument-hint`) into the root
       version, then delete the `app/` copy
-- [ ] Widen the root workflow skills' "when to run" wording to cover `front/`, `back/`, `app/`
+- [x] Widen the root workflow skills' "when to run" wording to cover `front/`, `back/`, `app/`
       and `edge/`
-- [ ] Extend root `publish` to also bump `app/package.json`, `app/app.json` `expo.version` and
+- [x] Extend root `publish` to also bump `app/package.json`, `app/app.json` `expo.version` and
       `app/src/constants/version.js`; delete `app/.claude/skills/publish`
-- [ ] `git mv app/.claude/skills/frontend-conventions .claude/skills/mobile-conventions`; rename
+- [x] `git mv app/.claude/skills/frontend-conventions .claude/skills/mobile-conventions`; rename
       its `name:` and rewrite its description so it triggers on `app/src` / `app/App.js`
-- [ ] `git mv` `app/docs/{DESIGN_GUIDELINES,MODULE_PATTERN,ENGINEERING_CHECKLIST}.md` into
+- [x] `git mv` `app/docs/{DESIGN_GUIDELINES,MODULE_PATTERN,ENGINEERING_CHECKLIST}.md` into
       `.claude/skills/mobile-conventions/references/` (kebab-case names) and add them to the
       skill's routing table
-- [ ] Move `app/CLAUDE.md`'s Architecture / Theming / Typography / Traps / Commands content into
+- [x] Move `app/CLAUDE.md`'s Architecture / Theming / Typography / Traps / Commands content into
       `mobile-conventions` references; replace `app/CLAUDE.md` with a short pointer modelled on
       [`front/CLAUDE.md`](../../../front/CLAUDE.md)
-- [ ] `git mv app/.claude/skills/new-module .claude/skills/new-mobile-module`; rename `name:`;
+- [x] `git mv app/.claude/skills/new-module .claude/skills/new-mobile-module`; rename `name:`;
       point the root `new-module` skill at it for the mobile half
-- [ ] Delete `app/.claude/settings.json` (identical to root) and the now-empty `app/.claude/`
-- [ ] Delete `app/docs/` (empty `plans/`, `change-requests/`, `bug-reports/`, `changelog/`
+- [x] Delete `app/.claude/settings.json` (identical to root) and the now-empty `app/.claude/`
+- [x] Delete `app/docs/` (empty `plans/`, `change-requests/`, `bug-reports/`, `changelog/`
       scaffolding + its README) after the moves above
-- [ ] Trim `app/README.md` to run / build / env instructions for the app
-- [ ] Root `CLAUDE.md`: fix the tenancy paragraph (no SuperAdmin/company/branch in code), add
+- [x] Trim `app/README.md` to run / build / env instructions for the app
+- [x] Root `CLAUDE.md`: fix the tenancy paragraph (no SuperAdmin/company/branch in code — already
+      fixed on disk before Phase 0 started), add
       `app/` (and later `edge/`) to the layout + skills tables, add the app's verification loop
       (`npx expo-doctor@latest`, `npx expo export --platform android --clear`)
-- [ ] Root `README.md`: Dyna Cam overview + quick start for `back/`, `front/`, `app/`
-- [ ] Grep the repo for dead links to `app/docs/…`, `docs/DESIGN_GUIDELINES.md`,
+- [x] Root `README.md`: Dyna Cam overview + quick start for `back/`, `front/`, `app/`
+- [x] Grep the repo for dead links to `app/docs/…`, `docs/DESIGN_GUIDELINES.md`,
       `docs/MODULE_PATTERN.md`, `docs/ENGINEERING_CHECKLIST.md` and fix them
 
 ### Template cleanup
 
-- [ ] `app/app.json`: name, slug, `android.package`, `ios.bundleIdentifier` → Dyna Cam values;
+- [x] `app/app.json`: name, slug, `android.package`, `ios.bundleIdentifier` → Dyna Cam values;
       `app/package.json` `name` → `dyna-cam-app`
-- [ ] `app/.env.example`: `EXPO_PUBLIC_API_URL=http://localhost:4021`, LAN-IP hint updated
-- [ ] `app/eas.json`: `production` profile sets `EXPO_PUBLIC_DEMO_MODE=false` explicitly
-- [ ] `back/package.json` → `dyna-cam-api`, `front/package.json` → `dyna-cam-web` (names and
+- [x] `app/.env.example`: `EXPO_PUBLIC_API_URL=http://localhost:4021`, LAN-IP hint updated
+- [x] `app/eas.json`: `production` profile sets `EXPO_PUBLIC_DEMO_MODE=false` explicitly
+- [x] `back/package.json` → `dyna-cam-api`, `front/package.json` → `dyna-cam-web` (names and
       descriptions only — **no** version bump by hand)
-- [ ] Delete root `.DS_Store`; add `.DS_Store` to [`.gitignore`](../../../.gitignore)
-- [ ] `run.sh` / `run-mac.sh`: optional `app` target running `npx expo start` in `app/`
-- [ ] Landing page decision applied (see Open questions) — either replaced with a Dyna Cam page
-      or left for a later CR
+- [x] Delete root `.DS_Store`; add `.DS_Store` to [`.gitignore`](../../../.gitignore) (it was
+      already ignored and untracked)
+- [x] `run.sh` / `run-mac.sh`: opt-in `app` target (`npm run dev` → `expo start`, port 8081),
+      not part of the no-argument default
+- [x] Landing page decision applied: `/` is now a Dyna Cam page; the template's component
+      gallery moved to `/components` (`pages/ComponentGallery/`)
+- [x] App identity decided: "Dyna Cam", `com.dgsi.dynacam`; app version aligned to 1.0.0 so
+      `/publish` bumps one product version
 
 ### Connect `app/` to this API
 
-- [ ] `app/src/services/api/auth.js` + `requests/auth.js`: unwrap the
+- [x] `app/src/services/api/auth.js` + `requests/auth.js`: unwrap the
       `{ success, message, data }` envelope (two `.data` hops), store access + refresh tokens
-- [ ] `app/src/services/api/axios.js`: refresh-token rotation on 401 via `/admin/auth/refresh`
-- [ ] Handle 403 `PASSWORD_CHANGE_REQUIRED`: route the user to a change-password screen
+- [x] `app/src/services/api/axios.js`: refresh-token rotation on 401 via `/admin/auth/refresh`
+- [x] Handle 403 `PASSWORD_CHANGE_REQUIRED`: route the user to a change-password screen
+      (`Screens/Account/ChangePassword/`, also reachable from Menu → Account)
+- [x] CSRF double-submit + `Idempotency-Key` on mutations; fixed the old interceptor's missing
+      `Toast` import and non-existent `reset()` call
+- [x] Request sequence replayed against the API test harness with CSRF on (csrf-token → login →
+      403 `PASSWORD_CHANGE_REQUIRED` → change password → refresh → logout): every step matched
 - [ ] Sign in on a device against the local API (`http://<LAN-IP>:4021`) and log out cleanly
 
 ### Phase 0 wrap-up
 
-- [ ] `cd back && npm run lint && npm test` passes
-- [ ] `cd front && npm run lint && npm run build` passes
-- [ ] `cd app && npx expo-doctor@latest && npx expo export --platform android --clear` passes
-- [ ] Changelog entry (`ref: PLAN-001`, internal: repo consolidation + app auth)
+- [x] `cd back && npm run lint && npm test` passes
+- [x] `cd front && npm run lint && npm run build` passes
+- [x] `cd app && npx expo export --platform android --clear` bundles (3642 modules)
+- [ ] `cd app && npx expo-doctor@latest` passes — **fails 1 check: 11 Expo packages behind SDK 58's
+      pinned versions** (pre-existing; fix with `npx expo install --check`, then a new dev build)
+- [x] Changelog entry (`ref: PLAN-001`): `docs/changelog/unpublished/2026-11-17-dyna-cam-foundation.md`
 
 ## Phase 1: Foundation + QR clips + watermark
 

@@ -4,6 +4,8 @@ import { ComponentLoader } from "../components/LoadingFallback";
 import AdminRoute from "./pageRoutes/AdminRoute";
 
 const LandingPage = lazy(() => import("../pages/LandingPage"));
+// Developer page: every shared component in both themes. Not linked from the product.
+const ComponentGallery = lazy(() => import("../pages/ComponentGallery"));
 
 const RootRoutes = () => {
   return (
@@ -14,6 +16,14 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <LandingPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/components"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <ComponentGallery />
             </Suspense>
           }
         />

@@ -1,5 +1,5 @@
 /**
- * The Modern module pattern — see docs/MODULE_PATTERN.md.
+ * The Modern module pattern — see the mobile-conventions skill (module-pattern.md).
  *
  *   import { DataList, StatCard, Fab } from "@/components/pattern";
  *

@@ -28,7 +28,10 @@ src/pages/
 │
 ├── Auth/                     # ForgotPassword.jsx, ResetPassword.jsx (public, no layout)
 │
-└── LandingPage/              # Public landing page + the component gallery
+├── LandingPage/              # Public Dyna Cam home page at `/` (what it is, staff sign-in link)
+│   └── index.jsx
+│
+└── ComponentGallery/         # Developer gallery at `/components` (not linked from the product)
     ├── index.jsx             # Hero + section nav, composes the gallery sections
     └── components/           # One file per gallery section (Showcase.jsx holds Section/Demo)
 ```

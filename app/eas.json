@@ -18,7 +18,10 @@
       "android": {
         "buildType": "apk"
       },
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_DEMO_MODE": "false"
+      }
     }
   },
   "submit": {

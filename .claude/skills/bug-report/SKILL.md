@@ -1,6 +1,6 @@
 ---
 name: bug-report
-description: Log a bug as a document and investigate it. Creates docs/bug-reports/BUG-NNN-<slug>/ with bug.md (summary, severity, where, steps to reproduce, expected vs actual, root cause, resolution) and fix.md (the fix checklist). Use AUTOMATICALLY, without being asked, whenever the user reports or asks to fix something under front/ or back/ that should already work and doesn't — an error, a crash, wrong data, a broken page or flow — before fixing it. Also use when the user runs /bug-report, asks to log or write up a bug, or names a BUG-NNN id to resume. Wanting existing behaviour to work DIFFERENTLY is a change request, not a bug. Not Claude Code's built-in /bug (feedback to Anthropic).
+description: Log a bug as a document and investigate it. Creates docs/bug-reports/BUG-NNN-<slug>/ with bug.md (summary, severity, where, steps to reproduce, expected vs actual, root cause, resolution) and fix.md (the fix checklist). Use AUTOMATICALLY, without being asked, whenever the user reports or asks to fix something under front/, back/, app/ or edge/ that should already work and doesn't — an error, a crash, wrong data, a broken page, screen or flow — before fixing it. Also use when the user runs /bug-report, asks to log or write up a bug, or names a BUG-NNN id to resume. Wanting existing behaviour to work DIFFERENTLY is a change request, not a bug. Not Claude Code's built-in /bug (feedback to Anthropic).
 argument-hint: "<what's broken> | BUG-NNN"
 ---
 
@@ -28,9 +28,12 @@ that does nothing, data showing to someone without permission. The user doesn't 
 - **Existing ID or slug**: open the folder, read `bug.md` + `fix.md`, and continue.
 - **Automatic**: if the user already described the symptom and where, don't ask anything up
   front. Write bug.md from what they said, investigate, and fill the gaps from the code.
-- **New**: at minimum you need **what happened** and **where** (page or endpoint). If
-  either is missing, ask once. In the same message, ask for steps, the account's role, and any
-  error text or screenshot the user has. Don't block on nice-to-haves; mark them `Unknown`.
+- **New**: at minimum you need **what happened** and **where** (page, endpoint, or app screen).
+  If either is missing, ask once. In the same message, ask for steps, the account's role, and any
+  error text or screenshot the user has. For the mobile app (`app/`), also ask for the platform,
+  device and OS version, how it was run (Expo Go, dev build, release build), and whether demo mode
+  was on. For the recorder box (`edge/`), ask for the venue, the box's agent version, and its
+  logs. Don't block on nice-to-haves; mark them `Unknown`.
 
 ## Step 2: Allocate the ID
 
@@ -45,7 +48,8 @@ instead.
 ## Step 3: Write bug.md with what's known
 
 Status `Open`. Pick the severity from the table in `docs/bug-reports/README.md`. If the bug lets
-a user see or change data their permissions don't allow, or reach the Owner account or role, it's
+a user see or change data their permissions don't allow, reach the Owner account or role, lose
+data on a device, or let one venue's recorder box touch another venue's courts or clips, it's
 **Critical**.
 
 ````md
@@ -60,9 +64,11 @@ a user see or change data their permissions don't allow, or reach the Owner acco
 
 ## Where
 
-- **Page / endpoint:** <e.g. Admin → User Management → Roles · `GET /api/v1/admin/roles`>
+- **Page / screen / endpoint:** <e.g. Admin → User Management → Roles · `GET /api/v1/admin/roles`>
 - **Account / role:** <e.g. operations manager with read-only access>
 - **Environment:** <local / staging / production · browser>
+- **App build (mobile only):** <Android / iOS · OS version · device · Expo Go / dev build / release · app version · demo mode on/off>
+- **Recorder box (edge only):** <venue · agent version · court/camera>
 
 ## Steps to reproduce
 
@@ -88,9 +94,10 @@ a user see or change data their permissions don't allow, or reach the Owner acco
 
 ## Step 4: Investigate
 
-Set the status to `Investigating`. Load `frontend-conventions` and/or `backend-conventions` for
-the sides involved, then trace the path from the UI through the request to the query. Common
-culprits in this repo:
+Set the status to `Investigating`. Load the conventions skill for each side involved
+(`frontend-conventions` for `front/`, `backend-conventions` for `back/`, `mobile-conventions`
+for `app/`), then trace the path from the UI through the request to the query. Common culprits
+in `front/` + `back/`:
 
 - Owner protection: a users/roles query missing `roleName != 'Owner'`, so the Owner becomes reachable
 - a permission slug that differs between `checkPermission()` and `<ProtectedRoute>` / the nav entry
@@ -98,6 +105,18 @@ culprits in this repo:
 - a missing `status != 'Deleted'` filter
 - a React Query key that isn't invalidated after a mutation
 - a `NULL` DB column validated as required (or the reverse)
+
+Common culprits in `app/` (the full list is in `mobile-conventions` → traps):
+
+- **Unstyled component**: the file sits outside `tailwind.config.js` `content`, so its classes
+  were never compiled
+- **Wrong in one theme only**: a colour changed in `global.css` but not in `src/lib/theme.js`
+  (or the reverse), or `useColorScheme()` read the OS instead of `useThemeStore`
+- **Bold text isn't bold**: `font-bold` instead of a family class (`font-sans-bold`)
+- **`[Reanimated] Reading from 'value' during component render`**: a `transition-*` /
+  `animate-*` class reached native outside `Platform.select({ web })`
+- **"Text strings must be rendered within a `<Text>` component"**: a `count && <X/>` with
+  `count === 0`, or a bare string in a `View`
 
 Fill **Root cause** with the actual lines (`file:line` links) and why they fail. If you can't
 confirm it, write it as `Hypothesis:` and say what would confirm it. **Never present a guess as
@@ -129,12 +148,14 @@ the cause.**
 
 - [ ] `cd back && npm run lint` passes
 - [ ] `cd front && npm run lint && npm run build` passes
-- [ ] The steps in bug.md no longer reproduce
+- [ ] `cd app && npx expo-doctor@latest && npx expo export --platform android --clear` passes
+- [ ] The steps in bug.md no longer reproduce (for `app/`: on a device or emulator)
 - [ ] Changelog entry added (`type: fixed`, `ref: BUG-NNN`)
 - [ ] `bug.md` status set to `Fixed`, Resolution filled
 ````
 
-Drop lines that don't apply, such as backend lint for a CSS-only fix.
+Drop lines that don't apply, such as backend lint for a CSS-only fix or the `app/` line for a
+web-only fix.
 
 ## Step 6: Hand off
 

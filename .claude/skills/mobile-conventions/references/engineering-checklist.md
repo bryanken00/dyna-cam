@@ -4,8 +4,8 @@ Read this **before writing code**, not after. It is the standing set of things
 to check on every change in this repo — reuse, data access, rendering cost,
 responsiveness, and the states every screen owes its user.
 
-Design and visual rules live in [DESIGN_GUIDELINES.md](DESIGN_GUIDELINES.md).
-List-module structure lives in [MODULE_PATTERN.md](MODULE_PATTERN.md). This file
+Design and visual rules live in [design-guidelines.md](design-guidelines.md).
+List-module structure lives in [module-pattern.md](module-pattern.md). This file
 is about how the code behaves.
 
 ---
@@ -152,7 +152,7 @@ A screen is not done when the happy path renders.
 ## 8. Platform & bundle
 
 - [ ] `transition-*` / `animate-*` classes stay inside
-      `Platform.select({ web: … })` — see CLAUDE.md for why
+      `Platform.select({ web: … })` — see architecture-and-traps.md for why
 - [ ] `Platform.select` for anything with real OS divergence
 - [ ] New dependency justified: is it maintained, and what does it add to the
       bundle?
@@ -184,9 +184,9 @@ deliberate to-do, not an oversight.
 
 | Gap | Where | Impact |
 | --- | --- | --- |
-| `new QueryClient()` has no defaults | [App.js](../App.js) | `staleTime: 0` refetches on every mount; `retry: 3` retries 4xx |
-| No `React.memo` on rows | [DataListRow.js](../src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes |
-| No `getItemLayout` / windowing props | [DataList.js](../src/components/pattern/DataList.js) | Fine at 5 rows, degrades in the hundreds |
-| Search is not debounced | [FilterBar.js](../src/components/pattern/FilterBar.js) | Filters on every keystroke; becomes a request per keystroke once wired to an API |
-| Only the tab shell reads `useWindowDimensions` | [Home/index.js](../src/Screens/Home/index.js) | Nothing else adapts to width; tablet layout is `max-w-*` only |
-| No error state in the example module | [Screens/Example/](../src/Screens/Example/) | In-memory data cannot fail — add one when you wire a real API |
+| `new QueryClient()` has no defaults | [App.js](../../../../app/App.js) | `staleTime: 0` refetches on every mount; `retry: 3` retries 4xx |
+| No `React.memo` on rows | [DataListRow.js](../../../../app/src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes |
+| No `getItemLayout` / windowing props | [DataList.js](../../../../app/src/components/pattern/DataList.js) | Fine at 5 rows, degrades in the hundreds |
+| Search is not debounced | [FilterBar.js](../../../../app/src/components/pattern/FilterBar.js) | Filters on every keystroke; becomes a request per keystroke once wired to an API |
+| Only the tab shell reads `useWindowDimensions` | [Home/index.js](../../../../app/src/Screens/Home/index.js) | Nothing else adapts to width; tablet layout is `max-w-*` only |
+| No error state in the example module | [Screens/Example/](../../../../app/src/Screens/Example/) | In-memory data cannot fail — add one when you wire a real API |

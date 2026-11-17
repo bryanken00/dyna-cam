@@ -1,6 +1,6 @@
 ---
 name: plan-doc
-description: Write an implementation plan as a document. Creates docs/plans/PLAN-NNN-<slug>/ with plan.md (goal, context, approach, affected areas, risks, open questions) and checklist.md (ordered, tickable build steps). Use AUTOMATICALLY, without being asked, before building any FULLY NEW feature or module under front/ or back/ (something the app doesn't do yet and that isn't an add-on to an existing module; changes to existing features go to change-request, broken things to bug-report). Also use when the user runs /plan-doc, asks to write a plan, RFC, or design proposal as a doc, or names a PLAN-NNN id to resume. Not Claude Code's built-in plan mode (/plan).
+description: Write an implementation plan as a document. Creates docs/plans/PLAN-NNN-<slug>/ with plan.md (goal, context, approach, affected areas, risks, open questions) and checklist.md (ordered, tickable build steps). Use AUTOMATICALLY, without being asked, before building any FULLY NEW feature or module under front/, back/, app/ or edge/ (something the app doesn't do yet and that isn't an add-on to an existing module; changes to existing features go to change-request, broken things to bug-report). Also use when the user runs /plan-doc, asks to write a plan, RFC, or design proposal as a doc, or names a PLAN-NNN id to resume. Not Claude Code's built-in plan mode (/plan).
 argument-hint: "<what to plan> | PLAN-NNN"
 ---
 
@@ -38,8 +38,9 @@ A plan that doesn't match the code is worse than none. Before drafting:
 
 - Find the code it touches (pages, controllers, validators, tables, permissions) and name real
   files.
-- If it touches `front/src` or `back/`, load `frontend-conventions` / `backend-conventions` so
-  the approach follows them. A new CRUD entity takes its build order from the `new-module` skill.
+- If it touches `front/src`, `back/` or `app/src`, load `frontend-conventions` /
+  `backend-conventions` / `mobile-conventions` so the approach follows them. A new CRUD entity
+  takes its build order from the `new-module` skill; its mobile screens from `new-mobile-module`.
 - Check `docs/plans/` and `docs/change-requests/` for related or overlapping work, and link it.
 
 ## Step 3: Allocate the ID
@@ -123,8 +124,9 @@ someone else could build it without asking you.>
 
 - [ ] `cd back && npm run lint` passes
 - [ ] `cd front && npm run lint && npm run build` passes
+- [ ] `cd app && npx expo-doctor@latest && npx expo export --platform android --clear` passes
 - [ ] Migration applied, or noted as pending for deploy
-- [ ] Tried in the browser: <the main flow, in one line>
+- [ ] Tried in the browser (or on a device, for `app/`): <the main flow, in one line>
 - [ ] Changelog entry added in `docs/changelog/unpublished/` (`ref: PLAN-NNN`)
 - [ ] `plan.md` status set to `Done`
 ````

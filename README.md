@@ -1,19 +1,28 @@
-# Full-Stack Admin Template
+# Dyna Cam
 
-A production-style starter for a single-organisation admin platform. It ships one **Admin**
+A court-camera service for pickleball venues. A fixed camera on each court records all the time;
+a player scans the court's QR code (or presses a button) to save the last 60 seconds as a replay
+clip and gets it on their phone, with the venue's logo on it. Venue staff run venues, courts,
+cameras, clips and payments from the web Admin portal and the mobile staff app. The roadmap and
+its phases are in [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
+
+Dyna Cam is built on a production-style single-organisation admin platform. It ships one **Admin**
 portal out of the box — users, roles, per-user permissions, settings, and a dashboard — run by an
 **Owner** account that holds every permission, with role-based access control, an audit trail,
 private file uploads, a hardened Express API, and an API test suite.
 
-The repository is a **monorepo of two independent apps**:
+The repository is a **monorepo of three independent apps** (a fourth, `edge/` — the on-site
+recorder box — arrives with PLAN-001 Phase 1):
 
 | Path               | App                         | Stack                                                                                          |
 | ------------------ | --------------------------- | ---------------------------------------------------------------------------------------------- |
 | [`front/`](front/) | React SPA (the Admin portal) | React 19 · Vite · shadcn/ui (Radix + Tailwind) · Tailwind CSS v4 · Zustand · TanStack Query · react-hook-form + zod · React Router v8 |
 | [`back/`](back/)   | REST API server             | Node · Express · MySQL (`mysql2`) · Passport JWT · Zod                                         |
+| [`app/`](app/)     | Mobile staff app            | Expo SDK 58 · React Native 0.88 · React Native Reusables on NativeWind · Zustand · TanStack Query · expo-sqlite |
 
-> Coding conventions live in the [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md)
-> and [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md) skills — 15 topic docs
+> Coding conventions live in the [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md),
+> [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md) and
+> [`mobile-conventions`](.claude/skills/mobile-conventions/SKILL.md) skills — 22 topic docs
 > that are the source of truth for the project's patterns. This README is the high-level map. See
 > [Working with Claude Code](#working-with-claude-code).
 
@@ -101,12 +110,21 @@ The repository is a **monorepo of two independent apps**:
 ├── .claude/skills/            ← Claude Code skills (checked in)
 │   ├── frontend-conventions/  ← 8 frontend topic docs, loaded on demand
 │   ├── backend-conventions/   ← 7 backend topic docs, loaded on demand
-│   └── new-module/            ← scaffolds a CRUD module end to end
-├── docs/                      ← plans, bug reports, change requests, changelog, reviews
+│   ├── mobile-conventions/    ← 7 mobile-app topic docs, loaded on demand
+│   ├── new-module/            ← scaffolds a CRUD module end to end
+│   ├── new-mobile-module/     ← scaffolds a screen module in the mobile app
+│   └── plan-doc, change-request, bug-report, changelog, publish
+├── docs/                      ← plans, bug reports, change requests, changelog, reviews (all apps)
+├── app/                       ← Expo React Native staff app
+│   ├── CLAUDE.md              ← stack + pointer to mobile-conventions
+│   ├── app.json · eas.json    ← Expo config + EAS build profiles
+│   └── src/                   ← Screens/, components/ (ui/ + pattern/), services/{api,requests},
+│                                store/ (Zustand + SQLite), Navigation/, constants/
 ├── front/                     ← React SPA
 │   ├── CLAUDE.md              ← stack + pointer to frontend-conventions
 │   └── src/
-│       ├── pages/             ← Admin/ portal modules, Auth/ (forgot/reset password), LandingPage/
+│       ├── pages/             ← Admin/ portal modules, Auth/ (forgot/reset password), LandingPage/ (`/`),
+│       │                        ComponentGallery/ (`/components`, dev-only)
 │       │   └── <Module>/      ← index.jsx (view) · hooks.jsx (logic) · components/
 │       ├── components/        ← shared UI (PageHeader, StatCard, PaginationFooter,
 │       │                        SectionLabel, StatusToggle, ProtectedRoute, layout, …)
@@ -163,8 +181,9 @@ continue from `npm run db:setup` below. The steps it automates are spelled out n
 
 Once set up, start both dev servers from one terminal — `./run-mac.sh` on macOS, `./run.sh` in
 Git Bash on Windows. Output is prefixed per app and Ctrl+C stops everything. Both take the same
-arguments: `back` or `front` to start just one, and `stop` to free the dev ports (4021 — or `PORT`
-from `back/.env` — and 4020) if a server was left running.
+arguments: `back` or `front` to start just one, `app` (opt-in, e.g. `./run-mac.sh back app`) to
+add the mobile app's Expo dev server, and `stop` to free the dev ports (4021 — or `PORT` from
+`back/.env` — 4020 and 8081) if a server was left running.
 
 ### 1. Backend
 
@@ -232,7 +251,23 @@ injected at build time as `import.meta.env.APP_VERSION`. Make sure the backend's
 
 The Admin portal lives at `/admin/*`.
 
-### 3. Where to start
+### 3. Mobile staff app (optional)
+
+```bash
+cd app
+npm install
+
+cp .env.example .env          # EXPO_PUBLIC_API_URL → the backend, e.g. http://192.168.1.20:4021
+
+npm start                     # Expo dev server; open in a dev build or Expo Go
+```
+
+On a physical phone, `localhost` is the phone itself — use your computer's LAN IP. Sign in with
+the same accounts as the Admin portal. `EXPO_PUBLIC_DEMO_MODE=true` signs in locally with no
+backend, for UI work only. Native folders (`android/`, `ios/`) are generated with
+`npx expo prebuild` and never committed.
+
+### 4. Where to start
 
 `npm run db:setup` seeds the permission set, an **Owner** role that holds every permission, and
 the first Owner account. There is **no fixed default password**: the script generates a random
@@ -290,6 +325,17 @@ pulling one, run `db:migrate` to bring a local database up to date.
 | `npm run build:analyze`     | Build with bundle analysis   |
 | `npm run preview`           | Preview the production build |
 | `npm run lint` · `lint:fix` | ESLint                       |
+
+### Mobile app (`app/`)
+
+| Script                                          | Action                                          |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `npm start`                                     | Expo dev server (`expo start --clear`)          |
+| `npm run android` · `npm run ios`               | Native run (needs a prebuild + toolchain)       |
+| `npx expo-doctor@latest`                        | Dependency / config health check                |
+| `npx expo export --platform android --clear`    | Bundle check — the app's build verification     |
+
+The app has no test runner or linter; the two `npx` commands are its verification loop.
 
 ---
 
@@ -485,14 +531,16 @@ every session. Clone the repo and they work — no setup.
 | ----- | ----------- | ------ |
 | [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md) | Automatic | Anything under `front/src` — code style, folder structure + route registration, the `hooks.jsx` contract, the API service layers, auth & permissions, the Modern design system, the Sheet form pattern. 8 topic docs. |
 | [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md)   | Automatic | Anything under `back/server`, `back/database` or `back/tests` — `req.user` and Owner protection, query/transaction patterns, schema & ID rules, validators, permission gating, uploads and signed links, tests. 7 topic docs. |
-| [`new-module`](.claude/skills/new-module/SKILL.md)                     | `/new-module` | A whole CRUD module end to end. Drives the other two in the right order. |
+| [`mobile-conventions`](.claude/skills/mobile-conventions/SKILL.md)     | Automatic | Anything under `app/` — architecture and traps, the engineering checklist, code style, project structure + component kit, the data layer (api/requests, demo mode, SQLite), design guidelines, the list-module pattern. 7 topic docs. |
+| [`new-module`](.claude/skills/new-module/SKILL.md)                     | `/new-module` | A whole CRUD module end to end. Drives the frontend and backend skills in the right order. |
+| [`new-mobile-module`](.claude/skills/new-mobile-module/SKILL.md)       | `/new-mobile-module` | A list/detail screen module in the mobile app, after `new-module` when it needs a table and API. |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md)                         | `/plan-doc` | An implementation plan + build checklist in `docs/plans/PLAN-NNN-*/`. |
 | [`bug-report`](.claude/skills/bug-report/SKILL.md)                     | `/bug-report` | A bug write-up with investigated root cause + fix checklist in `docs/bug-reports/BUG-NNN-*/`. |
 | [`change-request`](.claude/skills/change-request/SKILL.md)             | `/change-request` | A client's request, impact, and acceptance checklist in `docs/change-requests/CR-NNN-*/`. |
 | [`changelog`](.claude/skills/changelog/SKILL.md)                       | Automatic · `/changelog` | Queues each finished change in `docs/changelog/unpublished/` with its version weight. |
 | [`publish`](.claude/skills/publish/SKILL.md)                           | `/publish` | Turns the queue into plain-language release notes and bumps the version. |
 
-### The two convention skills fire on their own
+### The convention skills fire on their own
 
 Just describe the work — Claude matches the task and reads only the relevant topic docs:
 
@@ -530,7 +578,7 @@ write-up and a checklist:
 /change-request Acme wants a "Department" field on users
 ```
 
-Whenever Claude finishes a change under `front/` or `back/`, it queues a one-file entry in
+Whenever Claude finishes a change under `front/`, `back/` or `app/`, it queues a one-file entry in
 `docs/changelog/unpublished/` tagged `major` / `minor` / `patch`. When you're ready to ship:
 
 ```
@@ -540,25 +588,25 @@ Whenever Claude finishes a change under `front/` or `back/`, it queues a one-fil
 ```
 
 `/publish` writes a client-friendly release note (no jargon) to
-`docs/changelog/published/vX.Y.Z.md`, bumps `version` in both `package.json` files (the frontend
-and its Sentry release tag read it from there), and clears the queue. It never commits or tags on its own. The names are longer
+`docs/changelog/published/vX.Y.Z.md`, bumps the one product version everywhere it lives (`front/` and `back/`
+`package.json`, plus the mobile app's `package.json`, `app.json` and `src/constants/version.js`), and clears the queue. It never commits or tags on its own. The names are longer
 than `/plan` and `/bug` because those two are Claude Code built-ins.
 
 ### Adding a convention
 
 Put the new topic doc in the relevant skill's `references/` as `kebab-case.md`, then add a row to
 that skill's routing table in its `SKILL.md` — a doc that isn't in the table won't get read.
-Cross-cutting facts that apply to both sides belong in [`CLAUDE.md`](CLAUDE.md) at the root.
+Cross-cutting facts that apply to more than one app belong in [`CLAUDE.md`](CLAUDE.md) at the root.
 
 ---
 
 ## Conventions & further reading
 
-The 15 topic docs behind those skills, if you want to read them directly. They're plain Markdown —
+The 22 topic docs behind those skills, if you want to read them directly. They're plain Markdown —
 useful to a human even without an agent.
 
 **Project map:** [`CLAUDE.md`](CLAUDE.md) (root) · [`front/CLAUDE.md`](front/CLAUDE.md) ·
-[`back/CLAUDE.md`](back/CLAUDE.md)
+[`back/CLAUDE.md`](back/CLAUDE.md) · [`app/CLAUDE.md`](app/CLAUDE.md)
 
 ### Frontend — [`.claude/skills/frontend-conventions/references/`](.claude/skills/frontend-conventions/references/)
 
@@ -584,3 +632,15 @@ useful to a human even without an agent.
 | [`permission-gating.md`](.claude/skills/backend-conventions/references/permission-gating.md) | One permission per route group, the access hierarchy, the Owner-role rules. |
 | [`file-uploads.md`](.claude/skills/backend-conventions/references/file-uploads.md) | The `public/uploads/admin/` paths and per-user folders, signed links, content checks, ownership on save and delete. |
 | [`testing.md`](.claude/skills/backend-conventions/references/testing.md) | How `npm test` works, the test helpers, and the Deleted/Owner-record test every by-ID endpoint needs. |
+
+### Mobile app — [`.claude/skills/mobile-conventions/references/`](.claude/skills/mobile-conventions/references/)
+
+| Doc | Covers |
+| --- | ------ |
+| [`architecture-and-traps.md`](.claude/skills/mobile-conventions/references/architecture-and-traps.md) | Commands, the api/requests split, local DB layering, navigation, theming, typography, demo mode, and the traps. Read first. |
+| [`engineering-checklist.md`](.claude/skills/mobile-conventions/references/engineering-checklist.md) | The bar for every change: reuse, fetch/render cost, layout at 320px and on tablets, loading/empty/error states, known gaps. |
+| [`project-structure.md`](.claude/skills/mobile-conventions/references/project-structure.md) | Where files live in `app/src/` and the component kit (screen chrome, `pattern/`, RNR primitives). |
+| [`code-conventions.md`](.claude/skills/mobile-conventions/references/code-conventions.md) | Naming, exports, imports, the library set, where state lives, error handling, RN rendering traps. |
+| [`data-layer.md`](.claude/skills/mobile-conventions/references/data-layer.md) | `services/api` + `services/requests`, React Query keys, demo mode, Zustand, the SQLite layering. |
+| [`design-guidelines.md`](.claude/skills/mobile-conventions/references/design-guidelines.md) | Tokens, dark mode, typography, icons, spacing, the screen checklist. |
+| [`module-pattern.md`](.claude/skills/mobile-conventions/references/module-pattern.md) | The list screen + create/edit sheet anatomy and the conversion checklist. |

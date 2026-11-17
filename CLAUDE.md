@@ -1,6 +1,11 @@
-# Full-Stack Admin Template
+# Dyna Cam
 
-A single-organisation admin platform with one portal, **Admin** (`/admin/*` in the client,
+A court-camera service for pickleball venues, built on this repo's admin platform. Players scan a
+court QR or press a button to save the last 60 seconds as a replay clip and get it on their phone.
+Staff run venues, courts, cameras, clips and payments from the web Admin portal and the mobile
+staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
+
+The platform is single-organisation with one portal, **Admin** (`/admin/*` in the client,
 `/api/v1/admin/*` in the API), where staff manage users, roles, permissions, settings and
 resources. The **Owner** — created by `npm run db:setup` — holds every permission and is never
 listed, editable or assignable in Users or Roles; everyone else gets access through roles and
@@ -12,7 +17,8 @@ per-user overrides.
 | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `front/`          | React 19 + Vite client (shadcn/ui, Tailwind v4, Zustand, React Query) | [front/CLAUDE.md](front/CLAUDE.md) → `frontend-conventions` skill             |
 | `back/`           | Node + Express API (MySQL via `mysql2`, Passport JWT, Zod) + API tests | [back/CLAUDE.md](back/CLAUDE.md) → `backend-conventions` skill                |
-| `docs/`           | Repo-level Markdown not tied to `front/` or `back/`                   | [docs/README.md](docs/README.md)                                             |
+| `app/`            | Expo SDK 58 / React Native staff app (NativeWind, Zustand, React Query) | [app/CLAUDE.md](app/CLAUDE.md) → `mobile-conventions` skill                 |
+| `docs/`           | Repo-level Markdown for every part: plans, CRs, bugs, changelog, notes | [docs/README.md](docs/README.md)                                             |
 | `.claude/skills/` | Claude Code skills checked into the repo                              | [.claude/skills/](.claude/skills/)                                           |
 
 ### Skills
@@ -25,7 +31,9 @@ in every session. **Load the relevant skill before writing code** — the rules 
 | ----- | ---------- |
 | [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md) | Anything under `front/src` — pages, hooks, components, forms, services, stores, routes. 8 topic docs. |
 | [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md) | Anything under `back/server`, `back/database` or `back/tests` — controllers, routes, validators, migrations, uploads, tests. 7 topic docs. |
-| [`new-module`](.claude/skills/new-module/SKILL.md) | A whole new CRUD module end to end: table + migration, permission row, validator, controller, routes, services, list page, form drawer, sidebar registration. Drives the other two in the right order. |
+| [`mobile-conventions`](.claude/skills/mobile-conventions/SKILL.md) | Anything under `app/` — screens, hooks, components, sheets, services, stores, SQLite, navigation, `app.json`. 7 topic docs; start with `architecture-and-traps.md`. |
+| [`new-module`](.claude/skills/new-module/SKILL.md) | A whole new CRUD module end to end: table + migration, permission row, validator, controller, routes, services, list page, form drawer, sidebar registration. Drives the frontend and backend skills in the right order. |
+| [`new-mobile-module`](.claude/skills/new-mobile-module/SKILL.md) | A new list/detail screen module in `app/`: screen, state hook, form sheet, data source, route, Menu row. Runs after `new-module` when the module also needs a table and API. |
 | [`plan-doc`](.claude/skills/plan-doc/SKILL.md) | **Automatic** for a fully new feature or module (also `/plan-doc`) — plan + checklist in `docs/plans/PLAN-NNN-<slug>/`. |
 | [`change-request`](.claude/skills/change-request/SKILL.md) | **Automatic** for a change to something that already exists, including new features added to it (also `/change-request`) — request + checklist in `docs/change-requests/CR-NNN-<slug>/`. |
 | [`bug-report`](.claude/skills/bug-report/SKILL.md) | **Automatic** when something is broken (also `/bug-report`) — root cause + fix checklist in `docs/bug-reports/BUG-NNN-<slug>/`. |
@@ -34,7 +42,7 @@ in every session. **Load the relevant skill before writing code** — the rules 
 
 ## Work tracking is automatic
 
-Every request to build, change, or fix something under `front/` or `back/` gets its tracking doc
+Every request to build, change, or fix something under `front/`, `back/` or `app/` gets its tracking doc
 **before any code is written**, without the user typing a slash command. Classify it:
 
 | The request is… | Doc | Skill |
@@ -60,19 +68,22 @@ Every request to build, change, or fix something under `front/` or `back/` gets 
   write-up + a checklist), automatically per [Work tracking](#work-tracking-is-automatic).
   **Changelog entries** → `docs/changelog/unpublished/`.
 - **Other cross-cutting `.md` — notes, decisions, research, runbooks** that aren't specific to the
-  client or the API → put it in **[`docs/`](docs/)**, not at the repo root and not inside
-  `front/` / `back/`. See [docs/README.md](docs/README.md) for what belongs there and the naming
-  convention.
+  client, the API or the app → put it in **[`docs/`](docs/)**, not at the repo root and not
+  inside `front/` / `back/` / `app/`. See [docs/README.md](docs/README.md) for what belongs there
+  and the naming convention. There is one `docs/` and one `.claude/` for the whole repo; don't
+  create nested ones inside a part.
 - **Coding conventions** for a side live in that side's skill:
-  `.claude/skills/frontend-conventions/references/` and
-  `.claude/skills/backend-conventions/references/`. One topic per file, `kebab-case.md`; add the
+  `.claude/skills/frontend-conventions/references/`,
+  `.claude/skills/backend-conventions/references/` and
+  `.claude/skills/mobile-conventions/references/`. One topic per file, `kebab-case.md`; add the
   new file to the skill's routing table so it gets read.
 - The repo root keeps only its map files (`README.md`, `CLAUDE.md`).
 
 ## Cross-cutting facts
 
 - **Backend response envelope:** every endpoint replies via `res.sendSuccess()` →
-  `{ success, message, data: { ... } }`. The frontend unwraps `apiData?.data?.<entity>`.
+  `{ success, message, data: { ... } }`. The frontend unwraps `apiData?.data?.<entity>`; the
+  mobile app's `services/api/` returns the envelope and `requests/` reads `.data.<entity>`.
 - **Permissions are shared front-to-back:** a page's `<ProtectedRoute module/submodule>` uses the
   same permission the backend's `checkPermission()` enforces for that route group.
 - **Soft deletes everywhere:** rows are never physically deleted — set `status = 'Deleted'` and
@@ -110,17 +121,21 @@ Every request to build, change, or fix something under `front/` or `back/` gets 
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run
   `npm run lint` and `npm test` yourself before reporting a backend change done.
+- **App changes are bundled, not unit-tested:** `app/` has no test runner or linter. Verify with
+  `cd app && npx expo-doctor@latest && npx expo export --platform android --clear`, and try the
+  flow on a device or emulator against the API on port `4021` (use the machine's LAN IP).
 - **Schema changes are migrations, never `schema.sql`:** `back/database/schema.sql` is the
   frozen baseline — don't edit it. Every schema change (new table, column, index, ENUM, FK,
   backfill) is a **new numbered migration** in `back/database/migrations/`. A migration is
   **immutable once implemented** (committed or applied): never edit, rename or delete it, even
   to fix it — add another migration. The real schema is `schema.sql` + every migration in order.
 - **Every shipped change gets a changelog entry:** when you finish a plan, CR, or bug checklist
-  (or any other change under `front/` or `back/` that will ship), add one entry to
+  (or any other change under `front/`, `back/` or `app/` that will ship), add one entry to
   `docs/changelog/unpublished/` via the `changelog` skill **before reporting done** — one per
   finished checklist / logical change, not per file. Docs/`.claude/`-only changes
   don't get one. **Never bump `version` by hand** — `/publish` picks it from the entries' impact
-  and bumps `front/` and `back/` `package.json` together.
-- **App version = `package.json`:** the frontend reads `version` from `front/package.json`,
-  injected by `vite.config.js` as `import.meta.env.APP_VERSION`. There is no version env var —
-  don't add one.
+  and bumps `front/`, `back/` and `app/` together.
+- **One product version:** the web frontend reads `version` from `front/package.json`, injected
+  by `vite.config.js` as `import.meta.env.APP_VERSION`. The mobile app keeps the same version in
+  `app/package.json`, `app/app.json` (`expo.version`) and `app/src/constants/version.js`. There is
+  no version env var — don't add one. EAS owns the app's build numbers.

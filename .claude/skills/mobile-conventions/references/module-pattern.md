@@ -7,10 +7,10 @@ Ported from a web design system built on Ant Design; §1 records what had to
 change for a phone and why. This document is self-contained — you do not need
 the web original to use it.
 
-[src/Screens/Example/](../src/Screens/Example/) is the reference
+[src/Screens/Example/](../../../../app/src/Screens/Example/) is the reference
 implementation; copy that folder to start a module.
 
-> Everything visual is driven by tokens in [global.css](../global.css).
+> Everything visual is driven by tokens in [global.css](../../../../app/global.css).
 > **Never hardcode a hex in a screen.**
 
 ---
@@ -37,7 +37,7 @@ segmented toggle, the inverted primary button — carries over unchanged.
 ## 2. Design system
 
 **Fonts.** Onest (UI) and JetBrains Mono (`#`, ids, units), loaded in
-[useAppFonts.js](../src/hooks/useAppFonts.js) and held behind the splash screen
+[useAppFonts.js](../../../../app/src/hooks/useAppFonts.js) and held behind the splash screen
 until ready.
 
 React Native has **no synthetic weights** — each weight is a separately loaded
@@ -89,10 +89,10 @@ background.
 Dashboard and Menu. A module is a row in a `GroupedList` under the Menu tab that
 pushes onto the stack:
 
-1. Name the route in [constants/navigations.js](../src/constants/navigations.js)
+1. Name the route in [constants/navigations.js](../../../../app/src/constants/navigations.js)
    under `SCREEN_NAVIGATION.Modules`
-2. Register the screen in [Navigation/index.js](../src/Navigation/index.js)
-3. Add a row in [Settings](../src/Screens/Home/Settings/index.js) with an
+2. Register the screen in [Navigation/index.js](../../../../app/src/Navigation/index.js)
+3. Add a row in [Settings](../../../../app/src/Screens/Home/Settings/index.js) with an
    `onPress` that navigates to it
 
 The navigator runs with `headerShown: false`, so **pass `onBack` to
@@ -105,13 +105,13 @@ The navigator runs with `headerShown: false`, so **pass `onBack` to
 Fixed `ScreenHeader` → stat row → **one list card** holding toolbar, rows and
 footer → floating `Fab`.
 
-The title lives in a **fixed** [`ScreenHeader`](../src/components/ScreenHeader.js)
+The title lives in a **fixed** [`ScreenHeader`](../../../../app/src/components/ScreenHeader.js)
 outside the list, so it stays put while rows scroll. That is the same header
 every other screen uses — there is deliberately no separate large-title header
 for modules, and no subtitle: on a list screen it costs a row of content and
 says little.
 
-The create action is a flat [`Fab`](../src/components/pattern/Fab.js) rather
+The create action is a flat [`Fab`](../../../../app/src/components/pattern/Fab.js) rather
 than a header button, so it stays reachable however far you have scrolled.
 Because it floats, the list **must** reserve room for it — pass `FAB_CLEARANCE`
 as `contentContainerClassName`, or the FAB will sit on top of the pager.
@@ -186,16 +186,16 @@ adds nothing.
 The example's records are shaped `{ itemId, name, description, status }` —
 deliberately the same shape as the local `items` table, so replacing the
 in-memory array in
-[useExampleModule.js](../src/Screens/Example/useExampleModule.js) with
+[useExampleModule.js](../../../../app/src/Screens/Example/useExampleModule.js) with
 `db_getItems()` from
-[example.endpoints.js](../src/store/database/endpoints/example.endpoints.js) is
+[example.endpoints.js](../../../../app/src/store/database/endpoints/example.endpoints.js) is
 a drop-in swap rather than a rewrite.
 
 ---
 
 ## 6. Create / edit sheet
 
-Follow [ExampleFormSheet.js](../src/Screens/Example/ExampleFormSheet.js). Props
+Follow [ExampleFormSheet.js](../../../../app/src/Screens/Example/ExampleFormSheet.js). Props
 are `{ open, onClose, onSubmit, entity }` — the sheet owns its own `FormSheet`.
 
 - **Header** — accent-free primary chip + title + subtitle + bordered X. Handled
@@ -250,10 +250,10 @@ are `{ open, onClose, onSubmit, entity }` — the sheet owns its own `FormSheet`
 - [ ] Add a shadow, gradient or pastel chip
 - [ ] Use green for a button
 - [ ] Use `font-bold` expecting a bold face — use `font-sans-bold`
-- [ ] Let a `transition-*` class reach native (see CLAUDE.md)
+- [ ] Let a `transition-*` class reach native (see architecture-and-traps.md)
 
 ---
 
-_Reference: [Example module](../src/Screens/Example/) ·
-[pattern components](../src/components/pattern/) ·
-[global.css](../global.css) · [DESIGN_GUIDELINES.md](DESIGN_GUIDELINES.md)_
+_Reference: [Example module](../../../../app/src/Screens/Example/) ·
+[pattern components](../../../../app/src/components/pattern/) ·
+[global.css](../../../../app/global.css) · [design-guidelines.md](design-guidelines.md)_

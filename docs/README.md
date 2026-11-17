@@ -1,8 +1,10 @@
 # Project docs
 
-Home for **repo-level Markdown that isn't front- or back-specific**: plans, bug reports, change
-requests, the release changelog, and any other cross-cutting notes. Put it here instead of at the
-repo root (keep the root clean) or inside `front/` / `back/` (those hold code conventions only).
+Home for **repo-level Markdown that isn't specific to one app**: plans, bug reports, change
+requests, the release changelog, and any other cross-cutting notes, for `front/`, `back/` and
+`app/` alike. Put it here instead of at the repo root (keep the root clean) or inside an app
+folder. There is no second `docs/` inside `app/` (or anywhere else); code conventions live in the
+skills under `.claude/skills/`.
 
 ## Layout
 
@@ -45,7 +47,7 @@ docs/
 3. **Every time a checklist is finished**, Claude drops an entry into `changelog/unpublished/`
    **automatically**, tagged with its weight (`major` / `minor` / `patch`) and the doc's ID.
 4. `/publish` rolls every unpublished entry into one plain-language release note in
-   `changelog/published/`, bumps the version in `front/` and `back/`, and empties the queue.
+   `changelog/published/`, bumps the one product version in `front/`, `back/` and `app/`, and empties the queue.
 
 | Command | Creates | Skill |
 | --- | --- | --- |

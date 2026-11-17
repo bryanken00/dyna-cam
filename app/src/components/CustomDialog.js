@@ -10,7 +10,7 @@ export const CUSTOMDIALOGSTATUS = {
   error: "error",
 };
 
-// Fixed status colors per docs/DESIGN_GUIDELINES.md — the token set has no
+// Fixed status colors per the mobile-conventions skill (design-guidelines.md) — the token set has no
 // semantic success/warning role, and these must read the same in both themes.
 const STATUS_ICON = {
   [CUSTOMDIALOGSTATUS.success]: { Icon: CheckCircle, color: "#2E7D32" },

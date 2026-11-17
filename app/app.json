@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Expo Template",
-    "slug": "expo-template",
+    "name": "Dyna Cam",
+    "slug": "dyna-cam",
     "version": "1.0.0",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -9,7 +9,7 @@
       "favicon": "./assets/favicon.png"
     },
     "android": {
-      "package": "com.example.apptemplate",
+      "package": "com.dgsi.dynacam",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6750A4"
@@ -17,7 +17,7 @@
     },
     "ios": {
       "icon": "./assets/icon.png",
-      "bundleIdentifier": "com.example.apptemplate"
+      "bundleIdentifier": "com.dgsi.dynacam"
     },
     "plugins": [
       "expo-sqlite",

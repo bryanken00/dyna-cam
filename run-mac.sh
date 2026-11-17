@@ -4,6 +4,7 @@
 #
 #   ./run-mac.sh                 # both
 #   ./run-mac.sh back            # just the API (or: front)
+#   ./run-mac.sh back app        # the API + the Expo dev server for the mobile app (opt-in)
 #   ./run-mac.sh stop            # free the dev ports if anything was left behind
 #
 # Output is prefixed per app. Ctrl+C stops all of them.
@@ -30,10 +31,15 @@ BACK_PORT="$(sed -n 's/^PORT=\([0-9][0-9]*\).*/\1/p' back/.env 2>/dev/null | tai
 BACK_PORT="${BACK_PORT:-4021}"
 
 # name : port : ANSI colour
+# `app` is the Expo dev server (Metro, 8081). It is opt-in — never started by
+# the no-argument default — because Expo is happiest in its own terminal, where
+# its QR code and key shortcuts work. Through this script you get the URL only.
 ALL=(
   "back:$BACK_PORT:36"
   "front:4020:34"
+  "app:8081:35"
 )
+DEFAULT=(back front)
 
 PIDFILE=".run.pid"
 
@@ -166,8 +172,9 @@ fi
 # ── pick the apps ────────────────────────────────────────────────────────────
 selected=()
 if [ $# -eq 0 ]; then
-  selected=("${ALL[@]}")
-else
+  set -- "${DEFAULT[@]}"
+fi
+if [ $# -gt 0 ]; then
   for want in "$@"; do
     hit=""
     for entry in "${ALL[@]}"; do
@@ -175,7 +182,7 @@ else
     done
     if [ -z "$hit" ]; then
       echo "Unknown app: $want" >&2
-      echo "Choose from: back front  (or: stop)" >&2
+      echo "Choose from: back front app  (or: stop)" >&2
       exit 1
     fi
     selected+=("$hit")

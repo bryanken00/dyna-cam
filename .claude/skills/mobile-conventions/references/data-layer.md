@@ -54,26 +54,48 @@ export const getItemsApi = async (params = {}) => {
 
 ### Response shapes
 
-`api/` returns `response.data` — whatever the server sent. This template ships
-no backend, so **confirm the real shape before writing an unwrap**: ask for a
-sample response or read the server code. The auth endpoints here return their
-payload at the top level (`{ token, user }`); a server that wraps everything in
-`{ success, message, data: {…} }` needs one more `.data` hop.
+`api/` returns `response.data` — the API's envelope. Every endpoint in this
+repo's API (`back/`) replies `{ success, message, data: { … } }`, so the payload
+is **one more `.data` hop**: a login is `response.data.user`, a list is
+`response.data.<entities>` + `response.data.pagination`. Read the controller in
+`back/server/src/controllers/` for the exact keys before writing an unwrap.
 
-Unwrap **once**, in the module hook, and return plain arrays and numbers from
-it, so the screen never knows the envelope:
+Unwrap **once**, in the module hook (or in a `requests/` hook's `onSuccess`),
+and return plain arrays and numbers from it, so the screen never knows the
+envelope:
 
 ```js
-const rows = data?.items ?? [];
-const total = data?.pagination?.total ?? rows.length;
+const rows = data?.data?.clips ?? [];
+const total = data?.data?.pagination?.total ?? rows.length;
 ```
+
+Demo-mode fixtures return the same envelope (see `demoEnvelope()` in
+`constants/demo.js`), so the unwrap needs no demo branch.
+
+### Auth, CSRF and sessions
+
+`services/api/axios.js` mirrors the web client's rules for this API — don't
+re-implement them per call:
+
+- `axiosAuth` (no Bearer) is for login / refresh / logout;
+  `createAxiosInstanceWithInterceptor("data" | "multipart")` for everything
+  else.
+- Every mutation gets an `x-csrf-token` (fetched from
+  `/api/v1/admin/auth/csrf-token`, refetched once on 403
+  `CSRF_VALIDATION_FAILED`) and an `Idempotency-Key`.
+- A 401 refreshes the token pair once (the API rotates refresh tokens, so the
+  new one is always stored) and retries; a failed refresh clears the session.
+- A 403 `PASSWORD_CHANGE_REQUIRED` sets `user.mustChangePassword`, and
+  Navigation holds the user on the change-password screen.
+- `INVALID_CREDENTIALS` (a wrong password typed into a form) never triggers a
+  refresh or a sign-out.
 
 ---
 
 ## React Query (v5)
 
 `App.js` creates the one `QueryClient`. It has **no defaults yet**
-([ENGINEERING_CHECKLIST §10](../../../../docs/ENGINEERING_CHECKLIST.md)):
+([engineering-checklist §10](engineering-checklist.md)):
 `staleTime: 0` refetches on every mount and `retry: 3` retries 4xx errors.
 Set per-query `staleTime` where it matters until someone sets global defaults.
 

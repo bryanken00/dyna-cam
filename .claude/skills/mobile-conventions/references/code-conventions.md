@@ -82,7 +82,7 @@ the order the existing screens already use.
 ## The library set
 
 Use what is installed. Adding a library is a decision, not a convenience — see
-[ENGINEERING_CHECKLIST §8](../../../../docs/ENGINEERING_CHECKLIST.md).
+[engineering-checklist §8](engineering-checklist.md).
 
 | Purpose | Use | Not |
 | --- | --- | --- |

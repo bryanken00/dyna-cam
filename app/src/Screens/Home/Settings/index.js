@@ -1,5 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
-import { LogOut, Moon, Package, Sun } from "lucide-react-native";
+import { KeyRound, LogOut, Moon, Package, Sun } from "lucide-react-native";
 import { useMemo } from "react";
 import { Alert, ScrollView, View } from "react-native";
 import GroupedList from "@/components/GroupedList";
@@ -37,6 +37,18 @@ const SettingsTab = () => {
             icon: Package,
             onPress: () =>
               navigation.navigate(SCREEN_NAVIGATION.Modules.Items),
+          },
+        ],
+      },
+      {
+        title: "Account",
+        items: [
+          {
+            title: "Change Password",
+            description: "Signs you out on your other devices",
+            icon: KeyRound,
+            onPress: () =>
+              navigation.navigate(SCREEN_NAVIGATION.Account.ChangePassword),
           },
         ],
       },

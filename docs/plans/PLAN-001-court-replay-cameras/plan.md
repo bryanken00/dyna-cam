@@ -1,6 +1,6 @@
 # PLAN-001 · Court replay cameras ("Pickle Cam"-style)
 
-> **Status:** Draft · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
+> **Status:** In progress · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
 > **Related:** —
 
 ## Goal
@@ -404,15 +404,23 @@ The checklist follows these phases. Each phase is shippable on its own.
 - [ ] **Live streaming:** YouTube, Facebook, or both? Who owns the stream keys, the venue or Dyna
   Cam?
 - [ ] **Privacy notice** wording and signage, and a default retention period (30 days proposed).
-- [ ] **Branding:** should the template's landing page become a Dyna Cam product page in this
-  plan? What app name, icon and bundle ID should `app/` use (for example `ph.dynacam.staff`)?
+- [x] **Branding:** yes. The landing page is replaced in Phase 0 (the component gallery moves to
+  `/components`). The app is named "Dyna Cam" with ID `com.dgsi.dynacam` (2026-11-17). App icons
+  are still placeholder art.
 - [ ] **Staff app scope:** is staff-only right, or should `app/` also be a player app later?
-- [ ] **One version or two:** should `app/` share the `front/`/`back/` version through
-  `publish` (proposed), or keep its own release line because store builds ship on a different
-  schedule?
+- [x] **One version or two:** one shared product version. `app/` was aligned to 1.0.0 on
+  2026-11-17, and `/publish` bumps all three.
 
 ## Revisions
 
 - 2026-11-17: Created. Trigger, camera, delivery and extras decisions taken with the user.
 - 2026-11-17: Added Phase 0 (merge `app/` docs, skills and `CLAUDE.md` into the root; template
   cleanup) and the staff mobile app (`app/`), at the user's request.
+- 2026-11-17: Phase 0 built on branch `plan/PLAN-001-court-replay-cameras`.
+  - Scope added: the app's change-password screen (needed for the forced-change hold), CSRF and
+    `Idempotency-Key` handling in the app's axios layer, an opt-in `app` target in the run
+    scripts, and moving the component gallery to `/components` instead of deleting it.
+  - `mobile-conventions` gained a 7th reference, `project-structure.md`, taken from the old app
+    README.
+  - Still open: a device sign-in test, and `expo-doctor`'s pre-existing "11 packages out of date"
+    failure.

@@ -3,7 +3,8 @@
  *
  * The `requests/` layer is where side effects live: store writes, Toasts,
  * cache invalidation. The `api/` layer stays pure — it only makes the call and
- * returns `response.data`.
+ * returns `response.data`, which is the API's envelope
+ * `{ success, message, data }`. The payload is always `.data` of that.
  *
  * Import API functions from services/api/ — never call an axios instance here.
  *
@@ -11,16 +12,48 @@
  * When `IS_DEMO` is on, every hook below short-circuits before its API call
  * and resolves from `constants/demo.js` instead, so the app runs with no
  * backend at all. The bypass lives here rather than in `api/` on purpose:
- * `api/` describes your server, and a fake user is not something your server
- * does. Everything after the mutation — store writes, toasts, navigation — is
- * identical in both modes, so demo mode exercises the real flow.
+ * `api/` describes the server, and a fake user is not something the server
+ * does. Demo responses use the same envelope, so everything after the
+ * mutation — store writes, toasts, navigation — is identical in both modes.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Toast from "react-native-toast-message";
 import { IS_DEMO } from "../../constants";
-import { DEMO_TOKEN, demoDelay, makeDemoUser } from "../../constants/demo";
+import {
+  demoDelay,
+  demoEnvelope,
+  makeDemoSession,
+  makeDemoUser,
+} from "../../constants/demo";
 import { useUserAuthStore } from "../../store/useUserAuthStore";
-import { loginApi, getMeApi, changePasswordApi, logoutApi } from "../api/auth";
+import { clearCsrfToken } from "../api/axios";
+import {
+  changePasswordApi,
+  getMeApi,
+  loginApi,
+  logoutApi,
+} from "../api/auth";
+
+/** The API's error message, if it sent one. */
+const apiMessage = (error) =>
+  error?.response?.data?.message || "Something went wrong";
+
+/**
+ * The user object the app keeps in its store, built from the API's `user`
+ * (`accountId`, `firstName`, `lastName`, `email`, `roleId`, `roleName`,
+ * `mustChangePassword`, …).
+ */
+export const toStoreUser = (user) => ({
+  accountId: user.accountId,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  fullName: [user.firstName, user.lastName].filter(Boolean).join(" "),
+  email: user.email,
+  roleId: user.roleId,
+  roleName: user.roleName,
+  mustChangePassword: Boolean(user.mustChangePassword),
+  permissions: user.permissions || null,
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // useLoginAuth
@@ -33,25 +66,20 @@ export const useLoginAuth = () => {
     mutationFn: async (payload) => {
       if (IS_DEMO) {
         await demoDelay();
-        // Same shape loginApi returns, so onSuccess needs no branch
-        return { token: DEMO_TOKEN, user: makeDemoUser(payload?.email) };
+        return demoEnvelope("Login successful", {
+          user: makeDemoUser(payload?.email),
+          ...makeDemoSession(),
+        });
       }
       return loginApi(payload);
     },
-    onSuccess: (data) => {
-      const { token, user } = data;
+    onSuccess: (response) => {
+      const { user, token, accessToken, refreshToken } = response.data;
 
       login(
-        {
-          userId: user.userId,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          role: user.role,
-          fullName: user.fullName,
-          permissions: user.permissions || null,
-        },
-        token,
+        toStoreUser(user),
+        token || accessToken?.token,
+        refreshToken?.token ?? null,
       );
 
       Toast.show({
@@ -64,7 +92,7 @@ export const useLoginAuth = () => {
       Toast.show({
         type: "error",
         text1: "Login failed",
-        text2: error.response?.data?.message || "Something went wrong",
+        text2: apiMessage(error),
       });
     },
   });
@@ -81,7 +109,7 @@ export const useGetMe = (options = {}) => {
     queryFn: async () => {
       if (IS_DEMO) {
         await demoDelay();
-        return { user: user ?? makeDemoUser() };
+        return demoEnvelope("User profile", { user: user ?? makeDemoUser() });
       }
       return getMeApi();
     },
@@ -92,27 +120,46 @@ export const useGetMe = (options = {}) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // useChangePassword
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * payload: { currentPassword, newPassword }
+ *
+ * The API ends every session of the account and returns a new one for this
+ * device, so the new tokens must be stored or the next request signs the user
+ * out. It also clears a pending forced change.
+ */
 export const useChangePassword = () => {
+  const setSession = useUserAuthStore((s) => s.setSession);
+  const setMustChangePassword = useUserAuthStore(
+    (s) => s.setMustChangePassword,
+  );
+
   return useMutation({
     mutationFn: async (payload) => {
       if (IS_DEMO) {
         await demoDelay();
-        return { message: "Password changed" };
+        return demoEnvelope("Password changed successfully", makeDemoSession());
       }
       return changePasswordApi(payload);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
+      const session = response.data;
+      const token = session?.token || session?.accessToken?.token;
+      if (token) setSession(token, session?.refreshToken?.token);
+      setMustChangePassword(false);
+
       Toast.show({
         type: "success",
         text1: "Password changed successfully",
-        ...(IS_DEMO && { text2: "Demo mode — nothing was saved" }),
+        text2: IS_DEMO
+          ? "Demo mode — nothing was saved"
+          : "You were signed out on your other devices.",
       });
     },
     onError: (error) => {
       Toast.show({
         type: "error",
         text1: "Failed to change password",
-        text2: error.response?.data?.message || "Something went wrong",
+        text2: apiMessage(error),
       });
     },
   });
@@ -123,20 +170,26 @@ export const useChangePassword = () => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const useLogout = () => {
   const logout = useUserAuthStore((s) => s.logout);
+  const refreshToken = useUserAuthStore((s) => s.refreshToken);
+
+  const clearLocal = () => {
+    logout();
+    clearCsrfToken();
+  };
 
   return useMutation({
     mutationFn: async () => {
-      if (IS_DEMO) return { message: "Logged out" };
-      return logoutApi();
+      if (IS_DEMO) return demoEnvelope("Logout successful");
+      return logoutApi(refreshToken);
     },
     onSuccess: () => {
-      logout();
+      clearLocal();
       Toast.show({ type: "success", text1: "Logged out successfully" });
     },
     onError: () => {
       // Clear local state even if the server call fails, so a network error
       // can never trap someone in a signed-in state.
-      logout();
+      clearLocal();
     },
   });
 };

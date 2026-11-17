@@ -11,7 +11,7 @@
  * Changing .env requires restarting the bundler with `npx expo start --clear`.
  */
 export const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
+  process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4021";
 
 /** Where the API serves uploaded/static files from. */
 export const BASE_URL_FILES = `${BASE_URL}/public`;

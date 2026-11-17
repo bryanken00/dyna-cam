@@ -226,8 +226,8 @@ const KEY = "products";
  * Filters and pages the fixtures the way the server would, so demo mode runs
  * the same paths as a real response.
  *
- * ⚠️ Must return exactly what getProductsApi returns. If the server wraps its
- * payload (`{ success, data: { … } }`), wrap this the same way.
+ * ⚠️ Must return exactly what getProductsApi returns: this repo's API wraps
+ * every payload as `{ success, message, data: { … } }`, so the fixture does too.
  */
 const demoList = ({ page = 1, pageSize = 20, search, status } = {}) => {
   const q = search?.toLowerCase();
@@ -238,8 +238,12 @@ const demoList = ({ page = 1, pageSize = 20, search, status } = {}) => {
   );
 
   return {
-    products: matches.slice((page - 1) * pageSize, page * pageSize),
-    pagination: { total: matches.length },
+    success: true,
+    message: "Products",
+    data: {
+      products: matches.slice((page - 1) * pageSize, page * pageSize),
+      pagination: { total: matches.length },
+    },
   };
 };
 
@@ -497,8 +501,8 @@ export const useProductsModule = () => {
 
   // ⚠️ Match the shape your server actually returns (data-layer.md →
   // Response shapes). This is the only place that knows it.
-  const pageItems = query.data?.products ?? [];
-  const total = query.data?.pagination?.total ?? pageItems.length;
+  const pageItems = query.data?.data?.products ?? [];
+  const total = query.data?.data?.pagination?.total ?? pageItems.length;
 
   const save = (draft) => {
     const { productId, ...fields } = draft;
@@ -760,7 +764,7 @@ import { useProductsModule } from "./useProductsModule";
 
 /**
  * Products — list screen. Layout only: state and data live in
- * useProductsModule. See docs/MODULE_PATTERN.md.
+ * useProductsModule. See the mobile-conventions skill, references/module-pattern.md.
  *
  * The header sits OUTSIDE the list so it stays put while the rows scroll.
  * Everything that should scroll goes in `ListHeaderComponent` — DataList is a

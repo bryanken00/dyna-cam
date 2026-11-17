@@ -21,7 +21,7 @@ import { useExampleModule } from "./useExampleModule";
 
 /**
  * Reference implementation of the Modern module pattern — copy this folder to
- * start a new module. See docs/MODULE_PATTERN.md.
+ * start a new module. See the mobile-conventions skill (module-pattern.md).
  *
  * Shape: fixed ScreenHeader → stat row → one list card (toolbar, rows, footer)
  * → floating create action → form sheet.

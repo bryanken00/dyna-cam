@@ -1,6 +1,6 @@
 ---
 name: new-module
-description: Scaffold a complete CRUD module across this template — MySQL table + migration, permission row, Zod validator, Express controller with permission gating, route wiring, axios + React Query services, the Modern list page (hooks.jsx + index.jsx), the Sheet form drawer, and sidebar/route registration. Use whenever the user asks to add, create, or scaffold a new module, page, entity, resource, or CRUD feature in the Admin portal (e.g. "add a Products module", "new Suppliers page", "scaffold Inventory CRUD"). Also use to add just the backend or just the frontend half of such a module.
+description: Scaffold a complete CRUD module across this template — MySQL table + migration, permission row, Zod validator, Express controller with permission gating, route wiring, axios + React Query services, the Modern list page (hooks.jsx + index.jsx), the Sheet form drawer, and sidebar/route registration. Use whenever the user asks to add, create, or scaffold a new module, page, entity, resource, or CRUD feature in the Admin portal (e.g. "add a Products module", "new Suppliers page", "scaffold Inventory CRUD"). Also use to add just the backend or just the frontend half of such a module. For screens in the Expo staff app (app/), use new-mobile-module (after this skill when the module also needs the table and API).
 ---
 
 # New module scaffold
@@ -144,6 +144,12 @@ A new module is one entry, not one per file.
   object syntax; `placeholderData: keepPreviousData`.
 - **Phone is always `09XX XXXX XXX`** — `zPhone` + `formatPhoneOnChange` + `PHONE_PLACEHOLDER`
   from `utils/phoneFormat.js` on the frontend, `optionalPhone()` on the backend.
+
+## Mobile screens
+
+If the module also needs screens in the Expo staff app (`app/`), finish steps 1–6 here first
+(the app reuses the same `/api/v1/admin/...` endpoints and permissions), then run the
+**`new-mobile-module`** skill for the app half. One changelog entry covers both halves.
 
 ## Partial builds
 

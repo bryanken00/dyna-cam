@@ -1,6 +1,6 @@
 ---
 name: change-request
-description: Record a change request. Creates docs/change-requests/CR-NNN-<slug>/ with request.md (who asked, today vs requested behaviour, why, scope, impact, size, approval) and checklist.md (build steps, acceptance criteria, sign-off). Use AUTOMATICALLY, without being asked, before changing anything that ALREADY EXISTS under front/ or back/ — updating, tweaking, or removing an existing module, page, field, or flow, or ADDING A NEW FEATURE ONTO an existing module or a finished plan/CR — whoever asked (the user, a client, a boss). Fully new modules go to plan-doc; broken things go to bug-report. Also use when the user runs /change-request or names a CR-NNN id to resume.
+description: Record a change request. Creates docs/change-requests/CR-NNN-<slug>/ with request.md (who asked, today vs requested behaviour, why, scope, impact, size, approval) and checklist.md (build steps, acceptance criteria, sign-off). Use AUTOMATICALLY, without being asked, before changing anything that ALREADY EXISTS under front/, back/, app/ or edge/ — updating, tweaking, or removing an existing module, page, screen, field, or flow, or ADDING A NEW FEATURE ONTO an existing module or a finished plan/CR — whoever asked (the user, a client, a boss). Fully new modules go to plan-doc; broken things go to bug-report. Also use when the user runs /change-request or names a CR-NNN id to resume.
 argument-hint: "<what they want changed> | CR-NNN"
 ---
 
@@ -52,9 +52,19 @@ Take the next number, zero-padded to 3. The slug is 2–5 kebab-case words, e.g.
 ## Step 3: Assess the impact
 
 Read the code it touches, enough to fill **Impact** honestly. Load `frontend-conventions` /
-`backend-conventions` for the sides involved. Flag each of these explicitly:
+`backend-conventions` / `mobile-conventions` for the sides involved. Flag each of these
+explicitly:
 
 - **Schema change**: new columns or tables mean a migration.
+- **Needs a new app build** (`app/`): a new native module, config plugin, or `app.json` change
+  can't reach existing installs until users update from the store. Say so, because it sets the
+  timeline, not just the effort.
+- **New OS permission** (`app/`: camera, photos, location, notifications): users see a new
+  prompt, `app.json` gains its usage text, and store review may ask about it.
+- **Local schema change** (`app/`): a SQLite table already on devices needs a migration, not
+  just an edit to its `tables/` file.
+- **Recorder box update** (`edge/`): a change to the box agent has to be rolled out to every
+  venue's box. Note whether old boxes keep working against the new API.
 - **New permission**: it has to be seeded and granted, or nobody but the Owner sees it.
 - **Different behaviour for existing users**: this is a breaking change, and it will make the
   release a `major`.
@@ -110,8 +120,9 @@ Plain statements the requester can check themselves in the app:
 
 | Area | Detail |
 | --- | --- |
-| Screens | <pages affected> |
-| Data | <new fields / tables; migration needed?> |
+| Screens | <pages / app screens affected> |
+| Data | <new fields / tables; migration needed? local SQLite migration?> |
+| Build / rollout | <new app build, OS permission, or recorder-box update needed? or "none"> |
 | Permissions | <new permission? which roles get it?> |
 | Existing users | <anything that works differently for them; if yes, it's a breaking change> |
 | Size | <S/M/L/XL, one line on why> |
@@ -153,6 +164,7 @@ Plain statements the requester can check themselves in the app:
 
 - [ ] `cd back && npm run lint` passes
 - [ ] `cd front && npm run lint && npm run build` passes
+- [ ] `cd app && npx expo-doctor@latest && npx expo export --platform android --clear` passes
 - [ ] Migration applied, or noted as pending for deploy
 - [ ] Changelog entry added (`ref: CR-NNN`)
 - [ ] Requester shown the result and signed off

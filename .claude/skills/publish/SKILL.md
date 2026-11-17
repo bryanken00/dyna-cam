@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Cut a release. Rolls every entry in docs/changelog/unpublished/ into one plain-language, client-facing release note at docs/changelog/published/vX.Y.Z.md, picks the next semantic version from the entries' impact (major/minor/patch), bumps the version in front/ and back/ package.json, updates the release index, and clears the queue. Only when the user runs /publish.
+description: Cut a release. Rolls every entry in docs/changelog/unpublished/ into one plain-language, client-facing release note at docs/changelog/published/vX.Y.Z.md, picks the next semantic version from the entries' impact (major/minor/patch), bumps the one product version in front/ and back/ package.json and in app/ (package.json, app.json, src/constants/version.js), updates the release index, and clears the queue. Only when the user runs /publish.
 argument-hint: "[major|minor|patch|X.Y.Z] [--dry-run]"
 disable-model-invocation: true
 ---
@@ -16,14 +16,19 @@ Arguments: **$ARGUMENTS**
 
 1. **Entries**: every `*.md` in `docs/changelog/unpublished/` (ignore `.gitkeep`). If there are
    none, stop and say "Nothing to publish: the unpublished queue is empty."
-2. **Current version**: `version` in `front/package.json` and in `back/package.json`. **If they
-   differ, stop and ask** which one is right. Never guess.
+2. **Current version**: the product has one version, kept in five places:
+   - `version` in `front/package.json` and `back/package.json`
+   - `version` in `app/package.json`
+   - `expo.version` in `app/app.json` (what the App Store and Play Store show)
+   - `VERSION` in `app/src/constants/version.js` (what the mobile app displays)
+
+   **If any of them differ, stop and ask** which one is right. Never guess.
 3. **Sanity**: the current version should match the newest file in `docs/changelog/published/`.
    Warn if it doesn't. If `published/v<next>.md` already exists, stop.
 4. **Parse** each entry's frontmatter. If `type` or `impact` is missing, infer it from the text
    using the tables in the `changelog` skill and list the file under "Inferred" in your report.
-5. **Stragglers**: run `git status --porcelain front back`. Uncommitted changes there may be
-   finished work that has no entry yet. Mention them; don't block.
+5. **Stragglers**: run `git status --porcelain front back app edge`. Uncommitted changes there
+   may be finished work that has no entry yet. Mention them; don't block.
 
 ## Step 2: Pick the version
 
@@ -99,6 +104,13 @@ group bullets with bold sub-labels (**For company administrators**), as in
 Re-read the draft once as a non-technical client would. Rewrite any sentence they'd have to ask
 about.
 
+### Store text (only when an entry touches `app/`)
+
+If any entry's Dev notes mention `app/`, also draft the **store text**: the app-facing part of the
+release in **500 characters or fewer**, plain text, no headings or emoji, short `-` bullets. Google
+Play caps release notes at 500 characters per language; the App Store allows more, but the same
+text works there. Count the characters and cut until it fits.
+
 ## Step 4: Stop or confirm
 
 - `--dry-run`: print the version (with the reason) and the draft, and write nothing. Done.
@@ -108,19 +120,27 @@ about.
 ## Step 5: Apply
 
 1. Write `docs/changelog/published/vX.Y.Z.md`.
-2. Bump both apps (this updates their lockfiles too and doesn't touch git):
+2. Bump every part (this updates their lockfiles too and doesn't touch git):
 
    ```bash
-   (cd front && npm version X.Y.Z --no-git-tag-version) && (cd back && npm version X.Y.Z --no-git-tag-version)
+   (cd front && npm version X.Y.Z --no-git-tag-version) && (cd back && npm version X.Y.Z --no-git-tag-version) && (cd app && npm version X.Y.Z --no-git-tag-version)
    ```
 
-   That's the only place the version lives. `vite.config.js` injects `front/package.json`'s
-   version as `import.meta.env.APP_VERSION` (the Sentry release tag), so there's no env var to
-   update.
+   then edit `"version"` under `expo` in `app/app.json`, and `VERSION` in
+   `app/src/constants/version.js`. Those five are the only places the version lives.
+   `vite.config.js` injects `front/package.json`'s version as `import.meta.env.APP_VERSION` (the
+   Sentry release tag), so there's no env var to update.
+
+   **Don't touch `android.versionCode` or `ios.buildNumber`.** `app/eas.json` sets
+   `appVersionSource: "remote"`, so EAS owns build numbers and auto-increments them on production
+   builds.
 3. In `docs/changelog/README.md`, add a row directly under the Releases table header:
    `| [vX.Y.Z](published/vX.Y.Z.md) | YYYY-MM-DD | <highlight, 12 words or fewer> |`
-4. **Before deleting**, collect every Dev-notes line that a deploy needs (migrations, new env vars,
-   manual steps).
+4. **Before deleting**, collect every Dev-notes line that a deploy needs: migrations, new env
+   vars, manual steps; for `app/`, new native modules or config plugins (needs a new store build
+   and a local `npx expo prebuild --clean`), new `EXPO_PUBLIC_*` variables, local SQLite
+   migrations, new permission prompts, anything that signs users out; for `edge/`, a recorder-box
+   update that has to be rolled out to every venue.
 5. Delete the entry files you published from `unpublished/`, keeping `.gitkeep`. Their technical
    notes stay in git history.
 
@@ -130,13 +150,17 @@ Run `git diff --stat`, then report:
 
 - old → new version and why (e.g. "minor: 2 new features, 3 fixes")
 - the path and full text of the release note
+- the store text with its character count, if one was drafted
 - **Deploy notes** from step 5.4, or "none"
 - any inferred entries or stragglers from Step 1
 
 **Don't commit or tag on your own.** Offer:
 
 ```bash
-git add docs/changelog front/package.json back/package.json
+git add docs/changelog front/package*.json back/package*.json app/package*.json app/app.json app/src/constants/version.js
 git commit -m "chore(release): vX.Y.Z"
 git tag vX.Y.Z
 ```
+
+The store build itself (`eas build`, `eas submit`) and the recorder-box rollout are the user's
+call.

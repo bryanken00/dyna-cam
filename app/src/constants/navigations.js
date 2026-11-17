@@ -24,6 +24,11 @@ export const SCREEN_NAVIGATION = {
   Home: "Home",
   Login: "Login",
 
+  // The signed-in user's own account.
+  Account: {
+    ChangePassword: "ChangePassword",
+  },
+
   // Modules reached from the Menu tab, not from the tab bar itself.
   // Keep the tab bar for top-level destinations only.
   Modules: {

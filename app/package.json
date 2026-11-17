@@ -1,10 +1,11 @@
 {
-  "name": "expo-template-2026",
-  "version": "0.1.0",
-  "description": "Expo React Native starter: auth, theming, navigation, React Query and offline SQLite",
+  "name": "dyna-cam-app",
+  "version": "1.0.0",
+  "description": "Dyna Cam staff app (Expo React Native)",
   "main": "index.js",
   "scripts": {
     "start": "expo start --clear",
+    "dev": "expo start",
     "android": "expo run:android",
     "start:dev": "expo start --dev-client",
     "ios": "expo run:ios",

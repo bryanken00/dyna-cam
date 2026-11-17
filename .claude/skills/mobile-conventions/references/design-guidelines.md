@@ -1,7 +1,7 @@
 # Design Steering
 
 The single source of truth for how screens should look and feel. The redesigned
-**Login screen** ([src/Screens/Login/Index.js](../src/Screens/Login/Index.js)) is the
+**Login screen** ([src/Screens/Login/Index.js](../../../../app/src/Screens/Login/Index.js)) is the
 reference implementation — when in doubt, copy its patterns. The goal is a clean,
 modern product built on [React Native Reusables](https://reactnativereusables.com)
 that works in light **and** dark mode and looks correct on phones **and** tablets.
@@ -11,7 +11,7 @@ that works in light **and** dark mode and looks correct on phones **and** tablet
 ## 1. Principles
 
 1. **Tailwind classes, never hardcoded hex.** Every colour is a token defined in
-   [global.css](../global.css) and consumed as a class — `bg-primary`,
+   [global.css](../../../../app/global.css) and consumed as a class — `bg-primary`,
    `text-muted-foreground`, `border-border`. The only literal colours allowed are
    `#fff`/`#000` on top of a known brand surface (e.g. white on the primary
    button) and the fixed status set in §2.
@@ -29,9 +29,9 @@ that works in light **and** dark mode and looks correct on phones **and** tablet
 
 ## 2. Colour tokens
 
-Tokens are declared once in [global.css](../global.css) as HSL triplets under
+Tokens are declared once in [global.css](../../../../app/global.css) as HSL triplets under
 `:root` (light) and `.dark:root` (dark), and mapped to Tailwind colours in
-[tailwind.config.js](../tailwind.config.js). Change a colour there and both
+[tailwind.config.js](../../../../app/tailwind.config.js). Change a colour there and both
 themes follow.
 
 | Role | Class | Use for |
@@ -72,7 +72,7 @@ const colors = useThemeColors();
 <Rocket color={colors.primary} />
 ```
 
-Those values come from [src/lib/theme.js](../src/lib/theme.js), a hand-maintained
+Those values come from [src/lib/theme.js](../../../../app/src/lib/theme.js), a hand-maintained
 JS mirror of `global.css`. **If you change a colour in one, change it in the
 other** — CSS custom properties are not readable from JS at runtime, so this
 duplication cannot be automated away.
@@ -90,12 +90,12 @@ follow the in-app toggle rather than the device setting — do not read
 
 Reach for [React Native Reusables](https://reactnativereusables.com) first — add
 one with `npx @react-native-reusables/cli@latest add <name>`. Components land in
-[src/components/ui/](../src/components/ui/) as ordinary files you own and can
+[src/components/ui/](../../../../app/src/components/ui/) as ordinary files you own and can
 edit; they are not a dependency.
 
 Project-specific compositions live one level up in
-[src/components/](../src/components/). Each accepts a `className` and merges it
-with [`cn()`](../src/lib/utils.js), so a caller can always override:
+[src/components/](../../../../app/src/components/). Each accepts a `className` and merges it
+with [`cn()`](../../../../app/src/lib/utils.js), so a caller can always override:
 
 ```js
 cn("px-4 py-2 bg-primary", isGhost && "bg-transparent", className)
@@ -107,8 +107,8 @@ decide.
 
 For **list/detail modules** — the admin-style screens with a header, stat row,
 searchable list and create/edit form — use the pattern kit in
-[src/components/pattern/](../src/components/pattern/) and follow
-[MODULE_PATTERN.md](MODULE_PATTERN.md). Don't rebuild those from primitives.
+[src/components/pattern/](../../../../app/src/components/pattern/) and follow
+[module-pattern.md](module-pattern.md). Don't rebuild those from primitives.
 
 ---
 
@@ -125,11 +125,11 @@ searchable list and create/edit form — use the pattern kit in
 
 ## 5. Typography
 
-Use RNR's [`Text`](../src/components/ui/text.jsx) rather than React Native's, so
+Use RNR's [`Text`](../../../../app/src/components/ui/text.jsx) rather than React Native's, so
 colour and size inherit through `TextClassContext` inside buttons and cards.
 
 **Fonts are Onest (UI) and JetBrains Mono (numerals, ids, units)**, loaded in
-[useAppFonts.js](../src/hooks/useAppFonts.js).
+[useAppFonts.js](../../../../app/src/hooks/useAppFonts.js).
 
 ⚠️ **React Native has no synthetic weights.** Each weight is a separately loaded
 family, so Tailwind's `font-bold` / `font-semibold` weight utilities do nothing
@@ -188,8 +188,8 @@ Tailwind's own weight utilities of the same name.
 
 ---
 
-_Reference: [Login](../src/Screens/Login/Index.js) (full pattern set — gradient
+_Reference: [Login](../../../../app/src/Screens/Login/Index.js) (full pattern set — gradient
 logo mark, staggered entrance, styled inputs, primary button states) ·
-[Dashboard](../src/Screens/Home/Dashboard/index.js) (header, card, tablet
-`max-w`) · [Settings](../src/Screens/Home/Settings/index.js) (grouped list
-sections, destructive action) · [global.css](../global.css) (tokens)._
+[Dashboard](../../../../app/src/Screens/Home/Dashboard/index.js) (header, card, tablet
+`max-w`) · [Settings](../../../../app/src/Screens/Home/Settings/index.js) (grouped list
+sections, destructive action) · [global.css](../../../../app/global.css) (tokens)._
