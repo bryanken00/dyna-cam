@@ -232,6 +232,16 @@
 - [ ] Tried for real: book Court 1 "Start now" → pair a phone → live video from the C200 on the
       phone → Stop → QR → game downloads → phone unpairs after Done
 
+## Phase F — `DEVICE_TOKEN` removed (boxes pair with a key only)
+
+- [x] API: remove `POST /admin/devices` (create + token) and `POST /admin/devices/:id/token`;
+      tests pair their boxes with a key (`pairBox` helper)
+- [x] Web: Recorder Boxes without the token dialog / "New token"; Add box = pairing key
+- [x] Edge: drop `DEVICE_TOKEN` (config, credentials, `.env.example`, README, skill, tests); a
+      set `DEVICE_TOKEN` only logs that it's ignored
+- [x] `back` lint + test (161), `front` lint + build, `edge` lint + test (154); changelog;
+      commit. Tests pair boxes with a key; a freshly paired box counts as online
+
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,

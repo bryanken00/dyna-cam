@@ -2,21 +2,16 @@ import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { isOnline, toEpochMs } from "../../../utils/clips.js";
-import { hashToken, randomToken } from "../../../utils/crypto/tokens.js";
-import {
-  createDeviceSchema,
-  listDevicesQuerySchema,
-  updateDeviceSchema,
-} from "../../../validators/devices.validator.js";
+import { listDevicesQuerySchema, updateDeviceSchema } from "../../../validators/devices.validator.js";
 
 /**
  * Devices — the on-site recorder boxes (edge/) that record a venue's court
  * cameras (PLAN-001). Permission: venues / devices.
  *
- * A box signs in with a token shown once, when it is added (or re-issued);
- * only its SHA-256 is stored. Revoking a box stops it at its next request.
+ * A box is added by pairing it with a 6-digit key (pairing-codes.controller.js
+ * → /api/v1/pair/device); it keeps the token it gets in DATA_DIR/device.json and
+ * only its SHA-256 is stored here. Revoking a box stops it at its next request.
  */
 const router = express.Router();
 
@@ -51,9 +46,6 @@ const toDevice = (row) => {
     lastStatus: undefined,
   };
 };
-
-/** The credential a box is configured with. Shown once. */
-const newDeviceToken = () => `dcb_${randomToken(32)}`;
 
 /**
  * GET /
@@ -164,55 +156,6 @@ router.get(
 );
 
 /**
- * POST /
- * Returns the box's token — the only time it is ever shown.
- */
-router.post(
-  "/",
-  checkPermission("venues", "devices", "write"),
-  validateBody(createDeviceSchema),
-  catchAsync(async (req, res) => {
-    const { venueId, name } = req.body;
-    const now = getCurrentTimestampLocal();
-
-    let conn;
-    try {
-      conn = await req.db.beginTransaction();
-
-      const [venue] = await conn.execute(
-        `SELECT venueId FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [venueId]
-      );
-      if (venue.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError("Venue not found", 400);
-      }
-
-      const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
-      const deviceId = uuidRow[0].id;
-      const token = newDeviceToken();
-
-      await conn.execute(
-        `INSERT INTO devices (deviceId, venueId, name, tokenHash, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, 'Active', ?, ?)`,
-        [deviceId, venueId, name, hashToken(token), now, now]
-      );
-
-      await req.db.commit(conn);
-      noIdempotencyCache(res); // the token must never sit in the cache table
-      return res.sendSuccess(
-        "Recorder box added — copy its token now, it will not be shown again",
-        { deviceId, token },
-        201
-      );
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-  })
-);
-
-/**
  * PUT /:deviceId — rename
  */
 router.put(
@@ -235,38 +178,9 @@ router.put(
 );
 
 /**
- * POST /:deviceId/token
- * Issue a new token (e.g. the box was reinstalled) and re-activate a revoked
- * box. The old token stops working immediately.
- */
-router.post(
-  "/:deviceId/token",
-  checkPermission("venues", "devices", "write"),
-  catchAsync(async (req, res) => {
-    const token = newDeviceToken();
-    const result = await req.db.query(
-      `UPDATE devices d
-       JOIN venues v ON v.venueId = d.venueId AND v.status != 'Deleted'
-       SET d.tokenHash = ?, d.status = 'Active', d.dateUpdated = ?
-       WHERE d.deviceId = ? AND d.status != 'Deleted'`,
-      [hashToken(token), getCurrentTimestampLocal(), req.params.deviceId]
-    );
-
-    if (result.affectedRows === 0) {
-      return res.sendError("Recorder box not found", 404);
-    }
-
-    noIdempotencyCache(res); // the token must never sit in the cache table
-    return res.sendSuccess("New token issued — copy it now, it will not be shown again", {
-      deviceId: req.params.deviceId,
-      token,
-    });
-  })
-);
-
-/**
  * POST /:deviceId/revoke
- * The box is refused from its next request until a new token is issued.
+ * The box is refused from its next request; to use it again, pair it with a new
+ * key (Add box), which adds it as a new box.
  */
 router.post(
   "/:deviceId/revoke",

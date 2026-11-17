@@ -39,7 +39,7 @@ describe("clips", () => {
     });
     target.courtId = court.data.courtId;
     target.qrToken = court.data.qrToken;
-    const box = await call("POST", "/admin/devices", { venueId: target.venueId, name: "Box" });
+    const box = await ctx.pairBox(admin.token, target.venueId, "Box");
     target.device = asDevice(box.data.token);
     target.deviceId = box.data.deviceId;
   };
@@ -70,6 +70,8 @@ describe("clips", () => {
   after(() => ctx?.stop());
 
   it("won't save a clip while the court's recorder box is offline", async () => {
+    // A box is online from the moment it pairs; this one hasn't been heard from since
+    await ctx.sql.query(`UPDATE devices SET lastSeenAt = NULL WHERE venueId = ?`, [home.venueId]);
     const court = await ctx.api("GET", `/public/courts/${home.qrToken}`);
     assert.equal(court.status, 200);
     assert.equal(court.data.court.cameraReady, false);
@@ -243,7 +245,7 @@ describe("clips", () => {
   });
 
   it("lets only one box at a venue make a clip", async () => {
-    const second = await call("POST", "/admin/devices", { venueId: home.venueId, name: "Box 2" });
+    const second = await ctx.pairBox(admin.token, home.venueId, "Box 2");
     const box2 = asDevice(second.data.token);
     await ageClips(home.courtId);
     const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);

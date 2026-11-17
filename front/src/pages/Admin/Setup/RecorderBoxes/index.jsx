@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/select";
 import { useDeviceHooks } from "./hooks";
 import DeviceFormDrawer from "./components/DeviceFormDrawer";
-import DeviceTokenDialog from "./components/DeviceTokenDialog";
 import PairingKeyDialog from "../../../../components/PairingKeyDialog";
 import PendingPairingKeys from "../../../../components/PendingPairingKeys";
 import PageHeader from "../../../../components/PageHeader";
@@ -47,8 +46,6 @@ const DevicesPage = () => {
     handleCreate,
     handleDrawerClose,
     handleDrawerSuccess,
-    issuedToken,
-    handleTokenDialogClose,
     pairingKey,
     handlePairingDialogClose,
   } = useDeviceHooks();
@@ -244,14 +241,6 @@ const DevicesPage = () => {
         kind="recorder"
         pairingKey={pairingKey}
         onClose={handlePairingDialogClose}
-      />
-
-      <DeviceTokenDialog
-        key={issuedToken?.token || "none"}
-        open={!!issuedToken}
-        deviceName={issuedToken?.deviceName}
-        token={issuedToken?.token}
-        onClose={handleTokenDialogClose}
       />
     </div>
   );

@@ -50,7 +50,7 @@ function fakeApi(answers) {
     },
   };
 }
-const settings = (extra = {}) => ({ dataDir: dir, deviceToken: "", pairingCode: null, ...extra });
+const settings = (extra = {}) => ({ dataDir: dir, pairingCode: null, ...extra });
 const args = (api, extra = {}) => ({
   settings: settings(extra),
   api,
@@ -62,21 +62,14 @@ const args = (api, extra = {}) => ({
 const writeDevice = (data) => fs.writeFile(path.join(dir, DEVICE_FILE), JSON.stringify(data));
 
 describe("resolveCredentials: which token", () => {
-  it("prefers device.json, then DEVICE_TOKEN, then a PAIRING_CODE", async () => {
+  it("prefers device.json, then a PAIRING_CODE", async () => {
     const api = fakeApi([PAIRED]);
     await writeDevice({ token: "dcb_stored_token_1234", name: "Box" });
-    const stored = await resolveCredentials(
-      args(api, { deviceToken: "env-token-123", pairingCode: "123456" })
-    );
+    const stored = await resolveCredentials(args(api, { pairingCode: "123456" }));
     assert.deepEqual([stored.token, stored.source], ["dcb_stored_token_1234", "stored"]);
+    assert.equal(api.calls.length, 0, "no pairing while a token is saved");
 
     await fs.rm(path.join(dir, DEVICE_FILE));
-    const env = await resolveCredentials(
-      args(api, { deviceToken: "env-token-123", pairingCode: "123456" })
-    );
-    assert.deepEqual([env.token, env.source], ["env-token-123", "env"]);
-    assert.equal(api.calls.length, 0, "no pairing while a token exists");
-
     const paired = await resolveCredentials(args(api, { pairingCode: "123456" }));
     assert.deepEqual([paired.token, paired.source], [PAIRED.token, "paired"]);
     assert.deepEqual(api.calls, [["123456", "1.0.0"]]);

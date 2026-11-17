@@ -15,7 +15,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | File | Owns |
 | --- | --- |
 | `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid; `USER_AGENT`, `AGENT_VERSION` |
-| `credentials.js` | Token: `device.json` (0600) → `DEVICE_TOKEN` → redeem `PAIRING_CODE` once (`POST /pair/device`, no auth); revoked → cleanup |
+| `credentials.js` | Token: `device.json` (0600) → redeem `PAIRING_CODE` once (`POST /pair/device`, no auth); revoked → cleanup. `DEVICE_TOKEN` is gone (PLAN-002 Phase F) — a set one is only warned about |
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court (`CourtRecorder`), restart/backoff, stall watchdog, pruning, heartbeat status (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
@@ -40,8 +40,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   bot, crawler, spider or scraper.
 - Envelope → `data`; failures throw `ApiError` (`status` 0 = no answer).
 - Errors: **404/409** clip gone or done → drop. **401**: a paired box (device.json) stops all work,
-  deletes device.json + config cache, tries a NEW `PAIRING_CODE` once, exits; a `DEVICE_TOKEN` box
-  logs loudly and retries 30 s → 5 min. Pairing: 400 final (key hash kept, never resent), 429 →
+  deletes device.json + config cache, tries a NEW `PAIRING_CODE` once, exits. Pairing: 400 final (key hash kept, never resent), 429 →
   `Retry-After` or 60 s. Never log a token or key (`dcb_…` masked). **429** → `Retry-After`. **0/5xx** →
   exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
 - `logoUrl` is signed and **relative** (`new URL(logoUrl, API_URL)`, token only to the API's own

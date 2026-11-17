@@ -3,10 +3,10 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { ConfigError, loadConfig, parsePairingCode, ROOT_DIR, USER_AGENT } from "../src/config.js";
 
-const base = { API_URL: "https://api.example.com/", DEVICE_TOKEN: "tok" };
+const base = { API_URL: "https://api.example.com/" };
 
 describe("loadConfig", () => {
-  it("fails fast without API_URL, and needs no DEVICE_TOKEN (pairing replaces it)", () => {
+  it("fails fast without API_URL; DEVICE_TOKEN is only noticed, never used", () => {
     assert.throws(
       () => loadConfig({}),
       (err) => {
@@ -17,8 +17,12 @@ describe("loadConfig", () => {
       }
     );
     const cfg = loadConfig({ API_URL: "https://x.test" });
-    assert.equal(cfg.deviceToken, "");
     assert.equal(cfg.pairingCode, null);
+    assert.equal(cfg.ignoredDeviceToken, false);
+    assert.equal(cfg.deviceToken, undefined, "DEVICE_TOKEN is no longer read");
+    const old = loadConfig({ API_URL: "https://x.test", DEVICE_TOKEN: "dcb_old" });
+    assert.equal(old.ignoredDeviceToken, true);
+    assert.ok(!JSON.stringify(old).includes("dcb_old"), "the old token isn't kept");
   });
 
   it("reads PAIRING_CODE as typed (spaces and dashes) and rejects anything but 6 digits", () => {

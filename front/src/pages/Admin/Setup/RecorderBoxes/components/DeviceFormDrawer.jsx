@@ -52,8 +52,8 @@ const iconPrefix =
 const mutedIcon = { color: "var(--color-text-muted)" };
 
 /**
- * Add a recorder box, or rename one. On create, `onSuccess` receives
- * `{ name, token }` so the page can show the one-time token.
+ * Add a recorder box (a 6-digit pairing key the box redeems itself), or rename
+ * one.
  */
 const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   const isEditMode = !!entity;

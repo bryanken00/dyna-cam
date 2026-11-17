@@ -41,7 +41,7 @@ describe("camera setup preview", () => {
         cameraRtspUrl: "rtsp://u:p@10.0.0.9:554/stream1",
       });
       target.courtId = court.data.courtId;
-      const box = await call("POST", "/admin/devices", { venueId: target.venueId, name: "Box" });
+      const box = await ctx.pairBox(admin.token, target.venueId, "Box");
       target.device = asDevice(box.data.token);
     }
   });

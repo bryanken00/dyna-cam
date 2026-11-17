@@ -28,7 +28,7 @@ describe("court buttons", () => {
     });
     assert.equal(court.status, 201, JSON.stringify(court.body));
     target.courtId = court.data.courtId;
-    const box = await call("POST", "/admin/devices", { venueId: target.venueId, name: "Box" });
+    const box = await ctx.pairBox(admin.token, target.venueId, "Box");
     target.device = asDevice(box.data.token);
   };
 

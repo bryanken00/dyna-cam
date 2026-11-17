@@ -62,7 +62,7 @@ describe("venues, courts and recorder boxes", () => {
     it("treats a deleted venue as missing, leaves it alone, and retires its courts and boxes", async () => {
       const venueId = await createVenue("Closing Down Courts");
       const court = await call("POST", "/admin/courts", { venueId, name: "Court 1" });
-      const box = await call("POST", "/admin/devices", { venueId, name: "Box" });
+      const box = await ctx.pairBox(admin.token, venueId, "Box");
       assert.equal(court.status, 201);
       assert.equal(box.status, 201);
 
@@ -193,8 +193,8 @@ describe("venues, courts and recorder boxes", () => {
       venueId = await createVenue("Quezon City Pickle Hub");
     });
 
-    it("shows the token once and stores only its hash", async () => {
-      const created = await call("POST", "/admin/devices", { venueId, name: "Front box" });
+    it("pairs with a key, and stores only the token's hash", async () => {
+      const created = await ctx.pairBox(admin.token, venueId, "Front box");
       assert.equal(created.status, 201);
       const { deviceId, token } = created.data;
       assert.match(token, /^dcb_/);
@@ -203,44 +203,37 @@ describe("venues, courts and recorder boxes", () => {
       assert.equal(one.status, 200);
       assert.ok(!JSON.stringify(one.body).includes(token));
       assert.equal(one.data.device.tokenHash, undefined);
-      assert.equal(one.data.device.online, false);
+      assert.equal(one.data.device.online, true, "pairing counts as a sign of life");
 
+      // Offline once it goes quiet; any request brings it back
+      await ctx.sql.query(`UPDATE devices SET lastSeenAt = NULL WHERE deviceId = ?`, [deviceId]);
+      assert.equal((await call("GET", `/admin/devices/${deviceId}`)).data.device.online, false);
       assert.equal((await device("GET", "/device/config", token)).status, 200);
       const after = await call("GET", `/admin/devices/${deviceId}`);
       assert.equal(after.data.device.online, true, "a request counts as a sign of life");
     });
 
-    it("refuses a revoked box until a new token is issued, and the old token stays dead", async () => {
-      const created = await call("POST", "/admin/devices", { venueId, name: "Back box" });
+    it("refuses a revoked box for good — it has to be paired again as a new box", async () => {
+      const created = await ctx.pairBox(admin.token, venueId, "Back box");
       const { deviceId, token } = created.data;
 
       assert.equal((await call("POST", `/admin/devices/${deviceId}/revoke`)).status, 200);
       assert.equal((await device("GET", "/device/config", token)).status, 401);
 
-      const reissued = await call("POST", `/admin/devices/${deviceId}/token`);
-      assert.equal(reissued.status, 200);
-      assert.equal((await device("GET", "/device/config", reissued.data.token)).status, 200);
+      const again = await ctx.pairBox(admin.token, venueId, "Back box");
+      assert.equal(again.status, 201);
+      assert.notEqual(again.data.deviceId, deviceId);
+      assert.equal((await device("GET", "/device/config", again.data.token)).status, 200);
       assert.equal((await device("GET", "/device/config", token)).status, 401);
     });
 
-    it("never stores a box token in the idempotency cache", async () => {
-      // The web app sends an Idempotency-Key on every change; the cache table is plain text
-      const created = await ctx.api("POST", "/admin/devices", {
-        token: admin.token,
-        body: { venueId, name: "Cached box" },
-        headers: { "Idempotency-Key": "add-box-key-1" },
-      });
-      assert.equal(created.status, 201);
-      const reissued = await ctx.api("POST", `/admin/devices/${created.data.deviceId}/token`, {
-        token: admin.token,
-        headers: { "Idempotency-Key": "reissue-key-1" },
-      });
-      assert.equal(reissued.status, 200);
-
-      const [rows] = await ctx.sql.query(`SELECT responseBody FROM idempotency_keys`);
-      const stored = rows.map((r) => JSON.stringify(r.responseBody)).join("\n");
-      assert.ok(!stored.includes(created.data.token), "first token must not be cached");
-      assert.ok(!stored.includes(reissued.data.token), "re-issued token must not be cached");
+    it("can't be added or given a token without a pairing key (PLAN-002 Phase F)", async () => {
+      assert.equal((await call("POST", "/admin/devices", { venueId, name: "x" })).status, 404);
+      const created = await ctx.pairBox(admin.token, venueId, "Keyed box");
+      assert.equal(
+        (await call("POST", `/admin/devices/${created.data.deviceId}/token`)).status,
+        404
+      );
     });
 
     it("refuses requests without a device token", async () => {
@@ -251,13 +244,12 @@ describe("venues, courts and recorder boxes", () => {
     });
 
     it("treats a deleted box as missing and leaves it alone", async () => {
-      const created = await call("POST", "/admin/devices", { venueId, name: "Old box" });
+      const created = await ctx.pairBox(admin.token, venueId, "Old box");
       const { deviceId, token } = created.data;
       assert.equal((await call("DELETE", `/admin/devices/${deviceId}`)).status, 200);
 
       assert.equal((await call("GET", `/admin/devices/${deviceId}`)).status, 404);
       assert.equal((await call("PUT", `/admin/devices/${deviceId}`, { name: "X" })).status, 404);
-      assert.equal((await call("POST", `/admin/devices/${deviceId}/token`)).status, 404);
       assert.equal((await call("POST", `/admin/devices/${deviceId}/revoke`)).status, 404);
       assert.equal((await call("DELETE", `/admin/devices/${deviceId}`)).status, 404);
       assert.equal((await device("GET", "/device/config", token)).status, 401);

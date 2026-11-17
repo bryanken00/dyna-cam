@@ -8,9 +8,7 @@ import {
 import {
   getDevicesApi,
   getDeviceOptionsApi,
-  createDeviceApi,
   updateDeviceApi,
-  reissueDeviceTokenApi,
   revokeDeviceApi,
   deleteDeviceApi,
 } from "../../api/admin/devices";
@@ -38,25 +36,6 @@ export const useGetDeviceOptions = (options = {}) => {
   });
 };
 
-// Mutation: Add a box — the response carries its token, shown once
-export const useCreateDevice = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: createDeviceApi,
-    onSuccess: () => {
-      toast.success("Recorder box added — copy its token now");
-      queryClient.invalidateQueries({ queryKey: ["devices"] });
-      queryClient.invalidateQueries({ queryKey: ["venues"] }); // deviceCount
-    },
-    onError: (error) => {
-      toast.error(
-        error.response?.data?.message || "Failed to add recorder box",
-      );
-    },
-  });
-};
-
 // Mutation: Rename a box
 export const useUpdateDevice = () => {
   const queryClient = useQueryClient();
@@ -72,23 +51,6 @@ export const useUpdateDevice = () => {
       toast.error(
         error.response?.data?.message || "Failed to update recorder box",
       );
-    },
-  });
-};
-
-// Mutation: Issue a new token — the response carries it, shown once
-export const useReissueDeviceToken = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: reissueDeviceTokenApi,
-    onSuccess: () => {
-      toast.success("New token issued — copy it now");
-      queryClient.invalidateQueries({ queryKey: ["devices"] });
-      queryClient.invalidateQueries({ queryKey: ["venues"] }); // deviceCount
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.message || "Failed to issue a token");
     },
   });
 };

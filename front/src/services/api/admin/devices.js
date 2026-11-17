@@ -18,23 +18,11 @@ export const getDeviceByIdApi = async (deviceId) => {
   return response.data;
 };
 
-// Returns { deviceId, token } — the only time the token is ever shown.
-export const createDeviceApi = async (deviceData) => {
-  const response = await api.post("/api/v1/admin/devices", deviceData);
-  return response.data;
-};
-
 export const updateDeviceApi = async (deviceId, deviceData) => {
   const response = await api.put(
     `/api/v1/admin/devices/${deviceId}`,
     deviceData,
   );
-  return response.data;
-};
-
-// Issues a new token (shown once) and re-activates a revoked box.
-export const reissueDeviceTokenApi = async (deviceId) => {
-  const response = await api.post(`/api/v1/admin/devices/${deviceId}/token`);
   return response.data;
 };
 

@@ -314,6 +314,36 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     };
   };
 
+  /**
+   * Add a recorder box to a venue the only way there is (PLAN-002 Phase F): a
+   * 6-digit key from the Admin portal, redeemed at /pair/device. Each call
+   * comes from its own documentation-range IP, so the per-IP pairing limits
+   * don't trip in suites that add several boxes.
+   * @returns {Promise<{ status: number, data: { token: string, deviceId: string, name: string } }>}
+   */
+  let boxCount = 0;
+  const pairBox = async (adminToken, venueId, name = "Box") => {
+    const key = await api("POST", "/admin/pairing-codes/recorders", {
+      token: adminToken,
+      body: { venueId, name },
+    });
+    if (key.status !== 201) return key;
+    boxCount += 1;
+    const paired = await api("POST", "/pair/device", {
+      body: { code: key.data.code, agentVersion: "test" },
+      headers: { "X-Forwarded-For": `198.51.100.${boxCount % 250}` },
+    });
+    if (paired.status !== 201) return paired;
+    return {
+      status: 201,
+      data: {
+        token: paired.data.token,
+        deviceId: paired.data.device.deviceId,
+        name: paired.data.device.name,
+      },
+    };
+  };
+
   const stop = async () => {
     server.closeAllConnections(); // fetch keeps connections alive; don't wait for them
     await new Promise((resolve) => server.close(resolve));
@@ -331,6 +361,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     owner,
     ownerRoleId,
     createStaff,
+    pairBox,
     issueResetToken,
     sql,
     db,

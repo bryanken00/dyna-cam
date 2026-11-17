@@ -435,3 +435,10 @@ an HLS live playlist — no new camera connection, no re-encoding:
   min after the end, then unpair; staff sign-in removed from the app. Supersedes the paired mode
   of Phases B–D (section 4) and the Phase D Start/End-from-phone routes. Document written first,
   build waits for the requester's go-ahead.
+- 2026-11-17: **Phase F — `DEVICE_TOKEN` removed.** Requester: "We can remove this now?" A
+  recorder box is now added only with a 6-digit key (Setup → Recorder Boxes → Add box); the
+  admin "create a box and copy its token" and "new token" routes, the web token dialog and the
+  box's `DEVICE_TOKEN` setting are gone. A box keeps its token in `DATA_DIR/device.json`; a box
+  that was set up with `DEVICE_TOKEN` must be paired once with a key. (This also answers the
+  2026-11-17 question that started this plan.)
+

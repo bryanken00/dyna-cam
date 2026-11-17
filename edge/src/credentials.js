@@ -7,9 +7,10 @@ import { backoffMs, sleep as defaultSleep, readJson, writeJsonAtomic } from "./u
  * How the box proves who it is (PLAN-002). In order:
  *
  *   1. DATA_DIR/device.json — the token from an earlier pairing (mode 0600)
- *   2. DEVICE_TOKEN in .env — the older way, copied from the Admin portal
- *   3. PAIRING_CODE in .env — a 6-digit key, redeemed ONCE with POST /pair/device;
+ *   2. PAIRING_CODE in .env — a 6-digit key, redeemed ONCE with POST /pair/device;
  *      the token is saved to device.json and the key is not needed again
+ *
+ * (DEVICE_TOKEN, the older copied token, was removed in PLAN-002 Phase F.)
  *
  * A key that was used or refused is remembered (only its hash) in
  * pairing-used.json, so a restart never sends the same key again — wrong
@@ -132,7 +133,7 @@ const freshCode = async (settings) =>
   Boolean(settings.pairingCode) && !(await isCodeUsed(settings.dataDir, settings.pairingCode));
 
 /**
- * The token to use at start-up. → { token, source: "stored" | "env" | "paired", device? }
+ * The token to use at start-up. → { token, source: "stored" | "paired", device? }
  * Throws CredentialsError when a person has to add or fix a key.
  */
 export async function resolveCredentials({
@@ -145,7 +146,6 @@ export async function resolveCredentials({
 }) {
   const stored = await loadStoredDevice(settings.dataDir);
   if (stored) return { token: stored.token, source: "stored", device: stored };
-  if (settings.deviceToken) return { token: settings.deviceToken, source: "env" };
   if (await freshCode(settings)) return pair({ settings, api, agentVersion, log, sleep, now });
   if (settings.pairingCode) {
     throw new CredentialsError(`The PAIRING_CODE in .env was already used. ${ADD_BOX_HINT}`);

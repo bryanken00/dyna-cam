@@ -37,7 +37,7 @@ describe("clip payments (cash)", () => {
     });
     target.courtId = court.data.courtId;
     target.qrToken = court.data.qrToken;
-    const box = await call("POST", "/admin/devices", { venueId: target.venueId, name: "Box" });
+    const box = await ctx.pairBox(admin.token, target.venueId, "Box");
     target.device = asDevice(box.data.token);
     await target.device("GET", "/device/config"); // online
   };

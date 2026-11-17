@@ -76,8 +76,9 @@ export function loadConfig(env = process.env) {
     .trim()
     .replace(/\/+$/, "");
   // Credentials (credentials.js): a token saved by pairing in DATA_DIR/device.json,
-  // else DEVICE_TOKEN (the older way), else a 6-digit PAIRING_CODE to redeem
-  const deviceToken = String(env.DEVICE_TOKEN ?? "").trim();
+  // else a 6-digit PAIRING_CODE to redeem. DEVICE_TOKEN is no longer read (PLAN-002
+  // Phase F) — index.js only warns when one is still set.
+  const ignoredDeviceToken = String(env.DEVICE_TOKEN ?? "").trim() !== "";
   const pairingCode = parsePairingCode(env.PAIRING_CODE);
   if (!apiUrl) {
     throw new ConfigError(
@@ -110,7 +111,7 @@ export function loadConfig(env = process.env) {
 
   return Object.freeze({
     apiUrl,
-    deviceToken,
+    ignoredDeviceToken,
     pairingCode,
     dataDir: path.resolve(ROOT_DIR, env.DATA_DIR || "./data"),
     segmentSeconds: int(env, "SEGMENT_SECONDS", 2, 1, 10),

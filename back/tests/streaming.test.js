@@ -29,7 +29,7 @@ describe("live streaming", () => {
       [other, "Other Courts"],
     ]) {
       target.venueId = (await call("POST", "/admin/venues", { name })).data.venueId;
-      const box = await call("POST", "/admin/devices", { venueId: target.venueId, name: "Box" });
+      const box = await ctx.pairBox(admin.token, target.venueId, "Box");
       target.device = asDevice(box.data.token);
     }
   });

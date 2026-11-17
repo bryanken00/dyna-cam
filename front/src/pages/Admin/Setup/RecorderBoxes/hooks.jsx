@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { Ban, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { Ban, Pencil, Trash2 } from "lucide-react";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import RowActions from "../../../../components/RowActions";
@@ -12,7 +12,6 @@ import { confirm } from "../../../../store/confirmStore";
 import {
   useGetDevices,
   useGetDeviceOptions,
-  useReissueDeviceToken,
   useRevokeDevice,
   useDeleteDevice,
 } from "../../../../services/requests/admin/devices";
@@ -65,8 +64,6 @@ export const useDeviceHooks = () => {
   // ─── Drawer / Dialog State ─────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(null);
-  // { deviceName, token } — the one-time token to show, or null
-  const [issuedToken, setIssuedToken] = useState(null);
   // { code, name, venueName, receivedAt } — a new box's pairing key, or null
   const [pairingKey, setPairingKey] = useState(null);
 
@@ -92,7 +89,6 @@ export const useDeviceHooks = () => {
   // Venue filter options — under this page's own permission
   const { data: optionsData } = useGetDeviceOptions();
 
-  const reissueMutation = useReissueDeviceToken();
   const revokeMutation = useRevokeDevice();
   const deleteMutation = useDeleteDevice();
 
@@ -158,43 +154,13 @@ export const useDeviceHooks = () => {
     setPairingKey(null);
   }, []);
 
-  const handleTokenDialogClose = useCallback(() => {
-    setIssuedToken(null);
-  }, []);
-
-  const handleReissueRequest = useCallback(
-    async (record) => {
-      const name = decodeHTML(record.name);
-      const revoked = record.status === "Revoked";
-      const ok = await confirm({
-        title: revoked ? "Re-activate recorder box" : "Issue a new token",
-        description: revoked
-          ? `Issue a new token for "${name}" and let it connect again? Put the new token in the box's settings.`
-          : `Issue a new token for "${name}"? Its current token stops working right away, so the box goes offline until you put the new token in its settings.`,
-        confirmText: "Issue new token",
-        cancelText: "Cancel",
-        danger: !revoked,
-      });
-      if (!ok) return;
-      try {
-        const response = await reissueMutation.mutateAsync(record.deviceId);
-        const token = response?.data?.token;
-        if (token) setIssuedToken({ deviceName: name, token });
-      } catch (err) {
-        // the mutation's onError already surfaced a toast
-        console.error("Reissue token error:", err);
-      }
-    },
-    [reissueMutation],
-  );
-
   const handleRevokeRequest = useCallback(
     async (record) => {
       const ok = await confirm({
         title: "Revoke recorder box",
         description: `Revoke "${decodeHTML(
           record.name,
-        )}"? It is refused from its next request and stops recording. You can re-activate it later by issuing a new token.`,
+        )}"? It is refused from its next request and stops recording. To use it again, add it again with a new pairing key.`,
         confirmText: "Revoke",
         cancelText: "Cancel",
         danger: true,
@@ -220,7 +186,7 @@ export const useDeviceHooks = () => {
     [deleteMutation],
   );
 
-  // ⋮ menu: Rename, Issue new token, Revoke, divider, Delete (danger)
+  // ⋮ menu: Rename, Revoke, divider, Delete (danger)
   const getActionItems = useCallback(
     (record) => {
       if (!canWrite || record.status === "Deleted") return [];
@@ -231,13 +197,6 @@ export const useDeviceHooks = () => {
           label: "Rename",
           icon: <Pencil className="w-4 h-4" />,
           onClick: () => handleEdit(record),
-        },
-        {
-          key: "token",
-          // Advanced: pairing is the normal way; this re-issues the long token
-          label: revoked ? "Re-activate with new token (advanced)" : "Re-issue token (advanced)",
-          icon: <KeyRound className="w-4 h-4" />,
-          onClick: () => handleReissueRequest(record),
         },
       ];
       if (!revoked) {
@@ -263,7 +222,6 @@ export const useDeviceHooks = () => {
     [
       canWrite,
       handleEdit,
-      handleReissueRequest,
       handleRevokeRequest,
       handleDeleteRequest,
     ],
@@ -475,9 +433,7 @@ export const useDeviceHooks = () => {
     handleCreate,
     handleDrawerClose,
     handleDrawerSuccess,
-    issuedToken,
     pairingKey,
     handlePairingDialogClose,
-    handleTokenDialogClose,
   };
 };

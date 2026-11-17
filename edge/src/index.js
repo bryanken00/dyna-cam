@@ -101,6 +101,12 @@ async function main() {
   setLogLevel(settings.logLevel);
   const log = createLogger("main");
   log.info(`${USER_AGENT} starting — API ${settings.apiUrl}, data in ${settings.dataDir}`);
+  if (settings.ignoredDeviceToken) {
+    log.warn(
+      "DEVICE_TOKEN in .env is no longer used — a box pairs with a 6-digit PAIRING_CODE " +
+        "(Admin → Setup → Recorder Boxes → Add box). You can delete the DEVICE_TOKEN line."
+    );
+  }
 
   const ffmpegMajor = await checkFfmpeg(settings, log);
 
@@ -184,12 +190,11 @@ async function main() {
     await recorders.stopAll();
   };
 
-  // A 401 on a paired token: the box was revoked. Stop recording and job work,
-  // forget the token, and try a NEW PAIRING_CODE once (pm2 restarts the process
-  // with the new pairing). A DEVICE_TOKEN box keeps the old behaviour: log
-  // loudly and keep retrying slowly (jobs.js / sync.js).
+  // A 401: the box was revoked. Stop recording and job work, forget the token,
+  // and try a NEW PAIRING_CODE once (pm2 restarts the process with the new
+  // pairing).
   api.onUnauthorized = () => {
-    if (creds.source === "env" || shuttingDown) return;
+    if (shuttingDown) return;
     shuttingDown = true;
     stopWork()
       .then(() => recoverFromRevoked(credentialArgs))
