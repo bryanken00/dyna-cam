@@ -1,5 +1,6 @@
 import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal } from "../utils/dateUtils.js";
+import { redactSecrets } from "../utils/redact.js";
 
 /**
  * Audit Trail
@@ -165,15 +166,11 @@ function buildDescription(action, module, req) {
 function buildMetadata(req, responseBody) {
   const metadata = {};
 
-  // Include safe request body fields (exclude sensitive data)
+  // Include safe request body fields: no passwords/tokens/keys, and camera or
+  // stream addresses only masked (BUG-001 — they carry passwords and stream keys)
   if (req.body && typeof req.body === "object") {
-    const safeBody = {};
-
-    for (const [key, value] of Object.entries(req.body)) {
-      if (!SENSITIVE_FIELDS.includes(key)) {
-        safeBody[key] = value;
-      }
-    }
+    const safeBody = redactSecrets(req.body);
+    for (const key of SENSITIVE_FIELDS) delete safeBody[key];
 
     if (Object.keys(safeBody).length > 0) {
       metadata.body = safeBody;

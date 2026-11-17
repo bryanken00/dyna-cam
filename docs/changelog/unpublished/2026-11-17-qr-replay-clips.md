@@ -24,3 +24,6 @@ print each court's QR sign, and browse, play and delete saved clips.
   the box in Admin → Recorder boxes, put `API_URL` + `DEVICE_TOKEN` in `edge/.env`, run with pm2.
   See `edge/README.md` (Tapo C200 setup included).
 - `front/`: new dependency `qrcode.react` 4.2.0 (`npm install`).
+- `back/`: the audit trail never stores a camera address's password or a stream key — they are
+  masked before the row is written (BUG-001); run `npm run db:migrate` (migration
+  `012_redact_audit_trail_secrets` removes any already stored).

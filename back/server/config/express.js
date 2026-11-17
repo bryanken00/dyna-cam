@@ -19,6 +19,7 @@ import APIError from "../src/utils/APIError.js"; // your custom error class
 import { error } from "../src/utils/responses.js"; // your custom error handling function
 import Database from "./database.js";
 import { httpLogger, logger, maskSensitiveData } from "./logger.js"; // your winston logger setup
+import { redactSecrets } from "../src/utils/redact.js";
 import { loggerMiddleware } from "../src/middlewares/logger.middleware.js"; // Global logger middleware
 
 const app = express();
@@ -225,14 +226,15 @@ app.use((err, req, res, next) => {
     "email",
   ];
 
+  // BUG-001: camera/stream addresses masked, keys and codes dropped, then the old mask
   const maskedBody = req.body
-    ? maskSensitiveData(req.body, sensitiveFields)
+    ? maskSensitiveData(redactSecrets(req.body), sensitiveFields)
     : {};
   const maskedQuery = req.query
-    ? maskSensitiveData(req.query, sensitiveFields)
+    ? maskSensitiveData(redactSecrets(req.query), sensitiveFields)
     : {};
   const maskedParams = req.params
-    ? maskSensitiveData(req.params, sensitiveFields)
+    ? maskSensitiveData(redactSecrets(req.params), sensitiveFields)
     : {};
 
   // Log the full error details using Winston

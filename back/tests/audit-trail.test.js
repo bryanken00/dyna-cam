@@ -49,6 +49,29 @@ describe("audit trail", () => {
       assert.equal(rows[0].metadata.body.email, staff.email);
     });
 
+    it("never stores a camera password or stream key (BUG-001)", async () => {
+      const call = (method, url, body) => ctx.api(method, url, { token: owner.token, body });
+      const { venueId } = (await call("POST", "/admin/venues", { name: "Audit Courts" })).data;
+      const court = await call("POST", "/admin/courts", {
+        venueId,
+        name: "Court A",
+        cameraRtspUrl: "rtsp://cam-user:Cam%40Secret1@192.168.1.50:554/stream1",
+      });
+      assert.equal(court.status, 201, JSON.stringify(court.body));
+      const update = await call("PUT", `/admin/courts/${court.data.courtId}`, {
+        name: "Court A",
+        streamEnabled: true,
+        streamRtmpUrl: "rtmps://live-api-s.facebook.com:443/rtmp/FB-123-0-SuperSecretKey99",
+      });
+      assert.equal(update.status, 200, JSON.stringify(update.body));
+
+      const rows = await rowsOf(owner.accountId, "module = 'courts'");
+      assert.ok(rows.length >= 2, "the changes are still recorded");
+      const stored = JSON.stringify(rows.map((row) => row.metadata));
+      assert.doesNotMatch(stored, /Cam%40Secret1|cam-user|SuperSecretKey99/);
+      assert.match(stored, /rtsp:\/\/192\.168\.1\.50:554\/stream1/, "the masked address stays");
+    });
+
     it("records an update and a delete, naming the record", async () => {
       const { roleId } = (
         await ctx.api("POST", "/admin/roles", { token: owner.token, body: { roleName: "Temp" } })
