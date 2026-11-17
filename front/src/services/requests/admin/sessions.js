@@ -11,6 +11,9 @@ import {
   createSessionApi,
   cancelSessionApi,
   endSessionApi,
+  createSessionPairingCodeApi,
+  cancelSessionPairingCodeApi,
+  unpairSessionDeviceApi,
 } from "../../api/admin/sessions";
 
 /** Statuses that still change on their own (parts arrive, status settles). */
@@ -32,21 +35,24 @@ export const useGetSessions = (filters = {}) => {
   });
 };
 
-// Query: one session with its parts. Refreshes every 15 s while it is live.
+// Query: one session with its parts, devices and live pairing keys.
+// Refreshes every 15 s while it is live — every 5 s while a key is waiting,
+// so a device shows up soon after it pairs.
 export const useGetSessionById = (sessionId) => {
   return useQuery({
     queryKey: ["sessions", sessionId],
     queryFn: () => getSessionByIdApi(sessionId),
     enabled: !!sessionId,
     staleTime: 15 * 1000,
-    refetchInterval: (query) =>
-      SESSION_LIVE_STATUSES.includes(query.state.data?.data?.session?.status)
-        ? 15 * 1000
-        : false,
+    refetchInterval: (query) => {
+      const session = query.state.data?.data?.session;
+      if (session?.pairingCodes?.length > 0) return 5 * 1000;
+      return SESSION_LIVE_STATUSES.includes(session?.status) ? 15 * 1000 : false;
+    },
   });
 };
 
-// Mutation: Book a court for a session
+// Mutation: Book a court for a session (`startNow: true` or a `startAt`)
 export const useCreateSession = () => {
   const queryClient = useQueryClient();
 
@@ -101,6 +107,63 @@ export const useEndSession = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to end the session");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
+// Mutation: a 6-digit key that pairs a device to this session
+export const useCreateSessionPairingCode = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, data }) => createSessionPairingCodeApi(sessionId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error.response?.data?.message || "Failed to create a pairing key",
+      );
+      // A 409 means the session has ended meanwhile — show the real status
+      if (error.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
+    },
+  });
+};
+
+// Mutation: cancel a session key nobody has used yet
+export const useCancelSessionPairingCode = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, pairingCodeId }) =>
+      cancelSessionPairingCodeApi(sessionId, pairingCodeId),
+    onSuccess: () => {
+      toast.success("Pairing key cancelled");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to cancel the key");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
+// Mutation: unpair a device from its session
+export const useUnpairSessionDevice = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, pairedAppId }) =>
+      unpairSessionDeviceApi(sessionId, pairedAppId),
+    onSuccess: () => {
+      toast.success("Device unpaired");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to unpair the device");
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

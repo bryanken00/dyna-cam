@@ -18,8 +18,9 @@ import {
 } from "@/components/ui/select";
 import { useSessionHooks } from "./hooks";
 import SessionFormDrawer from "./components/SessionFormDrawer";
-import SessionBookedDialog from "./components/SessionBookedDialog";
 import SessionDetailSheet from "./components/SessionDetailSheet";
+import PairDeviceFormModal from "./components/PairDeviceFormModal";
+import PairingKeyDialog from "../../../../components/PairingKeyDialog";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -60,10 +61,14 @@ const SessionsPage = () => {
     handleCreate,
     handleDrawerClose,
     handleDrawerSuccess,
-    bookedSession,
-    handleBookedDialogClose,
     detailSessionId,
     handleDetailClose,
+    pairTarget,
+    handlePairDevice,
+    handlePairFormClose,
+    handlePairFormSuccess,
+    pairingKey,
+    handlePairingKeyClose,
   } = useSessionHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -97,7 +102,7 @@ const SessionsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Sessions"
-        subtitle="Book a court to record a whole game. Footage arrives in 5-minute parts on the player's link."
+        subtitle="Book a court to record a whole game, then pair the phone or tablet at the court. Footage arrives in 5-minute parts on the player's link."
         actions={
           canWrite && (
             <Button onClick={handleCreate}>
@@ -259,17 +264,28 @@ const SessionsPage = () => {
         onSuccess={handleDrawerSuccess}
       />
 
-      <SessionBookedDialog
-        open={!!bookedSession}
-        session={bookedSession}
-        onClose={handleBookedDialogClose}
-      />
-
       <SessionDetailSheet
         open={!!detailSessionId}
         sessionId={detailSessionId}
         canWrite={canWrite}
         onClose={handleDetailClose}
+        onPairDevice={handlePairDevice}
+      />
+
+      {/* Pair a device: name it, then show its 6-digit key */}
+      <PairDeviceFormModal
+        open={!!pairTarget}
+        entity={pairTarget}
+        onClose={handlePairFormClose}
+        onSuccess={handlePairFormSuccess}
+      />
+
+      <PairingKeyDialog
+        key={pairingKey?.code || "none"}
+        open={!!pairingKey}
+        kind="session"
+        pairingKey={pairingKey}
+        onClose={handlePairingKeyClose}
       />
     </div>
   );

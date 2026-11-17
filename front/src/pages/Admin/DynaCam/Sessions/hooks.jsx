@@ -1,9 +1,17 @@
 import { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { Ban, Copy, Eye, ExternalLink, Square } from "lucide-react";
+import {
+  Ban,
+  Copy,
+  Eye,
+  ExternalLink,
+  Smartphone,
+  Square,
+} from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import PartsProgress from "./components/PartsProgress";
+import DevicesCount from "./components/DevicesCount";
 import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
@@ -25,6 +33,9 @@ import {
 
 const EMPTY_FILTERS = { search: "", venueId: "", courtId: "", status: "" };
 
+/** A device can be paired to a session until it ends. */
+const PAIRABLE_STATUSES = ["Scheduled", "Recording"];
+
 export const useSessionHooks = () => {
   const { hasPermission } = usePermissions();
   // Sessions deliver their footage as clips — same permission
@@ -36,9 +47,11 @@ export const useSessionHooks = () => {
 
   // ─── Drawer / Dialog / Sheet State ─────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // { shareUrl, startAt, endAt, courtName, playerName } after a booking
-  const [bookedSession, setBookedSession] = useState(null);
   const [detailSessionId, setDetailSessionId] = useState(null);
+  // The session a device is being named for: { sessionId, courtName, venueName, startAt, endAt }
+  const [pairTarget, setPairTarget] = useState(null);
+  // { code, name, courtName, expiresInSeconds, receivedAt } — a new key, or null
+  const [pairingKey, setPairingKey] = useState(null);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -109,13 +122,28 @@ export const useSessionHooks = () => {
   const handleCreate = useCallback(() => setDrawerOpen(true), []);
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), []);
 
-  // The drawer hands back the booking so staff can give the player the link
+  // The drawer hands back the booking — go straight on to pairing a device
   const handleDrawerSuccess = useCallback((booked) => {
     setDrawerOpen(false);
-    if (booked?.shareUrl) setBookedSession(booked);
+    if (booked?.sessionId) setPairTarget(booked);
   }, []);
 
-  const handleBookedDialogClose = useCallback(() => setBookedSession(null), []);
+  // ─── Pair a device: name it → its 6-digit key ──────────────────────
+  const handlePairDevice = useCallback((session) => {
+    setPairTarget({
+      sessionId: session.sessionId,
+      courtName: session.courtName,
+      venueName: session.venueName,
+      startAt: session.startAt,
+      endAt: session.endAt,
+    });
+  }, []);
+  const handlePairFormClose = useCallback(() => setPairTarget(null), []);
+  const handlePairFormSuccess = useCallback((key) => {
+    setPairTarget(null);
+    if (key?.code) setPairingKey({ ...key, receivedAt: Date.now() });
+  }, []);
+  const handlePairingKeyClose = useCallback(() => setPairingKey(null), []);
 
   const handleView = useCallback((record) => {
     setDetailSessionId(record.sessionId);
@@ -170,7 +198,7 @@ export const useSessionHooks = () => {
       const items = [
         {
           key: "view",
-          label: "View parts",
+          label: "View details",
           icon: <Eye className="w-4 h-4" />,
           onClick: () => handleView(record),
         },
@@ -190,6 +218,14 @@ export const useSessionHooks = () => {
             onClick: () => handleOpenLink(record),
           },
         );
+      }
+      if (canWrite && PAIRABLE_STATUSES.includes(record.status)) {
+        items.push({
+          key: "pair",
+          label: "Pair a device",
+          icon: <Smartphone className="w-4 h-4" />,
+          onClick: () => handlePairDevice(record),
+        });
       }
       if (canWrite && record.status === "Recording") {
         items.push(
@@ -222,6 +258,7 @@ export const useSessionHooks = () => {
       handleView,
       handleCopyLink,
       handleOpenLink,
+      handlePairDevice,
       handleEndRequest,
       handleCancelRequest,
     ],
@@ -230,7 +267,7 @@ export const useSessionHooks = () => {
   const { current, pageSize } = pagination;
 
   // ─── Columns ───────────────────────────────────────────────────────
-  // # · court + venue · when · player · status · parts · ⋮
+  // # · court + venue · when · player · status (+ paired devices) · parts · ⋮
   const columns = useMemo(
     () => [
       {
@@ -341,6 +378,10 @@ export const useSessionHooks = () => {
                 {record.failureReason}
               </div>
             )}
+            <DevicesCount
+              count={Number(record.devicesCount) || 0}
+              live={PAIRABLE_STATUSES.includes(status)}
+            />
           </div>
         ),
       },
@@ -392,9 +433,13 @@ export const useSessionHooks = () => {
     handleCreate,
     handleDrawerClose,
     handleDrawerSuccess,
-    bookedSession,
-    handleBookedDialogClose,
     detailSessionId,
     handleDetailClose,
+    pairTarget,
+    handlePairDevice,
+    handlePairFormClose,
+    handlePairFormSuccess,
+    pairingKey,
+    handlePairingKeyClose,
   };
 };

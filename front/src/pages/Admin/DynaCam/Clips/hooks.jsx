@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { Copy, ExternalLink, Film, Play, Trash2 } from "lucide-react";
+import { Copy, ExternalLink, Film, Play } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import PaymentStatusChip from "../../../../components/PaymentStatusChip";
@@ -22,7 +22,6 @@ import { confirm } from "../../../../store/confirmStore";
 import {
   useGetClips,
   useGetClipOptions,
-  useDeleteClip,
 } from "../../../../services/requests/admin/clips";
 import { useCreatePayment } from "../../../../services/requests/admin/payments";
 
@@ -36,18 +35,18 @@ const EMPTY_FILTERS = {
   dateTo: "",
 };
 
+// Clips are view only (PLAN-002 Phase E): staff don't save or delete them
+// here — players save them from the court, and sessions deliver their parts.
 export const useClipHooks = () => {
   const { hasPermission } = usePermissions();
-  const canWrite = hasPermission("clips", null, "write");
   // Taking cash for an unpaid clip is a Payments action
   const canTakePayment = hasPermission("payments", null, "write");
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
 
-  // ─── Preview Sheet / Save Dialog State ─────────────────────────────
+  // ─── Preview Sheet State ───────────────────────────────────────────
   const [previewClip, setPreviewClip] = useState(null);
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -65,7 +64,6 @@ export const useClipHooks = () => {
   // Venue + court filter options — under the clips permission
   const { data: optionsData } = useGetClipOptions();
 
-  const deleteMutation = useDeleteClip();
   const paymentMutation = useCreatePayment();
 
   const venueOptions = useMemo(
@@ -119,15 +117,6 @@ export const useClipHooks = () => {
     setPreviewClip(null);
   }, []);
 
-  const handleOpenSaveDialog = useCallback(() => {
-    setSaveDialogOpen(true);
-  }, []);
-
-  // The mutation invalidates ["clips"], so the new Pending row appears
-  const handleCloseSaveDialog = useCallback(() => {
-    setSaveDialogOpen(false);
-  }, []);
-
   const handleCopyShareLink = useCallback(async (record) => {
     const ok = await copyText(record.shareUrl);
     if (ok) toast.success("Share link copied");
@@ -159,34 +148,7 @@ export const useClipHooks = () => {
     [paymentMutation],
   );
 
-  const handleDeleteRequest = useCallback(
-    async (record) => {
-      const ok = await confirm({
-        title: "Delete clip",
-        description: `Delete this clip from ${decodeHTML(
-          record.courtName,
-        )} (${formatDateTime(
-          record.requestedAt,
-        )})? Its video is removed and its share link stops working. This can't be undone.`,
-        confirmText: "Delete clip",
-        cancelText: "Cancel",
-        danger: true,
-      });
-      if (!ok) return;
-      try {
-        await deleteMutation.mutateAsync(record.clipId);
-        setPreviewClip((prev) =>
-          prev?.clipId === record.clipId ? null : prev,
-        );
-      } catch (err) {
-        // the mutation's onError already surfaced a toast
-        console.error("Delete clip error:", err);
-      }
-    },
-    [deleteMutation],
-  );
-
-  // ⋮ menu: Preview, share-link actions, divider, Delete (danger)
+  // ⋮ menu: Preview, share-link actions (view only)
   const getActionItems = useCallback(
     (record) => {
       if (record.status === "Deleted") return [];
@@ -213,27 +175,9 @@ export const useClipHooks = () => {
           onClick: () => handleOpenSharePage(record),
         },
       );
-      if (canWrite) {
-        items.push(
-          { type: "divider" },
-          {
-            key: "delete",
-            label: "Delete clip",
-            icon: <Trash2 className="w-4 h-4" />,
-            danger: true,
-            onClick: () => handleDeleteRequest(record),
-          },
-        );
-      }
       return items;
     },
-    [
-      canWrite,
-      handlePreview,
-      handleCopyShareLink,
-      handleOpenSharePage,
-      handleDeleteRequest,
-    ],
+    [handlePreview, handleCopyShareLink, handleOpenSharePage],
   );
 
   const { current, pageSize } = pagination;
@@ -443,7 +387,6 @@ export const useClipHooks = () => {
     isFetching,
     error,
     refetch,
-    canWrite,
     venueOptions,
     courtOptions,
     columns,
@@ -455,10 +398,6 @@ export const useClipHooks = () => {
     canTakePayment,
     handleRecordPayment,
     isRecordingPayment: paymentMutation.isPending,
-    saveDialogOpen,
-    handleOpenSaveDialog,
-    handleCloseSaveDialog,
     handleCopyShareLink,
-    handleDeleteRequest,
   };
 };

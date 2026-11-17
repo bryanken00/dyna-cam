@@ -26,17 +26,22 @@ const mmss = (ms) => {
 
 /**
  * Shows a new 6-digit pairing key — the only time its digits are visible —
- * with a live countdown to its 10-minute expiry (counted from when the key
- * arrived, so the browser's clock/zone doesn't matter).
+ * with a live countdown to its expiry (counted from when the key arrived, so
+ * the browser's clock/zone doesn't matter).
  *
  * @param {boolean} open
  * @param {() => void} onClose
- * @param {"recorder"|"app"} kind  a recorder box also gets its `.env` lines
- * @param {{ code, name, venueName, receivedAt }} pairingKey
- *        receivedAt: Date.now() when the API answered
+ * @param {"recorder"|"session"} kind  a recorder box also gets its `.env`
+ *        lines; a session key pairs a phone or tablet at the court
+ * @param {{ code, name, venueName?, courtName?, receivedAt, expiresInSeconds? }} pairingKey
+ *        receivedAt: Date.now() when the API answered. expiresInSeconds (when
+ *        the API sends it) wins over the default 10 minutes — a session key
+ *        also stops when the session ends.
  */
 const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
-  const expiresAtMs = (pairingKey?.receivedAt || 0) + PAIRING_KEY_TTL_MS;
+  const ttlSeconds = Number(pairingKey?.expiresInSeconds);
+  const ttlMs = Number.isFinite(ttlSeconds) ? ttlSeconds * 1000 : PAIRING_KEY_TTL_MS;
+  const expiresAtMs = (pairingKey?.receivedAt || 0) + ttlMs;
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
 
@@ -73,13 +78,16 @@ const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <KeyRound className="w-4.5 h-4.5" />
-            Pairing key for {pairingKey?.name || (isRecorder ? "the box" : "the phone")}
+            Pairing key for {pairingKey?.name || (isRecorder ? "the box" : "the device")}
           </DialogTitle>
           <DialogDescription>
             {isRecorder
               ? "On the recorder box, put these two lines in its .env file and start it. The box swaps the key for its own token and keeps it."
-              : "On the phone, open the Dyna Cam staff app and enter this key."}
-            {pairingKey?.venueName && ` It pairs with ${pairingKey.venueName}.`}
+              : "Type this key into the Dyna Cam app on the device."}
+            {isRecorder && pairingKey?.venueName && ` It pairs with ${pairingKey.venueName}.`}
+            {!isRecorder &&
+              pairingKey?.courtName &&
+              ` It pairs with this session on ${pairingKey.courtName}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -157,7 +165,7 @@ const PairingKeyDialog = ({ open, onClose, kind, pairingKey }) => {
         <p className="m-0" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
           {isRecorder
             ? "The box appears under Recorder Boxes as soon as it pairs. "
-            : "The phone appears in the list as soon as it pairs. "}
+            : "It works until the session ends at the latest. The device shows under the session's Devices as soon as it pairs. "}
           You won&apos;t see these digits again.
         </p>
 

@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  CircleAlert,
-  CircleCheck,
-  Film,
-  Filter,
-  Hourglass,
-  Scissors,
-} from "lucide-react";
+import { CircleAlert, CircleCheck, Film, Filter, Hourglass } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +11,6 @@ import {
 } from "@/components/ui/select";
 import { useClipHooks } from "./hooks";
 import ClipPreviewSheet from "./components/ClipPreviewSheet";
-import SaveClipFormModal from "./components/SaveClipFormModal";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -41,7 +33,6 @@ const ClipsPage = () => {
     isFetching,
     error,
     refetch,
-    canWrite,
     venueOptions,
     courtOptions,
     columns,
@@ -53,11 +44,7 @@ const ClipsPage = () => {
     canTakePayment,
     handleRecordPayment,
     isRecordingPayment,
-    saveDialogOpen,
-    handleOpenSaveDialog,
-    handleCloseSaveDialog,
     handleCopyShareLink,
-    handleDeleteRequest,
   } = useClipHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -90,15 +77,7 @@ const ClipsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Clips"
-        subtitle="Replays saved from the court cameras — by players scanning the QR, the court button, or staff."
-        actions={
-          canWrite && (
-            <Button onClick={handleOpenSaveDialog}>
-              <Scissors />
-              Save clip now
-            </Button>
-          )
-        }
+        subtitle="Replays saved from the court cameras by players (QR scan or court button) and the parts of booked sessions. View only."
       />
 
       {/* 2. STAT CARDS */}
@@ -296,23 +275,15 @@ const ClipsPage = () => {
         )}
       </div>
 
-      {/* 4. SAVE DIALOG + PREVIEW */}
-      <SaveClipFormModal
-        open={saveDialogOpen}
-        onClose={handleCloseSaveDialog}
-        onSuccess={handleCloseSaveDialog}
-      />
-
+      {/* 4. PREVIEW */}
       <ClipPreviewSheet
         open={!!previewClip}
         clip={previewClip}
-        canWrite={canWrite}
         canTakePayment={canTakePayment}
         isRecordingPayment={isRecordingPayment}
         onRecordPayment={handleRecordPayment}
         onClose={handlePreviewClose}
         onCopyLink={handleCopyShareLink}
-        onDelete={handleDeleteRequest}
       />
     </div>
   );

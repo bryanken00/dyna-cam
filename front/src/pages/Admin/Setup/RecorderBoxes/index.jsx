@@ -119,7 +119,6 @@ const DevicesPage = () => {
 
       {/* Keys created but not used yet */}
       <PendingPairingKeys
-        kind="recorders"
         canWrite={canWrite}
         refetchInterval={pairingKey ? 10 * 1000 : 60 * 1000}
       />

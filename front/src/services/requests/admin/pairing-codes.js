@@ -6,26 +6,26 @@ import {
   cancelPairingCodeApi,
 } from "../../api/admin/pairing-codes";
 
-/** `kind`: "apps" (staff phones) or "recorders" (recorder boxes). */
+/** Recorder box pairing keys. Session device keys: requests/admin/sessions.js. */
 
 // Query: keys still waiting to be used (no digits)
-export const useGetPairingCodes = (kind, options = {}) => {
+export const useGetPairingCodes = (options = {}) => {
   return useQuery({
-    queryKey: ["pairingCodes", kind],
-    queryFn: () => getPairingCodesApi(kind),
+    queryKey: ["pairingCodes", "recorders"],
+    queryFn: getPairingCodesApi,
     staleTime: 15 * 1000,
     ...options,
   });
 };
 
 // Mutation: create a key — the response carries the 6 digits, shown once
-export const useCreatePairingCode = (kind) => {
+export const useCreatePairingCode = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data) => createPairingCodeApi(kind, data),
+    mutationFn: createPairingCodeApi,
     onSuccess: () => {
       toast.success("Pairing key created — it works once, for 10 minutes");
-      queryClient.invalidateQueries({ queryKey: ["pairingCodes", kind] });
+      queryClient.invalidateQueries({ queryKey: ["pairingCodes", "recorders"] });
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to create a pairing key");
@@ -34,17 +34,17 @@ export const useCreatePairingCode = (kind) => {
 };
 
 // Mutation: cancel a key nobody has used yet
-export const useCancelPairingCode = (kind) => {
+export const useCancelPairingCode = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (pairingCodeId) => cancelPairingCodeApi(kind, pairingCodeId),
+    mutationFn: cancelPairingCodeApi,
     onSuccess: () => {
       toast.success("Pairing key cancelled");
-      queryClient.invalidateQueries({ queryKey: ["pairingCodes", kind] });
+      queryClient.invalidateQueries({ queryKey: ["pairingCodes", "recorders"] });
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to cancel the key");
-      queryClient.invalidateQueries({ queryKey: ["pairingCodes", kind] });
+      queryClient.invalidateQueries({ queryKey: ["pairingCodes", "recorders"] });
     },
   });
 };

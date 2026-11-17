@@ -9,17 +9,17 @@ import {
 } from "../services/requests/admin/pairing-codes";
 
 /**
- * "Waiting to pair": keys created but not used yet (their digits are never
- * shown again), each with Cancel. Renders nothing when there are none.
+ * "Waiting to pair": recorder box keys created but not used yet (their digits
+ * are never shown again), each with Cancel. Renders nothing when there are
+ * none. (A session's device keys are listed in its detail sheet.)
  *
- * @param {"apps"|"recorders"} kind
  * @param {boolean} canWrite   shows Cancel
  * @param {number} [refetchInterval]  faster while a key dialog is open; by
  *        default once a minute so expired keys drop off
  */
-const PendingPairingKeys = ({ kind, canWrite, refetchInterval = 60 * 1000 }) => {
-  const { data } = useGetPairingCodes(kind, { refetchInterval });
-  const cancelMutation = useCancelPairingCode(kind);
+const PendingPairingKeys = ({ canWrite, refetchInterval = 60 * 1000 }) => {
+  const { data } = useGetPairingCodes({ refetchInterval });
+  const cancelMutation = useCancelPairingCode();
   const keys = data?.data?.pairingCodes || [];
 
   if (keys.length === 0) return null;

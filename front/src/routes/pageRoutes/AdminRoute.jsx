@@ -31,7 +31,6 @@ const RecorderBoxes = lazy(
 const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
-const PairedApps = lazy(() => import("../../pages/Admin/DynaCam/PairedApps"));
 
 const VENUE_PAGE_ACCESS = [
   { module: "venues", submodule: "list", accessLevel: "read" },
@@ -188,7 +187,6 @@ const AdminRoute = () => {
         anyOf: [
           { module: "clips", submodule: null, accessLevel: "read" },
           { module: "payments", submodule: null, accessLevel: "read" },
-          { module: "paired_apps", submodule: null, accessLevel: "read" },
         ],
       },
       isFilter: true,
@@ -237,26 +235,6 @@ const AdminRoute = () => {
           ),
           permission: {
             module: "payments",
-            submodule: null,
-            accessLevel: "read",
-          },
-          isFilter: true,
-          isShow: true,
-        },
-        {
-          // PLAN-002: staff phones paired with a 6-digit key
-          route: "/paired-apps",
-          name: "Paired Apps",
-          label: "Paired Apps",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute module="paired_apps" accessLevel="read">
-                <PairedApps />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: {
-            module: "paired_apps",
             submodule: null,
             accessLevel: "read",
           },
@@ -383,6 +361,11 @@ const AdminRoute = () => {
         <Route
           path="dyna-cam/devices"
           element={<Navigate to="/admin/setup/recorder-boxes" replace />}
+        />
+        {/* PLAN-002 Phase E: devices are paired to a session now */}
+        <Route
+          path="dyna-cam/paired-apps"
+          element={<Navigate to="/admin/dyna-cam/sessions" replace />}
         />
 
         <Route

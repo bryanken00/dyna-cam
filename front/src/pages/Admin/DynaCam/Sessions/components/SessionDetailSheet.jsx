@@ -7,6 +7,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import SessionDevices from "./SessionDevices";
 import DescriptionList from "../../../../../components/DescriptionList";
 import Spinner from "../../../../../components/Spinner";
 import StatusDot from "../../../../../components/StatusDot";
@@ -96,13 +97,20 @@ const PartRow = ({ part }) => {
 };
 
 /**
- * Read-only session detail with its parts (refreshes while the session is
- * live). Not a form — takes the session id plus the write flag.
+ * Session detail: its devices (pair / unpair, live keys) and its parts —
+ * refreshes while the session is live. Not a form — takes the session id,
+ * the write flag, and `onPairDevice(session)` (the page owns the pairing
+ * dialogs so a booking can open them too).
  */
-const SessionDetailSheet = ({ open, onClose, sessionId, canWrite }) => {
+const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }) => {
   const { data, isLoading, error } = useGetSessionById(open ? sessionId : null);
   const session = data?.data?.session || null;
   const parts = session?.parts || [];
+  // While it can take a device, or while one is still paired (the device
+  // keeps the download QR for a few minutes after the end)
+  const showDevices =
+    ["Scheduled", "Recording"].includes(session?.status) ||
+    (session?.devices || []).some((d) => d.status === "Active");
   const remaining = Math.max(0, (Number(session?.partsTotal) || 0) - parts.length);
 
   const cancelMutation = useCancelSession();
@@ -247,6 +255,14 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite }) => {
                     },
                   ]}
                 />
+
+                {showDevices && (
+                  <SessionDevices
+                    session={session}
+                    canWrite={canWrite}
+                    onPairDevice={onPairDevice}
+                  />
+                )}
 
                 {/* Parts */}
                 <div

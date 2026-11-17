@@ -1,4 +1,4 @@
-import { Banknote, Copy, Download, Film, Trash2, X } from "lucide-react";
+import { Banknote, Copy, Download, Film, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -23,15 +23,14 @@ import {
 } from "../../../../../utils/dynaCam";
 
 /**
- * Read-only clip preview: the video, its details, and the share / delete
- * actions. Not a form, so it takes the clip plus the actions it offers.
+ * Read-only clip preview: the video, its details, and the share / download /
+ * payment actions (clips are view only — no delete). Not a form, so it takes
+ * the clip plus the actions it offers.
  *
  * @param {boolean} open
  * @param {() => void} onClose
  * @param {object|null} clip       a row from the clips list
- * @param {boolean} canWrite       shows Delete
  * @param {(clip) => void} onCopyLink
- * @param {(clip) => void} onDelete
  * @param {boolean} canTakePayment  shows "Record cash payment" on Unpaid clips
  * @param {boolean} isRecordingPayment
  * @param {(clip) => void} onRecordPayment
@@ -40,9 +39,7 @@ const ClipPreviewSheet = ({
   open,
   onClose,
   clip,
-  canWrite,
   onCopyLink,
-  onDelete,
   canTakePayment,
   isRecordingPayment,
   onRecordPayment,
@@ -214,18 +211,6 @@ const ClipPreviewSheet = ({
               paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
             }}
           >
-            {canWrite && (
-              <Button
-                type="button"
-                variant="destructive"
-                size="lg"
-                className="sm:mr-auto"
-                onClick={() => onDelete?.(clip)}
-              >
-                <Trash2 />
-                Delete
-              </Button>
-            )}
             {canTakePayment && payable && (
               <Button
                 type="button"

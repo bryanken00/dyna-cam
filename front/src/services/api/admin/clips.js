@@ -17,16 +17,3 @@ export const getClipByIdApi = async (clipId) => {
   const response = await api.get(`/api/v1/admin/clips/${clipId}`);
   return response.data;
 };
-
-// Staff save: the last 60 seconds on a court, now.
-// 201 { clipId, shareUrl, merged: false } · 200 { …, merged: true }
-// 503 CAMERA_OFFLINE · 404 court not found / not active
-export const createClipApi = async (clipData) => {
-  const response = await api.post("/api/v1/admin/clips", clipData);
-  return response.data;
-};
-
-export const deleteClipApi = async (clipId) => {
-  const response = await api.delete(`/api/v1/admin/clips/${clipId}`);
-  return response.data;
-};

@@ -11,7 +11,6 @@ import {
   Timer,
   User,
   X,
-  Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,6 +36,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import DatePicker from "../../../../../components/DatePicker";
 import SearchableSelect from "../../../../../components/SearchableSelect";
 import SectionLabel from "../../../../../components/SectionLabel";
+import StatusToggle from "../../../../../components/StatusToggle";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import {
@@ -59,18 +59,28 @@ import { useCreateSession } from "../../../../../services/requests/admin/session
 const CUSTOM = "custom";
 const PART_MINUTES = 5;
 
+// When the session starts — the toggle's labels are its values
+const START_NOW = "Start now";
+const START_LATER = "Pick date & time";
+const START_OPTIONS = [
+  { v: START_NOW, dot: "var(--color-success)" },
+  { v: START_LATER, dot: "var(--color-text-muted)" },
+];
+
 /** The minutes the form stands for, or NaN while the custom value is invalid. */
 const minutesOf = (duration, customMinutes) =>
   duration === CUSTOM ? Number(customMinutes) : Number(duration);
 
 // Mirrors sessions.validator.js + the controller's window rules. Times are
 // Manila wall-clock ("YYYY-MM-DD HH:mm"), compared as strings against
-// manilaNow() so the browser's own zone doesn't matter.
+// manilaNow() so the browser's own zone doesn't matter. With Start now the
+// date and time aren't sent, so they aren't checked.
 const sessionSchema = z
   .object({
     courtId: z.string().min(1, "Choose the court to record"),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date"),
-    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Pick a start time"),
+    start: z.enum([START_NOW, START_LATER]),
+    date: z.string(),
+    time: z.string(),
     duration: z.enum([...SESSION_DURATIONS.map(String), CUSTOM]),
     customMinutes: z.string().trim(),
     playerName: z.string().trim().max(100, "Keep the name under 100 characters"),
@@ -91,9 +101,16 @@ const sessionSchema = z
         });
       }
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v.date) || !/^\d{2}:\d{2}$/.test(v.time)) {
-      return;
+    if (v.start === START_NOW) return;
+    const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(v.date);
+    const timeOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(v.time);
+    if (!dateOk) {
+      ctx.addIssue({ code: "custom", path: ["date"], message: "Pick a date" });
     }
+    if (!timeOk) {
+      ctx.addIssue({ code: "custom", path: ["time"], message: "Pick a start time" });
+    }
+    if (!dateOk || !timeOk) return;
     const start = `${v.date} ${v.time}`;
     const earliest = manilaNow(-1);
     const latest = manilaNow(SESSION_MAX_DAYS_AHEAD * 24 * 60);
@@ -123,6 +140,7 @@ const emptyValues = () => {
   const start = defaultStart();
   return {
     courtId: "",
+    start: START_NOW,
     date: start.date,
     time: start.time,
     duration: "60",
@@ -137,10 +155,11 @@ const iconPrefix =
 const mutedIcon = { color: "var(--color-text-muted)" };
 
 /**
- * Book a court for a whole-session recording. Create only (a session can be
- * cancelled, not edited). On success `onSuccess` receives
- * `{ shareUrl, startAt, endAt, courtName, venueName, playerName }` so the page
- * can show the player link.
+ * Book a court for a whole-session recording — starting now (the default) or
+ * at a picked date and time. Create only (a session can be cancelled, not
+ * edited). On success `onSuccess` receives
+ * `{ sessionId, shareUrl, startAt, endAt, courtName, venueName, playerName }`
+ * so the page can go straight on to pairing a device.
  */
 const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
   const req = <span style={{ color: "var(--color-error)" }}>*</span>;
@@ -152,10 +171,11 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
   const {
     formState: { isDirty, isSubmitSuccessful },
   } = form;
-  const [courtId, date, time, duration, customMinutes] = useWatch({
+  const [courtId, start, date, time, duration, customMinutes] = useWatch({
     control: form.control,
-    name: ["courtId", "date", "time", "duration", "customMinutes"],
+    name: ["courtId", "start", "date", "time", "duration", "customMinutes"],
   });
+  const startNow = start === START_NOW;
 
   // A fresh default start time each time the drawer opens
   useEffect(() => {
@@ -195,17 +215,19 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
     label: "SessionFormDrawer",
   });
 
-  const handleStartNow = () => {
-    const now = manilaNow();
-    form.setValue("date", now.date, { shouldDirty: true, shouldValidate: true });
-    form.setValue("time", now.time, { shouldDirty: true, shouldValidate: true });
-  };
-
   // "Ends 3:30 PM · 18 parts" — display only, the API works out the real end
   const minutes = minutesOf(duration, customMinutes);
+  const startsAt = startNow
+    ? (() => {
+        const now = manilaNow();
+        return `${now.date} ${now.time}`;
+      })()
+    : date && time
+      ? `${date} ${time}`
+      : null;
   const summary =
-    date && time && Number.isFinite(minutes) && minutes > 0
-      ? `Ends ${dayjs(`${date} ${time}`)
+    startsAt && Number.isFinite(minutes) && minutes > 0
+      ? `${startNow ? "Starts now · ends about" : "Ends"} ${dayjs(startsAt)
           .add(minutes, "minute")
           .format("MMM D, h:mm A")} · ${Math.ceil(minutes / PART_MINUTES)} parts of 5 minutes`
       : null;
@@ -215,13 +237,16 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
     try {
       const response = await createMutation.mutateAsync({
         courtId: values.courtId,
-        startAt: `${values.date} ${values.time}`,
+        ...(values.start === START_NOW
+          ? { startNow: true }
+          : { startAt: `${values.date} ${values.time}` }),
         durationMinutes: minutesOf(values.duration, values.customMinutes),
         playerName: values.playerName || null,
         phone: values.phone || null,
       });
       markSaved();
       onSuccess?.({
+        sessionId: response?.data?.sessionId,
         shareUrl: response?.data?.shareUrl,
         startAt: response?.data?.startAt,
         endAt: response?.data?.endAt,
@@ -332,59 +357,66 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
               {/* When */}
               <div className="mt-7">
                 <SectionLabel>When (venue time)</SectionLabel>
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 items-start">
-                  <FormField
-                    control={form.control}
-                    name="date"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Date {req}</FormLabel>
-                        <FormControl>
-                          <DatePicker
-                            className="w-full"
-                            min={manilaNow().date}
-                            max={manilaNow(SESSION_MAX_DAYS_AHEAD * 24 * 60).date}
-                            allowClear={false}
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="time"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Start time {req}</FormLabel>
-                        <div className="relative">
-                          <Clock className={iconPrefix} style={mutedIcon} />
+                <FormField
+                  control={form.control}
+                  name="start"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Start {req}</FormLabel>
+                      <StatusToggle
+                        value={field.value}
+                        onChange={field.onChange}
+                        options={START_OPTIONS}
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {!startNow && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start mt-5">
+                    <FormField
+                      control={form.control}
+                      name="date"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Date {req}</FormLabel>
                           <FormControl>
-                            <Input
-                              type="time"
-                              step={300}
-                              className="h-10 pl-9"
+                            <DatePicker
+                              className="w-full"
+                              min={manilaNow().date}
+                              max={manilaNow(SESSION_MAX_DAYS_AHEAD * 24 * 60).date}
+                              allowClear={false}
                               {...field}
                             />
                           </FormControl>
-                        </div>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <div className="sm:pt-[22px]">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 w-full sm:w-auto"
-                      onClick={handleStartNow}
-                    >
-                      <Zap />
-                      Start now
-                    </Button>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="time"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Start time {req}</FormLabel>
+                          <div className="relative">
+                            <Clock className={iconPrefix} style={mutedIcon} />
+                            <FormControl>
+                              <Input
+                                type="time"
+                                step={300}
+                                className="h-10 pl-9"
+                                {...field}
+                              />
+                            </FormControl>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                   </div>
-                </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start mt-5">
                   <FormField

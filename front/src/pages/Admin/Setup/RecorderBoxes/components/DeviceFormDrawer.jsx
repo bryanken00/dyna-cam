@@ -89,7 +89,7 @@ const DeviceFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   }, [open, entity, form]);
 
   // A new box pairs itself with a 6-digit key (PLAN-002), no token to copy
-  const createMutation = useCreatePairingCode("recorders");
+  const createMutation = useCreatePairingCode();
   const updateMutation = useUpdateDevice();
   const isPending = createMutation.isPending || updateMutation.isPending;
   const saveDisabled = isEditMode && !isDirty;
