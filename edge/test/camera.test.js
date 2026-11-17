@@ -230,6 +230,46 @@ describe("PreviewSender", () => {
     assert.equal(calls, 1);
   });
 
+  it("sends a picture of each camera of a 2-camera court, camera 2 from its own folder", async () => {
+    const now = 1_794_881_010_000;
+    const uploads = [];
+    const dirsAsked = [];
+    const sender = new PreviewSender({
+      api: { uploadSnapshot: async (courtId, _file, camera) => uploads.push([courtId, camera]) },
+      courtDir: (courtId, camera) => {
+        dirsAsked.push([courtId, camera]);
+        return dir;
+      },
+      settings: { ffmpegPath: "ffmpeg" },
+      log: silent,
+      now: () => now,
+      runFfmpeg: async (_bin, args) => {
+        await fs.writeFile(args.at(-1), "jpeg");
+        return { stdout: "" };
+      },
+    });
+    await segments([
+      ["1794881000.ts", now - 4000],
+      ["1794881002.ts", now - 2000],
+      ["1794881004.ts", now],
+    ]);
+    sender.setWanted([
+      { courtId: "c1", previewWanted: true, camera2RtspUrl: "rtsp://u:p@10.0.0.2/stream1" },
+      { courtId: "c2", previewWanted: true, camera2RtspUrl: null },
+    ]);
+    assert.deepEqual(await sender.tick(), ["c1", "c1#2", "c2"]);
+    assert.deepEqual(uploads, [
+      ["c1", 1],
+      ["c1", 2],
+      ["c2", 1],
+    ]);
+    assert.deepEqual(dirsAsked, [
+      ["c1", 1],
+      ["c1", 2],
+      ["c2", 1],
+    ]);
+  });
+
   it("schedules by court", () => {
     const last = new Map([
       ["a", 1000],

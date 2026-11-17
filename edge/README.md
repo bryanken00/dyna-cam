@@ -114,6 +114,7 @@ pairing (under pm2). Otherwise it exits until you add a new key and run
 | `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
 | `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
 | `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. Must differ from `BUTTON_PORT`. |
+| `MAX_STACKED_STREAMS` | `2` | Stacked (two-camera, re-encoded) live streams at once, court and player streams together. `0` = never stack. |
 | `LIVE_HOST` | detected | The box's LAN address as phones reach it (e.g. `192.168.1.50`). Leave empty to detect it; set it when the box has several networks (Docker, VPN) or detection picks the wrong one. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
@@ -259,27 +260,62 @@ The stream key is a secret. The box never logs it; it shows at most the last 4 c
 
 How it works, and the rules:
 
-- **One camera connection.** A Tapo C200 serves only **one** RTSP client at a time; a second
-  connection is refused. So the stream is a second output of the court's **recorder** ffmpeg
-  (the `tee` muxer), never a second connection to the camera.
-- **Recording comes first.**
-  - The RTMP output runs in its own queue (`fifo`). On a slow uplink it drops stream packets
-    rather than slowing the recording.
-  - If the streaming service is unreachable or refuses the key, recording carries on and the
-    court shows *"Can't reach the streaming service"* or *"Stream rejected — check the stream
-    key"*.
-  - ffmpeg reconnects to the service by itself every 10 s.
-- **Restarts are rare and careful.** Turning streaming on or off, or changing the key, restarts
-  that court's recorder. So does an RTMP output that closed for good, at most every 5 min. A
-  restart leaves a few seconds' gap, so it only happens when no clip or session part that isn't
-  cut yet reaches into the last ~70 s.
-- **The picture is the camera's own.** Video is copied as-is (H.264, as the C200 sends it), with
-  the Tapo's on-screen time and logo but **without the venue watermark** in v1. Audio is AAC at
-  44.1 kHz. An H.265 camera can't be streamed this way.
+- **A restream, not part of the recorder.** The court stream is its own small ffmpeg that reads
+  the court's [live view](#live-view-on-the-venue-wi-fi) from the box itself and sends it to the
+  ingest URL, the same way as a [player's own stream](#players-own-live-stream). It never opens
+  the camera (a Tapo C200 serves one RTSP client) and never touches the recorder: turning the
+  stream on or off, or changing its key or layout, **never restarts the recording** and leaves no
+  gap in clips or session parts. It runs about 10 s behind the court.
+- **It needs the live view** (`LIVE_PORT`, on by default). With `LIVE_PORT=0` the court shows
+  *"Live view is off on this box (LIVE_PORT=0)"*.
+- **Recording comes first.** If the streaming service is unreachable or refuses the key,
+  recording carries on and the court shows the reason (*"YouTube refused the stream key"*,
+  *"Can't reach youtube.com"*, …). The stream retries after 5 s, 10 s, … up to 60 s.
+- **Layouts** on a court with [two cameras](#two-cameras-on-one-court): *Cam 1*, *Cam 2* or
+  *Both (stacked)*. A one-camera court always streams Cam 1.
+- **The picture is the camera's own** for Cam 1 / Cam 2: video copied as-is (H.264, as the C200
+  sends it), with the Tapo's on-screen time and logo but **without the venue watermark**. Audio is
+  AAC at 44.1 kHz. An H.265 camera can't be streamed this way.
 - **Bandwidth:** each streamed court sends about the camera's bitrate **up** (about 1–2 Mbit/s for
-  a C200 at 720p, more at 1080p), on top of clip uploads. Check the venue's upload speed before
-  turning on several courts. YouTube/Facebook may warn that the bitrate is low for their
-  recommended settings; the stream still works.
+  a C200 at 720p, more at 1080p; ~3 Mbit/s stacked), on top of clip uploads. Check the venue's
+  upload speed before turning on several courts.
+
+## Two cameras on one court
+
+A court can have a second camera (PLAN-002 §7), for example one behind each baseline.
+
+- **Setup:** Admin portal → the court → **Camera 2 (optional)**, with the same guided steps, live
+  check and preview as camera 1. Use the same kind of camera account and `/stream1` path. **Remove
+  camera 2** there to go back to one camera.
+- **Recording:** each camera has its own recorder and rolling buffer — camera 1 in
+  `data/buffer/<court>/`, camera 2 in `data/buffer/<court>~cam2/` — with its own status, camera
+  details and preview (`camera: 1 | 2` in the heartbeat). **Losing camera 2 never stops camera
+  1.** Removing camera 2 stops its recorder; its folder ages out like any other.
+- **Clips and session parts** are **stacked**: Cam 1 above Cam 2, each scaled to 1280×720, one
+  1280×1440 video with the venue logo bottom-right. If one camera has no footage for that window,
+  the clip is the other camera alone (the log says so).
+- **Live streams** (the venue's court stream and a player's own stream) can be *Cam 1*, *Cam 2*
+  or *Both (stacked)*:
+  - *Cam 1* / *Cam 2* copy that camera's video: no extra CPU.
+  - *Both* decodes both cameras and encodes one 1280×1440 H.264 stream at ~3 Mbit/s with a
+    keyframe every 2 s (which also ends Facebook's keyframe warning), at the slower camera's frame
+    rate. It uses the box's clip encoder (`ENCODER`: VAAPI/QSV on an Intel box, VideoToolbox on a
+    Mac, else `libx264 veryfast` — about one CPU core per stream on an N100).
+  - If one camera of a stacked stream has no video, the stream shows the other camera alone
+    (*"Live on YouTube (Camera 2 has no video — showing Camera 1)"*) and goes back to stacked
+    when both are up again (checked at most every 30 s).
+  - At most `MAX_STACKED_STREAMS` (default 2) stacked streams run at once on a box, court and
+    player streams together. More show *"Too many stacked streams on this box — choose Cam 1 or
+    Cam 2"*.
+- **Sync:** the two cameras have their own clocks, so the halves can be up to about 1 s apart.
+- **Sound** comes from Cam 1 (Cam 2's if Cam 1 has none).
+- **Storage:** a second camera doubles that court's buffer and session footage (about
+  0.5–1 GB per camera per hour at 720p). Stacked clips and parts are about twice the size of
+  one camera's (a 5-min part stays under ~75 MB).
+- **Upload:** stacked clips and parts upload about twice the bytes; a stacked live stream sends
+  ~3 Mbit/s.
+- **The session device's live view** stays Cam 1 (`/live/<courtId>/index.m3u8`); camera 2's is
+  `/live/<courtId>/cam2/index.m3u8`, with the same signature.
 
 ## Live view on the venue Wi-Fi
 
@@ -291,6 +327,7 @@ re-encoding.
 ```
 GET http://<box-ip>:8090/live/<courtId>/index.m3u8?exp=<unix seconds>&sig=<hex>   → last 5 segments (~10 s)
 GET http://<box-ip>:8090/live/<courtId>/<epoch>.ts?exp=…&sig=…                   → one segment
+GET http://<box-ip>:8090/live/<courtId>/cam2/index.m3u8?exp=…&sig=…              → camera 2 (same signature)
 ```
 
 - **Signed links only.** On first start the box makes a random key, `data/live-key` (mode 600),
@@ -329,12 +366,13 @@ How the box does it:
 
 - **Its own small ffmpeg per session**, reading the court's [live view](#live-view-on-the-venue-wi-fi)
   from the box itself (`http://127.0.0.1:<LIVE_PORT>/live/…`, signed with the box's own key)
-  and sending it to the player's `rtmp://` / `rtmps://` address (video copied, only the audio
-  re-encoded to 44.1 kHz). **No video re-encode, no second camera connection, and no recorder
-  restart**, so turning a player's
-  stream on or off never leaves a gap in the recording, a clip or a session part.
+  and sending it to the player's `rtmp://` / `rtmps://` address. With *Cam 1* or *Cam 2* the video
+  is copied (only the audio is re-encoded to 44.1 kHz); *Both* is stacked and encoded (see
+  [two cameras](#two-cameras-on-one-court)). **No second camera connection and no recorder
+  restart**, so turning a player's stream on or off, or changing its layout, never leaves a gap
+  in the recording, a clip or a session part.
 - It starts when the session starts (or when the player adds the stream), stops when the session
-  ends or the player stops it, and restarts on a new address. If ffmpeg fails it retries after
+  ends or the player stops it, and restarts on a new address or layout. If ffmpeg fails it retries after
   5 s, 10 s, … up to 60 s. A failure only affects that player's stream.
 - It runs about 10 s behind the court.
 - **At most 4** player streams per box; more show *"Too many player streams on this box"*.
@@ -352,9 +390,10 @@ Things to know:
 
 - **Upload:** each player stream sends about the camera's bitrate **up** (1–2 Mbit/s for a C200 at
   720p), on top of a venue court stream and clip uploads. Check the venue's upload speed.
-- **Facebook keyframes:** Facebook wants a keyframe at least every 2 seconds. The video is the
-  camera's own (copied), and a Tapo C200 sends one every 2–6 s, so Facebook may show a *"keyframe
-  frequency"* warning or buffer now and then. The stream still runs. Where the camera allows it,
+- **Facebook keyframes:** Facebook wants a keyframe at least every 2 seconds. With *Cam 1* /
+  *Cam 2* the video is the camera's own (copied), and a Tapo C200 sends one every 2–6 s, so
+  Facebook may show a *"keyframe frequency"* warning or buffer now and then (*Both* is encoded with
+  a keyframe every 2 s and doesn't). The stream still runs. Where the camera allows it,
   set its keyframe interval (I-frame / GOP) to 2 s or less.
 - **Audio** is re-encoded to AAC 44.1 kHz (the camera sends 8 kHz, which Facebook and YouTube may
   warn about or play silent). It's one small mono track, so it costs almost no CPU. (Not yet tried
@@ -474,7 +513,7 @@ clip from the court's QR page.
 
 ## How it works (short)
 
-- **Recording** (`src/recorder.js`): one ffmpeg per court, `-rtsp_transport tcp -timeout 10s
+- **Recording** (`src/recorder.js`): one ffmpeg per camera (two on a 2-camera court), `-rtsp_transport tcp -timeout 10s
   -c:v copy -c:a aac -f segment`. Video is never re-encoded, and audio is transcoded because
   MPEG-TS can't carry the Tapo's A-law. When ffmpeg exits or produces no video for 20 s, it is
   restarted with backoff from 2 s up to 30 s. Segments older than `BUFFER_SECONDS` are deleted.
@@ -486,19 +525,20 @@ clip from the court's QR page.
   2. Pick the covering segments; holes up to 7 s are allowed.
   3. Concat them on a wall-clock timeline, then trim.
   4. Overlay the logo at 12% of the width, bottom-right.
-  5. Encode H.264 at up to 1080p with AAC audio and `+faststart`.
+  5. Encode H.264 at up to 1080p with AAC audio and `+faststart`. On a 2-camera court both
+     cameras' segments are trimmed to the same window and stacked (1280×1440) in one ffmpeg.
   6. Make the thumbnail from the middle frame.
 - **Camera setup** (`src/camera.js`): camera details and preview JPEGs read from the buffer, never
   from the camera.
 - **Sessions:** session windows from `/config` protect their segments from pruning
   (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
   `selectPartSegments`).
-- **Streaming** (`src/stream.js`): tee-muxer arguments and escaping, stream-key masking,
-  reading ffmpeg's stream messages, and the restart rule.
+- **Stream keys** (`src/stream.js`): stream-key masking and reading ffmpeg's log lines.
 - **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
   segments into a signed HLS live playlist and streams the files with their timestamps shifted.
-- **Player streams** (`src/restream.js`): one ffmpeg per session that copies the box's own live
-  view to the player's RTMP(S) address, with backoff, status and key masking.
+- **Streams** (`src/restream.js`): one ffmpeg per venue court stream and per player stream,
+  reading the box's own live view: one camera copied, or both stacked and encoded; backoff,
+  status, caps and key masking.
 - **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
   202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
@@ -538,8 +578,12 @@ clip from the court's QR page.
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
 | Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |
-| Stream *Can't reach the streaming service* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying every 10 s. |
-| Stream *rejected — check the stream key* | The key was reset or the live event ended. Paste the new ingest URL in Admin → Courts. |
+| Court stream *Can't reach youtube.com / facebook.com* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying (5 s → 60 s). |
+| Court stream *refused the stream key* | The key was reset or the live event ended. Paste the new ingest URL in Admin → Courts. |
+| Stream *Live view is off on this box* | Streams read the box's live view: remove `LIVE_PORT=0` from `.env` and restart. |
+| *Too many stacked streams on this box* | Choose Cam 1 or Cam 2 for one of the streams, or raise `MAX_STACKED_STREAMS` if the box has the CPU/encoder for it. |
+| Stacked stream shows one camera | The other camera has no video (check its status in the court setup page). It stacks again once both are up. |
+| Stacked clip shows one camera | That camera had no footage for the window (log: *camera 2 has no footage for that window*). |
 | Stream on, but the camera shows *not reachable* | Something else is connected to the camera (NVR, VLC, Tapo's own NVR mode). The C200 allows one RTSP client. |
 | Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
 

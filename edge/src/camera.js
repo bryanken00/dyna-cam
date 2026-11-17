@@ -159,15 +159,23 @@ export class MediaProbe {
   }
 }
 
-/** Courts whose preview is due: wanted, not dropped, last sent ≥ 30 s ago. */
+/** Previews due (keys of wanted cameras): not dropped, last sent ≥ 30 s ago. */
 export const duePreviews = (wanted, lastSent, nowMs, intervalMs = SNAPSHOT_INTERVAL_MS) =>
   [...wanted].filter((courtId) => nowMs - (lastSent.get(courtId) ?? 0) >= intervalMs);
 
+/** Preview key of a court camera: the court id, `<courtId>#2` for camera 2. */
+const previewKey = (courtId, camera) => (camera === 2 ? `${courtId}#2` : courtId);
+const describeKey = (key) =>
+  key.endsWith("#2") ? `court ${key.slice(0, -2)} camera 2` : `court ${key}`;
+const parsePreviewKey = (key) =>
+  key.endsWith("#2") ? { courtId: key.slice(0, -2), camera: 2 } : { courtId: key, camera: 1 };
+
 /**
  * Preview snapshots for camera setup: while `/config` says `previewWanted`
- * for a court, one JPEG from its latest closed segment every ~30 s, uploaded
- * to POST /courts/:courtId/snapshot. Lowest priority: skipped whenever the
- * clip queue is busy, one at a time.
+ * for a court, one JPEG per camera (camera 2 when the court has one) from its
+ * latest closed segment every ~30 s, uploaded to POST /courts/:courtId/snapshot
+ * (`?camera=2` for camera 2). Lowest priority: skipped whenever the clip queue
+ * is busy, one at a time. `courtDir(courtId, camera)` = the camera's buffer.
  */
 export class PreviewSender {
   constructor({
@@ -192,11 +200,15 @@ export class PreviewSender {
     this.running = false;
   }
 
-  /** From /config: the courts with previewWanted. */
+  /** From /config: every camera of the courts with previewWanted. */
   setWanted(courts) {
-    const next = new Set((courts || []).filter((c) => c.previewWanted).map((c) => c.courtId));
+    const next = new Set(
+      (courts || [])
+        .filter((c) => c.previewWanted)
+        .flatMap((c) => (c.camera2RtspUrl ? [c.courtId, previewKey(c.courtId, 2)] : [c.courtId]))
+    );
     for (const id of next)
-      if (!this.wanted.has(id)) this.log.info(`camera preview wanted for court ${id}`);
+      if (!this.wanted.has(id)) this.log.info(`camera preview wanted for ${describeKey(id)}`);
     for (const id of this.wanted) if (!next.has(id)) this.lastSent.delete(id);
     for (const id of this.dropped) if (!next.has(id)) this.dropped.delete(id);
     this.wanted = next;
@@ -223,11 +235,12 @@ export class PreviewSender {
     return sent;
   }
 
-  async sendOne(courtId) {
-    const dir = this.courtDir(courtId);
+  async sendOne(key) {
+    const { courtId, camera } = parsePreviewKey(key);
+    const dir = this.courtDir(courtId, camera);
     const latest = latestClosedSegment(await readSegmentEntries(dir));
     if (!latest || this.now() - latest.mtimeMs > FRESH_MS) {
-      this.lastSent.set(courtId, this.now() - SNAPSHOT_INTERVAL_MS + 5000); // look again in 5 s
+      this.lastSent.set(key, this.now() - SNAPSHOT_INTERVAL_MS + 5000); // look again in 5 s
       return false;
     }
     const outPath = path.join(dir, "preview.jpg");
@@ -241,17 +254,17 @@ export class PreviewSender {
       );
       const { size } = await fsp.stat(outPath);
       if (size === 0 || size > SNAPSHOT_MAX_BYTES) throw new Error(`snapshot is ${size} bytes`);
-      await this.api.uploadSnapshot(courtId, outPath);
-      this.lastSent.set(courtId, this.now());
-      this.log.debug(`preview sent for court ${courtId}`);
+      await this.api.uploadSnapshot(courtId, outPath, camera);
+      this.lastSent.set(key, this.now());
+      this.log.debug(`preview sent for ${describeKey(key)}`);
       return true;
     } catch (err) {
       if (err.status === 404) {
-        this.log.warn(`court ${courtId} is not this venue's any more — no previews for it`);
-        this.dropped.add(courtId);
+        this.log.warn(`no previews for ${describeKey(key)} — the API doesn't know it (404)`);
+        this.dropped.add(key);
       } else {
-        this.log.warn(`preview for court ${courtId} failed, trying again in 10 s`, err);
-        this.lastSent.set(courtId, this.now() - SNAPSHOT_INTERVAL_MS + 10_000);
+        this.log.warn(`preview for ${describeKey(key)} failed, trying again in 10 s`, err);
+        this.lastSent.set(key, this.now() - SNAPSHOT_INTERVAL_MS + 10_000);
       }
       return false;
     } finally {

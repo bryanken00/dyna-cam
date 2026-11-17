@@ -138,7 +138,17 @@ export const logoLayout = (videoWidth) => ({
 export const QUALITY = {
   clip: { crf: "23", bitrate: "2000k", maxrate: "2300k", bufsize: "4600k", audio: "96k" },
   session: { crf: "26", bitrate: "1000k", maxrate: "1200k", bufsize: "2400k", audio: "64k" },
+  // Two cameras stacked (1280×1440): about twice the pixels. A 5-min part stays
+  // ≲ 75 MB, under the API's 100 MB upload limit
+  clipStacked: { crf: "23", bitrate: "3800k", maxrate: "4200k", bufsize: "8400k", audio: "96k" },
+  sessionStacked: { crf: "26", bitrate: "1700k", maxrate: "1900k", bufsize: "3800k", audio: "64k" },
+  // A stacked live stream: constant ~3 Mbit/s (no crf — streaming services want a steady rate)
+  stream: { crf: null, bitrate: "3000k", maxrate: "3000k", bufsize: "6000k", audio: "96k" },
 };
+
+/** Size of each camera in a stacked picture, and the whole picture. */
+export const STACK_TILE = { width: 1280, height: 720 };
+export const STACKED_SIZE = { width: 1280, height: 1440 };
 
 /** Per-encoder input options, last filter step and codec options. */
 export function encoderSettings(
@@ -177,8 +187,7 @@ export function encoderSettings(
           "libx264",
           "-preset",
           "veryfast",
-          "-crf",
-          q.crf,
+          ...(q.crf ? ["-crf", q.crf] : ["-b:v", q.bitrate]),
           ...cap,
           "-profile:v",
           "high",
@@ -247,6 +256,54 @@ export function buildClipArgs({
   // the audio in testing.
   args.push("-ss", seconds(offsetMs), "-t", seconds(durationMs));
   args.push("-filter_complex", filter, "-map", "[v]", "-map", "0:a?");
+  args.push(...enc.codec, "-c:a", "aac", "-b:a", QUALITY[quality].audio);
+  args.push("-movflags", "+faststart", "-f", "mp4", outPath);
+  return args;
+}
+
+/**
+ * Two cameras of one court in one clip: each concat list trimmed to the same
+ * wall-clock window (its own offset), scaled into 1280×720 (aspect kept,
+ * padded), Cam 1 over Cam 2 → 1280×1440, watermark bottom-right (laid out for
+ * 1280 wide), H.264 + AAC from `audioInput` (Cam 1's unless it has none).
+ * The trim happens in the filter because each input has its own offset.
+ */
+export function buildStackedClipArgs({
+  listPaths,
+  offsetsMs,
+  durationMs,
+  logoPath,
+  fps,
+  audioInput = 0,
+  encoder,
+  vaapiDevice,
+  quality = "clipStacked",
+  outPath,
+}) {
+  const enc = encoderSettings(encoder, { vaapiDevice, quality });
+  const { width, height } = STACK_TILE;
+  const d = seconds(durationMs);
+  const args = ["-hide_banner", "-nostdin", "-y", "-loglevel", "error", ...enc.input];
+  for (const listPath of listPaths) args.push("-f", "concat", "-safe", "0", "-i", listPath);
+  const tile = (i, label) =>
+    `[${i}:v:0]trim=start=${seconds(offsetsMs[i])}:duration=${d},setpts=PTS-STARTPTS,` +
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+    `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps}[${label}]`;
+  const parts = [tile(0, "top"), tile(1, "bottom")];
+  const audio = `[${audioInput}:a:0]atrim=start=${seconds(offsetsMs[audioInput])}:duration=${d},asetpts=PTS-STARTPTS[a]`;
+  if (logoPath) {
+    const { logoWidth, margin } = logoLayout(STACKED_SIZE.width);
+    args.push("-i", logoPath);
+    parts.push(
+      "[top][bottom]vstack=inputs=2[stack]",
+      `[2:v]scale=${logoWidth}:-2,format=rgba[logo]`,
+      `[stack][logo]overlay=x=W-w-${margin}:y=H-h-${margin},${enc.tail}[v]`
+    );
+  } else {
+    parts.push(`[top][bottom]vstack=inputs=2,${enc.tail}[v]`);
+  }
+  args.push("-filter_complex", [...parts, ...(audioInput === null ? [] : [audio])].join(";"));
+  args.push("-map", "[v]", ...(audioInput === null ? [] : ["-map", "[a]"]), "-t", d);
   args.push(...enc.codec, "-c:a", "aac", "-b:a", QUALITY[quality].audio);
   args.push("-movflags", "+faststart", "-f", "mp4", outPath);
   return args;
@@ -337,13 +394,73 @@ async function pinSegments(segments, partsDir) {
   return pinned;
 }
 
+/** Pin each camera's segments and write its concat list. → [{ listPath, first }] */
+async function prepareSources(sources, workDir) {
+  const prepared = [];
+  for (const [i, source] of sources.entries()) {
+    const pinned = await pinSegments(source.segments, path.join(workDir, "parts", `cam${i + 1}`));
+    const listPath = path.join(workDir, `list-${i + 1}.ffconcat`);
+    await fsp.writeFile(
+      listPath,
+      buildConcatList(source.segments.map((segment, j) => ({ ...segment, path: pinned[j] })))
+    );
+    prepared.push({ listPath, first: pinned[0], offsetMs: source.offsetMs });
+  }
+  return prepared;
+}
+
+/** The ffmpeg arguments for one or two cameras (stacked), per encoder. */
+async function clipArgsFor(prepared, { durationMs, logoPath, quality, settings, videoPath }) {
+  if (prepared.length === 1) {
+    const source = await probeVideo(settings.ffprobePath, prepared[0].first);
+    const { width, height } = outputSize(source.width, source.height);
+    return (encoder) =>
+      buildClipArgs({
+        listPath: prepared[0].listPath,
+        offsetMs: prepared[0].offsetMs,
+        durationMs,
+        logoPath,
+        width,
+        height,
+        encoder,
+        vaapiDevice: settings.vaapiDevice,
+        quality,
+        outPath: videoPath,
+      });
+  }
+  const probes = await Promise.all(prepared.map((p) => probeFile(settings.ffprobePath, p.first)));
+  const video = probes.map((p) => p.streams.find((st) => st.type === "video"));
+  const hasAudio = probes.map((p) => p.streams.some((st) => st.type === "audio"));
+  const known = video.map((v) => v?.fps).filter((f) => Number.isFinite(f) && f > 0);
+  const fps = known.length ? Math.min(30, Math.round(Math.min(...known))) : 25;
+  // Sound from Cam 1, Cam 2's if Cam 1 has none
+  const audioInput = hasAudio[0] ? 0 : hasAudio[1] ? 1 : null;
+  return (encoder) =>
+    buildStackedClipArgs({
+      listPaths: prepared.map((p) => p.listPath),
+      offsetsMs: prepared.map((p) => p.offsetMs),
+      durationMs,
+      logoPath,
+      fps,
+      audioInput,
+      encoder,
+      vaapiDevice: settings.vaapiDevice,
+      quality: quality === "session" ? "sessionStacked" : "clipStacked",
+      outPath: videoPath,
+    });
+}
+
 /**
- * Cut, watermark and encode one clip into `workDir`. Falls back to libx264
- * once if a hardware encoder fails. → { videoPath, thumbnailPath, durationSeconds, encoder }
+ * Cut, watermark and encode one clip into `workDir`, from one camera
+ * (`segments` + `offsetMs`, or `sources` with one entry) or two stacked
+ * (`sources` = [cam 1, cam 2], each { segments, offsetMs }). Falls back to
+ * libx264 once if a hardware encoder fails.
+ * → { videoPath, thumbnailPath, durationSeconds, encoder, cameras }
  */
 export async function cutClip({
   segments,
   offsetMs,
+  sources = [{ segments, offsetMs }],
   durationMs,
   workDir,
   logoPath,
@@ -353,36 +470,19 @@ export async function cutClip({
   signal,
   log,
 }) {
-  const partsDir = path.join(workDir, "parts");
-  const listPath = path.join(workDir, "list.ffconcat");
   const videoPath = path.join(workDir, "clip.mp4");
   const thumbPath = path.join(workDir, "thumbnail.jpg");
   try {
-    const pinned = await pinSegments(segments, partsDir);
-    await fsp.writeFile(
-      listPath,
-      buildConcatList(segments.map((segment, i) => ({ ...segment, path: pinned[i] })))
-    );
-    const source = await probeVideo(settings.ffprobePath, pinned[0]);
-    const { width, height } = outputSize(source.width, source.height);
-
+    const prepared = await prepareSources(sources, workDir);
+    const argsFor = await clipArgsFor(prepared, {
+      durationMs,
+      logoPath,
+      quality,
+      settings,
+      videoPath,
+    });
     const encode = (enc) =>
-      runFfmpeg(
-        settings.ffmpegPath,
-        buildClipArgs({
-          listPath,
-          offsetMs,
-          durationMs,
-          logoPath,
-          width,
-          height,
-          encoder: enc,
-          vaapiDevice: settings.vaapiDevice,
-          quality,
-          outPath: videoPath,
-        }),
-        { timeoutMs: 15 * 60_000, signal }
-      );
+      runFfmpeg(settings.ffmpegPath, argsFor(enc), { timeoutMs: 15 * 60_000, signal });
     let used = encoder;
     try {
       await encode(encoder);
@@ -412,11 +512,69 @@ export async function cutClip({
       log?.warn("thumbnail failed — uploading the clip without one", err);
       thumbnailPath = null;
     }
-    return { videoPath, thumbnailPath, durationSeconds: result.duration, encoder: used };
+    return {
+      videoPath,
+      thumbnailPath,
+      durationSeconds: result.duration,
+      encoder: used,
+      cameras: sources.length,
+    };
   } finally {
-    await fsp.rm(partsDir, { recursive: true, force: true });
-    await fsp.rm(listPath, { force: true });
+    await fsp.rm(path.join(workDir, "parts"), { recursive: true, force: true });
+    for (let i = 1; i <= sources.length; i += 1) {
+      await fsp.rm(path.join(workDir, `list-${i}.ffconcat`), { force: true });
+    }
   }
+}
+
+/**
+ * Which cameras to cut and how: both stacked when both cover the window, else
+ * the one that does. `selections` = one per camera (selectSegments or
+ * selectPartSegments), `null` for a camera without a buffer.
+ * → { sources: [{ segments, offsetMs }], durationMs, cameras: [1] | [2] | [1, 2], coverage? }
+ *   or { fail: selection } (camera 1's reason, else camera 2's)
+ */
+export function chooseSources(selections, window, { part = false } = {}) {
+  const ok = selections.map((sel, i) => (sel?.ok ? i : -1)).filter((i) => i >= 0);
+  if (!ok.length) return { fail: selections[0] ?? selections.find(Boolean) };
+  if (!part) {
+    return {
+      sources: ok.map((i) => ({
+        segments: selections[i].segments,
+        offsetMs: selections[i].offsetMs,
+      })),
+      durationMs: window.endMs - window.startMs,
+      cameras: ok.map((i) => i + 1),
+    };
+  }
+  // Session part: the stretch both cameras recorded; one camera if that is < 80 %
+  const span = (sel) => {
+    const start = sel.segments[0].startMs + sel.offsetMs;
+    return { start, end: start + sel.durationMs };
+  };
+  if (ok.length === 2) {
+    const [a, b] = ok.map((i) => span(selections[i]));
+    const start = Math.max(a.start, b.start);
+    const end = Math.min(a.end, b.end);
+    if (end - start >= (window.endMs - window.startMs) * PART_MIN_COVERAGE) {
+      return {
+        sources: ok.map((i) => ({
+          segments: selections[i].segments,
+          offsetMs: start - selections[i].segments[0].startMs,
+        })),
+        durationMs: end - start,
+        cameras: [1, 2],
+        coverage: Math.min(...ok.map((i) => selections[i].coverage)),
+      };
+    }
+  }
+  const i = ok[0];
+  return {
+    sources: [{ segments: selections[i].segments, offsetMs: selections[i].offsetMs }],
+    durationMs: selections[i].durationMs,
+    cameras: [i + 1],
+    coverage: selections[i].coverage,
+  };
 }
 
 /**
@@ -424,61 +582,66 @@ export async function cutClip({
  *   { status: "wait" }                       the post-window is not on disk yet
  *   { status: "fail", reason }               the buffer does not cover the window
  *   { status: "done", videoPath, thumbnailPath, ... }
+ * `segmentsDirs` = the court's camera folders ([cam 1, cam 2]; a missing
+ * folder is a camera without footage). Both cameras covering the window →
+ * one stacked video; only one → that camera alone (logged).
  * Throws FfmpegError when ffmpeg fails.
  */
 export async function makeClip(entry, ctx) {
-  const { segmentsDir, courtKnown, workDir, logoPath, encoder, settings, signal, log } = ctx;
+  const { courtKnown, workDir, logoPath, encoder, settings, signal, log } = ctx;
+  const dirs = ctx.segmentsDirs ?? [ctx.segmentsDir];
   const now = ctx.now ?? Date.now();
   const window = clipWindow(entry);
-  const timeline = await loadTimeline(segmentsDir);
+  const timelines = await Promise.all(dirs.map((dir) => loadTimeline(dir)));
   // Keyframes can be 6 s apart and a reconnect takes ~10 s: give up waiting after 30 s
   const waitLimit = window.endMs + Math.max(30_000, settings.segmentSeconds * 4000);
-  if (!isWindowClosed(timeline, window.endMs) && now < waitLimit) return { status: "wait" };
+  // Wait for every camera that is recording around the window
+  const active = timelines.filter((t) => t.some((s) => s.endMs > window.startMs));
+  const ready = active.length > 0 && active.every((t) => isWindowClosed(t, window.endMs));
+  if (!ready && now < waitLimit) return { status: "wait" };
 
-  if (!courtKnown && timeline.length === 0) {
+  if (!courtKnown && timelines.every((t) => t.length === 0)) {
     return { status: "fail", reason: "This court's camera is not set up on the recorder box" };
   }
   const part = isSessionPart(entry);
-  if (part) {
-    const selection = selectPartSegments(timeline, window.startMs, window.endMs);
-    if (!selection.ok)
-      return { status: "fail", reason: partFailureReason(selection), detail: selection };
-    await fsp.mkdir(workDir, { recursive: true });
-    const result = await cutClip({
-      ...selection,
-      workDir,
-      logoPath,
-      encoder,
-      quality: "session",
-      settings,
-      signal,
-      log,
-    });
-    return { status: "done", coverage: selection.coverage, ...result };
+  const selections = timelines.map((t, i) => {
+    if (i > 0 && t.length === 0) return null; // no second camera
+    return part
+      ? selectPartSegments(t, window.startMs, window.endMs)
+      : selectSegments(t, window.startMs, window.endMs);
+  });
+  const choice = chooseSources(selections, window, { part });
+  if (choice.fail) {
+    const reason = part
+      ? partFailureReason(choice.fail)
+      : coverageReason(choice.fail, {
+          windowStartMs: window.startMs,
+          nowMs: now,
+          bufferMs: settings.bufferSeconds * 1000,
+        });
+    return { status: "fail", reason, detail: choice.fail };
   }
-  const selection = selectSegments(timeline, window.startMs, window.endMs);
-  if (!selection.ok) {
-    return {
-      status: "fail",
-      reason: coverageReason(selection, {
-        windowStartMs: window.startMs,
-        nowMs: now,
-        bufferMs: settings.bufferSeconds * 1000,
-      }),
-      detail: selection,
-    };
+  if (selections.filter(Boolean).length > 1 && choice.cameras.length === 1) {
+    const other = choice.cameras[0] === 1 ? 2 : 1;
+    log?.info(
+      `${entry.clipId}: camera ${other} has no footage for that window — camera ${choice.cameras[0]} only`
+    );
   }
   await fsp.mkdir(workDir, { recursive: true });
   const result = await cutClip({
-    segments: selection.segments,
-    offsetMs: selection.offsetMs,
-    durationMs: window.endMs - window.startMs,
+    sources: choice.sources,
+    durationMs: choice.durationMs,
     workDir,
     logoPath,
     encoder,
+    quality: part ? "session" : "clip",
     settings,
     signal,
     log,
   });
-  return { status: "done", ...result };
+  return {
+    status: "done",
+    ...(part ? { coverage: choice.coverage } : {}),
+    ...result,
+  };
 }

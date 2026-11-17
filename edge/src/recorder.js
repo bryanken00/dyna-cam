@@ -11,16 +11,16 @@ import {
   segmentsToPrune,
 } from "./segments.js";
 import { MediaProbe } from "./camera.js";
+import { parseLogLine } from "./stream.js";
 import {
-  classifyStreamLine,
-  maskStreamKey,
-  maskStreamUrl,
-  parseLogLine,
-  streamRestartAllowed,
-  streamSlave,
-  teeSlave,
-} from "./stream.js";
-import { backoffMs, maskCredentials, safeId, truncate } from "./util.js";
+  backoffMs,
+  CAM2_SUFFIX,
+  cameraDirName,
+  courtDirName,
+  maskCredentials,
+  safeId,
+  truncate,
+} from "./util.js";
 
 /**
  * The rolling buffer: one ffmpeg per court stream-copies the camera's video
@@ -29,6 +29,11 @@ import { backoffMs, maskCredentials, safeId, truncate } from "./util.js";
  * six courts on one small box. Audio is transcoded to AAC because cameras such
  * as the Tapo C200 send G.711 (pcm_alaw), which MPEG-TS stores as unplayable
  * `bin_data` when stream-copied.
+ *
+ * A court can have two cameras (PLAN-002 §7): each gets its own recorder and
+ * folder — `buffer/<safeId(courtId)>` for camera 1, `buffer/<safeId(courtId)>~cam2`
+ * for camera 2 (`~` never appears in a safeId, so no court can collide with it).
+ * Streams are never an output of the recorder (restream.js reads the live view).
  */
 
 const RESTART_BASE_MS = 2_000;
@@ -39,13 +44,8 @@ const CONNECT_GRACE_MS = 30_000;
 const RTSP_TIMEOUT_US = "10000000"; // 10 s socket timeout: a stalled stream exits instead of hanging
 
 /**
- * ffmpeg arguments for one court's recorder. segments.csv lists each closed
+ * ffmpeg arguments for one camera's recorder. segments.csv lists each closed
  * segment's content start/end; segments.js turns those into wall-clock times.
- *
- * With `streamUrl` the same process also restreams to RTMP through the tee
- * muxer (stream.js) — a Tapo C200 accepts only one RTSP client, so the stream
- * can never open its own camera connection. The RTMP slave can fail without
- * touching the recording. Logs are `level+info` so stream events can be read.
  */
 export function buildRecordArgs({
   rtspUrl,
@@ -53,39 +53,13 @@ export function buildRecordArgs({
   segmentSeconds,
   recordAudio = true,
   ffmpegMajor = 99,
-  streamUrl = null,
 }) {
-  const segmentOptions = {
-    segment_time: String(segmentSeconds),
-    segment_format: "mpegts",
-    segment_list: path.join(outDir, SEGMENT_LIST),
-    segment_list_type: "csv",
-    segment_list_size: "100",
-    reset_timestamps: "1",
-    strftime: "1",
-  };
-  const segmentsOut = path.join(outDir, "%s.ts");
-  const output = streamUrl
-    ? [
-        // FLV needs the codec headers up front; YouTube wants 44.1/48 kHz audio
-        "-flags",
-        "+global_header",
-        "-f",
-        "tee",
-        `${teeSlave({ f: "segment", ...segmentOptions }, segmentsOut)}|${streamSlave(streamUrl)}`,
-      ]
-    : [
-        "-f",
-        "segment",
-        ...Object.entries(segmentOptions).flatMap(([k, v]) => [`-${k}`, v]),
-        segmentsOut,
-      ];
   return [
     "-hide_banner",
     "-nostdin",
     "-nostats",
     "-loglevel",
-    "level+info",
+    "level+warning",
     "-y",
     "-rtsp_transport",
     "tcp",
@@ -97,12 +71,26 @@ export function buildRecordArgs({
     rtspUrl,
     "-map",
     "0:v:0",
-    ...(recordAudio
-      ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "64k", ...(streamUrl ? ["-ar", "44100"] : [])]
-      : ["-an"]),
+    ...(recordAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "64k"] : ["-an"]),
     "-c:v",
     "copy",
-    ...output,
+    "-f",
+    "segment",
+    "-segment_time",
+    String(segmentSeconds),
+    "-segment_format",
+    "mpegts",
+    "-segment_list",
+    path.join(outDir, SEGMENT_LIST),
+    "-segment_list_type",
+    "csv",
+    "-segment_list_size",
+    "100",
+    "-reset_timestamps",
+    "1",
+    "-strftime",
+    "1",
+    path.join(outDir, "%s.ts"),
   ];
 }
 
@@ -128,33 +116,21 @@ export function describeFailure(line) {
   return truncate(text ? `Recorder stopped: ${text}` : "Recorder stopped unexpectedly");
 }
 
-const hostOf = (url) => {
-  try {
-    return new URL(url).hostname || null;
-  } catch (_err) {
-    return null;
-  }
-};
-
-/** One camera → one ffmpeg, restarted with backoff whenever it exits or stalls. */
+/**
+ * One camera → one ffmpeg, restarted with backoff whenever it exits or stalls.
+ * `court` = { courtId, name, camera (1|2), cameraRtspUrl, cameraVersion }.
+ */
 export class CourtRecorder {
-  constructor({ court, dir, settings, ffmpegMajor, log, spawnImpl = spawn, lastStreamRestartAt }) {
+  constructor({ court, dir, settings, ffmpegMajor, log, spawnImpl = spawn }) {
     this.court = court;
     this.courtId = court.courtId;
+    this.camera = court.camera === 2 ? 2 : 1;
     this.name = court.name;
     this.rtspUrl = court.cameraRtspUrl;
     // The court config this recorder runs with: echoed in the heartbeat so the
     // setup page can tell a report about a new camera address from an old one
     this.cameraVersion = court.cameraVersion ?? null;
     this.createdAt = Date.now();
-    this.streamUrl = court.stream?.rtmpUrl || null;
-    this.streamHost = this.streamUrl ? hostOf(this.streamUrl) : null;
-    this.streamStatus = this.streamUrl ? "starting" : "off";
-    this.streamMessage = null;
-    this.streamDead = false;
-    // A stream-only restart (config change, dead RTMP output) — see RecorderManager
-    this.lastStreamRestartAt = lastStreamRestartAt ?? Date.now();
-    this.wantStream = undefined;
     this.dir = dir;
     this.settings = settings;
     this.ffmpegMajor = ffmpegMajor;
@@ -171,41 +147,22 @@ export class CourtRecorder {
     this.lastStderr = "";
   }
 
-  get label() {
-    const stream = this.streamUrl ? `, streaming to ${maskStreamUrl(this.streamUrl)}` : "";
-    return `${this.name || this.courtId} (${maskCredentials(this.rtspUrl)}${stream})`;
+  /** "Court 1" or "Court 1 camera 2", for logs. */
+  get who() {
+    const name = this.name || this.courtId;
+    return this.camera === 2 ? `${name} camera 2` : name;
   }
 
-  /** Every stderr line: masked first, then read for stream events and recording errors. */
+  get label() {
+    return `${this.who} (${maskCredentials(this.rtspUrl)})`;
+  }
+
+  /** Every stderr line: masked first, then kept as the last error. */
   onStderrLine(raw) {
-    const line = maskCredentials(maskStreamKey(raw, this.streamUrl));
-    const parsed = parseLogLine(line);
-    const event = this.streamUrl ? classifyStreamLine(parsed) : null;
-    if (event) return this.onStreamEvent(event);
-    // e.g. "[tcp] Connection to tcp://<ingest host>:1935 failed" — the stream's, not the camera's
-    if (this.streamHost && parsed.text.includes(this.streamHost)) return undefined;
+    const parsed = parseLogLine(maskCredentials(raw));
     if (parsed.level === null || ["error", "fatal", "panic"].includes(parsed.level)) {
       this.lastStderr = parsed.text;
     }
-    return undefined;
-  }
-
-  onStreamEvent(event) {
-    const who = this.name || this.courtId;
-    if (event.event === "recovered") {
-      if (this.streamStatus !== "live") this.log.info(`stream for ${who} reconnected`);
-      this.streamStatus = "live";
-      this.streamMessage = "Streaming";
-      return;
-    }
-    if (this.streamStatus !== "error" || this.streamMessage !== event.message) {
-      this.log.warn(
-        `stream for ${who}: ${event.message}${event.event === "dead" ? " (output closed; the recorder restarts it within 5 min when no clip is being made)" : " — retrying"}`
-      );
-    }
-    this.streamStatus = "error";
-    this.streamMessage = event.message;
-    if (event.event === "dead") this.streamDead = true;
   }
 
   start() {
@@ -218,7 +175,7 @@ export class CourtRecorder {
   /** Fold segments.csv into index.json (see segments.js). */
   mergeIndex() {
     return loadTimeline(this.dir, { persist: true }).catch((err) =>
-      this.log.warn(`could not update the segment index for ${this.name || this.courtId}`, err)
+      this.log.warn(`could not update the segment index for ${this.who}`, err)
     );
   }
 
@@ -230,11 +187,7 @@ export class CourtRecorder {
       segmentSeconds: this.settings.segmentSeconds,
       recordAudio: this.settings.recordAudio,
       ffmpegMajor: this.ffmpegMajor,
-      streamUrl: this.streamUrl,
     });
-    this.streamStatus = this.streamUrl ? "starting" : "off";
-    this.streamMessage = this.streamUrl ? "Connecting to the streaming service" : null;
-    this.streamDead = false;
     this.state = "starting";
     this.message = "Connecting to camera";
     this.startedAt = Date.now();
@@ -249,6 +202,7 @@ export class CourtRecorder {
       this.log.warn("could not write the run file", err);
     }
     this.log.info(`starting recorder for ${this.label}`);
+    this.spawnCount = (this.spawnCount ?? 0) + 1;
     const child = this.spawnImpl(this.settings.ffmpegPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
     });
@@ -280,7 +234,7 @@ export class CourtRecorder {
     if (!this.stallMessage) this.message = describeFailure(this.lastStderr);
     this.stallMessage = null;
     this.log.warn(
-      `recorder for ${this.name || this.courtId} exited (${signal || `code ${code}`}): ${this.message}; restarting in ${Math.round(delay / 1000)}s`
+      `recorder for ${this.who} exited (${signal || `code ${code}`}): ${this.message}; restarting in ${Math.round(delay / 1000)}s`
     );
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
@@ -298,15 +252,8 @@ export class CourtRecorder {
     if (!this.child) return;
 
     const fresh = this.lastVideoAt > this.startedAt && now - this.lastVideoAt < STALL_MS;
-    // The fifo reports failures and reconnects, not a first success: video
-    // flowing and no stream error for a few seconds counts as live
-    if (fresh && this.streamStatus === "starting" && now - this.startedAt >= 8000) {
-      this.streamStatus = "live";
-      this.streamMessage = "Streaming";
-      this.log.info(`streaming ${this.name || this.courtId} to ${maskStreamUrl(this.streamUrl)}`);
-    }
     if (fresh) {
-      if (this.state !== "ok") this.log.info(`recording ${this.name || this.courtId}`);
+      if (this.state !== "ok") this.log.info(`recording ${this.who}`);
       this.state = "ok";
       this.message = "Recording";
       this.failures = now - this.startedAt >= STABLE_RUN_MS ? 0 : this.failures;
@@ -318,7 +265,7 @@ export class CourtRecorder {
       const seconds = Math.round((now - since) / 1000);
       this.stallMessage = true;
       this.message = `Camera not reachable — no video for ${seconds}s, check Wi-Fi/power`;
-      this.log.warn(`no video from ${this.name || this.courtId} for ${seconds}s — reconnecting`);
+      this.log.warn(`no video from ${this.who} for ${seconds}s — reconnecting`);
       this.child.kill("SIGKILL");
     }
   }
@@ -326,11 +273,10 @@ export class CourtRecorder {
   status() {
     return {
       courtId: this.courtId,
+      camera: this.camera,
       status: this.state,
       message: truncate(this.message, 255),
       ...(this.cameraVersion ? { cameraVersion: this.cameraVersion } : {}),
-      streamStatus: this.streamStatus,
-      ...(this.streamMessage ? { streamMessage: truncate(this.streamMessage, 255) } : {}),
     };
   }
 
@@ -345,7 +291,7 @@ export class CourtRecorder {
       const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
       if (pid > 1 && cmdline.includes("ffmpeg") && cmdline.includes(this.dir)) {
         process.kill(pid, "SIGKILL");
-        this.log.warn(`killed a leftover recorder (pid ${pid}) for ${this.name || this.courtId}`);
+        this.log.warn(`killed a leftover recorder (pid ${pid}) for ${this.who}`);
       }
     } catch (_err) {
       // no pid file, process gone, or no /proc (macOS)
@@ -381,7 +327,35 @@ async function pruneEntries(dir, entries, now, bufferMs, keep) {
   }
 }
 
-/** All courts of the venue: starts/stops/restarts recorders as /config changes. */
+/** The cameras of a /config court: camera 1, plus camera 2 when it has an address. */
+export function courtCameras(court) {
+  const cams = [];
+  if (court.cameraRtspUrl) {
+    cams.push({
+      courtId: court.courtId,
+      name: court.name,
+      camera: 1,
+      cameraRtspUrl: court.cameraRtspUrl,
+      cameraVersion: court.cameraVersion ?? null,
+    });
+  }
+  if (court.camera2RtspUrl) {
+    cams.push({
+      courtId: court.courtId,
+      name: court.name,
+      camera: 2,
+      cameraRtspUrl: court.camera2RtspUrl,
+      cameraVersion: court.camera2Version ?? null,
+    });
+  }
+  return cams;
+}
+
+/** Map key of a court camera's recorder. */
+export const cameraKey = (courtId, camera = 1) =>
+  camera === 2 ? `${courtId}${CAM2_SUFFIX}` : courtId;
+
+/** All court cameras of the venue: starts/stops/restarts recorders as /config changes. */
 export class RecorderManager {
   constructor({ dataDir, settings, ffmpegMajor, log, spawnImpl = spawn }) {
     this.root = path.join(dataDir, "buffer");
@@ -389,53 +363,23 @@ export class RecorderManager {
     this.ffmpegMajor = ffmpegMajor;
     this.log = log;
     this.spawnImpl = spawnImpl;
-    this.recorders = new Map();
+    this.recorders = new Map(); // cameraKey → CourtRecorder
     this.timer = null;
     this.sessions = [];
     this.disk = { lowWarnedAt: 0, critical: false };
     // What each camera really sends, read from its latest closed segment (camera.js)
     this.media = new MediaProbe({ ffprobePath: settings.ffprobePath });
-    /** Uncut clip/part windows of a court — set by index.js from the job queue. */
-    this.pendingWindows = () => [];
   }
 
-  newRecorder(court, extra = {}) {
+  newRecorder(cam) {
     return new CourtRecorder({
-      court,
-      dir: this.courtDir(court.courtId),
+      court: cam,
+      dir: this.courtDir(cam.courtId, cam.camera),
       settings: this.settings,
       ffmpegMajor: this.ffmpegMajor,
       log: this.log,
       spawnImpl: this.spawnImpl,
-      ...extra,
     });
-  }
-
-  /**
-   * Stream changes and dead RTMP outputs need a recorder restart, which leaves
-   * a few seconds' gap: only when no uncut clip/part window reaches into the
-   * last 70 s, and for a dead output at most every 5 min.
-   */
-  async applyStreamRestarts(now = Date.now()) {
-    for (const [courtId, recorder] of this.recorders) {
-      const change = recorder.wantStream !== undefined;
-      if (!change && !recorder.streamDead) continue;
-      const allowed = streamRestartAllowed({
-        nowMs: now,
-        lastRestartMs: change ? 0 : recorder.lastStreamRestartAt,
-        minIntervalMs: change ? 0 : undefined,
-        pendingWindows: this.pendingWindows(courtId),
-      });
-      if (!allowed) continue;
-      const court = change ? { ...recorder.court, stream: recorder.wantStream } : recorder.court;
-      this.log.info(
-        `restarting the recorder for ${recorder.name || courtId} (${change ? "stream settings changed" : "stream output closed"})`
-      );
-      await recorder.stop();
-      const next = this.newRecorder(court, { lastStreamRestartAt: now });
-      this.recorders.set(courtId, next);
-      next.start();
-    }
   }
 
   /** Sessions from /config: their footage outlives the rolling buffer (segments.js). */
@@ -450,11 +394,15 @@ export class RecorderManager {
     this.sessions = list;
   }
 
-  /** Kept windows for a court folder; none while disk space is critical (live recording first). */
+  /**
+   * Kept windows for a buffer folder (either camera's); none while disk space
+   * is critical (live recording first).
+   */
   keepFor(dirName, now) {
     if (this.disk.critical) return [];
+    const court = courtDirName(dirName);
     const courtIds = [...new Set(this.sessions.map((s) => s.courtId))].filter(
-      (id) => safeId(id) === dirName
+      (id) => safeId(id) === court
     );
     return courtIds.flatMap((id) => retentionWindows(this.sessions, id, now));
   }
@@ -491,61 +439,74 @@ export class RecorderManager {
     return free;
   }
 
-  courtDir(courtId) {
-    return path.join(this.root, safeId(courtId));
+  /** A camera's buffer folder: `buffer/<safeId>` (camera 1) or `buffer/<safeId>~cam2`. */
+  courtDir(courtId, camera = 1) {
+    return path.join(this.root, cameraDirName(courtId, camera));
   }
 
+  /** Both possible camera folders of a court (clips use whichever has footage). */
+  courtDirs(courtId) {
+    return [this.courtDir(courtId, 1), this.courtDir(courtId, 2)];
+  }
+
+  /** Is any camera of this court recorded by this box? */
   has(courtId) {
-    return this.recorders.has(courtId);
+    return this.recorders.has(cameraKey(courtId, 1)) || this.recorders.has(cameraKey(courtId, 2));
   }
 
-  /** A stream turned on/off/changed: the restart waits for applyStreamRestarts. */
-  noteStreamChange(recorder, next) {
-    const nextStream = next.stream?.rtmpUrl ? next.stream : null;
-    const nextUrl = nextStream?.rtmpUrl || null;
-    if (nextUrl === recorder.streamUrl) {
-      recorder.wantStream = undefined; // unchanged, or changed back before the restart
-      return;
+  /**
+   * The cameras of a court this box records, for streams:
+   * [{ camera, up, fps, hasAudio }] — `fps`/`hasAudio` undefined until probed.
+   */
+  cameraInfo(courtId) {
+    const out = [];
+    for (const camera of [1, 2]) {
+      const recorder = this.recorders.get(cameraKey(courtId, camera));
+      if (!recorder) continue;
+      const info = this.media.current(recorder.dir);
+      const fresh = info?.video && info.segmentAtMs >= recorder.createdAt;
+      out.push({
+        camera,
+        up: recorder.state === "ok",
+        fps: fresh ? info.video.fps : undefined,
+        hasAudio: fresh ? Boolean(info.audio) : undefined,
+      });
     }
-    if (recorder.wantStream === undefined || (recorder.wantStream?.rtmpUrl || null) !== nextUrl) {
-      const what = nextUrl ? (recorder.streamUrl ? "changed" : "turned on") : "turned off";
-      this.log.info(
-        `stream ${what} for ${next.name || recorder.courtId} — restarting the recorder when no clip is being made`
-      );
-    }
-    recorder.wantStream = nextStream;
+    return out;
   }
 
-  /** Make the running recorders match `courts` (from GET /config). */
+  /** Make the running recorders match `courts` (from GET /config): one per camera. */
   async sync(courts) {
-    const wanted = new Map(courts.filter((c) => c.cameraRtspUrl).map((c) => [c.courtId, c]));
-    for (const [courtId, recorder] of this.recorders) {
-      const next = wanted.get(courtId);
-      if (next && next.cameraRtspUrl === recorder.rtspUrl) this.noteStreamChange(recorder, next);
+    const wanted = new Map(
+      (courts || []).flatMap(courtCameras).map((cam) => [cameraKey(cam.courtId, cam.camera), cam])
+    );
+    for (const [key, recorder] of this.recorders) {
+      const next = wanted.get(key);
       if (!next || next.cameraRtspUrl !== recorder.rtspUrl) {
         this.log.info(
-          `${next ? "camera URL changed, restarting" : "court removed, stopping"} ${recorder.name || courtId}`
+          `${next ? "camera URL changed, restarting" : "camera removed, stopping"} ${recorder.who}`
         );
-        this.recorders.delete(courtId);
+        this.recorders.delete(key);
         await recorder.stop();
       } else {
         recorder.name = next.name;
-        recorder.court = { ...next, stream: recorder.court.stream };
+        recorder.court = next;
         // Same address re-saved: this recorder already runs with it
         recorder.cameraVersion = next.cameraVersion ?? null;
       }
     }
-    for (const [courtId, court] of wanted) {
-      if (this.recorders.has(courtId)) continue;
-      const recorder = this.newRecorder(court);
-      this.recorders.set(courtId, recorder);
+    for (const [key, cam] of wanted) {
+      if (this.recorders.has(key)) continue;
+      const recorder = this.newRecorder(cam);
+      this.recorders.set(key, recorder);
       recorder.start();
     }
   }
 
   /**
-   * Heartbeat camera entries: recorder + stream status, plus `video` / `audio`
-   * (audio null = the stream has none) while they describe the last minute.
+   * Heartbeat camera entries, one per camera (`camera: 1 | 2`): recorder
+   * status, plus `video` / `audio` (audio null = the stream has none) while
+   * they describe the last minute.
    */
   statuses() {
     return [...this.recorders.values()].map((r) => {
@@ -556,13 +517,13 @@ export class RecorderManager {
     });
   }
 
-  /** Probe each running camera's latest closed segment (cached; ≤ every 30 s per court). */
+  /** Probe each running camera's latest closed segment (cached; ≤ every 30 s per camera). */
   async refreshMedia() {
     for (const recorder of this.recorders.values()) {
       if (!recorder.child) continue;
       await this.media
         .refresh(recorder.dir)
-        .catch((err) => this.log.debug(`could not probe ${recorder.courtId}`, err));
+        .catch((err) => this.log.debug(`could not probe ${recorder.who}`, err));
     }
   }
 
@@ -577,17 +538,16 @@ export class RecorderManager {
       for (const recorder of this.recorders.values()) {
         await recorder
           .tick(now, this.keepFor(path.basename(recorder.dir), now))
-          .catch((err) => this.log.warn(`tick failed for ${recorder.courtId}`, err));
+          .catch((err) => this.log.warn(`tick failed for ${recorder.who}`, err));
       }
       await this.pruneOrphans().catch((err) => this.log.warn("prune failed", err));
       await this.refreshMedia();
-      await this.applyStreamRestarts().catch((err) => this.log.warn("stream restart failed", err));
       this.timer = setTimeout(run, intervalMs);
     };
     this.timer = setTimeout(run, intervalMs);
   }
 
-  /** Folders of courts that are no longer recorded: let their footage age out, then remove them. */
+  /** Folders of cameras that are no longer recorded: let their footage age out, then remove them. */
   async pruneOrphans(now = Date.now()) {
     const active = new Set([...this.recorders.values()].map((r) => path.basename(r.dir)));
     const dirs = await fsp.readdir(this.root).catch(() => []);

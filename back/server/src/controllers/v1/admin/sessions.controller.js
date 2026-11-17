@@ -170,9 +170,11 @@ router.get(
     const secondsUntil = (at) => Math.max(0, Math.round((toEpochMs(at) - Date.now()) / 1000));
 
     const [streamRow] = await req.db.query(
-      `SELECT sessionId, venueId, status, startAt, endAt, streamUrl, streamPlatform,
-              streamUpdatedAt
-       FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      `SELECT s.sessionId, s.venueId, s.status, s.startAt, s.endAt, s.streamUrl,
+              s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
+              c.camera2RtspUrl IS NOT NULL AS hasCamera2
+       FROM recording_sessions s JOIN courts c ON c.courtId = s.courtId
+       WHERE s.sessionId = ? LIMIT 1`,
       [req.params.sessionId]
     );
 

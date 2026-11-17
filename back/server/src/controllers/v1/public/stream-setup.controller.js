@@ -9,8 +9,13 @@ import {
   describeStream,
   findSessionBySetupCode,
   saveStream,
+  saveStreamLayout,
 } from "../../../utils/sessionStreams.js";
-import { saveStreamSchema, streamSetupParamsSchema } from "../../../validators/public.validator.js";
+import {
+  saveStreamSchema,
+  streamLayoutSchema,
+  streamSetupParamsSchema,
+} from "../../../validators/public.validator.js";
 
 /**
  * A player's own live stream (PLAN-002 Phase G) — mounted at
@@ -20,7 +25,8 @@ import { saveStreamSchema, streamSetupParamsSchema } from "../../../validators/p
  * for 15 minutes, and once a stream is saved with it, until the session ends.
  *
  *   GET    /:code   the session (court, venue, times) and its stream (masked)
- *   PUT    /:code   save { platform, streamKey } or { platform: "OTHER", url }
+ *   PUT    /:code   save { platform, streamKey, layout? } or { platform: "OTHER", url, layout? },
+ *                   or { layout } alone to switch cameras (Phase H)
  *   DELETE /:code   stop the stream
  *
  * The key is never returned — only a masked address.
@@ -66,6 +72,8 @@ router.get(
         startAt: row.startAt,
         endAt: row.endAt,
         sessionStatus: row.status,
+        // Phase H: 2 → the player can pick Cam 1 / Cam 2 / Both
+        cameras: row.hasCamera2 ? 2 : 1,
         expiresAt: row.streamSetupExpiresAt,
         expiresInSeconds: secondsUntil(row.streamSetupExpiresAt),
       },
@@ -77,17 +85,33 @@ router.get(
 /**
  * PUT /:code — save (or change) the player's stream
  */
+/** A key (with platform), or a layout-only change of the saved stream. */
+const validateStreamBody = (req, res, next) =>
+  validateBody(req.body?.platform === undefined ? streamLayoutSchema : saveStreamSchema)(
+    req,
+    res,
+    next
+  );
+
 router.put(
   "/:code",
   setupLimiter,
   validateParams(streamSetupParamsSchema),
-  validateBody(saveStreamSchema),
+  validateStreamBody,
   withSession,
   catchAsync(async (req, res) => {
-    await saveStream(req.db, req.streamSession, {
-      platform: req.body.platform,
-      url: buildStreamUrl(req.body),
-    });
+    if (req.body.platform === undefined) {
+      if (!req.streamSession.streamUrl) {
+        return res.sendError("Add your stream key first", 409);
+      }
+      await saveStreamLayout(req.db, req.streamSession, req.body.layout);
+    } else {
+      await saveStream(req.db, req.streamSession, {
+        platform: req.body.platform,
+        url: buildStreamUrl(req.body),
+        layout: req.body.layout,
+      });
+    }
     const row = await findSessionBySetupCode(req.db, req.params.code);
     return res.sendSuccess("Your live stream is set — it runs while the game records", {
       stream: await describeStream(req.db, row),

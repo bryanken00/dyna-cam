@@ -12,7 +12,7 @@ import {
   SEGMENT_LIST,
   segmentStartMs,
 } from "./segments.js";
-import { readJson, safeId, writeJsonAtomic } from "./util.js";
+import { cameraDirName, readJson, writeJsonAtomic } from "./util.js";
 
 /**
  * LAN live view (PLAN-002 §5.4): the newest closed buffer segments of a court
@@ -20,6 +20,7 @@ import { readJson, safeId, writeJsonAtomic } from "./util.js";
  *
  *   GET /live/:courtId/index.m3u8?exp=<unix s>&sig=<hex>   → the last 5 closed segments
  *   GET /live/:courtId/<epoch>.ts?exp=…&sig=…             → one segment of that court
+ *   GET /live/:courtId/cam2/index.m3u8 · /live/:courtId/cam2/<epoch>.ts   → camera 2, same signature
  *
  * No camera connection and no encoding: the files are the recorder's own.
  * `sig` = hex HMAC-SHA256(liveKey, `${courtId}.${exp}`), made by the API with
@@ -64,8 +65,8 @@ export function checkSignature({ key, courtId, exp, sig, nowMs }) {
 }
 
 /**
- * Route a request (pure). → { kind: "playlist" | "segment", courtId, file, exp, sig }
- * or { status, error }. Only `/live/<court id>/<index.m3u8 | epoch.ts>`;
+ * Route a request (pure). → { kind: "playlist" | "segment", courtId, camera, file, exp, sig }
+ * or { status, error }. Only `/live/<court id>/[cam2/]<index.m3u8 | epoch.ts>`;
  * anything else — another path, `..`, `/` in a name — is a 404.
  */
 export function routeLive(method, rawUrl) {
@@ -77,7 +78,8 @@ export function routeLive(method, rawUrl) {
     return { status: 404, error: "Not found" };
   }
   const parts = url.pathname.split("/");
-  if (parts.length !== 4 || parts[0] !== "" || parts[1] !== "live") {
+  const camera = parts.length === 5 && parts[3] === "cam2" ? 2 : 1;
+  if (parts.length !== (camera === 2 ? 5 : 4) || parts[0] !== "" || parts[1] !== "live") {
     return { status: 404, error: "Not found" };
   }
   let courtId;
@@ -86,12 +88,13 @@ export function routeLive(method, rawUrl) {
   } catch (_err) {
     courtId = "";
   }
-  const file = parts[3];
+  const file = parts.at(-1);
   const kind = file === "index.m3u8" ? "playlist" : SEGMENT_FILE.test(file) ? "segment" : null;
   if (!COURT_ID.test(courtId) || !kind) return { status: 404, error: "Not found" };
   return {
     kind,
     courtId,
+    camera,
     file,
     exp: url.searchParams.get("exp"),
     sig: url.searchParams.get("sig"),
@@ -357,17 +360,18 @@ function sendText(req, res, status, text, extra = {}) {
 }
 
 /**
- * The HTTP server. `bufferDir` = DATA_DIR/buffer; a court's folder is
- * `safeId(courtId)` inside it. The URL (it holds the signature) is never logged.
+ * The HTTP server. `bufferDir` = DATA_DIR/buffer; a camera's folder is
+ * `cameraDirName(courtId, camera)` inside it. The URL (it holds the signature)
+ * is never logged.
  */
 export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }) {
-  const courts = new Map(); // courtId → { sequencer, read: { at, promise } }
-  const court = (courtId) => {
-    if (!courts.has(courtId)) courts.set(courtId, { sequencer: new LiveSequencer(), read: null });
-    return courts.get(courtId);
+  const courts = new Map(); // camera folder → { sequencer, read: { at, promise } }
+  const court = (dir) => {
+    if (!courts.has(dir)) courts.set(dir, { sequencer: new LiveSequencer(), read: null });
+    return courts.get(dir);
   };
-  const readCached = (courtId, dir) => {
-    const state = court(courtId);
+  const readCached = (dir) => {
+    const state = court(dir);
     const at = now();
     if (!state.read || at - state.read.at >= READ_CACHE_MS) {
       state.read = { at, promise: readCourtSegments(dir) };
@@ -379,8 +383,8 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
   };
 
   async function servePlaylist(req, res, route, dir) {
-    const segments = await readCached(route.courtId, dir);
-    const listed = segments ? court(route.courtId).sequencer.number(segments) : [];
+    const segments = await readCached(dir);
+    const listed = segments ? court(dir).sequencer.number(segments) : [];
     if (!listed.length || now() - listed.at(-1).mtimeMs > STALE_MS) {
       return sendText(req, res, 404, "No live video for this court right now");
     }
@@ -394,8 +398,8 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
   }
 
   /** The clock offset of a segment: as numbered for the playlist, else from the timing files. */
-  async function offsetOf(courtId, dir, name) {
-    const numbered = court(courtId).sequencer.byName.get(name);
+  async function offsetOf(dir, name) {
+    const numbered = court(dir).sequencer.byName.get(name);
     if (numbered) return numbered.offset;
     const index = await readTimingIndex(dir, new Map([[name, 0]]));
     const known = index[name];
@@ -413,7 +417,7 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
     try {
       const stat = await handle.stat();
       if (!stat.isFile()) throw Object.assign(new Error("not a file"), { notFound: true });
-      const offset = await offsetOf(route.courtId, dir, route.file);
+      const offset = await offsetOf(dir, route.file);
       res.writeHead(200, {
         ...BASE_HEADERS,
         "Content-Type": "video/mp2t",
@@ -449,7 +453,7 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
       log.debug(`live ${route.kind} for ${route.courtId} refused: ${check} link`);
       return sendText(req, res, 403, check === "expired" ? "Link expired" : "Bad signature");
     }
-    const dir = path.join(bufferDir, safeId(route.courtId));
+    const dir = path.join(bufferDir, cameraDirName(route.courtId, route.camera));
     const serve = route.kind === "playlist" ? servePlaylist : serveSegment;
     return serve(req, res, route, dir).catch((err) => {
       log.warn(`live ${route.kind} for ${route.courtId} failed`, err);
@@ -529,14 +533,15 @@ export class LiveView {
   }
 
   /**
-   * The box's own signed playlist link for a court on 127.0.0.1 (player
-   * streams read it, restream.js); null while the server isn't running.
+   * The box's own signed playlist link for a court camera on 127.0.0.1
+   * (restreams read it, restream.js); null while the server isn't running.
    */
-  localPlaylistUrl(courtId, exp) {
+  localPlaylistUrl(courtId, exp, camera = 1) {
     if (!this.server) return null;
     const port = this.server.address().port;
     const sig = signLive(this.key, courtId, exp);
-    return `http://127.0.0.1:${port}/live/${encodeURIComponent(courtId)}/index.m3u8?exp=${exp}&sig=${sig}`;
+    const cam = camera === 2 ? "cam2/" : "";
+    return `http://127.0.0.1:${port}/live/${encodeURIComponent(courtId)}/${cam}index.m3u8?exp=${exp}&sig=${sig}`;
   }
 
   /** The heartbeat's `live` field: { url, key }, or null when off or no LAN address is known. */

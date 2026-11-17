@@ -12,7 +12,7 @@ import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
 import { JobQueue } from "./queue.js";
 import { RecorderManager } from "./recorder.js";
-import { SessionStreams } from "./restream.js";
+import { Restreams } from "./restream.js";
 import { DeviceSync } from "./sync.js";
 
 /**
@@ -44,12 +44,12 @@ async function checkFfmpeg(settings, log) {
 }
 
 /** The parts that talk to the API: previews, config/heartbeat sync and the job loop. */
-function createServices({ settings, api, recorders, encoder, jobsDir, live, sessionStreams }) {
+function createServices({ settings, api, recorders, encoder, jobsDir, live, streams }) {
   // Camera-setup previews: lowest priority, never while clips are busy (jobs is set below)
   let jobs = null;
   const preview = new PreviewSender({
     api,
-    courtDir: (courtId) => recorders.courtDir(courtId),
+    courtDir: (courtId, camera) => recorders.courtDir(courtId, camera),
     settings,
     isBusy: () => Boolean(jobs?.isBusy()),
     log: createLogger("preview"),
@@ -63,7 +63,7 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, sess
     agentVersion: AGENT_VERSION,
     log: createLogger("sync"),
     live,
-    sessionStreams,
+    streams,
   });
   const clipLog = createLogger("clip");
   jobs = new JobRunner({
@@ -74,7 +74,8 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, sess
     log: createLogger("jobs"),
     clip: (entry, { workDir, signal }) =>
       makeClip(entry, {
-        segmentsDir: recorders.courtDir(entry.courtId),
+        // Both cameras' folders: stacked when both have the window
+        segmentsDirs: recorders.courtDirs(entry.courtId),
         courtKnown: sync.courtKnown(entry.courtId),
         workDir,
         logoPath: sync.logoPath,
@@ -90,20 +91,23 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, sess
 
 /**
  * LAN live view from the buffer (a taken port only turns it off, recording goes
- * on) and the players' own streams: their own ffmpeg reading the live view —
- * never the recorder.
+ * on) and every live stream (venue court streams and players' own): their own
+ * ffmpeg reading the live view — never the recorder.
  */
-async function startLiveView(settings, recorders) {
+async function startLiveView(settings, recorders, encoder) {
   const live = new LiveView({ settings, log: createLogger("live") });
   await live.start();
-  const sessionStreams = new SessionStreams({
+  const streams = new Restreams({
     live,
-    records: (courtId) => recorders.has(courtId),
+    cameras: (courtId) => recorders.cameraInfo(courtId),
     ffmpegPath: settings.ffmpegPath,
-    log: createLogger("player-stream"),
+    encoder,
+    vaapiDevice: settings.vaapiDevice,
+    maxStacked: settings.maxStackedStreams,
+    log: createLogger("stream"),
   });
-  process.on("exit", () => sessionStreams.killAllSync());
-  return { live, sessionStreams };
+  process.on("exit", () => streams.killAllSync());
+  return { live, streams };
 }
 
 async function main() {
@@ -164,12 +168,9 @@ async function main() {
   // Whatever happens to this process, no ffmpeg is left recording behind it
   process.on("exit", () => recorders.killAllSync());
 
-  const { live, sessionStreams } = await startLiveView(settings, recorders);
-  const services = { settings, api, recorders, encoder, jobsDir, live, sessionStreams };
+  const { live, streams } = await startLiveView(settings, recorders, encoder);
+  const services = { settings, api, recorders, encoder, jobsDir, live, streams };
   const { preview, sync, jobs } = createServices(services);
-
-  // Stream restarts wait until no uncut clip/part window reaches into the last 70 s
-  recorders.pendingWindows = (courtId) => jobs.pendingWindows(courtId);
 
   let buttons = null;
   const previewTimer = setInterval(() => {
@@ -196,7 +197,7 @@ async function main() {
     sync.stop();
     clearInterval(previewTimer);
     buttons?.close();
-    await sessionStreams.stopAll();
+    await streams.stopAll();
     live.close();
     await jobs.stop();
     await recorders.stopAll();
@@ -220,7 +221,7 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   recorders.startTicker();
-  sessionStreams.startTicker();
+  streams.startTicker();
   await sync.init();
   if (shuttingDown) return;
   await jobs.start();

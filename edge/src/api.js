@@ -202,11 +202,12 @@ export function createApi({
     failClip: (clipId, reason) =>
       request("POST", clipPath(clipId, "fail"), { json: { reason: truncate(reason, 255) } }),
 
-    /** Camera-setup preview: multipart `snapshot` (image/jpeg, ≤ 3 MB). */
-    async uploadSnapshot(courtId, jpegPath) {
+    /** Camera-setup preview: multipart `snapshot` (image/jpeg, ≤ 3 MB); `?camera=2` for camera 2. */
+    async uploadSnapshot(courtId, jpegPath, camera = 1) {
       const { form } = await multipart([["snapshot", jpegPath, "image/jpeg", "snapshot.jpg"]]);
       const pathname = `/courts/${encodeURIComponent(courtId)}/snapshot`;
-      return request("POST", pathname, { form, timeoutMs: 60_000 });
+      const query = camera === 2 ? { camera: "2" } : undefined;
+      return request("POST", pathname, { form, query, timeoutMs: 60_000 });
     },
 
     /** multipart: `video` (video/mp4, *.mp4, required), `thumbnail` (image/jpeg, *.jpg). */

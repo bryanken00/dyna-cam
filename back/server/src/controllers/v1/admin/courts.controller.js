@@ -36,8 +36,9 @@ const router = express.Router();
 
 const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
-         c.cameraRtspUrl, c.qrToken, c.buttonCode, c.streamEnabled, c.streamRtmpUrl,
-         c.streamWatchUrl, c.snapshotPath, c.snapshotAt,
+         c.cameraRtspUrl, c.camera2RtspUrl, c.qrToken, c.buttonCode, c.streamEnabled,
+         c.streamRtmpUrl, c.streamWatchUrl, c.streamLayout, c.snapshotPath, c.snapshotAt,
+         c.snapshot2Path, c.snapshot2At,
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -53,8 +54,9 @@ const secondsSince = (localTimestamp) =>
 /**
  * What each court's camera looks like to its venue's recorder box right now
  * (PLAN-002 camera setup): the latest heartbeat entry for the court, from the
- * most recently seen Active box of the venue.
- * @returns {Promise<Map<string, Object>>} courtId → live camera info
+ * most recently seen Active box of the venue. Phase H: keyed by court and
+ * camera (`liveKey(courtId, 2)`); a report without `camera` is camera 1.
+ * @returns {Promise<Map<string, Object>>} liveKey → live camera info
  */
 const liveCameras = async (db, venueIds) => {
   const live = new Map();
@@ -70,7 +72,7 @@ const liveCameras = async (db, venueIds) => {
       typeof device.lastStatus === "string" ? JSON.parse(device.lastStatus) : device.lastStatus;
     for (const camera of status?.cameras || []) {
       // Later rows (more recently seen boxes) win
-      live.set(camera.courtId, {
+      live.set(liveKey(camera.courtId, camera.camera || 1), {
         status: camera.status,
         message: camera.message || null,
         video: camera.video || null,
@@ -87,6 +89,8 @@ const liveCameras = async (db, venueIds) => {
   return live;
 };
 
+const liveKey = (courtId, camera = 1) => `${courtId}#${camera}`;
+
 /** Button codes are unique across every court (one press must reach one court). */
 const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
   if (!buttonCode) return false;
@@ -101,34 +105,61 @@ const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
   return rows.length > 0;
 };
 
-const toCourt = (row, live = null) => {
+/**
+ * Camera 2 needs camera 1, and a layout showing camera 2 needs camera 2.
+ * @returns {string|null} the problem, for a 400
+ */
+const cameraProblem = ({ camera1, camera2, layout }) => {
+  if (camera2 && !camera1) return "Set up camera 1 before adding a second camera";
+  if (!camera2 && layout && layout !== "CAM1") {
+    return "Cam 2 and Both need a second camera on this court";
+  }
+  return null;
+};
+
+/** One camera as the court setup page shows it (camera 1 or camera 2). */
+const toCamera = (stored, live, snapshotPath, snapshotAt) => ({
+  configured: Boolean(stored),
+  // null when set but unreadable (DEVICE_SECRET_KEY changed) — re-enter it
+  display: maskStreamUrl(decryptSecret(stored)),
+  // PLAN-002: what the venue's recorder box receives from this camera
+  live: live || null,
+  // Compare with live.cameraVersion: equal → the report is about this address
+  version: cameraVersion(stored),
+  snapshotUrl: signUploadUrl(snapshotPath),
+  snapshotAt: snapshotAt || null,
+  snapshotSecondsAgo: secondsSince(snapshotAt),
+});
+
+const toCourt = (row, live = new Map()) => {
   const {
     cameraRtspUrl,
+    camera2RtspUrl,
     streamRtmpUrl,
     streamEnabled,
     streamWatchUrl,
+    streamLayout,
     snapshotPath,
     snapshotAt,
+    snapshot2Path,
+    snapshot2At,
     ...court
   } = row;
-  const plain = decryptSecret(cameraRtspUrl);
   return {
     ...court,
     venueLogoUrl: signUploadUrl(row.venueLogoUrl),
     recorderOnline: Boolean(row.recorderOnline),
     qrUrl: courtQrUrl(row.qrToken),
-    camera: {
-      configured: Boolean(cameraRtspUrl),
-      // null when set but unreadable (DEVICE_SECRET_KEY changed) — re-enter it
-      display: maskStreamUrl(plain),
-      // PLAN-002: what the venue's recorder box receives from this camera
-      live: live || null,
-      // Compare with live.cameraVersion: equal → the report is about this address
-      version: cameraVersion(cameraRtspUrl),
-      snapshotUrl: signUploadUrl(snapshotPath),
-      snapshotAt: snapshotAt || null,
-      snapshotSecondsAgo: secondsSince(snapshotAt),
-    },
+    camera: toCamera(cameraRtspUrl, live.get(liveKey(row.courtId, 1)), snapshotPath, snapshotAt),
+    // PLAN-002 Phase H: the optional second camera
+    camera2: toCamera(
+      camera2RtspUrl,
+      live.get(liveKey(row.courtId, 2)),
+      snapshot2Path,
+      snapshot2At
+    ),
+    // What the venue's court stream shows (CAM1 / CAM2 / STACKED)
+    streamLayout: camera2RtspUrl ? streamLayout : "CAM1",
     stream: {
       enabled: Boolean(streamEnabled),
       configured: Boolean(streamRtmpUrl),
@@ -201,7 +232,7 @@ router.get(
     const live = await liveCameras(req.db, [...new Set(courts.map((c) => c.venueId))]);
 
     return res.sendSuccess("Courts retrieved successfully", {
-      courts: courts.map((court) => toCourt(court, live.get(court.courtId))),
+      courts: courts.map((court) => toCourt(court, live)),
       pagination: {
         page: Number(page),
         pageSize: Number(pageSize),
@@ -248,7 +279,7 @@ router.get(
 
     const live = await liveCameras(req.db, [rows[0].venueId]);
     return res.sendSuccess("Court retrieved successfully", {
-      court: toCourt(rows[0], live.get(rows[0].courtId)),
+      court: toCourt(rows[0], live),
     });
   })
 );
@@ -266,14 +297,22 @@ router.post(
       venueId,
       name,
       cameraRtspUrl,
+      camera2RtspUrl,
       buttonCode,
       streamEnabled,
       streamRtmpUrl,
       streamWatchUrl,
+      streamLayout = "CAM1",
     } = req.body;
     if (streamEnabled && !streamRtmpUrl) {
       return res.sendError("Enter the stream's RTMP address to turn live streaming on", 400);
     }
+    const layoutProblem = cameraProblem({
+      camera1: cameraRtspUrl,
+      camera2: camera2RtspUrl,
+      layout: streamLayout,
+    });
+    if (layoutProblem) return res.sendError(layoutProblem, 400);
     const now = getCurrentTimestampLocal();
 
     let conn;
@@ -310,19 +349,22 @@ router.post(
 
       await conn.execute(
         `INSERT INTO courts
-           (courtId, venueId, name, cameraRtspUrl, qrToken, buttonCode, streamEnabled,
-            streamRtmpUrl, streamWatchUrl, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+           (courtId, venueId, name, cameraRtspUrl, camera2RtspUrl, qrToken, buttonCode,
+            streamEnabled, streamRtmpUrl, streamWatchUrl, streamLayout, status, dateCreated,
+            dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           courtId,
           venueId,
           name,
           encryptSecret(cameraRtspUrl),
+          encryptSecret(camera2RtspUrl),
           qrToken,
           buttonCode || null,
           streamEnabled ? 1 : 0,
           encryptSecret(streamRtmpUrl),
           streamWatchUrl || null,
+          streamLayout,
           now,
           now,
         ]
@@ -343,7 +385,8 @@ router.post(
 
 /**
  * PUT /:courtId
- * cameraRtspUrl: omitted/"" keeps the stored one; removeCamera clears it.
+ * cameraRtspUrl / camera2RtspUrl: omitted/"" keeps the stored one;
+ * removeCamera / removeCamera2 clears it. streamLayout: omitted keeps it.
  */
 router.put(
   "/:courtId",
@@ -355,11 +398,14 @@ router.put(
       name,
       cameraRtspUrl,
       removeCamera,
+      camera2RtspUrl,
+      removeCamera2,
       buttonCode,
       streamEnabled,
       streamRtmpUrl,
       removeStream,
       streamWatchUrl,
+      streamLayout,
       status,
     } = req.body;
     const now = getCurrentTimestampLocal();
@@ -369,7 +415,8 @@ router.put(
       conn = await req.db.beginTransaction();
 
       const [target] = await conn.execute(
-        `SELECT c.courtId, c.venueId, c.cameraRtspUrl, c.streamRtmpUrl
+        `SELECT c.courtId, c.venueId, c.cameraRtspUrl, c.camera2RtspUrl, c.streamRtmpUrl,
+                c.streamLayout
          FROM courts c
          JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
          WHERE c.courtId = ? AND c.status != 'Deleted'
@@ -400,6 +447,23 @@ router.put(
       if (removeCamera) storedCamera = null;
       else if (cameraRtspUrl) storedCamera = encryptSecret(cameraRtspUrl);
 
+      let storedCamera2 = target[0].camera2RtspUrl;
+      if (removeCamera2) storedCamera2 = null;
+      else if (camera2RtspUrl) storedCamera2 = encryptSecret(camera2RtspUrl);
+
+      // Removing camera 2 drops a layout that needs it; an explicit one is checked
+      let layout = streamLayout ?? target[0].streamLayout;
+      if (!storedCamera2 && streamLayout === undefined) layout = "CAM1";
+      const layoutProblem = cameraProblem({
+        camera1: storedCamera,
+        camera2: storedCamera2,
+        layout,
+      });
+      if (layoutProblem) {
+        await req.db.rollback(conn);
+        return res.sendError(layoutProblem, 400);
+      }
+
       let storedStream = target[0].streamRtmpUrl;
       if (removeStream) storedStream = null;
       else if (streamRtmpUrl) storedStream = encryptSecret(streamRtmpUrl);
@@ -410,16 +474,18 @@ router.put(
 
       await conn.execute(
         `UPDATE courts
-         SET name = ?, cameraRtspUrl = ?, buttonCode = ?, streamEnabled = ?, streamRtmpUrl = ?,
-             streamWatchUrl = ?, status = ?, dateUpdated = ?
+         SET name = ?, cameraRtspUrl = ?, camera2RtspUrl = ?, buttonCode = ?, streamEnabled = ?,
+             streamRtmpUrl = ?, streamWatchUrl = ?, streamLayout = ?, status = ?, dateUpdated = ?
          WHERE courtId = ?`,
         [
           name,
           storedCamera,
+          storedCamera2,
           buttonCode || null,
           streamEnabled && !removeStream ? 1 : 0,
           storedStream,
           streamWatchUrl || null,
+          layout,
           status || "Active",
           now,
           courtId,

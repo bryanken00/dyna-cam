@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the signed LAN HLS live view for session devices, players' own RTMP streams of a session, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, pairing with a 6-digit key, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -17,15 +17,15 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid; `USER_AGENT`, `AGENT_VERSION` |
 | `credentials.js` | Token: `device.json` (0600) → redeem `PAIRING_CODE` once (`POST /pair/device`, no auth); revoked → cleanup. `DEVICE_TOKEN` is gone (PLAN-002 Phase F) — a set one is only warned about |
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
-| `recorder.js` | One ffmpeg per court (`CourtRecorder`), restart/backoff, stall watchdog, pruning, heartbeat status (`RecorderManager`) |
+| `recorder.js` | One ffmpeg per court **camera** (`CourtRecorder`; camera 2 in `buffer/<safeId>~cam2`), restart/backoff, stall watchdog, pruning, heartbeat status with `camera` (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
 | `clipper.js` | Pure window and selection math, ffmpeg argument builders, encoder detection, `cutClip`, `makeClip` |
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
-| `restream.js` | Players' own streams (`SessionStreams`): one ffmpeg per /config session with `stream.url`, live HLS from 127.0.0.1 → `-c:v copy -c:a aac -ar 44100 -f flv`, backoff, status, cap, heartbeat `sessionStreams` |
-| `live.js` | LAN live view `GET\|HEAD /live/:courtId/{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
-| `stream.js` | RTMP via the recorder's own ffmpeg (tee + fifo slave): escaping, key masking, stderr → stream status, restart rule |
+| `restream.js` | Every live stream (`Restreams`): venue court streams + players' own, one ffmpeg each reading the box's live HLS on 127.0.0.1; CAM1/CAM2 copied, STACKED encoded; backoff, status, caps, heartbeat `sessionStreams` + camera 1's `streamStatus` |
+| `live.js` | LAN live view `GET\|HEAD /live/:courtId/[cam2/]{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
+| `stream.js` | Stream-key masking (`maskStreamKey`, `maskStreamUrl`) and `parseLogLine` |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
@@ -55,9 +55,13 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
   retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
 - Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
-  (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion`. `/config` court
-  `previewWanted` → one JPEG per ~30 s to `POST /courts/:id/snapshot` (`snapshot`, ≤ 3 MB),
-  skipped while clips are busy; config/heartbeat every 15 s meanwhile; 404 → stop that court.
+  (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion` + `camera: 1 | 2`
+  (one entry per camera). `/config` court `previewWanted` → one JPEG per camera per ~30 s to
+  `POST /courts/:id/snapshot` (`snapshot`, ≤ 3 MB; `?camera=2` for camera 2), skipped while clips are
+  busy; config/heartbeat every 15 s meanwhile; 404 → stop that camera.
+- Two cameras (PLAN-002 §7): `/config` courts `camera2RtspUrl` + `camera2Version` (null = none),
+  `stream: { rtmpUrl, layout } | null`; sessions `stream: { url, layout } | null`. `layout` ∈
+  CAM1/CAM2/STACKED; missing/unknown → CAM1; CAM2/STACKED without camera 2 → CAM1.
 - Upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
 
 ## ffmpeg rules
@@ -72,16 +76,18 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   encoder drops them (half the frame rate). Keep the camera's timestamps.
 - **Mask credentials** (`maskCredentials`) in every log line and heartbeat message — RTSP passwords
   and RTMP stream keys (≤ last 4 chars shown; `maskStreamKey` on every stderr line).
-- **One RTSP connection per camera** (a C200 refuses a second): probes and previews read segment files. Streaming is a `tee` output of the
-  recorder: `[f=segment:…]…%s.ts|[f=flv:onfail=ignore:use_fifo=1:fifo_options=…]rtmp://…` —
-  never a second ffmpeg on the camera. Tee values are escaped twice, file names once (`stream.js`).
-  Recorders log `level+info`; stream lines set `streamStatus`, never the recording error.
-  Restart for streaming only on a config change or a closed output (≤ every 5 min), and never
-  while an uncut clip/part window reaches into the last 70 s (`streamRestartAllowed`).
+- **One RTSP connection per camera** (a C200 refuses a second): probes, previews and streams read
+  the buffer (segment files / the live view). **The recorder has one output, the segment muxer —
+  never a tee, never RTMP**; a stream change never restarts a recorder. Recorders log `level+warning`.
 - No `drawtext` (missing in some builds). Watermark = image overlay, 12% width, bottom-**right**.
 - Clip encode:
   - Concat demuxer with per-file `duration` = wall-clock spacing.
   - **Output-side** `-ss/-t`. Input-side seeking on concat started the video ~1.5 s late.
+  - **Stacked** (2-camera court, both cover the window — else the camera that does, logged): one
+    concat per camera, each `trim`med to the window in the filter (own offset) → 1280×720 (keep
+    aspect, pad) at the slower fps → `vstack` → logo (`logoLayout(1280)`) → 1280×1440 (no 1080 cap),
+    audio `atrim` from Cam 1 (Cam 2's if Cam 1 has none). Parts: the stretch both recorded, if ≥ 80 %.
+    `QUALITY.clipStacked` (max 4200k) / `sessionStacked` (max 1900k: a 5-min part < 75 MB, API cap 100 MB).
   - Scale to ≤ 1920×1080, end the filter with `format=yuv420p` (`nv12`/`hwupload` for QSV/VAAPI); `-c:a aac`, `+faststart`.
   - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s), session parts crf 26
     / max 1200k with 64k audio (≈ 45 MB per 5 min). Hardware encoders use `-b:v` with the same
@@ -102,23 +108,29 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   + the csv content start (90 kHz) — a Transform over `createReadStream`, in place, no remux.
 - Heartbeat: `live: { url: "http://<LIVE_HOST | first private IPv4>:<port>", key } | null`.
 
-## Player streams (`restream.js`, PLAN-002 §6.1)
+## Streams (`restream.js`, PLAN-002 §6.1, §7.3)
 
-- `/config` `sessions[].stream: { url } | null` (only while recording). One ffmpeg per session in
-  `[startMs, endMs)` on a court this box records: input = the box's OWN signed live playlist
-  (`LiveView.localPlaylistUrl`, `exp` = end + 10 min, re-signed with a restart 1 min before expiry),
-  `-extension_picky 0 -live_start_index -3 -re`, output `-map 0:v:0 -map 0:a? -c:v copy
-  -c:a aac -ar 44100 -b:a 96k -f flv -flvflags no_duration_filesize <url>` (video never re-encoded;
-  the camera's 8 kHz audio is resampled for Facebook/YouTube). **Never** touch or restart the recorder, never a camera connection.
-- Start/stop on window, stream added/removed, session gone; new url → restart. Exit → backoff 5 s → 60 s;
-  no output 30 s → kill. Max 4 (`MAX_SESSION_STREAMS`), logged once. A failure never reaches recording,
-  clips or the live server.
+- **Every stream is a restream** of the box's OWN signed live playlist (`LiveView.localPlaylistUrl(courtId,
+  exp, camera)`): the venue's court stream (`courts[].stream`, runs while the court is recorded, `exp` =
+  now + 24 h) and a player's (`sessions[].stream`, in `[startMs, endMs)`, `exp` = end + 10 min); re-signed
+  with a restart 1 min before expiry. Input `-extension_picky 0 -live_start_index -3 -re`.
+  **Never** touch or restart the recorder, never a camera connection.
+- CAM1/CAM2: `-map 0:v:0 -map 0:a? -c:v copy -c:a aac -ar 44100 -b:a 96k -f flv -flvflags no_duration_filesize`.
+  STACKED: both cameras' playlists → each `scale=1280:720:force_original_aspect_ratio=decrease,pad,fps=<slower ≤ 30>`
+  → `vstack` → `encoderSettings(<box encoder>, quality "stream")` (~3000k, no crf) + `-g 2·fps
+  -force_key_frames expr:gte(t,n_forced*2)`; audio from Cam 1 (Cam 2's if Cam 1 has none) → AAC 44.1 kHz.
+  One camera down → the other alone with a note; switches layout at most every 30 s (`planLayout`).
+- Start/stop on window / stream added/removed / session gone; new url or layout → restart. Exit → backoff
+  5 s → 60 s; no output 30 s → kill. Caps: 4 player streams (`MAX_SESSION_STREAMS`); `MAX_STACKED_STREAMS`
+  (default 2) stacked across court + player streams → "Too many stacked streams on this box — choose Cam 1
+  or Cam 2"; logged once. A failure never reaches recording, clips or the live server.
 - Status from `-progress pipe:1`: `starting` → `live` after 5 s of moving output (pauses > 3 s reset) →
   `error` + `describeRestreamFailure(all error lines of the run)`. `LIVE_PORT=0` → error "Live view is off
   on this box (LIVE_PORT=0)".
-- Heartbeat `sessionStreams: [{ sessionId, status, message }]` (`[]` when none); config + heartbeat
-  every 15 s while one is due. Every stderr line → `maskRestreamLine` (key, URL, `sig=`) before use;
-  the config cache drops `stream`.
+- Heartbeat: players' in `sessionStreams: [{ sessionId, status, message }]` (`[]` when none); the venue
+  stream's as `streamStatus`/`streamMessage` on camera 1's `cameras[]` entry (`off` when none). Config +
+  heartbeat every 15 s while a player stream is due. Every stderr line → `maskRestreamLine` (key, URL,
+  `sig=`) before use; the config cache drops sessions' `stream`.
 
 ## Segment timing (`segments.js`)
 
@@ -131,7 +143,8 @@ before every restart, as ffmpeg truncates the list). No row → name → mtime. 
 written is never used. Clips tolerate holes ≤ 7 s; the window must end in a closed segment.
 
 ## Data and state
-`DATA_DIR` holds `buffer/<courtId>/` (segments, csv, index, run, pid), `jobs/<clipId>/` (segments
+`DATA_DIR` holds `buffer/<courtId>/` and `buffer/<courtId>~cam2/` (segments, csv, index, run, pid; camera 2's
+pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` (segments
 hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
 `config.json` (mode 600, holds camera passwords), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
@@ -141,9 +154,11 @@ hard-linked in so pruning can't pull them away), `queue.json` (clips and button 
 ```bash
 npm run lint     # eslint (security plugin) + prettier-compatible; must be clean
 npm test         # node:test — no network, no ffmpeg
-npm run smoke    # ~2 min: real recorder + clipper on a Tapo-like source (pcm_alaw, irregular GOP):
-                 # 65 s clip (h264+aac, all frames, faststart, JPEG) + a 60 s session part (capped)
-                 # + the live view played by ffprobe (clock never goes back, bad sig 403)
+npm run smoke    # ~2 min: two real recorders on ONE court (Tapo-like cam 1: pcm_alaw, irregular GOP;
+                 # cam 2: 25 fps, no audio): stacked 65 s clip 1280x1440 (h264+aac, all frames,
+                 # faststart, JPEG) + stacked 60 s session part (capped) + the live view played by
+                 # ffprobe (clock never goes back, bad sig 403, /cam2/) + restreams to local RTMP:
+                 # venue STACKED → CAM2 and a player CAM1, recorders never restarted
 ```
 
 Unit-test every new pure function and API error path; report what can't be verified here (real cameras, QSV/VAAPI, load test).

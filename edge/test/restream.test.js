@@ -12,7 +12,7 @@ import {
   LIVE_OFF_MESSAGE,
   maskRestreamLine,
   platformOf,
-  SessionStreams,
+  Restreams,
   STALL_MS,
 } from "../src/restream.js";
 import { DeviceSync } from "../src/sync.js";
@@ -77,10 +77,14 @@ const session = (id, over = {}) => ({
   ...over,
 });
 
-function manager({ clock, spawn, live = liveView(), log = silentLog(), max, records }) {
-  return new SessionStreams({
+/** court-1 has camera 1 (up) on this box; nothing else is recorded here. */
+const oneCamera = (courtId) => (courtId === "court-1" ? [{ camera: 1, up: true }] : []);
+
+function manager({ clock, spawn, live = liveView(), log = silentLog(), max, cameras, maxStacked }) {
+  return new Restreams({
     live,
-    records: records || ((courtId) => courtId === "court-1"),
+    cameras: cameras || oneCamera,
+    ...(maxStacked !== undefined ? { maxStacked } : {}),
     log,
     spawnImpl: spawn.impl,
     now: () => clock.now,
@@ -96,7 +100,7 @@ async function progress(child, outTimeUs) {
 
 describe("buildRestreamArgs + the box's own signed input", () => {
   it("copies the live HLS video to FLV, audio resampled to 44.1 kHz", () => {
-    const args = buildRestreamArgs({ inputUrl: "http://in", outputUrl: FB });
+    const args = buildRestreamArgs({ inputs: ["http://in"], outputUrl: FB });
     const after = (flag) => args[args.indexOf(flag) + 1];
     assert.equal(after("-i"), "http://in");
     assert.equal(after("-c:v"), "copy");
@@ -242,7 +246,7 @@ describe("describeRestreamFailure", () => {
   });
 });
 
-describe("SessionStreams: when to run", () => {
+describe("Restreams (player streams): when to run", () => {
   let clock;
   let spawn;
   let streams;
@@ -337,7 +341,7 @@ describe("SessionStreams: when to run", () => {
   });
 });
 
-describe("SessionStreams: status", () => {
+describe("Restreams (player streams): status", () => {
   let clock;
   let spawn;
   let streams;
@@ -445,7 +449,7 @@ describe("SessionStreams: status", () => {
       ]
     );
     assert.match(capped.statuses()[0].message, /at most 2/);
-    assert.equal(log.lines.filter((l) => /at most 2 at a time/.test(l)).length, 1);
+    assert.equal(log.lines.filter((l) => /player stream not started.*at most 2/.test(l)).length, 1);
     await capped.stopAll();
   });
 
@@ -471,7 +475,7 @@ describe("heartbeat + config", () => {
       settings: { dataDir: dir },
       agentVersion: "1.0.0",
       log: silentLog(),
-      sessionStreams,
+      streams: sessionStreams,
     });
 
   it("sends sessionStreams: one entry per due stream, [] when none", async () => {

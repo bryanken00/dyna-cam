@@ -40,9 +40,15 @@ const rtmpAddress = z
     }
   }, "Enter the full address starting with rtmp:// or rtmps://, including the stream key");
 
-// PUT /stream-setup/:code
+/** What the stream shows on a 2-camera court (PLAN-002 Phase H). */
+const layout = z.enum(["CAM1", "CAM2", "STACKED"]).optional();
+
+// PUT /stream-setup/:code — a stream key (and optionally a layout)…
 export const saveStreamSchema = z.discriminatedUnion("platform", [
-  z.object({ platform: z.literal("FACEBOOK"), streamKey }),
-  z.object({ platform: z.literal("YOUTUBE"), streamKey }),
-  z.object({ platform: z.literal("OTHER"), url: rtmpAddress }),
+  z.object({ platform: z.literal("FACEBOOK"), streamKey, layout }),
+  z.object({ platform: z.literal("YOUTUBE"), streamKey, layout }),
+  z.object({ platform: z.literal("OTHER"), url: rtmpAddress, layout }),
 ]);
+
+// …or only a new layout for the stream already saved
+export const streamLayoutSchema = z.object({ layout: z.enum(["CAM1", "CAM2", "STACKED"]) });

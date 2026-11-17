@@ -10,6 +10,8 @@ export const heartbeatSchema = z.object({
     .array(
       z.object({
         courtId: z.string().min(1).max(50),
+        // PLAN-002 Phase H: which of the court's cameras (omitted = camera 1)
+        camera: z.union([z.literal(1), z.literal(2)]).optional(),
         status: z.enum(["ok", "error", "starting"]),
         message: optionalString(255),
         // Phase 5 live stream for this court (omitted when not streaming)

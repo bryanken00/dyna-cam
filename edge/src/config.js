@@ -133,6 +133,8 @@ export function loadConfig(env = process.env) {
     buttonKey: String(env.BUTTON_KEY ?? "").trim(),
     livePort,
     liveHost,
+    // Stacked (two-camera, re-encoded) live streams at once, court and player streams together
+    maxStackedStreams: int(env, "MAX_STACKED_STREAMS", 2, 0, 8),
     logLevel: ["debug", "info", "warn", "error"].includes(logLevel) ? logLevel : "info",
     ffmpegPath: env.FFMPEG_PATH || "ffmpeg",
     ffprobePath: env.FFPROBE_PATH || "ffprobe",

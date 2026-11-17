@@ -120,11 +120,36 @@ describe("routeLive", () => {
     assert.deepEqual(routeLive("GET", "/live/court-1/index.m3u8?exp=1&sig=ab"), {
       kind: "playlist",
       courtId: "court-1",
+      camera: 1,
       file: "index.m3u8",
       exp: "1",
       sig: "ab",
     });
     assert.equal(routeLive("HEAD", `/live/c_2/${T0}.ts`).kind, "segment");
+  });
+
+  it("routes camera 2 under /cam2/, same court id", () => {
+    assert.deepEqual(routeLive("GET", "/live/court-1/cam2/index.m3u8?exp=1&sig=ab"), {
+      kind: "playlist",
+      courtId: "court-1",
+      camera: 2,
+      file: "index.m3u8",
+      exp: "1",
+      sig: "ab",
+    });
+    const seg = routeLive("GET", `/live/court-1/cam2/${T0}.ts`);
+    assert.equal(seg.kind, "segment");
+    assert.equal(seg.camera, 2);
+    for (const bad of [
+      "/live/court-1/cam3/index.m3u8",
+      "/live/court-1/cam2/cam2/index.m3u8",
+      "/live/court-1/cam2",
+      "/live/court-1/cam2/../../x.ts",
+      "/live/court-1~cam2/index.m3u8",
+      "/live/court-1/CAM2/index.m3u8",
+    ]) {
+      assert.equal(routeLive("GET", bad).status, 404, bad);
+    }
   });
 
   it("404s traversal and anything that isn't a recorder segment name", () => {
@@ -362,6 +387,13 @@ describe("live server", () => {
       open: T0 + 14,
       payload: Buffer.concat([packet, packet]),
     });
+    // Camera 2 of the same court: its own folder and footage
+    const pkt2 = tsPacket({ pcr: 126_000, pts: 135_000, dts: 129_000 });
+    await court(path.join(bufferDir, "court-1~cam2"), {
+      rows: steadyRows(1, 6),
+      open: T0 + 14,
+      payload: Buffer.concat([pkt2, pkt2, pkt2]),
+    });
     await fs.writeFile(path.join(bufferDir, "device.json"), "{}");
   });
   after(async () => {
@@ -382,6 +414,21 @@ describe("live server", () => {
     const head = await rawGet(port, `/live/court-1/index.m3u8?${q}`, "HEAD");
     assert.equal(head.status, 200);
     assert.equal(head.body.length, 0);
+  });
+
+  it("serves camera 2 from its own folder with the same signature", async () => {
+    const res = await rawGet(port, `/live/court-1/cam2/index.m3u8?${q}`);
+    assert.equal(res.status, 200);
+    const text = res.body.toString();
+    // Relative URIs resolve under /cam2/; the newest closed segment of camera 2's folder
+    assert.ok(text.includes(`${T0 + 12}.ts?${q}\n`));
+    const seg = await rawGet(port, `/live/court-1/cam2/${T0 + 12}.ts?${q}`);
+    assert.equal(seg.status, 200);
+    assert.equal(seg.body.length, 3 * 188, "camera 2's file, not camera 1's");
+    const one = await rawGet(port, `/live/court-1/${T0 + 12}.ts?${q}`);
+    assert.equal(one.body.length, 2 * 188);
+    const other = `exp=${exp}&sig=${signLive(KEY, "court-2", exp)}`;
+    assert.equal((await rawGet(port, `/live/court-1/cam2/index.m3u8?${other}`)).status, 403);
   });
 
   it("streams a segment with its clock moved to its content start", async () => {

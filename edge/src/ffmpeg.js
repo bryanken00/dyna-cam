@@ -99,7 +99,15 @@ export async function probeVideo(ffprobePath, file) {
   return { width: stream.width, height: stream.height, codec: stream.codec_name };
 }
 
-/** Duration (s) and stream types of a finished file. */
+/** "30000/1001" → 29.97; "0/0" or missing → undefined. */
+const frameRateOf = (text) => {
+  const [num, den] = String(text || "")
+    .split("/")
+    .map(Number);
+  return num > 0 && den > 0 ? num / den : undefined;
+};
+
+/** Duration (s) and stream types (with the video frame rate) of a file. */
 export async function probeFile(ffprobePath, file) {
   const { stdout } = await runFfmpeg(
     ffprobePath,
@@ -107,7 +115,7 @@ export async function probeFile(ffprobePath, file) {
       "-v",
       "error",
       "-show_entries",
-      "format=duration:stream=codec_type,codec_name,width,height",
+      "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate",
       "-of",
       "json",
       file,
@@ -122,6 +130,7 @@ export async function probeFile(ffprobePath, file) {
       codec: s.codec_name,
       width: s.width,
       height: s.height,
+      fps: frameRateOf(s.avg_frame_rate),
     })),
   };
 }

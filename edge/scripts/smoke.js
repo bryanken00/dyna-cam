@@ -5,27 +5,28 @@
  *   npm run smoke -- --encoder libx264   # force an encoder
  *   npm run smoke -- --keep              # keep the temp folder to look at the files
  *   npm run smoke -- --bursty            # feed the camera in ~1 s bursts (bad Wi-Fi)
+ *   npm run smoke -- --no-stream         # skip the RTMP restreams
  *
- * 1. Makes a fake Tapo-like "camera" file: H.264 High 1280x720@30 with
- *    keyframes at irregular intervals (2.1 s … 6.1 s) + G.711 A-law 8 kHz audio.
- * 2. Plays it in real time into the REAL CourtRecorder (only the RTSP input
- *    options are swapped for a pipe), so segments, segments.csv, index.json and
- *    the wall-clock stamping are the production ones.
- * 3. Cuts a 65 s clip with makeClip() + a PNG logo and checks the result:
- *    duration ≈ 65 s, H.264 video + AAC audio, moov before mdat (faststart),
- *    JPEG thumbnail.
- * 4. Camera setup: reads the camera's details and a preview JPEG from the
+ * 1. Makes two fake cameras for ONE court: a Tapo-like H.264 High 1280x720@30
+ *    with keyframes at irregular intervals (2.1 s … 6.1 s) + G.711 A-law 8 kHz
+ *    audio (camera 1), and a 1280x720@25 camera without audio (camera 2).
+ * 2. Plays each in real time into its own REAL CourtRecorder (only the RTSP
+ *    input options are swapped for a pipe), so segments, segments.csv,
+ *    index.json and the wall-clock stamping are the production ones.
+ * 3. Cuts a 65 s clip with makeClip() + a PNG logo: both cameras stacked,
+ *    1280x1440, H.264 + AAC (camera 1's sound), every frame, moov before mdat
+ *    (faststart), JPEG thumbnail.
+ * 4. Camera setup: reads camera 1's details and a preview JPEG from the
  *    latest closed segment (no camera connection).
- * 5. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
+ * 5. Cuts a 60 s session part (exact window, stacked, capped bitrate).
  * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
  *    HLS; ffprobe plays the signed playlist URL and the video clock must run
- *    on across segments (each file restarts at 0 on disk), a bad signature 403s.
- *    Then a player's own stream (restream.js) copies that live view to a local
- *    RTMP listener: it must report "live" and the listener must get H.264.
- * 7. Meanwhile (skip with --no-stream) a second recorder records AND streams to
- *    a local ffmpeg RTMP server through the tee muxer: segments keep coming,
- *    the receiver gets video, killing the receiver leaves the recording running
- *    and reports a stream error, and a new receiver is picked up again.
+ *    on across segments (each file restarts at 0 on disk), a bad signature
+ *    403s, and camera 2's playlist (/cam2/) is served.
+ * 7. Restreams (skip with --no-stream) to local RTMP listeners: the court's
+ *    venue stream STACKED (1280x1440, encoded) and a player's stream (CAM1,
+ *    copied) go live; the venue stream's layout is then changed to CAM2 and
+ *    goes live again (1280x720) — and neither recorder is ever restarted.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -37,9 +38,8 @@ import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
 import { createLiveServer, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
-import { SessionStreams } from "../src/restream.js";
+import { Restreams } from "../src/restream.js";
 import { loadTimeline } from "../src/segments.js";
-import { maskStreamUrl } from "../src/stream.js";
 import { sleep } from "../src/util.js";
 
 const argv = process.argv.slice(2);
@@ -121,7 +121,32 @@ async function makeCamera(dir) {
     "1",
     logo,
   ]);
-  return { file, logo };
+  // Camera 2: another angle, 25 fps, keyframe every 2 s, no microphone
+  const file2 = path.join(dir, "camera2.mkv");
+  await runFfmpeg(FFMPEG, [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=1280x720:rate=25",
+    "-t",
+    String(SOURCE_SECONDS),
+    "-pix_fmt",
+    "yuv420p",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-bf",
+    "0",
+    "-g",
+    "50",
+    file2,
+  ]);
+  return { file, file2, logo };
 }
 
 const inputFormat = () => (flag("--bursty") ? "matroska" : "nut");
@@ -190,24 +215,26 @@ async function topLevelBoxes(file) {
 /** The pass/fail rules for the finished clip. */
 function check({ info, video, audio, boxes, frames, videoStart, thumb }) {
   if (Math.abs(info.duration - 65) > 1.5) fail(`duration ${info.duration}s, expected ≈ 65s`);
-  if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 720)
-    fail(`video stream ${JSON.stringify(video)}`);
+  // Both cameras stacked: 1280×720 each
+  if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 1440)
+    fail(`video stream ${JSON.stringify(video)} — expected the stacked 1280x1440`);
   if (audio?.codec !== "aac")
     fail(`audio stream ${JSON.stringify(audio)} — the camera's A-law audio did not survive`);
   if (boxes.indexOf("moov") === -1 || boxes.indexOf("moov") > boxes.indexOf("mdat"))
     fail("moov is not before mdat (no faststart)");
-  // The fake camera runs at 30 fps: a smooth clip keeps (nearly) every frame
-  if (frames < 65 * 30 * 0.95)
+  // Stacked at the slower camera's 25 fps: a smooth clip keeps (nearly) every frame
+  if (frames < 65 * 25 * 0.95)
     fail(`only ${frames} video frames — frames were dropped (choppy clip)`);
   if (videoStart > 0.2) fail(`video starts ${videoStart}s into the clip`);
   if (!thumb || thumb[0] !== 0xff || thumb[1] !== 0xd8 || thumb[2] !== 0xff)
     fail("thumbnail is not a JPEG");
 }
 
-const RTMP_URL = "rtmp://127.0.0.1:19350/live/smoke-key-9876";
+const VENUE_URL = "rtmp://127.0.0.1:19350/live/venue-key-9876";
+const PLAYER_URL = "rtmp://127.0.0.1:19351/live/player-key-4321";
 
 /** ffmpeg as a one-shot RTMP server, writing what it receives to an MPEG-TS file. */
-const rtmpReceiver = (file, rtmpUrl = RTMP_URL) =>
+const rtmpReceiver = (file, rtmpUrl) =>
   spawn(
     FFMPEG,
     [
@@ -230,79 +257,8 @@ const rtmpReceiver = (file, rtmpUrl = RTMP_URL) =>
     }
   );
 
-const countSegments = async (dir) =>
-  (await fs.readdir(dir).catch(() => [])).filter((n) => /^\d+\.ts$/.test(n)).length;
-
-/** Phase 5: record + stream from ONE recorder process; the stream can fail without hurting the recording. */
-async function streamPhase({ dir, file, settings }) {
-  const bufferDir = path.join(dir, "buffer", "court-stream");
-  const recvFile = path.join(dir, "received.ts");
-  const recvFile2 = path.join(dir, "received-2.ts");
-  let receiver = rtmpReceiver(recvFile);
-  await sleep(1000);
-  const recorder = new CourtRecorder({
-    court: {
-      courtId: "court-stream",
-      name: "Stream court",
-      cameraRtspUrl: "rtsp://smoke:secret@127.0.0.1/stream1",
-      stream: { rtmpUrl: RTMP_URL },
-    },
-    dir: bufferDir,
-    settings,
-    ffmpegMajor: 99,
-    log: createLogger("stream-recorder"),
-    // MKV input: NUT tags H.264 with a fourcc that FLV refuses (RTSP sets none)
-    spawnImpl: pipedSpawn(file, "matroska"),
-  });
-  const tickFor = async (ms) => {
-    for (const end = Date.now() + ms; Date.now() < end;) {
-      await sleep(1000);
-      await recorder.tick();
-    }
-  };
-  const results = [];
-  try {
-    recorder.start();
-    await tickFor(12_000);
-    const live = recorder.status();
-    const before = await countSegments(bufferDir);
-    receiver.kill("SIGKILL");
-    await tickFor(8_000);
-    const dead = recorder.status();
-    const during = await countSegments(bufferDir);
-    receiver = rtmpReceiver(recvFile2);
-    await tickFor(16_000);
-    const back = recorder.status();
-    const afterCount = await countSegments(bufferDir);
-    receiver.kill("SIGKILL");
-    await recorder.stop();
-    const got = await probeFile(FFPROBE, recvFile).catch(() => ({ duration: 0, streams: [] }));
-    const got2 = await probeFile(FFPROBE, recvFile2).catch(() => ({ duration: 0, streams: [] }));
-    results.push(
-      `stream to ${maskStreamUrl(RTMP_URL)} — after 12 s: recording ${live.status}, stream ${live.streamStatus}`,
-      `receiver 1 got ${got.streams.map((s) => s.codec).join("+") || "nothing"}, ${got.duration.toFixed(1)}s`,
-      `receiver killed → stream ${dead.streamStatus} ("${dead.streamMessage}"), recording ${dead.status}, segments ${before} → ${during}`,
-      `new receiver → stream ${back.streamStatus}, recording ${back.status}, segments → ${afterCount}; receiver 2 got ${got2.streams.map((s) => s.codec).join("+") || "nothing"}, ${got2.duration.toFixed(1)}s`
-    );
-    if (live.status !== "ok" || live.streamStatus !== "live")
-      fail(`stream did not go live: ${JSON.stringify(live)}`);
-    if (!got.streams.some((s) => s.codec === "h264") || got.duration < 5)
-      fail("the RTMP receiver got no video");
-    if (dead.status !== "ok" || dead.streamStatus !== "error")
-      fail(`after the receiver died: ${JSON.stringify(dead)}`);
-    if (during <= before || afterCount <= during)
-      fail("segments stopped while the stream was down");
-    if (back.streamStatus !== "live" || !got2.streams.some((s) => s.codec === "h264"))
-      fail("the stream did not reconnect");
-    return results;
-  } finally {
-    receiver.kill("SIGKILL");
-    await recorder.stop();
-  }
-}
-
 /** Phase 6: the LAN live view over the court-smoke buffer, read by ffprobe like a player. */
-async function livePhase({ bufferRoot }) {
+async function livePhase({ bufferRoot, recorders, encoder }) {
   await sleep(25_000);
   const key = "5".repeat(64);
   const server = createLiveServer({ bufferDir: bufferRoot, key, log: createLogger("live") });
@@ -351,62 +307,124 @@ async function livePhase({ bufferRoot }) {
     if (!audio) fail(`no audio in the live view — ${result}`);
     if (!(sequence(second) > sequence(first))) fail(`media sequence did not move on — ${result}`);
     log.info(result);
-    await playerStreamPhase({
-      port: server.address().port,
-      key,
-      workDir: path.dirname(bufferRoot),
-    });
+    const cam2 = await fetch(url.replace("/court-smoke/", "/court-smoke/cam2/"));
+    const cam2Text = await cam2.text();
+    if (cam2.status !== 200 || !cam2Text.includes("#EXTINF")) {
+      fail(`camera 2's live playlist answered ${cam2.status}`);
+    }
+    if (!flag("--no-stream")) {
+      const port = server.address().port;
+      await restreamPhase({ port, key, workDir: path.dirname(bufferRoot), recorders, encoder });
+    }
   } finally {
     server.close();
   }
 }
 
-/** Phase 6b: a player's own stream — its own ffmpeg copies the live view to RTMP (here a local listener). */
-async function playerStreamPhase({ port, key, workDir }) {
-  const playerUrl = "rtmp://127.0.0.1:19351/live/player-key-4321";
-  const received = path.join(workDir, "player-received.ts");
-  const receiver = rtmpReceiver(received, playerUrl);
+/** Tick the streams until `done()` or `ms` pass. */
+async function tickUntil(streams, done, ms) {
+  for (const end = Date.now() + ms; Date.now() < end && !done();) {
+    await streams.tick();
+    await sleep(1000);
+  }
+}
+
+const probeReceived = async (file) => {
+  const got = await probeFile(FFPROBE, file).catch(() => ({ duration: 0, streams: [] }));
+  const video = got.streams.find((s) => s.type === "video");
+  return {
+    ...got,
+    video,
+    text: `${got.streams.map((s) => s.codec).join("+") || "nothing"} ${video ? `${video.width}x${video.height}` : ""}, ${got.duration.toFixed(1)}s`,
+  };
+};
+
+/**
+ * Phase 7: restreams of the box's own live view (restream.js) to local RTMP
+ * listeners — the venue's court stream STACKED, a player's CAM1, then the
+ * venue stream switched to CAM2. The recorders must never restart.
+ */
+async function restreamPhase({ port, key, workDir, recorders, encoder }) {
+  const files = ["venue-stacked.ts", "venue-cam2.ts", "player.ts"].map((f) =>
+    path.join(workDir, f)
+  );
+  let venue = rtmpReceiver(files[0], VENUE_URL);
+  const player = rtmpReceiver(files[2], PLAYER_URL);
   await sleep(1000);
   const live = {
     settings: { livePort: port },
-    localPlaylistUrl: (courtId, exp) =>
-      `http://127.0.0.1:${port}/live/${courtId}/index.m3u8?exp=${exp}&sig=${signLive(key, courtId, exp)}`,
+    localPlaylistUrl: (courtId, exp, camera = 1) =>
+      `http://127.0.0.1:${port}/live/${courtId}/${camera === 2 ? "cam2/" : ""}index.m3u8?exp=${exp}&sig=${signLive(key, courtId, exp)}`,
   };
-  const streams = new SessionStreams({
+  const [rec1, rec2] = recorders;
+  const streams = new Restreams({
     live,
-    records: () => true,
+    cameras: () => [
+      { camera: 1, up: rec1.state === "ok", fps: 30, hasAudio: true },
+      { camera: 2, up: rec2.state === "ok", fps: 25, hasAudio: false },
+    ],
     ffmpegPath: FFMPEG,
-    log: createLogger("player-stream"),
+    encoder,
+    log: createLogger("stream"),
   });
+  const court = (layout) => [{ courtId: "court-smoke", stream: { rtmpUrl: VENUE_URL, layout } }];
   const now = Date.now();
+  streams.setCourts(court("STACKED"));
   streams.setSessions([
     {
       sessionId: "smoke-session",
       courtId: "court-smoke",
       startMs: now - 1000,
       endMs: now + 600_000,
-      stream: { url: playerUrl },
+      stream: { url: PLAYER_URL, layout: "CAM1" },
     },
   ]);
-  let status;
+  const pids = () => recorders.map((r) => `${r.child?.pid}/${r.spawnCount}`).join(",");
+  const pidsBefore = pids();
+  const venueLive = () => streams.courtStatus("court-smoke").streamStatus === "live";
+  const playerLive = () => streams.statuses()[0]?.status === "live";
+  let stacked;
+  let switched;
+  let playerStatus;
   try {
-    for (let i = 0; i < 25 && status?.status !== "live"; i += 1) {
-      await streams.tick();
-      status = streams.statuses()[0];
-      await sleep(1000);
-    }
+    await tickUntil(streams, () => venueLive() && playerLive(), 30_000);
+    stacked = streams.courtStatus("court-smoke");
+    playerStatus = streams.statuses()[0];
+    await sleep(3000);
+    // The venue switches the court stream to camera 2: only the restream restarts
+    venue.kill("SIGKILL");
+    await sleep(500);
+    venue = rtmpReceiver(files[1], VENUE_URL);
+    await sleep(1000);
+    streams.setCourts(court("CAM2"));
+    await tickUntil(streams, venueLive, 30_000);
+    switched = streams.courtStatus("court-smoke");
     await sleep(3000);
   } finally {
     await streams.stopAll();
     await sleep(1000);
-    receiver.kill("SIGKILL");
+    venue.kill("SIGKILL");
+    player.kill("SIGKILL");
   }
-  const got = await probeFile(FFPROBE, received).catch(() => ({ duration: 0, streams: [] }));
-  const codecs = got.streams.map((s) => s.codec).join("+") || "nothing";
-  const result = `player stream: ${status?.status} ("${status?.message}"); the listener got ${codecs}, ${got.duration.toFixed(1)}s`;
-  if (status?.status !== "live") fail(`the player stream did not go live — ${result}`);
-  if (!got.streams.some((s) => s.codec === "h264") || got.duration < 4) {
-    fail(`the player stream sent no video — ${result}`);
+  const pidsAfter = pids();
+  const [gotStacked, gotCam2, gotPlayer] = await Promise.all(files.map(probeReceived));
+  const result =
+    `restreams: venue STACKED ${stacked?.streamStatus} → listener got ${gotStacked.text}; ` +
+    `venue CAM2 ${switched?.streamStatus} → ${gotCam2.text}; player CAM1 ${playerStatus?.status} → ${gotPlayer.text}; ` +
+    `recorders (pid/starts) ${pidsBefore} → ${pidsAfter}`;
+  if (stacked?.streamStatus !== "live" || gotStacked.video?.height !== 1440) {
+    fail(`the stacked venue stream did not work — ${result}`);
+  }
+  if (!gotStacked.streams.some((st) => st.codec === "aac"))
+    fail(`stacked stream has no audio — ${result}`);
+  if (switched?.streamStatus !== "live" || gotCam2.video?.height !== 720) {
+    fail(`the CAM2 venue stream did not work — ${result}`);
+  }
+  if (playerStatus?.status !== "live" || gotPlayer.video?.codec !== "h264") {
+    fail(`the player stream did not work — ${result}`);
+  }
+  if (pidsBefore !== pidsAfter || recorders.some((r) => r.spawnCount !== 1)) {
+    fail(`a recorder was restarted — ${result}`);
   }
   log.info(result);
 }
@@ -440,7 +458,7 @@ async function cameraSetupPhase({ dir, bufferDir, settings }) {
 }
 
 /** A session part: exactly [20 s, 80 s] of the recording, with the capped session bitrate. */
-async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings }) {
+async function cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, settings }) {
   const part = await makeClip(
     {
       clipId: "smoke-part",
@@ -450,7 +468,7 @@ async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settin
       windowEndMs: startedAt + 80_000,
     },
     {
-      segmentsDir: bufferDir,
+      segmentsDirs: bufferDirs,
       courtKnown: true,
       workDir: path.join(dir, "jobs", "smoke-part"),
       logoPath: logo,
@@ -470,22 +488,26 @@ async function cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settin
   if (Math.abs(partInfo.duration - 60) > 1)
     fail(`part duration ${partInfo.duration}s, expected 60s`);
   if (!partInfo.streams.some((s) => s.codec === "aac")) fail("part has no AAC audio");
-  if (kbps > 1400) fail(`part bitrate ${kbps} kb/s is over the session cap`);
+  if (partInfo.streams.find((s) => s.type === "video")?.height !== 1440)
+    fail("the session part is not stacked");
+  // Stacked session parts: maxrate 1900k + 64k audio
+  if (kbps > 2100) fail(`part bitrate ${kbps} kb/s is over the stacked session cap`);
   return { ...partInfo, kbps };
 }
 
-/** The main court's recorder, fed in real time from the fake camera file. */
-const smokeRecorder = ({ bufferDir, file, settings }) =>
+/** One camera of the smoke court, fed in real time from its fake camera file. */
+const smokeRecorder = ({ bufferDir, file, settings, camera = 1 }) =>
   new CourtRecorder({
     court: {
       courtId: "court-smoke",
       name: "Smoke court",
-      cameraRtspUrl: "rtsp://smoke:secret@127.0.0.1/stream1",
+      camera,
+      cameraRtspUrl: `rtsp://smoke:secret@127.0.0.1/stream${camera}`,
     },
     dir: bufferDir,
     settings,
     ffmpegMajor: 99,
-    log: createLogger("recorder"),
+    log: createLogger(camera === 2 ? "recorder-cam2" : "recorder"),
     spawnImpl: pipedSpawn(file),
   });
 
@@ -500,24 +522,26 @@ async function main() {
     vaapiDevice: "/dev/dri/renderD128",
   };
   let recorder;
+  let recorder2;
   try {
     log.info(`working in ${dir}`);
-    const { file, logo } = await makeCamera(dir);
+    const { file, file2, logo } = await makeCamera(dir);
     const encoder = await detectEncoder({
       ffmpegPath: FFMPEG,
       preferred: option("--encoder", "auto"),
       log,
     });
-    log.info(`fake camera ready (${SOURCE_SECONDS}s, pcm_alaw audio); clip encoder: ${encoder}`);
+    log.info(`fake cameras ready (${SOURCE_SECONDS}s, pcm_alaw audio); clip encoder: ${encoder}`);
 
-    const streaming = flag("--no-stream")
-      ? Promise.resolve(null)
-      : streamPhase({ dir, file, settings }).catch((err) => err);
     const bufferDir = path.join(dir, "buffer", "court-smoke");
+    const bufferDirs = [bufferDir, path.join(dir, "buffer", "court-smoke~cam2")];
     recorder = smokeRecorder({ bufferDir, file, settings });
+    recorder2 = smokeRecorder({ bufferDir: bufferDirs[1], file: file2, settings, camera: 2 });
     const startedAt = Date.now();
     recorder.start();
-    const liveView = livePhase({ bufferRoot: path.dirname(bufferDir) }).then(
+    recorder2.start();
+    const recorders = [recorder, recorder2];
+    const liveView = livePhase({ bufferRoot: path.dirname(bufferDir), recorders, encoder }).then(
       () => null,
       (e) => e
     );
@@ -535,6 +559,7 @@ async function main() {
     while (!result || result.status === "wait") {
       await sleep(2000);
       await recorder.tick();
+      await recorder2.tick();
       const status = recorder.status();
       if (status.status !== lastStatus)
         log.info(`recorder status: ${status.status} — ${status.message}`);
@@ -542,7 +567,7 @@ async function main() {
       if (Date.now() - startedAt > (SOURCE_SECONDS + 40) * 1000)
         fail("timed out waiting for the window");
       result = await makeClip(entry, {
-        segmentsDir: bufferDir,
+        segmentsDirs: bufferDirs,
         courtKnown: true,
         workDir: path.join(dir, "jobs", "smoke-clip"),
         logoPath: logo,
@@ -555,6 +580,7 @@ async function main() {
     const liveError = await liveView; // the finally block stops the recorder
     if (liveError) throw liveError;
     await recorder.stop();
+    await recorder2.stop();
     if (result.status !== "done") fail(`clip not made: ${JSON.stringify(result)}`);
 
     const timeline = await loadTimeline(bufferDir, { ffprobePath: FFPROBE });
@@ -591,20 +617,18 @@ async function main() {
     if (recorder.lastStderr && !/^$/.test(recorder.lastStderr))
       log.info(`recorder's last stderr line: ${recorder.lastStderr}`);
     log.info(
-      `clip OK — ${info.duration.toFixed(2)}s with ${result.encoder}, AAC audio, faststart, JPEG thumbnail`
+      `clip OK — ${info.duration.toFixed(2)}s, ${result.cameras} cameras stacked ${video.width}x${video.height} with ${result.encoder}, AAC audio, faststart, JPEG thumbnail`
     );
 
     await cameraSetupPhase({ dir, bufferDir, settings });
-    const partInfo = await cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings });
+    const partInfo = await cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, settings });
     const { kbps } = partInfo;
-    const streamResult = await streaming;
-    if (streamResult instanceof Error) throw streamResult;
-    if (streamResult) console.log(`\n${streamResult.join("\n")}\n`);
     log.info(
       `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s`
     );
   } finally {
     await recorder?.stop();
+    await recorder2?.stop();
     if (flag("--keep")) log.info(`kept ${dir}`);
     else await fs.rm(dir, { recursive: true, force: true });
   }

@@ -37,7 +37,7 @@ before(async () => {
           data: { clipId: "c9", shareUrl: "https://app/clip/t", merged: false },
         });
       }
-      if (req.url === "/api/v1/device/courts/court-1/snapshot") {
+      if (req.url.startsWith("/api/v1/device/courts/court-1/snapshot")) {
         return send(200, { success: true, message: "Snapshot saved", data: { snapshotAt: "x" } });
       }
       if (req.url === "/api/v1/pair/device") {
@@ -196,6 +196,19 @@ describe("device API client", () => {
         body,
         /name="snapshot"; filename="snapshot\.jpg"\r\nContent-Type: image\/jpeg\r\n\r\nJPGDATA/
       );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends camera 2's preview with ?camera=2 (camera 1 without a query)", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "edge-api-"));
+    try {
+      await fs.writeFile(path.join(dir, "preview.jpg"), "JPGDATA");
+      await api().uploadSnapshot("court-1", path.join(dir, "preview.jpg"), 2);
+      assert.equal(seen.at(-1).url, "/api/v1/device/courts/court-1/snapshot?camera=2");
+      await api().uploadSnapshot("court-1", path.join(dir, "preview.jpg"), 1);
+      assert.equal(seen.at(-1).url, "/api/v1/device/courts/court-1/snapshot");
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

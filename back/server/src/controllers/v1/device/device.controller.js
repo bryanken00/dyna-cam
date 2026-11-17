@@ -96,8 +96,8 @@ router.get(
         [venueId]
       ),
       req.db.query(
-        `SELECT courtId, name, cameraRtspUrl, streamEnabled, streamRtmpUrl,
-                previewWantedUntil > ? AS previewWanted
+        `SELECT courtId, name, cameraRtspUrl, camera2RtspUrl, streamEnabled, streamRtmpUrl,
+                streamLayout, previewWantedUntil > ? AS previewWanted
          FROM courts
          WHERE venueId = ? AND status = 'Active' AND cameraRtspUrl IS NOT NULL
          ORDER BY name ASC`,
@@ -107,11 +107,13 @@ router.get(
       // starting within a day, or ended in the last 30 minutes (parts may
       // still be waiting to be cut)
       req.db.query(
-        `SELECT sessionId, courtId, startAt, endAt, status, streamUrl
-         FROM recording_sessions
-         WHERE venueId = ? AND status IN ('Scheduled', 'Recording', 'Processing')
-           AND startAt <= DATE_ADD(?, INTERVAL 1 DAY)
-           AND endAt >= DATE_SUB(?, INTERVAL 30 MINUTE)`,
+        `SELECT s.sessionId, s.courtId, s.startAt, s.endAt, s.status, s.streamUrl,
+                s.streamLayout, c.camera2RtspUrl IS NOT NULL AS hasCamera2
+         FROM recording_sessions s
+         JOIN courts c ON c.courtId = s.courtId
+         WHERE s.venueId = ? AND s.status IN ('Scheduled', 'Recording', 'Processing')
+           AND s.startAt <= DATE_ADD(?, INTERVAL 1 DAY)
+           AND s.endAt >= DATE_SUB(?, INTERVAL 30 MINUTE)`,
         [venueId, getCurrentTimestampLocal(), getCurrentTimestampLocal()]
       ),
     ]);
@@ -122,6 +124,9 @@ router.get(
         courtId: court.courtId,
         name: court.name,
         cameraRtspUrl: decryptSecret(court.cameraRtspUrl),
+        // PLAN-002 Phase H: the optional second camera (null = none)
+        camera2RtspUrl: decryptSecret(court.camera2RtspUrl),
+        camera2Version: court.camera2RtspUrl ? cameraVersion(court.camera2RtspUrl) : null,
         // Changes whenever the camera address is saved; the box echoes it in
         // its heartbeat so the setup page knows a report is about this address
         cameraVersion: cameraVersion(court.cameraRtspUrl),
@@ -129,7 +134,10 @@ router.get(
         // serves one RTSP client). null = not streaming.
         stream:
           court.streamEnabled && court.streamRtmpUrl
-            ? { rtmpUrl: decryptSecret(court.streamRtmpUrl) }
+            ? {
+                rtmpUrl: decryptSecret(court.streamRtmpUrl),
+                layout: court.camera2RtspUrl ? court.streamLayout : "CAM1",
+              }
             : null,
         // PLAN-002: someone has this court's setup page open — send a snapshot
         previewWanted: Boolean(court.previewWanted),
@@ -160,7 +168,9 @@ router.get(
           courtId: row.courtId,
           startMs,
           endMs,
-          stream: streamUrl ? { url: streamUrl } : null,
+          stream: streamUrl
+            ? { url: streamUrl, layout: row.hasCamera2 ? row.streamLayout || "STACKED" : "CAM1" }
+            : null,
         };
       }),
       clip: { preSeconds: CLIP_PRE_SECONDS, postSeconds: CLIP_POST_SECONDS },
@@ -190,6 +200,7 @@ router.post(
       .filter((camera) => names.has(camera.courtId))
       .map((camera) => ({
         courtId: camera.courtId,
+        camera: camera.camera || 1,
         courtName: names.get(camera.courtId),
         status: camera.status,
         message: camera.message || null,
@@ -558,7 +569,7 @@ router.post(
  */
 const loadOwnCourt = catchAsync(async (req, res, next) => {
   const rows = await req.db.query(
-    `SELECT courtId, venueId, snapshotPath FROM courts
+    `SELECT courtId, venueId, snapshotPath, snapshot2Path FROM courts
      WHERE courtId = ? AND venueId = ? AND status != 'Deleted'
      LIMIT 1`,
     [req.params.courtId, req.device.venueId]
@@ -585,8 +596,9 @@ const snapshotLimiter = dynamicLimiter({
 });
 
 /**
- * POST /courts/:courtId/snapshot
- * multipart/form-data: `snapshot` (JPEG). Replaces the court's previous one.
+ * POST /courts/:courtId/snapshot[?camera=2]
+ * multipart/form-data: `snapshot` (JPEG). Replaces that camera's previous one
+ * (camera 2: PLAN-002 Phase H).
  */
 router.post(
   "/courts/:courtId/snapshot",
@@ -599,13 +611,17 @@ router.post(
     }
     const storedPath = toStoredUploadPath(req.file);
     const now = getCurrentTimestampLocal();
+    const second = String(req.query.camera) === "2";
+    const previous = second ? req.court.snapshot2Path : req.court.snapshotPath;
     await req.db.query(
       // Live status, not an edit — dateUpdated is left alone (like lastSeenAt)
-      `UPDATE courts SET snapshotPath = ?, snapshotAt = ? WHERE courtId = ?`,
+      second
+        ? `UPDATE courts SET snapshot2Path = ?, snapshot2At = ? WHERE courtId = ?`
+        : `UPDATE courts SET snapshotPath = ?, snapshotAt = ? WHERE courtId = ?`,
       [storedPath, now, req.court.courtId]
     );
-    if (req.court.snapshotPath && req.court.snapshotPath !== storedPath) {
-      await removeSnapshotFile(req.court.snapshotPath);
+    if (previous && previous !== storedPath) {
+      await removeSnapshotFile(previous);
     }
     return res.sendSuccess("Snapshot saved", { snapshotAt: now });
   })

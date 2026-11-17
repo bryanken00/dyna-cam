@@ -39,6 +39,18 @@ export function safeId(id) {
   return `id-${crypto.createHash("sha1").update(value).digest("hex").slice(0, 16)}`;
 }
 
+/**
+ * A court camera's buffer folder name: `<safeId(courtId)>` for camera 1,
+ * `<safeId(courtId)>~cam2` for camera 2 (`~` is never in a safeId, so it
+ * can't collide with another court).
+ */
+export const CAM2_SUFFIX = "~cam2";
+export const cameraDirName = (courtId, camera = 1) =>
+  `${safeId(courtId)}${camera === 2 ? CAM2_SUFFIX : ""}`;
+/** The court folder name a buffer folder belongs to (camera 2's without its suffix). */
+export const courtDirName = (dirName) =>
+  dirName.endsWith(CAM2_SUFFIX) ? dirName.slice(0, -CAM2_SUFFIX.length) : dirName;
+
 /** Truncate to `max` characters (the API caps reasons/messages at 255). */
 export const truncate = (text, max = 255) => {
   const value = String(text ?? "").trim();

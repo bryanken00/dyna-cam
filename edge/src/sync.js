@@ -22,11 +22,11 @@ export class DeviceSync {
     log,
     preview = null,
     live = null,
-    sessionStreams = null,
+    streams = null,
   }) {
     this.preview = preview;
-    // Players' own live streams (restream.js): fed with /config sessions, reported in the heartbeat
-    this.sessionStreams = sessionStreams;
+    // Every live stream (restream.js): fed with /config courts and sessions, reported in the heartbeat
+    this.streams = streams;
     // LAN live view (live.js): its address and signing key go in every heartbeat
     this.live = live;
     this.api = api;
@@ -106,7 +106,9 @@ export class DeviceSync {
     }
     this.recorders.setSessions(config.sessions || []);
     await this.recorders.sync(config.courts || []);
-    this.sessionStreams?.setSessions(fromCache ? [] : config.sessions || []);
+    // The venue's court streams run from a cached config too (as before); players' only live
+    this.streams?.setCourts(config.courts || []);
+    this.streams?.setSessions(fromCache ? [] : config.sessions || []);
     this.preview?.setWanted(fromCache ? [] : config.courts);
     if (!fromCache) await this.updateLogo(config.venue?.logoUrl ?? null);
   }
@@ -152,11 +154,19 @@ export class DeviceSync {
   async heartbeat() {
     await this.api.heartbeat({
       agentVersion: this.agentVersion,
-      cameras: this.recorders.statuses(),
+      // One entry per camera (`camera: 1 | 2`); the venue's court stream status
+      // (streamStatus/streamMessage) rides on camera 1's entry, as before
+      cameras: this.recorders
+        .statuses()
+        .map((entry) =>
+          (entry.camera ?? 1) === 1 && this.streams
+            ? { ...entry, ...this.streams.courtStatus(entry.courtId) }
+            : entry
+        ),
       // { url, key } | null (off, port taken, or no LAN address)
       live: this.live?.info() ?? null,
       // [{ sessionId, status, message }] for each player stream due now; [] when none
-      sessionStreams: this.sessionStreams?.statuses() ?? [],
+      sessionStreams: this.streams?.statuses() ?? [],
     });
   }
 
@@ -165,7 +175,7 @@ export class DeviceSync {
    * heartbeat run every 15 s so starts, stops and statuses show up fast.
    */
   interval(seconds) {
-    const busy = this.preview?.active || this.sessionStreams?.recordingNow();
+    const busy = this.preview?.active || this.streams?.recordingNow();
     return busy ? Math.min(seconds, 15) : seconds;
   }
 

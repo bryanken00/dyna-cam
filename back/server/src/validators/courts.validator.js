@@ -71,15 +71,22 @@ const optionalButtonCode = () =>
       .optional()
   );
 
+/** What a court's stream shows (PLAN-002 Phase H). CAM2/STACKED need camera 2. */
+export const STREAM_LAYOUTS = ["CAM1", "CAM2", "STACKED"];
+const optionalLayout = () => emptyToUndefined(z.enum(STREAM_LAYOUTS).optional());
+
 // POST /
 export const createCourtSchema = z.object({
   venueId: z.string().min(1, "Venue is required").max(50),
   name: z.string().trim().min(1, "Name is required").max(100),
   cameraRtspUrl: optionalRtspUrl(),
+  // PLAN-002 Phase H: an optional second camera (needs camera 1)
+  camera2RtspUrl: optionalRtspUrl(),
   buttonCode: optionalButtonCode(),
   streamEnabled: z.boolean().optional().default(false),
   streamRtmpUrl: optionalRtmpUrl(),
   streamWatchUrl: optionalWatchUrl(),
+  streamLayout: optionalLayout(),
 });
 
 // PUT /:courtId
@@ -89,6 +96,11 @@ export const updateCourtSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
   cameraRtspUrl: optionalRtspUrl(),
   removeCamera: z.boolean().optional().default(false),
+  // Camera 2 (Phase H), write-only the same way: omitted/"" keeps, removeCamera2 clears
+  camera2RtspUrl: optionalRtspUrl(),
+  removeCamera2: z.boolean().optional().default(false),
+  // Omitted keeps the stored layout
+  streamLayout: optionalLayout(),
   // Full update like the other fields: omitted/"" clears the button
   buttonCode: optionalButtonCode(),
   // Live stream: the RTMP address is write-only — omitted/"" keeps the stored

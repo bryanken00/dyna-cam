@@ -82,6 +82,8 @@ export const describeStream = async (db, row, nowMs = Date.now()) => {
   }
   return {
     platform: row.streamPlatform,
+    // Phase H: what the stream shows on a 2-camera court; null on a 1-camera court
+    layout: Number(row.hasCamera2) ? row.streamLayout || "STACKED" : null,
     status,
     message,
     maskedUrl: maskRtmpUrl(url),
@@ -111,7 +113,8 @@ export const createStreamSetup = async (db, sessionId) => {
 /** Columns the stream helpers need, plus what the player's page shows. */
 export const STREAM_SESSION_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.streamUrl, s.streamPlatform,
-  s.streamUpdatedAt, s.streamSetupExpiresAt`;
+  s.streamLayout, s.streamUpdatedAt, s.streamSetupExpiresAt,
+  c.camera2RtspUrl IS NOT NULL AS hasCamera2`;
 
 /**
  * The session a setup code belongs to, while the code works and the session
@@ -133,28 +136,44 @@ export const findSessionBySetupCode = async (db, code) => {
 };
 
 /**
+ * The layout a player's stream uses on this court: one camera → CAM1; two →
+ * what they chose (default both stacked).
+ */
+export const streamLayoutFor = (row, chosen) => (row.hasCamera2 ? chosen || "STACKED" : "CAM1");
+
+/**
  * Save the player's stream. The setup code then keeps working until the
  * session ends, so their page can show the status and Stop.
  */
-export const saveStream = async (db, row, { platform, url }) => {
+export const saveStream = async (db, row, { platform, url, layout }) => {
   const now = getCurrentTimestampLocal();
   await db.query(
     `UPDATE recording_sessions
-     SET streamUrl = ?, streamPlatform = ?, streamUpdatedAt = ?, streamSetupExpiresAt = ?
+     SET streamUrl = ?, streamPlatform = ?, streamLayout = ?, streamUpdatedAt = ?,
+         streamSetupExpiresAt = ?
      WHERE sessionId = ?`,
-    [encryptSecret(url), platform, now, row.endAt, row.sessionId]
+    [encryptSecret(url), platform, streamLayoutFor(row, layout), now, row.endAt, row.sessionId]
+  );
+};
+
+/** Change only what the saved stream shows (Phase H); the key stays as it is. */
+export const saveStreamLayout = async (db, row, layout) => {
+  await db.query(
+    `UPDATE recording_sessions SET streamLayout = ?, streamUpdatedAt = ? WHERE sessionId = ?`,
+    [streamLayoutFor(row, layout), getCurrentTimestampLocal(), row.sessionId]
   );
 };
 
 /** Stop the player's stream (the setup code keeps working until it expires). */
 export const clearStream = async (db, sessionId) => {
   await db.query(
-    `UPDATE recording_sessions SET streamUrl = NULL, streamPlatform = NULL, streamUpdatedAt = ?
+    `UPDATE recording_sessions
+     SET streamUrl = NULL, streamPlatform = NULL, streamLayout = NULL, streamUpdatedAt = ?
      WHERE sessionId = ?`,
     [getCurrentTimestampLocal(), sessionId]
   );
 };
 
 /** SQL that forgets a session's stream and setup code (session ended / cancelled). */
-export const FORGET_STREAM_SQL = `streamUrl = NULL, streamSetupTokenHash = NULL,
-  streamSetupExpiresAt = NULL`;
+export const FORGET_STREAM_SQL = `streamUrl = NULL, streamLayout = NULL,
+  streamSetupTokenHash = NULL, streamSetupExpiresAt = NULL`;

@@ -80,7 +80,7 @@ describe("live streaming", () => {
   it("gives the stream URL to the venue's own box only", async () => {
     const config = await home.device("GET", "/device/config");
     const court = config.data.courts.find((c) => c.courtId === home.courtId);
-    assert.deepEqual(court.stream, { rtmpUrl: INGEST });
+    assert.deepEqual(court.stream, { rtmpUrl: INGEST, layout: "CAM1" });
     const otherConfig = await other.device("GET", "/device/config");
     assert.ok(!JSON.stringify(otherConfig.body).includes("abcd-efgh"));
   });
@@ -135,6 +135,7 @@ describe("live streaming", () => {
     config = await home.device("GET", "/device/config");
     assert.deepEqual(config.data.courts.find((c) => c.courtId === home.courtId).stream, {
       rtmpUrl: INGEST,
+      layout: "CAM1",
     });
 
     // Removing the stream clears the key and turns it off
