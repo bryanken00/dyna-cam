@@ -53,7 +53,7 @@ npx expo export --platform android --clear  # does it bundle?
 
 ## Demo mode
 
-Set `EXPO_PUBLIC_DEMO_MODE=true` in `.env` and the auth layer stops talking to
+Set `EXPO_PUBLIC_DEMO_MODE=true` in `.env` and the app stops talking to
 the network entirely. Any valid email and password signs you in as a fake user;
 the login screen shows an amber **Demo mode** badge so a demo session can never
 be mistaken for a real one. Useful for UI work without the API running.
@@ -62,11 +62,18 @@ be mistaken for a real one. Useful for UI work without the API running.
 | --- | --- | --- |
 | `useLoginAuth` | any credentials, fake user | `POST /api/v1/admin/auth/login` |
 | `useGetMe` | the signed-in demo user | `GET /api/v1/admin/auth/me` |
-| `useChangePassword` | succeeds, saves nothing | `POST /api/v1/admin/auth/change-password` |
+| `useChangePassword` | succeeds, saves nothing | `PUT /api/v1/admin/auth/me/password` |
 | `useLogout` | clears local state | `POST /api/v1/admin/auth/logout` |
 
-The switch is a single `IS_DEMO` check at the top of each hook in
-[src/services/requests/auth.js](src/services/requests/auth.js); fixtures live
+The Dyna Cam screens (Courts, Clips, Sessions, Take payment, Recorder boxes,
+the Dashboard numbers and the Menu's permissions) resolve from fixtures too:
+two venues, four courts, a handful of clips and sessions, every permission at
+write level. Writes (save clip, book, cancel, end, record cash) succeed and
+save nothing. Demo pay codes to try in Take payment: `K7QM2P` (unpaid),
+`H3XR9A` (already paid).
+
+The switch is an `IS_DEMO` check inside each hook in
+[src/services/requests/](src/services/requests/); fixtures live
 in [src/constants/demo.js](src/constants/demo.js).
 
 > `EXPO_PUBLIC_DEMO_MODE` must be exactly `"true"` — env vars arrive as

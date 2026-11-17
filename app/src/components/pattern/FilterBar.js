@@ -2,6 +2,7 @@ import { RotateCw, Search, SlidersHorizontal } from "lucide-react-native";
 import { View } from "react-native";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 
@@ -23,11 +24,16 @@ import { cn } from "@/lib/utils";
  *   >
  *     {showFilters && <FilterRow … />}
  *   </FilterBar>
+ *
+ * For a list the API can't search (Clips), omit `onChangeText` and pass a
+ * `title` instead — it takes the input's place, so the refresh and filter
+ * buttons stay where they always are.
  */
 const FilterBar = ({
   value,
   onChangeText,
   placeholder = "Search…",
+  title,
   onRefresh,
   refreshing = false,
   onToggleFilters,
@@ -40,20 +46,29 @@ const FilterBar = ({
   return (
     <View className={cn("border-border border-b", className)}>
       <View className="flex-row items-center gap-2 px-4 py-3">
-        <View className="relative min-w-0 flex-1 justify-center">
-          <View className="absolute left-3 z-10">
-            <Search size={15} color={colors.mutedForeground} />
+        {onChangeText ? (
+          <View className="relative min-w-0 flex-1 justify-center">
+            <View className="absolute left-3 z-10">
+              <Search size={15} color={colors.mutedForeground} />
+            </View>
+            <Input
+              value={value}
+              onChangeText={onChangeText}
+              placeholder={placeholder}
+              className="h-10 pl-9"
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
           </View>
-          <Input
-            value={value}
-            onChangeText={onChangeText}
-            placeholder={placeholder}
-            className="h-10 pl-9"
-            autoCorrect={false}
-            autoCapitalize="none"
-            returnKeyType="search"
-          />
-        </View>
+        ) : (
+          <Text
+            className="font-sans-medium min-w-0 flex-1 text-[14px]"
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+        )}
 
         {onRefresh ? (
           <Button

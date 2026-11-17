@@ -68,8 +68,9 @@ deduplication, cancellation on unmount, and refetch-on-reconnect for free.
 - [ ] Offline-capable screens read SQLite first and treat the network as a
       refresh, not a prerequisite
 
-**Set `QueryClient` defaults.** Out of the box `staleTime: 0` means every mount
-refetches, and `retry: 3` retries client errors. Decide those once, globally.
+**`QueryClient` defaults** are set once in `App.js`: `staleTime` 15s, and
+retries only for no-response or 5xx errors — a 4xx is final. Override per
+query where it matters (permissions 10 min, pay-code lookup 0).
 
 ---
 
@@ -184,9 +185,8 @@ deliberate to-do, not an oversight.
 
 | Gap | Where | Impact |
 | --- | --- | --- |
-| `new QueryClient()` has no defaults | [App.js](../../../../app/App.js) | `staleTime: 0` refetches on every mount; `retry: 3` retries 4xx |
-| No `React.memo` on rows | [DataListRow.js](../../../../app/src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes |
+| No `React.memo` on `DataListRow` | [DataListRow.js](../../../../app/src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes. The Dyna Cam module rows (`CourtRow`, `ClipRow`, `SessionRow`, `DeviceRow`) are memoised |
 | No `getItemLayout` / windowing props | [DataList.js](../../../../app/src/components/pattern/DataList.js) | Fine at 5 rows, degrades in the hundreds |
-| Search is not debounced | [FilterBar.js](../../../../app/src/components/pattern/FilterBar.js) | Filters on every keystroke; becomes a request per keystroke once wired to an API |
+| `FilterBar` itself doesn't debounce | [FilterBar.js](../../../../app/src/components/pattern/FilterBar.js) | The module hooks debounce with `hooks/useDebounce.js` before the query key; a new module must too |
 | Only the tab shell reads `useWindowDimensions` | [Home/index.js](../../../../app/src/Screens/Home/index.js) | Nothing else adapts to width; tablet layout is `max-w-*` only |
-| No error state in the example module | [Screens/Example/](../../../../app/src/Screens/Example/) | In-memory data cannot fail — add one when you wire a real API |
+| No in-app video player | [ClipDetail/useClipDetail.js](../../../../app/src/Screens/Clips/ClipDetail/useClipDetail.js) | Clips open in the phone's own player via `Linking`; `expo-video` needs a new dev build |

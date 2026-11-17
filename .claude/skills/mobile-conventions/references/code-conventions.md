@@ -20,15 +20,16 @@ and in `App.js`.
 
 | Item | Convention | Example |
 | --- | --- | --- |
-| Screen folder | PascalCase, entry file `index.js` | `Screens/Example/index.js` |
-| Module state hook | `use<Folder>Module.js`, next to the screen | `Screens/Example/useExampleModule.js` |
-| Module sheet | `<Entity>FormSheet.js`, next to the screen | `Screens/Example/ExampleFormSheet.js` |
+| Screen folder | PascalCase, entry file `index.js` | `Screens/Sessions/index.js` |
+| Module state hook | `use<Folder>Module.js`, next to the screen | `Screens/Sessions/useSessionsModule.js` |
+| Module sheet | `<Entity>FormSheet.js` (or `<Verb><Entity>Sheet.js` for a create-only form), next to the screen | `Screens/Sessions/BookSessionSheet.js` |
+| Detail screen | sub-folder of its module, `index.js` + `use<Entity>Detail.js` | `Screens/Clips/ClipDetail/` |
 | Hand-written component | PascalCase `.js` | `components/ScreenHeader.js` |
 | RNR primitive | kebab-case `.jsx`, CLI-generated | `components/ui/dropdown-menu.jsx` |
 | Hook | `useX.js` | `hooks/useAppFonts.js` |
 | Zustand store | `useXStore.js` | `store/useThemeStore.js` |
 | API / requests file | lowercase domain, same name in both folders | `services/api/auth.js` ↔ `services/requests/auth.js` |
-| SQLite table / endpoints | `<table>.table.js` / `<table>.endpoints.js` | `example.table.js`, `example.endpoints.js` |
+| SQLite table / endpoints | `<table>.table.js` / `<table>.endpoints.js` | `products.table.js`, `products.endpoints.js` |
 | Migration | `NNN_<what>.js` | `001_add_item_note.js` |
 | Util | camelCase `.js` | `utils/dateFormat.js` |
 
@@ -41,9 +42,9 @@ use `index.js`.
 
 | What | Style | Example |
 | --- | --- | --- |
-| Screen | `export default` | `export default ExampleScreen;` |
+| Screen | `export default` | `export default SessionsScreen;` |
 | Component | `export default` | `export default ScreenHeader;` |
-| Hook | named, plus default if it is the file's only export | `export const useExampleModule = …; export default useExampleModule;` |
+| Hook | named, plus default if it is the file's only export | `export const useSessionsModule = …; export default useSessionsModule;` |
 | API function | named, `…Api` suffix | `export const loginApi = async (payload) => …` |
 | Request hook | named, `use…` | `export const useLoginAuth = () => …` |
 | SQLite endpoint | named, `db_` prefix | `export const db_getItems = () => …` |
@@ -70,7 +71,7 @@ Button(…)`). Don't restyle them; it makes the next `add` harder to diff.
 - **RNR files import via `@/components/ui/*` and `@/lib/utils`.** Never rewrite
   those to relative paths.
 - App code may use either. Prefer `@/` across the tree (`@/hooks/useTheme`) and
-  relative paths for neighbours (`./ExampleFormSheet`).
+  relative paths for neighbours (`./BookSessionSheet`).
 - The module kit is imported through its index:
   `import { DataList, Fab, FAB_CLEARANCE } from "@/components/pattern";`.
 
@@ -97,7 +98,7 @@ Use what is installed. Adding a library is a decision, not a convenience — see
 | Confirm a destructive action | `Alert.alert` with a `destructive` button, or `useCustomDialog()` for the styled dialog | deleting without asking |
 | Dates | `utils/dateFormat.js` (platform `Intl`, no library) | `moment`, `dayjs` |
 | Images | `expo-image` with explicit dimensions | RN `Image` for remote images |
-| Forms | `useState` draft + dirty check in the sheet (see `ExampleFormSheet.js`) | a form library without a decision |
+| Forms | `useState` draft + dirty check in the sheet (see `new-mobile-module` templates §9) | a form library without a decision |
 | Navigation | React Navigation native stack + `SCREEN_NAVIGATION` | Expo Router |
 | Animation | RN `Animated` with `useNativeDriver: true` (`AnimatedField`), Reanimated where RNR uses it | `transition-*` classes on native |
 

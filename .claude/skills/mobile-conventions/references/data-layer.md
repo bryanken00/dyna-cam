@@ -234,9 +234,6 @@ read:
 SELECT * FROM products WHERE status != 'Deleted' ORDER BY createdAt DESC
 ```
 
-`example.table.js` predates this: it stores lowercase `'active'` and
-soft-deletes to `'inactive'`, which collides with an Inactive status a user can
-pick. Don't copy that part.
 
 ### Offline-first
 

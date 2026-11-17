@@ -557,4 +557,9 @@ The checklist follows these phases. Each phase is shippable on its own.
   - **No watermark in v1:** the stream is the camera's own picture.
   - **Audio:** the stream's audio is the camera's 8 kHz G.711, resampled to 44.1 kHz AAC.
   - **Bitrate:** a 720p C200 runs about 1–2 Mbps, so YouTube may warn about low bitrate.
+- 2026-11-17: Phase 6 built: the staff app with Courts, Clips, Sessions, Take payment, Recorder
+  boxes and a Dashboard. It bundles; not yet tried on a device.
+  - **Scan court QR:** not built. It needs `expo-camera` (a new dev build) and an admin lookup of
+    a court by its QR token.
+  - **Video:** plays in the phone's own player, because there's no `expo-video` yet.
 

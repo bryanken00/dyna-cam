@@ -24,9 +24,9 @@ import db from "../db";
 /**
  * products — one row per product in the catalogue.
  *
- * Follows example.table.js: idempotent CREATE (this runs on every start), a
- * local rowid plus a UUID `productId` for anything that leaves the device, an
- * `isSync` flag, and TEXT timestamps.
+ * Idempotent CREATE (this runs on every start), a local rowid plus a UUID
+ * `productId` for anything that leaves the device, an `isSync` flag, and TEXT
+ * timestamps.
  *
  * `status` is stored exactly as the UI shows it ("Active" / "Inactive"). Soft
  * delete is "Deleted" — a value the UI never offers, so it can't collide with
@@ -78,9 +78,9 @@ import { generateUUID } from "../helpers/uuid";
 
 /**
  * Products endpoints — one SQL statement per function, `db_` prefix, `?`
- * binding, plain data back. See example.endpoints.js for the bulk-write and
- * sync helpers (db_markItemsSynced, db_replaceAllItems) when this table
- * starts syncing with a server.
+ * binding, plain data back. Bulk writes (e.g. replacing the table with a
+ * server snapshot) go in db.transaction() with a prepared statement,
+ * finalized in `finally` — see data-layer.md.
  */
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -408,10 +408,12 @@ hasActiveFilters, clearFilters, page, pageSize, setPage,
 editing, openCreate, openEdit, closeSheet, save, saving, remove
 ```
 
-### 8a. `memory` and `local` — start from `useExampleModule.js`
+### 8a. `memory` and `local` — client-side filtering
 
-Copy it, rename (`useExampleModule` → `useProductsModule`, `itemId` →
-`productId`), then:
+Start from §8b's hook and replace the query with local state: hold the
+records in `useState`, filter them with a `useMemo` on `search` and
+`statusFilter`, and page with `slice()`, clamping `page` to the last page so
+deleting its last row can't strand the user. Then:
 
 - **Null-safe search.** A nullable field must not reach `.toLowerCase()`:
   `(r.description ?? "").toLowerCase().includes(q)`.
@@ -582,9 +584,10 @@ export default useProductsModule;
 
 ## 9. Sheet — `src/Screens/Products/ProductFormSheet.js`
 
-Adapted from `ExampleFormSheet.js`, with three changes: the draft is hydrated
-field by field through `toDraft`, the payload is mapped explicitly, and a
-`saving` prop disables the save button while a write is in flight.
+The draft is hydrated field by field through `toDraft`, the payload is
+mapped explicitly, and a `saving` prop disables the save button while a
+write is in flight. (For a create-only form see
+`src/Screens/Sessions/BookSessionSheet.js`.)
 
 ```js
 import { Box } from "lucide-react-native";
@@ -728,7 +731,7 @@ export default ProductFormSheet;
 
 ## 10. Screen — `src/Screens/Products/index.js`
 
-Adapted from `Screens/Example/index.js`: the `empty` slot picks between
+Same shape as `src/Screens/Sessions/index.js`: the `empty` slot picks between
 loading, error and empty; refresh is wired to the hook; the sheet gets
 `saving`. Works unchanged for every data source, because §8 returns the same
 contract.

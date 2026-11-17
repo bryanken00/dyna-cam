@@ -10,10 +10,15 @@ src/
 ├─ Navigation/        Stack navigator, auth-gated
 ├─ Screens/
 │  ├─ Login/          Reference implementation for the design guidelines
-│  ├─ Example/        Reference module — copy this to start a new one
+│  ├─ Account/        Change password (forced and voluntary)
+│  ├─ Courts/         List + CourtDetail/ (Save clip now, court QR) — read-only variant
+│  ├─ Clips/          List + ClipDetail/ (play, share, take payment)
+│  ├─ Sessions/       Reference module — list, filters, Fab, BookSessionSheet, SessionDetail/
+│  ├─ TakePayment/    Pay code → lookup → record cash
+│  ├─ RecorderBoxes/  Read-only list with per-camera status
 │  └─ Home/           Bottom-tab shell
-│     ├─ Dashboard/   Placeholder — replaced by the first real screen (PLAN-001 Phase 6)
-│     └─ Settings/    Modules list + dark-mode toggle + sign out
+│     ├─ Dashboard/   Today's numbers (from the list endpoints) + shortcuts
+│     └─ Settings/    Menu: permission-gated module rows + account + theme + sign out
 ├─ components/        Shared UI — see the component kit below
 │  ├─ ui/             React Native Reusables primitives (copied in, yours to edit)
 │  └─ pattern/        The list-module kit
@@ -56,8 +61,24 @@ src/
 | `Fab` + `FAB_CLEARANCE` | Floating create action, and the padding the list needs to clear it |
 | `SectionLabel` · `StatusToggle` · `StatusDot` · `InitialAvatar` | Form and row primitives |
 
-[src/Screens/Example/](../../../../app/src/Screens/Example/) composes all of them into a working
+[src/Screens/Sessions/](../../../../app/src/Screens/Sessions/) composes them into a working
 module; the conventions are in [module-pattern.md](module-pattern.md).
+
+**Dyna Cam building blocks** — [src/components/](../../../../app/src/components/)
+
+| Component | Use for |
+| --- | --- |
+| `StatusChip` | Outlined pill, coloured dot + label, `tone` success / warning / danger / muted |
+| `ChoiceChips` | Single choice among several options — filters, short pickers (scrolls or wraps) |
+| `QrCode` | A QR of any string, black on white in both themes (`toqr` + react-native-svg) |
+| `ShareLink` · `ShareLinkSheet` | A player link with QR + share sheet; the sheet is the full-screen result after a save/booking |
+| `DetailCard` + `DetailRow` | Read-only label/value card on detail screens (empty values are skipped) |
+| `QueryState` | Loading / error-with-retry for a single-record screen |
+| `ClipThumb` | 16:9 clip thumbnail from a signed link, with a placeholder |
+
+Helpers: `utils/dynaCam.js` (Manila time, ₱, pay codes, status tones,
+`fileUrl()`), `utils/phoneFormat.js`, `hooks/usePermissions.js`,
+`hooks/useDebounce.js`.
 
 **RNR primitives** — [src/components/ui/](../../../../app/src/components/ui/) holds `Button`,
 `Text`, `Input`, `Switch`, `Card`, `Separator`, `Label`, `Dialog`,

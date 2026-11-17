@@ -21,14 +21,16 @@ and offline SQLite, and signs in against the repo's API (`back/`).
 
 Consequences for how you work here:
 
-- Some starter files are **placeholders to be replaced by real screens**:
-  `Screens/Example/`, `store/database/tables/example.table.js`,
-  `store/database/endpoints/example.endpoints.js`, and `Screens/Home/Dashboard/`.
-  Keep copying `Screens/Example/`'s shape until the first real module exists
-  (PLAN-001 Phase 6 removes them). `constants/demo.js` backs demo mode and stays.
+- The starter's placeholders (`Screens/Example/`, the example `items`
+  SQLite table and endpoints, the placeholder Dashboard) were **replaced by
+  the real staff screens in PLAN-001 Phase 6**: Courts, Clips, Sessions, Take
+  payment, Recorder boxes, and a Dashboard summary. There are no local
+  SQLite tables yet; the layer stays wired for the first offline feature.
+  `constants/demo.js` backs demo mode and stays — every request hook has a
+  fixture branch, so the whole app runs with `EXPO_PUBLIC_DEMO_MODE=true`.
 - Several files under `src/` are unreachable from `index.js` **by design** —
-  every `utils/*`, `useCamera`, `LoadingScreen`, `DateRangePicker`,
-  `version.js`, the SQLite examples, and any `components/ui/*` not yet used on a
+  some `utils/*`, `useCamera`, `LoadingScreen`, `DateRangePicker`,
+  `version.js`, the SQLite wrapper, and any `components/ui/*` not yet used on a
   screen. They're a kit to build with. "Unused" is not a defect here.
 - Doc comments carry more weight than usual. Match the existing density rather
   than trimming them.
@@ -167,7 +169,7 @@ weights and ships ~576KB of unused `.ttf`.
 ### List/detail modules
 
 `components/pattern/` is a kit for admin-style screens — header, stat row,
-searchable card list, create/edit sheet. `Screens/Example/` is the reference
+searchable card list, create/edit sheet. `Screens/Sessions/` is the reference
 implementation to copy. See [module-pattern.md](module-pattern.md), which also records what
 changed from the web original (table → card list, drawer → full-screen sheet).
 
@@ -175,7 +177,8 @@ changed from the web original (table → card list, drawer → full-screen sheet
 `ListHeaderComponent`.
 
 [design-guidelines.md](design-guidelines.md) is the full spec. `Screens/Login/Index.js` is the
-reference for standalone screens, `Screens/Example/` for modules.
+reference for standalone screens, `Screens/Sessions/` for modules and
+`Screens/Clips/ClipDetail/` for detail screens.
 
 ### Demo mode
 

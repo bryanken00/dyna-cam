@@ -3,9 +3,16 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SCREEN_NAVIGATION } from "../constants/navigations";
 import { NAV_THEME } from "../lib/theme";
 import ChangePassword from "../Screens/Account/ChangePassword";
-import ExampleScreen from "../Screens/Example";
+import ClipsScreen from "../Screens/Clips";
+import ClipDetailScreen from "../Screens/Clips/ClipDetail";
+import CourtsScreen from "../Screens/Courts";
+import CourtDetailScreen from "../Screens/Courts/CourtDetail";
 import Home from "../Screens/Home";
 import Login from "../Screens/Login/Index";
+import RecorderBoxesScreen from "../Screens/RecorderBoxes";
+import SessionsScreen from "../Screens/Sessions";
+import SessionDetailScreen from "../Screens/Sessions/SessionDetail";
+import TakePaymentScreen from "../Screens/TakePayment";
 import useThemeStore from "../store/useThemeStore";
 import { useUserAuthStore } from "../store/useUserAuthStore";
 
@@ -61,10 +68,40 @@ const Navigation = () => {
             component={ChangePassword}
           />
 
-          {/* Modules — opened from the Menu tab. Delete with the example. */}
+          {/* Modules — opened from the Menu tab (and the Dashboard). Each
+              screen gates its own write actions on the user's permissions;
+              the Menu only lists the ones the user may read. */}
           <Stack.Screen
-            name={SCREEN_NAVIGATION.Modules.Items}
-            component={ExampleScreen}
+            name={SCREEN_NAVIGATION.Modules.Courts}
+            component={CourtsScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.CourtDetail}
+            component={CourtDetailScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.Clips}
+            component={ClipsScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.ClipDetail}
+            component={ClipDetailScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.Sessions}
+            component={SessionsScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.SessionDetail}
+            component={SessionDetailScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.TakePayment}
+            component={TakePaymentScreen}
+          />
+          <Stack.Screen
+            name={SCREEN_NAVIGATION.Modules.RecorderBoxes}
+            component={RecorderBoxesScreen}
           />
         </Stack.Navigator>
       ) : (

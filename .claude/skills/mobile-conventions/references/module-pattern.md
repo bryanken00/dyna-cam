@@ -7,8 +7,11 @@ Ported from a web design system built on Ant Design; §1 records what had to
 change for a phone and why. This document is self-contained — you do not need
 the web original to use it.
 
-[src/Screens/Example/](../../../../app/src/Screens/Example/) is the reference
-implementation; copy that folder to start a module.
+[src/Screens/Sessions/](../../../../app/src/Screens/Sessions/) is the reference
+implementation (API data with demo fixtures, debounced search, filter chips,
+Fab, create sheet, row actions); copy that folder's shape to start a module.
+[src/Screens/Courts/](../../../../app/src/Screens/Courts/) is the read-only
+variant (no Fab, no sheet).
 
 > Everything visual is driven by tokens in [global.css](../../../../app/global.css).
 > **Never hardcode a hex in a screen.**
@@ -152,7 +155,7 @@ virtualisation and warns at runtime.
 
   <Fab label="New item" icon={Plus} onPress={m.openCreate} />
 
-  <ExampleFormSheet open={m.editing !== null} … />
+  <ProductFormSheet open={m.editing !== null} … />
 </View>
 ```
 
@@ -183,20 +186,23 @@ The web's five columns become two lines plus trailing status and menu:
 Swap the fields per module and keep the shape. Omit `index` if a running number
 adds nothing.
 
-The example's records are shaped `{ itemId, name, description, status }` —
-deliberately the same shape as the local `items` table, so replacing the
-in-memory array in
-[useExampleModule.js](../../../../app/src/Screens/Example/useExampleModule.js) with
-`db_getItems()` from
-[example.endpoints.js](../../../../app/src/store/database/endpoints/example.endpoints.js) is
-a drop-in swap rather than a rewrite.
+When `DataListRow`'s avatar + two lines doesn't fit the record — a clip needs
+a thumbnail, a session a status chip and a progress line — write a
+module-local row next to the screen (`ClipRow.js`, `SessionRow.js`) with the
+same padding (`px-4 py-3`), `active:bg-secondary/60` press state and
+`numberOfLines` truncation, wrapped in `React.memo`. Status goes in
+`components/StatusChip` (outlined, coloured dot + label), not a pastel chip.
 
 ---
 
 ## 6. Create / edit sheet
 
-Follow [ExampleFormSheet.js](../../../../app/src/Screens/Example/ExampleFormSheet.js). Props
-are `{ open, onClose, onSubmit, entity }` — the sheet owns its own `FormSheet`.
+Follow the template in the `new-mobile-module` skill
+(`references/templates.md` §9) for an edit sheet, or
+[BookSessionSheet.js](../../../../app/src/Screens/Sessions/BookSessionSheet.js) for a
+create-only one. Props are `{ open, onClose, onSubmit, entity, saving }` —
+the sheet owns its own `FormSheet`. Single choices with more than two
+options use `components/ChoiceChips` (scrolls or wraps), not a picker.
 
 - **Header** — accent-free primary chip + title + subtitle + bordered X. Handled
   by `FormSheet`; pass `icon`, `title`, `subtitle`.
@@ -254,6 +260,6 @@ are `{ open, onClose, onSubmit, entity }` — the sheet owns its own `FormSheet`
 
 ---
 
-_Reference: [Example module](../../../../app/src/Screens/Example/) ·
+_Reference: [Sessions module](../../../../app/src/Screens/Sessions/) ·
 [pattern components](../../../../app/src/components/pattern/) ·
 [global.css](../../../../app/global.css) · [design-guidelines.md](design-guidelines.md)_

@@ -16,7 +16,9 @@ permissions. Every path below is relative to `app/` unless it says otherwise.
 
 These rules are **non-negotiable** unless the user says otherwise. Reference
 implementations: `src/Screens/Login/Index.js` for a standalone screen,
-`src/Screens/Example/` for a list/detail module — copy their shape.
+`src/Screens/Sessions/` for a list module (API + demo fixtures, filters,
+Fab, create sheet), `src/Screens/Clips/ClipDetail/` for a detail screen —
+copy their shape.
 
 ## Read the doc for the area you're touching
 
@@ -80,7 +82,20 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **RNR components come from the CLI** into `src/components/ui/`. Re-adding
   `switch.jsx` with `--overwrite` undoes its local fix.
 - **Phone is always `09XX XXXX XXX`** with the example `0912 3456 789` as the
-  hint, same as the web app and the API.
+  hint, same as the web app and the API — use `utils/phoneFormat.js`
+  (`PHONE_PLACEHOLDER`, `formatPhoneOnChange`, `isValidPhoneNumber`,
+  `formatPhoneDisplay`).
+- **Gate on permissions like the web does.** `usePermissions().can(module,
+  submodule, level)` (`hooks/usePermissions.js`) checks the same
+  `GET /admin/permissions/user` rows as the web portal. A Menu row needs
+  read; a write action (save, book, record) needs write. Permissions are
+  React Query data, never the auth store.
+- **API timestamps are Manila wall-clock strings** with no zone. Format them
+  with `utils/dynaCam.js` (`formatDateTime`, `manilaNow`, …), never
+  `new Date(str)` — Hermes misparses the space-separated form and a Date
+  shifts it into the phone's zone.
+- **Signed upload links are relative** — prefix with `fileUrl()` from
+  `utils/dynaCam.js`, use the rest unchanged.
 
 ## Related
 

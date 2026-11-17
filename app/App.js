@@ -15,7 +15,27 @@ import { useAppFonts } from "./src/hooks/useAppFonts";
 import { initDatabase } from "./src/store/database/initDatabase";
 import useThemeStore from "./src/store/useThemeStore";
 
-export const queryClient = new QueryClient();
+/**
+ * App-wide React Query defaults (engineering-checklist §2):
+ *  • retry only what can succeed by being repeated — no response (offline,
+ *    timeout) or a 5xx. A 4xx (404 pay code, 403 permission, 409 conflict)
+ *    is final, and retrying it just delays the error on screen.
+ *  • a short staleTime, so moving between a list and its detail doesn't
+ *    refetch everything on every mount. Lists still refresh on pull, on the
+ *    refresh button, and after every write (mutations invalidate).
+ */
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 15 * 1000,
+      retry: (failureCount, error) => {
+        const status = error?.response?.status;
+        if (status && status < 500) return false;
+        return failureCount < 2;
+      },
+    },
+  },
+});
 
 // Keep the native splash up until fonts are ready, so the first painted frame
 // is already in Onest rather than the system font.

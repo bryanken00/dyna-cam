@@ -9,9 +9,12 @@ argument-hint: "<module name> [fields…]"
 All paths below are relative to `app/`.
 
 Builds one entity's full vertical slice — data source to Menu row — to this
-repo's conventions. `src/Screens/Example/` is the reference implementation and
-the starting point: a new module **is** a copy of it, renamed, with its
-in-memory array swapped for a real data source.
+repo's conventions. `src/Screens/Sessions/` is the reference implementation
+and the starting point (API data, demo fixtures, debounced search, filter
+chips, Fab, create sheet, row actions, detail screen); `src/Screens/Courts/`
+is the read-only variant. A new module starts as a copy of one of them,
+renamed, with the templates below filling in what it lacks (an edit sheet,
+delete, a local SQLite source).
 
 Request: **$ARGUMENTS**
 
@@ -25,7 +28,8 @@ Read before writing anything (they override this skill if they disagree):
   row and sheet anatomy, and the per-module conversion checklist
 - [engineering-checklist.md](../mobile-conventions/references/engineering-checklist.md) — §2,
   §3, §5 and §6 in particular
-- All three files in `src/Screens/Example/`
+- The files in `src/Screens/Sessions/` (and `SessionDetail/` if the module
+  has a detail screen)
 
 ## Step 1 — Pin the spec, then stop
 
@@ -87,8 +91,8 @@ source doesn't use.
 | 12 | `src/Navigation/index.js` | always | `<Stack.Screen>` in the authenticated stack |
 | 13 | `src/Screens/Home/Settings/index.js` | always | a row in the Modules section |
 
-Steps 8–10 start as `cp -R src/Screens/Example src/Screens/<Entities>` and
-then change. Templates for every step, using `Product` as the worked example:
+Steps 8–10 start from `src/Screens/Sessions/` (or the templates) and then
+change. Templates for every step, using `Product` as the worked example:
 **[references/templates.md](references/templates.md)**.
 
 ## Step 3 — Verify before reporting done

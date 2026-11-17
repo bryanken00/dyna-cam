@@ -30,8 +30,16 @@ export const SCREEN_NAVIGATION = {
   },
 
   // Modules reached from the Menu tab, not from the tab bar itself.
-  // Keep the tab bar for top-level destinations only.
+  // Keep the tab bar for top-level destinations only. Detail screens are
+  // pushed from their module's list and take the record's ID as a param.
   Modules: {
-    Items: "Items",
+    Courts: "Courts",
+    CourtDetail: "CourtDetail", // { courtId, courtName? }
+    Clips: "Clips", // { venueId?, courtId? } — opens pre-filtered
+    ClipDetail: "ClipDetail", // { clipId }
+    Sessions: "Sessions", // { bookCourtId? } — opens the booking form
+    SessionDetail: "SessionDetail", // { sessionId }
+    TakePayment: "TakePayment", // { payCode? } — looks it up at once
+    RecorderBoxes: "RecorderBoxes",
   },
 };

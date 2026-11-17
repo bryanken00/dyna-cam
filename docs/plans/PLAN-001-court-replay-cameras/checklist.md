@@ -311,20 +311,30 @@
 
 ## Phase 6: Staff mobile app screens (`app/`)
 
-- [ ] Load `mobile-conventions` + `new-mobile-module`; add routes to
-      `constants/navigations.js`
-- [ ] `services/api/*` + `services/requests/*` for venues, courts, clips, sessions (reuse the
-      admin endpoints; permissions drive which tabs show)
-- [ ] Courts screen: per-venue list with camera / box / stream status
-- [ ] Save clip now from a court → shows a QR of the share link for the player
-- [ ] Clips screen: `DataList` with thumbnails, video player, share / copy link
-- [ ] Sessions screen: start / schedule / cancel a session
-- [ ] Scan court QR (`useCamera`) → opens that court's admin view
-- [ ] Remove the template `Screens/Example/`, example SQLite table/endpoints and placeholder
-      Dashboard once the real screens replace them
-- [ ] `npx expo-doctor@latest` + `npx expo export --platform android --clear` pass; tried on a
-      physical Android phone against the local API
-- [ ] Changelog entry (`ref: PLAN-001`, added: staff app)
+- [x] Loaded `mobile-conventions` + `new-mobile-module`; routes in `constants/navigations.js`
+      (Courts, CourtDetail, Clips, ClipDetail, Sessions, SessionDetail, TakePayment, RecorderBoxes)
+- [x] `services/api/*` + `services/requests/*` for permissions, courts, devices, clips, sessions,
+      payments (the admin endpoints); the signed-in user's permissions (`/permissions/user`, the
+      same call the web makes) decide which Menu rows and actions show — read to see, write to act
+- [x] Courts screen: per-venue list with camera / box / stream state and button code
+- [x] Save clip now from a court → full-screen QR of the share link for the player (QR drawn with
+      `toqr` 0.1.1 + `react-native-svg` — pure JS, no new dev build)
+- [x] Clips screen: `DataList` with thumbnails, filters (venue / court / status / payment),
+      detail with play + download (opens the signed link in the phone's player — no
+      `expo-video`/`expo-av` installed), share link + QR, "Record ₱X cash"
+- [x] Sessions screen: list with progress, book (Now / Later in Manila time, 30–180 min, player
+      name + phone `0912 3456 789`), cancel / end now, detail with parts
+- [x] Take payment screen (added — Phase 4 exists): pay code → lookup → "Record ₱X cash"
+- [x] Recorder boxes screen (read-only): online, last seen, per-camera status
+- [x] Dashboard tab: clips today, unpaid, sessions recording, boxes offline (permission-aware)
+- [ ] Scan court QR → opens that court *(not built: needs `expo-camera`, a native module → a new
+      dev build, and an admin lookup of a court by QR token; left for a CR)*
+- [x] Removed the template `Screens/Example/`, example SQLite table/endpoints and the placeholder
+      Dashboard; `App.js` QueryClient now has defaults (15 s stale, no retry on 4xx)
+- [x] `npx expo export --platform android --clear` bundles (3697 modules); `npx expo-doctor` 19/20
+      (only the pre-existing "11 packages out of date"); every API path the app calls exists
+- [ ] Tried on a physical Android phone against the local API *(needs a phone on the venue LAN)*
+- [x] Changelog entry (`ref: PLAN-001`, added: staff app)
 
 ## Final wrap-up
 

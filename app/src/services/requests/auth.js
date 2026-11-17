@@ -16,7 +16,7 @@
  * does. Demo responses use the same envelope, so everything after the
  * mutation — store writes, toasts, navigation — is identical in both modes.
  */
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Toast from "react-native-toast-message";
 import { IS_DEMO } from "../../constants";
 import {
@@ -52,7 +52,9 @@ export const toStoreUser = (user) => ({
   roleId: user.roleId,
   roleName: user.roleName,
   mustChangePassword: Boolean(user.mustChangePassword),
-  permissions: user.permissions || null,
+  // Permissions are not kept here: they are server data, loaded with React
+  // Query by `useGetMyPermissions` (services/requests/permissions.js) and read
+  // through `hooks/usePermissions.js` — the same split as the web portal.
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,10 +173,14 @@ export const useChangePassword = () => {
 export const useLogout = () => {
   const logout = useUserAuthStore((s) => s.logout);
   const refreshToken = useUserAuthStore((s) => s.refreshToken);
+  const queryClient = useQueryClient();
 
   const clearLocal = () => {
     logout();
     clearCsrfToken();
+    // Drop every cached response (clips, sessions, permissions…) so the next
+    // person to sign in on this phone never sees the last one's data.
+    queryClient.clear();
   };
 
   return useMutation({
