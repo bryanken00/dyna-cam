@@ -5,7 +5,8 @@
  *
  * @param {string} [value]
  * @param {(v: string) => void} [onChange]
- * @param {{v: string, dot: string}[]} [options] - defaults to Active/Inactive
+ * @param {{v: string, label?: string, dot?: string}[]} [options] - defaults to
+ *        Active/Inactive. `label` (default `v`) is what shows; no `dot`, no dot.
  */
 const DEFAULT_OPTIONS = [
   { v: "Active", dot: "var(--color-success)" },
@@ -28,6 +29,7 @@ const StatusToggle = ({ value, onChange, options = DEFAULT_OPTIONS }) => (
         <button
           key={o.v}
           type="button"
+          aria-pressed={active}
           onClick={() => onChange?.(o.v)}
           className="flex items-center justify-center gap-2 transition-colors"
           style={{
@@ -44,15 +46,17 @@ const StatusToggle = ({ value, onChange, options = DEFAULT_OPTIONS }) => (
             boxShadow: active ? "0 1px 2px rgba(0,0,0,.06)" : "none",
           }}
         >
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: o.dot,
-            }}
-          />
-          {o.v}
+          {o.dot && (
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: o.dot,
+              }}
+            />
+          )}
+          {o.label ?? o.v}
         </button>
       );
     })}

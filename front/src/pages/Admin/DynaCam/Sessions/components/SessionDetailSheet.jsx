@@ -8,6 +8,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import SessionDevices from "./SessionDevices";
+import SessionStreamLine from "./SessionStreamLine";
 import DescriptionList from "../../../../../components/DescriptionList";
 import Spinner from "../../../../../components/Spinner";
 import StatusDot from "../../../../../components/StatusDot";
@@ -111,6 +112,8 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
   const showDevices =
     ["Scheduled", "Recording"].includes(session?.status) ||
     (session?.devices || []).some((d) => d.status === "Active");
+  const showStream =
+    !!session?.stream || ["Scheduled", "Recording"].includes(session?.status);
   const remaining = Math.max(0, (Number(session?.partsTotal) || 0) - parts.length);
 
   const cancelMutation = useCancelSession();
@@ -253,6 +256,22 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                           </a>
                         ),
                     },
+                    // The player's own live stream — shown while it can run,
+                    // or while one is still set
+                    ...(showStream
+                      ? [
+                          {
+                            label: "Live stream",
+                            value: (
+                              <SessionStreamLine
+                                sessionId={session.sessionId}
+                                stream={session.stream || null}
+                                canWrite={canWrite}
+                              />
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
 

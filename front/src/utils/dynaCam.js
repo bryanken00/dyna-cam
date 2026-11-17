@@ -205,6 +205,48 @@ export const formatAgo = (seconds) => {
   return `${days} ${days === 1 ? "day" : "days"} ago`;
 };
 
+/* ── A player's own live stream (PLAN-002 Phase G) ───────────────────────── */
+
+/** Stream platform → the label players and staff read. */
+export const STREAM_PLATFORM_LABEL = {
+  FACEBOOK: "Facebook",
+  YOUTUBE: "YouTube",
+  OTHER: "Other",
+};
+
+/** An RTMP(S) address with its key, as the API accepts for "Other". */
+export const RTMP_URL_PATTERN = /^rtmps?:\/\/\S+$/i;
+
+/**
+ * A session stream `{ platform, status, message }` as one line:
+ * → { label, tone } for <StatusDot>.
+ *   waiting  — the session hasn't started recording; it starts by itself
+ *   starting — the box is connecting
+ *   live     — on air
+ *   error    — the box reported a problem (`message`)
+ */
+export const streamStatusInfo = (stream) => {
+  const where =
+    stream?.platform === "OTHER"
+      ? "your stream server"
+      : STREAM_PLATFORM_LABEL[stream?.platform] || "your channel";
+  switch (stream?.status) {
+    case "waiting":
+      return { label: "Waiting for the game to start", tone: "muted" };
+    case "starting":
+      return { label: "Connecting…", tone: "warning" };
+    case "live":
+      return { label: `Live on ${where}`, tone: "success" };
+    case "error":
+      return {
+        label: `Problem: ${stream?.message || "the stream stopped"}`,
+        tone: "error",
+      };
+    default:
+      return { label: stream?.status || "-", tone: "muted" };
+  }
+};
+
 /* ── Pairing keys (PLAN-002) ─────────────────────────────────────────────── */
 
 /** A pairing key works once, for this long after it is created. */

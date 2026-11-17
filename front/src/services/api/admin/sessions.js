@@ -13,6 +13,8 @@ export const getSessionsApi = async (filters = {}) => {
 //               lastSeenSecondsAgo, status: "Active"|"Revoked" }]
 //   pairingCodes: live keys only, never the digits —
 //               [{ pairingCodeId, name, expiresAt, expiresInSeconds }]
+//   stream: the player's own live stream (Phase G), never the key —
+//           { platform, status, message, maskedUrl, updatedAt } | null
 export const getSessionByIdApi = async (sessionId) => {
   const response = await api.get(`/api/v1/admin/sessions/${sessionId}`);
   return response.data;
@@ -64,5 +66,11 @@ export const unpairSessionDeviceApi = async (sessionId, pairedAppId) => {
   const response = await api.post(
     `/api/v1/admin/sessions/${sessionId}/devices/${pairedAppId}/unpair`,
   );
+  return response.data;
+};
+
+// Stop the player's own live stream (Phase G)
+export const stopSessionStreamApi = async (sessionId) => {
+  const response = await api.post(`/api/v1/admin/sessions/${sessionId}/stream/stop`);
   return response.data;
 };

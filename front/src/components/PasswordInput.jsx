@@ -11,8 +11,15 @@ import { cn } from "@/lib/utils";
  *   <FormControl>
  *     <PasswordInput placeholder="…" {...field} />
  *   </FormControl>
+ *
+ * `secretName` names the secret in the toggle's label ("Show stream key").
  */
-const PasswordInput = ({ className, showLock = true, ...props }) => {
+const PasswordInput = ({
+  className,
+  showLock = true,
+  secretName = "password",
+  ...props
+}) => {
   const [visible, setVisible] = useState(false);
   return (
     <div className="relative">
@@ -30,7 +37,7 @@ const PasswordInput = ({ className, showLock = true, ...props }) => {
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? "Hide password" : "Show password"}
+        aria-label={`${visible ? "Hide" : "Show"} ${secretName}`}
         className="icon-btn absolute right-2 top-1/2 h-6 w-6 -translate-y-1/2"
       >
         {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

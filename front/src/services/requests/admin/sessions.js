@@ -14,6 +14,7 @@ import {
   createSessionPairingCodeApi,
   cancelSessionPairingCodeApi,
   unpairSessionDeviceApi,
+  stopSessionStreamApi,
 } from "../../api/admin/sessions";
 
 /** Statuses that still change on their own (parts arrive, status settles). */
@@ -164,6 +165,23 @@ export const useUnpairSessionDevice = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to unpair the device");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
+// Mutation: stop the player's own live stream
+export const useStopSessionStream = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: stopSessionStreamApi,
+    onSuccess: () => {
+      toast.success("Stream stopped");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to stop the stream");
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

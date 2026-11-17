@@ -10,6 +10,9 @@ const ComponentGallery = lazy(() => import("../pages/ComponentGallery"));
 const PublicCourt = lazy(() => import("../pages/Public/Court"));
 const PublicClip = lazy(() => import("../pages/Public/Clip"));
 const PublicSession = lazy(() => import("../pages/Public/Session"));
+// A player streams their session to their own Facebook / YouTube (PLAN-002
+// Phase G) — the setup code from the session device's QR is the credential.
+const PublicStream = lazy(() => import("../pages/Public/Stream"));
 
 const RootRoutes = () => {
   return (
@@ -52,6 +55,14 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicSession />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/stream/:code"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicStream />
             </Suspense>
           }
         />
