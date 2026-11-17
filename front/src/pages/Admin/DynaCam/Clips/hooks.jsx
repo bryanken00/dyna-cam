@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import { Copy, ExternalLink, Film, Play } from "lucide-react";
+import { Cloud, Copy, ExternalLink, Film, Play } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import PaymentStatusChip from "../../../../components/PaymentStatusChip";
@@ -10,6 +10,7 @@ import { decodeHTML } from "../../../../utils/decode-html";
 import { copyText } from "../../../../utils/clipboard";
 import { getImageUrl } from "../../../../utils/upload";
 import {
+  CLIP_DRIVE_LABEL,
   CLIP_STATUS_TONE,
   formatBytes,
   formatDate,
@@ -175,6 +176,15 @@ export const useClipHooks = () => {
           onClick: () => handleOpenSharePage(record),
         },
       );
+      // CR-001: the copy in the court's Google Drive
+      if (record.driveUrl) {
+        items.push({
+          key: "drive",
+          label: "Open in Google Drive",
+          icon: <Cloud className="w-4 h-4" />,
+          onClick: () => window.open(record.driveUrl, "_blank", "noopener,noreferrer"),
+        });
+      }
       return items;
     },
     [handlePreview, handleCopyShareLink, handleOpenSharePage],
@@ -326,6 +336,16 @@ export const useClipHooks = () => {
                 title={record.failureReason}
               >
                 {record.failureReason}
+              </div>
+            )}
+            {record.driveStatus && (
+              <div
+                className="inline-flex items-center gap-1 truncate mt-0.5"
+                style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+                title={record.driveError || undefined}
+              >
+                <Cloud className="w-3 h-3 shrink-0" />
+                {CLIP_DRIVE_LABEL[record.driveStatus] || record.driveStatus}
               </div>
             )}
           </div>

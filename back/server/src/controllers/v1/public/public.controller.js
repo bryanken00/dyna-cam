@@ -140,8 +140,8 @@ router.get(
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
       `SELECT cl.status, cl.requestedAt, cl.durationSeconds, cl.expiresAt, cl.videoPath,
-              cl.thumbnailPath, cl.price, cl.paymentStatus, cl.payCode,
-              c.name AS courtName, v.name AS venueName, v.logoUrl
+              cl.thumbnailPath, cl.price, cl.paymentStatus, cl.payCode, cl.driveStatus,
+              cl.driveUrl, c.name AS courtName, v.name AS venueName, v.logoUrl
        FROM clips cl
        JOIN courts c ON c.courtId = cl.courtId
        JOIN venues v ON v.venueId = cl.venueId
@@ -176,6 +176,12 @@ router.get(
         locked,
         // Shown to the player to pay at the front desk (only while unpaid)
         payCode: locked ? clip.payCode : null,
+        // CR-001: the copy in the venue's Google Drive — paid or free clips only,
+        // and still there after the server's copy expired
+        driveUrl:
+          !locked && clip.driveStatus === "Uploaded" && ["Ready", "Expired"].includes(clip.status)
+            ? clip.driveUrl
+            : null,
       },
     });
   })
@@ -191,7 +197,7 @@ router.get(
   validateParams(sessionTokenParamsSchema),
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
-      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName,
+      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName, s.driveUrl,
               c.name AS courtName, v.name AS venueName, v.logoUrl, s.venueId
        FROM recording_sessions s
        JOIN courts c ON c.courtId = s.courtId
@@ -214,31 +220,37 @@ router.get(
 
     const parts = await req.db.query(
       `SELECT partIndex, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
-              thumbnailPath, expiresAt
+              thumbnailPath, expiresAt, driveStatus, driveUrl
        FROM clips
        WHERE sessionId = ? AND status != 'Deleted'
        ORDER BY partIndex ASC`,
       [rows[0].sessionId]
     );
 
-    const { sessionId: _sessionId, venueId: _venueId, logoUrl, ...info } = rows[0];
+    const { sessionId: _sessionId, venueId: _venueId, logoUrl, driveUrl, ...info } = rows[0];
+    const inDrive = (part) => part.driveStatus === "Uploaded" && Boolean(part.driveUrl);
     return res.sendSuccess("Session", {
       session: {
         ...info,
         status: session.status,
         venueLogoUrl: signUploadUrl(logoUrl),
         partsTotal: partCount(info.startAt, info.endAt),
-        parts: parts.map(({ videoPath, thumbnailPath, ...part }) => {
-          const ready = part.status === "Ready";
-          return {
-            ...part,
-            // To the player a part being cut is still "saving"
-            status: part.status === "Processing" ? "Pending" : part.status,
-            videoUrl: ready ? signUploadUrl(videoPath) : null,
-            downloadUrl: ready ? signedDownloadUrl(videoPath) : null,
-            thumbnailUrl: ready ? signUploadUrl(thumbnailPath) : null,
-          };
-        }),
+        // CR-001: the game's folder in the venue's Google Drive, once a part is in it
+        driveUrl: driveUrl && parts.some(inDrive) ? driveUrl : null,
+        parts: parts.map(
+          ({ videoPath, thumbnailPath, driveStatus, driveUrl: partDriveUrl, ...part }) => {
+            const ready = part.status === "Ready";
+            return {
+              ...part,
+              // To the player a part being cut is still "saving"
+              status: part.status === "Processing" ? "Pending" : part.status,
+              videoUrl: ready ? signUploadUrl(videoPath) : null,
+              downloadUrl: ready ? signedDownloadUrl(videoPath) : null,
+              thumbnailUrl: ready ? signUploadUrl(thumbnailPath) : null,
+              driveUrl: inDrive({ driveStatus, driveUrl: partDriveUrl }) ? partDriveUrl : null,
+            };
+          }
+        ),
       },
     });
   })

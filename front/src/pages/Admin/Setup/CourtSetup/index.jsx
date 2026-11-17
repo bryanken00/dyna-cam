@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useCourtSetupHooks } from "./hooks";
 import ButtonSection from "./components/ButtonSection";
 import CameraSection from "./components/CameraSection";
+import GoogleDriveSection from "./components/GoogleDriveSection";
 import QrSignSection from "./components/QrSignSection";
 import StreamSection from "./components/StreamSection";
 import PageHeader from "../../../../components/PageHeader";
@@ -97,7 +98,7 @@ const CourtSetupPage = () => {
 
       <PageHeader
         title={courtName}
-        subtitle={`${venueName} · set up the cameras, QR sign, button and live stream`}
+        subtitle={`${venueName} · set up the cameras, QR sign, button, live stream and Google Drive`}
         actions={
           <div className="flex items-center gap-3">
             <StatusDot tone={court.status === "Active" ? "success" : "muted"}>
@@ -130,6 +131,7 @@ const CourtSetupPage = () => {
       <QrSignSection key={`qr-${court.courtId}`} court={court} canWrite={canWrite} />
       <ButtonSection key={`button-${court.courtId}`} court={court} canWrite={canWrite} />
       <StreamSection key={`stream-${court.courtId}`} court={court} canWrite={canWrite} />
+      <GoogleDriveSection key={`drive-${court.courtId}`} court={court} canWrite={canWrite} />
     </div>
   );
 };

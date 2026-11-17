@@ -1,4 +1,5 @@
 import {
+  Cloud,
   Download,
   Film,
   Loader2,
@@ -24,6 +25,16 @@ const cardStyle = {
   border: "1px solid var(--color-line)",
   borderRadius: "var(--radius-card)",
 };
+
+/** CR-001: the copy in the venue's Google Drive (opens without a Google sign-in). */
+const DriveButton = ({ href, className = "" }) => (
+  <Button asChild variant="outline" size="lg" className={`h-12 ${className}`}>
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      <Cloud />
+      Open in Google Drive
+    </a>
+  </Button>
+);
 
 /** Venue logo + venue/court line shown above every state. */
 const ClipHeading = ({ clip, courtName, venueName }) => {
@@ -230,8 +241,17 @@ const ClipPage = () => {
           <ResultState
             status="404"
             title="This clip has expired"
-            description="Clips are only kept for a limited time after they're saved."
+            description={
+              clip.driveUrl
+                ? "It's no longer on this page, but the venue kept a copy in Google Drive."
+                : "Clips are only kept for a limited time after they're saved."
+            }
           />
+          {clip.driveUrl && (
+            <div className="px-4 pb-4">
+              <DriveButton href={clip.driveUrl} className="w-full" />
+            </div>
+          )}
         </div>
       </PublicLayout>
     );
@@ -382,6 +402,7 @@ const ClipPage = () => {
             <Share2 />
             Share
           </Button>
+          {clip.driveUrl && <DriveButton href={clip.driveUrl} className="col-span-2" />}
         </div>
       </div>
 

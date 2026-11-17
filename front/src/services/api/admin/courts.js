@@ -44,6 +44,23 @@ export const rotateCourtQrApi = async (courtId) => {
   return response.data;
 };
 
+// CR-001 Google Drive: returns { url } — Google's consent screen. Google sends
+// the browser back to the court setup page with ?drive=connected|cancelled|error
+export const connectCourtDriveApi = async (courtId) => {
+  const response = await api.post(
+    `/api/v1/admin/courts/${courtId}/google-drive/connect`,
+  );
+  return response.data;
+};
+
+// CR-001: stop copying this court's recordings to Google Drive
+export const disconnectCourtDriveApi = async (courtId) => {
+  const response = await api.delete(
+    `/api/v1/admin/courts/${courtId}/google-drive`,
+  );
+  return response.data;
+};
+
 export const deleteCourtApi = async (courtId) => {
   const response = await api.delete(`/api/v1/admin/courts/${courtId}`);
   return response.data;

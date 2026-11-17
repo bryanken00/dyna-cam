@@ -213,8 +213,11 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     return { status: response.status, body: parsed, data: parsed?.data };
   };
 
-  /** Fetch a non-API path (e.g. an upload link). Returns the raw Response. */
-  const get = (pathAndQuery) => fetch(`${baseUrl}${pathAndQuery}`);
+  /**
+   * Fetch a non-API path (e.g. an upload link). Returns the raw Response.
+   * `init` is passed to fetch, e.g. `{ redirect: "manual" }` to see a redirect.
+   */
+  const get = (pathAndQuery, init) => fetch(`${baseUrl}${pathAndQuery}`, init);
 
   /** Sign in; throws if it fails. @returns {{ token, refreshToken, user }} */
   const login = async (email, password) => {

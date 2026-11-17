@@ -30,6 +30,7 @@ import {
 } from "../../../utils/clipRequests.js";
 import { materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
 import { upload } from "../../../utils/file/uploads.js";
+import { queueClipForDrive } from "../../../utils/courtDrive.js";
 import { removeSnapshotFile, snapshotUploadFolder } from "../../../utils/file/snapshotFiles.js";
 import {
   buttonParamsSchema,
@@ -540,6 +541,8 @@ router.post(
       );
     }
 
+    // CR-001: a court with a Google account gets a copy in its Drive
+    await queueClipForDrive(req.db, req.clip.clipId);
     if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
     return res.sendSuccess("Clip uploaded", { clipId: req.clip.clipId, status: "Ready" });
   })

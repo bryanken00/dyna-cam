@@ -47,6 +47,15 @@ export const CLIP_STATUS_TONE = {
   Deleted: "muted",
 };
 
+/** CR-001: a clip's Google Drive copy (clips.driveStatus) → the label staff read. */
+export const CLIP_DRIVE_LABEL = {
+  Pending: "Drive: waiting",
+  Uploading: "Drive: uploading",
+  Uploaded: "In Google Drive",
+  Failed: "Drive: couldn't upload",
+  Skipped: "Drive: skipped",
+};
+
 /** Clip source → the label staff read. */
 export const CLIP_SOURCE_LABEL = {
   QR: "QR scan",

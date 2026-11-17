@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
+import { toast } from "sonner";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
 import {
@@ -83,6 +84,20 @@ export const useCourtSetupHooks = () => {
     },
     [courtId, requestPreview],
   );
+
+  // CR-001: back from Google's consent screen — say how it went, once
+  const [searchParams, setSearchParams] = useSearchParams();
+  const driveResult = searchParams.get("drive");
+  const driveReason = searchParams.get("reason");
+  useEffect(() => {
+    if (!driveResult) return;
+    if (driveResult === "connected") {
+      toast.success("Google Drive connected — new recordings on this court go there");
+    } else if (driveResult === "error") {
+      toast.error(driveReason || "Couldn't connect Google Drive. Try again.");
+    }
+    setSearchParams({}, { replace: true });
+  }, [driveResult, driveReason, setSearchParams]);
 
   useEffect(() => {
     const timers = checkTimers.current;

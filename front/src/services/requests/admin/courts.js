@@ -13,6 +13,8 @@ import {
   updateCourtApi,
   rotateCourtQrApi,
   requestCourtPreviewApi,
+  connectCourtDriveApi,
+  disconnectCourtDriveApi,
   deleteCourtApi,
 } from "../../api/admin/courts";
 
@@ -106,6 +108,37 @@ export const useRotateCourtQr = () => {
     onError: (error) => {
       toast.error(
         error.response?.data?.message || "Failed to issue a new QR code",
+      );
+    },
+  });
+};
+
+// Mutation: start connecting (or changing) a court's Google Drive → { url }.
+// The caller sends the browser to the URL; no toast on success.
+export const useConnectCourtDrive = () => {
+  return useMutation({
+    mutationFn: connectCourtDriveApi,
+    onError: (error) => {
+      toast.error(
+        error.response?.data?.message || "Couldn't start connecting Google Drive",
+      );
+    },
+  });
+};
+
+// Mutation: disconnect a court's Google Drive
+export const useDisconnectCourtDrive = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectCourtDriveApi,
+    onSuccess: () => {
+      toast.success("Google Drive disconnected");
+      queryClient.invalidateQueries({ queryKey: ["courts"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error.response?.data?.message || "Failed to disconnect Google Drive",
       );
     },
   });

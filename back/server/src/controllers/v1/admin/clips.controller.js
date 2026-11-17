@@ -20,6 +20,7 @@ const CLIP_SELECT = `
            AS pairedAppName,
          cl.shareToken, cl.videoPath,
          cl.thumbnailPath, cl.sizeBytes, cl.failureReason, cl.expiresAt, cl.status,
+         cl.driveStatus, cl.driveUrl, cl.driveError,
          cl.dateCreated, cl.dateUpdated
   FROM clips cl
   JOIN venues v ON v.venueId = cl.venueId

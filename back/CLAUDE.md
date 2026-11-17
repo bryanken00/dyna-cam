@@ -23,7 +23,9 @@ the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a
 `RECORDER_ENROLL_KEY` → a box token at `/pair/enroll`; rate-limited — boxes are listed and
 revoked with `npm run boxes[:revoke]`) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
 credential; `/public/stream-setup/:code` takes a player's own stream key, see
-`utils/sessionStreams.js`). Queries see the whole database (soft deletes aside); the seeded
+`utils/sessionStreams.js`). CR-001 adds `/api/v1/oauth/google/callback` (Google's redirect after
+a court's "Connect Google Drive"; the encrypted `state` is the credential — see
+`utils/googleDrive.js`, `utils/courtDrive.js` and the 30-second `jobs/driveUploads.js`). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.

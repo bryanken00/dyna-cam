@@ -44,5 +44,10 @@ import appRoute from "../controllers/v1/app/app.controller.js";
 import { requirePairedApp } from "../middlewares/pairedAppAuth.middleware.js";
 router.use("/v1/app", requirePairedApp, appRoute);
 
+// CR-001 Google Drive per court — Google redirects the staff browser here after
+// its consent screen; the signed `state` is the credential (no login)
+import googleOAuthRoute from "../controllers/v1/oauth/google.controller.js";
+router.use("/v1/oauth/google", googleOAuthRoute);
+
 // Exporting the router to be used in the main app
 export default router;

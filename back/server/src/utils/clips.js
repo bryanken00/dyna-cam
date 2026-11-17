@@ -57,7 +57,7 @@ export const isOnline = (lastSeenAt) =>
  * Base URL of the web app players open (the QR sign and share links point
  * here). APP_URL is the same variable the password-reset emails use.
  */
-const appUrl = () =>
+export const appUrl = () =>
   (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:4020")
     .split(",")[0]
     .trim()

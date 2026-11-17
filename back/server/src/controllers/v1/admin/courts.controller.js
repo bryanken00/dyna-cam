@@ -19,6 +19,14 @@ import {
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
+  COURT_DRIVE_COLUMNS,
+  disconnectCourtDrive,
+  driveQueue,
+  driveSummary,
+} from "../../../utils/courtDrive.js";
+import { consentUrl, driveConfigured, signDriveState } from "../../../utils/googleDrive.js";
+import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
+import {
   createCourtSchema,
   listCourtsQuerySchema,
   updateCourtSchema,
@@ -38,7 +46,7 @@ const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
          c.cameraRtspUrl, c.camera2RtspUrl, c.qrToken, c.buttonCode, c.streamEnabled,
          c.streamRtmpUrl, c.streamWatchUrl, c.streamLayout, c.snapshotPath, c.snapshotAt,
-         c.snapshot2Path, c.snapshot2At,
+         c.snapshot2Path, c.snapshot2At, ${COURT_DRIVE_COLUMNS("c")},
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -134,7 +142,7 @@ const toCamera = (stored, live, snapshotPath, snapshotAt) => ({
   snapshotSecondsAgo: secondsSince(snapshotAt),
 });
 
-const toCourt = (row, live = new Map()) => {
+const toCourt = (row, live = new Map(), queue = null) => {
   const {
     cameraRtspUrl,
     camera2RtspUrl,
@@ -146,6 +154,11 @@ const toCourt = (row, live = new Map()) => {
     snapshotAt,
     snapshot2Path,
     snapshot2At,
+    driveRefreshToken: _driveRefreshToken,
+    driveEmail: _driveEmail,
+    driveStatus: _driveStatus,
+    driveProblem: _driveProblem,
+    driveConnectedAt: _driveConnectedAt,
     ...court
   } = row;
   return {
@@ -170,6 +183,8 @@ const toCourt = (row, live = new Map()) => {
       display: maskRtmpUrl(decryptSecret(streamRtmpUrl)),
       watchUrl: streamWatchUrl || null,
     },
+    // CR-001: the court's Google Drive (the token itself is never returned)
+    googleDrive: driveSummary(row, queue),
   };
 };
 
@@ -281,8 +296,9 @@ router.get(
     }
 
     const live = await liveCameras(req.db, [rows[0].venueId]);
+    const queue = rows[0].driveRefreshToken ? await driveQueue(req.db, req.params.courtId) : null;
     return res.sendSuccess("Court retrieved successfully", {
-      court: toCourt(rows[0], live),
+      court: toCourt(rows[0], live, queue),
     });
   })
 );
@@ -559,6 +575,62 @@ router.post(
       qrToken,
       qrUrl: courtQrUrl(qrToken),
     });
+  })
+);
+
+/**
+ * POST /:courtId/google-drive/connect  (CR-001)
+ * Start connecting (or changing) the court's Google account: returns Google's
+ * consent screen URL. Google sends the browser back to
+ * GET /api/v1/oauth/google/callback, which stores the sign-in and returns to
+ * the court setup page.
+ */
+router.post(
+  "/:courtId/google-drive/connect",
+  checkPermission("venues", "courts", "write"),
+  catchAsync(async (req, res) => {
+    if (!driveConfigured()) {
+      throw new APIError(
+        "Google Drive isn't set up on this server yet",
+        409,
+        ERROR_CODES.INVALID_STATUS
+      );
+    }
+    const rows = await req.db.query(
+      `SELECT c.courtId, c.venueId FROM courts c
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       WHERE c.courtId = ? AND c.status != 'Deleted'
+       LIMIT 1`,
+      [req.params.courtId]
+    );
+    if (rows.length === 0) {
+      return res.sendError("Court not found", 404);
+    }
+    const state = signDriveState({
+      courtId: rows[0].courtId,
+      venueId: rows[0].venueId,
+      accountId: req.user.accountId,
+    });
+    // Nothing changes until Google sends the sign-in back
+    res.locals.skipAudit = true;
+    return res.sendSuccess("Continue on Google", { url: consentUrl(state) });
+  })
+);
+
+/**
+ * DELETE /:courtId/google-drive  (CR-001)
+ * Disconnect the court's Google account. New recordings stay on the server
+ * only; files already in the Drive stay there.
+ */
+router.delete(
+  "/:courtId/google-drive",
+  checkPermission("venues", "courts", "write"),
+  catchAsync(async (req, res) => {
+    const found = await disconnectCourtDrive(req.db, req.params.courtId);
+    if (!found) {
+      return res.sendError("Court not found", 404);
+    }
+    return res.sendSuccess("Google Drive disconnected");
   })
 );
 

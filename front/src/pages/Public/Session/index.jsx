@@ -1,6 +1,7 @@
 import {
   CalendarClock,
   CircleAlert,
+  Cloud,
   Download,
   Loader2,
   Radio,
@@ -149,7 +150,21 @@ const PartCard = ({ part }) => {
       )}
       {part.status === "Expired" && (
         <p className="m-0 px-4 pb-3" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-          This part has expired.
+          This part has expired here.
+          {part.driveUrl && (
+            <>
+              {" "}
+              <a
+                href={part.driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+                style={{ color: "var(--color-text-dark)" }}
+              >
+                Open it in Google Drive
+              </a>
+            </>
+          )}
         </p>
       )}
     </div>
@@ -252,6 +267,16 @@ const SessionPage = () => {
       </div>
 
       <StatusNotice session={session} remaining={remaining} readyCount={readyCount} />
+
+      {/* CR-001: the whole game's folder in the venue's Google Drive */}
+      {session.driveUrl && (
+        <Button asChild variant="outline" size="lg" className="h-12 w-full mt-4">
+          <a href={session.driveUrl} target="_blank" rel="noopener noreferrer">
+            <Cloud />
+            Open the whole game in Google Drive
+          </a>
+        </Button>
+      )}
 
       {/* Parts, in order */}
       {parts.length > 0 && (
