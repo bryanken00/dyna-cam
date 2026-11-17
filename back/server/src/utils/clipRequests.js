@@ -24,7 +24,7 @@ const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 /** Columns every caller needs to decide whether a court can record. */
 export const COURT_RECORDING_COLUMNS = `
   c.courtId, c.venueId, c.name, c.cameraRtspUrl IS NOT NULL AS hasCamera,
-  v.name AS venueName, v.logoUrl, v.clipPrice,
+  v.name AS venueName, v.logoUrl, v.clipPrice, c.streamEnabled, c.streamWatchUrl,
   EXISTS (
     SELECT 1 FROM devices d
     WHERE d.venueId = c.venueId AND d.status = 'Active' AND d.lastSeenAt >= ?

@@ -22,6 +22,43 @@ const optionalRtspUrl = () =>
   );
 
 /**
+ * A live-stream ingest URL including its stream key, e.g.
+ * rtmp://a.rtmp.youtube.com/live2/xxxx-xxxx-xxxx. Write-only like the camera.
+ */
+const optionalRtmpUrl = () =>
+  emptyToUndefined(
+    z
+      .string()
+      .trim()
+      .max(500)
+      .refine((value) => {
+        try {
+          return ["rtmp:", "rtmps:"].includes(new URL(value).protocol);
+        } catch {
+          return false;
+        }
+      }, "Enter the stream's RTMP address (with the stream key), starting with rtmp://")
+      .optional()
+  );
+
+/** The public page players open to watch the stream (YouTube / Facebook link). */
+const optionalWatchUrl = () =>
+  emptyToUndefined(
+    z
+      .string()
+      .trim()
+      .max(255)
+      .refine((value) => {
+        try {
+          return ["https:", "http:"].includes(new URL(value).protocol);
+        } catch {
+          return false;
+        }
+      }, "Enter the link players open to watch, starting with https://")
+      .optional()
+  );
+
+/**
  * The code a court's physical button sends to the recorder box
  * (http://<box>:<port>/press/<code>). Letters, digits, - and _.
  */
@@ -40,6 +77,9 @@ export const createCourtSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
   cameraRtspUrl: optionalRtspUrl(),
   buttonCode: optionalButtonCode(),
+  streamEnabled: z.boolean().optional().default(false),
+  streamRtmpUrl: optionalRtmpUrl(),
+  streamWatchUrl: optionalWatchUrl(),
 });
 
 // PUT /:courtId
@@ -51,6 +91,12 @@ export const updateCourtSchema = z.object({
   removeCamera: z.boolean().optional().default(false),
   // Full update like the other fields: omitted/"" clears the button
   buttonCode: optionalButtonCode(),
+  // Live stream: the RTMP address is write-only — omitted/"" keeps the stored
+  // one, removeStream clears it (and turns streaming off)
+  streamEnabled: z.boolean().optional().default(false),
+  streamRtmpUrl: optionalRtmpUrl(),
+  removeStream: z.boolean().optional().default(false),
+  streamWatchUrl: optionalWatchUrl(),
   status: z.enum(["Active", "Inactive"]).optional(),
 });
 

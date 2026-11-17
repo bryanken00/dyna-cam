@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalString, queryInt } from "./_helpers.js";
+import { emptyToUndefined, optionalString, queryInt } from "./_helpers.js";
 
 /** Validators for the recorder-box API (controllers/v1/device/). */
 
@@ -12,6 +12,9 @@ export const heartbeatSchema = z.object({
         courtId: z.string().min(1).max(50),
         status: z.enum(["ok", "error", "starting"]),
         message: optionalString(255),
+        // Phase 5 live stream for this court (omitted when not streaming)
+        streamStatus: emptyToUndefined(z.enum(["off", "starting", "live", "error"]).optional()),
+        streamMessage: optionalString(255),
       })
     )
     .max(100)

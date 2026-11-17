@@ -180,6 +180,44 @@ The box checks free space every minute:
 API fails a part that isn't finished within 15 min, so with several courts in sessions use a
 hardware encoder (QSV/VAAPI). Measuring this is in the load test below.
 
+## Live streaming
+
+A court can be streamed live to YouTube or Facebook. In the **Admin portal → Courts**, turn
+streaming on and paste the **ingest URL with the stream key**:
+
+| Service | Ingest URL (stream key at the end) |
+| --- | --- |
+| YouTube Live | `rtmp://a.rtmp.youtube.com/live2/<stream key>` (YouTube Studio → Go live → Stream) |
+| Facebook Live | `rtmps://live-api-s.facebook.com:443/rtmp/<stream key>` (Live Producer → Streaming software) |
+
+The stream key is a secret. The box never logs it; it shows at most the last 4 characters
+(`rtmp://a.rtmp.youtube.com/live2/****mnop`). The Admin portal shows each court's stream status
+(off, starting, live or error) from the heartbeat.
+
+How it works, and the rules:
+
+- **One camera connection.** A Tapo C200 serves only **one** RTSP client at a time; a second
+  connection is refused. So the stream is a second output of the court's **recorder** ffmpeg
+  (the `tee` muxer), never a second connection to the camera.
+- **Recording comes first.**
+  - The RTMP output runs in its own queue (`fifo`). On a slow uplink it drops stream packets
+    rather than slowing the recording.
+  - If the streaming service is unreachable or refuses the key, recording carries on and the
+    court shows *"Can't reach the streaming service"* or *"Stream rejected — check the stream
+    key"*.
+  - ffmpeg reconnects to the service by itself every 10 s.
+- **Restarts are rare and careful.** Turning streaming on or off, or changing the key, restarts
+  that court's recorder. So does an RTMP output that closed for good, at most every 5 min. A
+  restart leaves a few seconds' gap, so it only happens when no clip or session part that isn't
+  cut yet reaches into the last ~70 s.
+- **The picture is the camera's own.** Video is copied as-is (H.264, as the C200 sends it), with
+  the Tapo's on-screen time and logo but **without the venue watermark** in v1. Audio is AAC at
+  44.1 kHz. An H.265 camera can't be streamed this way.
+- **Bandwidth:** each streamed court sends about the camera's bitrate **up** (about 1–2 Mbit/s for
+  a C200 at 720p, more at 1080p), on top of clip uploads. Check the venue's upload speed before
+  turning on several courts. YouTube/Facebook may warn that the bitrate is low for their
+  recommended settings; the stream still works.
+
 ## Court buttons
 
 A Wi-Fi button at each court saves the replay just like the QR code does. The button calls the
@@ -256,7 +294,7 @@ Keep the board on wired USB power. Reconnect Wi-Fi in `loop()` if `WiFi.status()
 ```bash
 npm run lint
 npm test          # node:test, no internet: window math, segment selection, ffmpeg args, masking, queue, job loop, buttons, API client
-npm run smoke     # ~2 min, ffmpeg only, no API, no camera
+npm run smoke     # ~2 min, ffmpeg only, no API, no camera (includes a local RTMP streaming test)
 ```
 
 `npm run smoke` makes a Tapo-like source (H.264 with keyframes 1.7–6.1 s apart + **pcm_alaw**
@@ -269,7 +307,11 @@ swapped for a pipe), cuts a 65 s clip with a logo, and checks:
 - `moov` comes before `mdat` (faststart);
 - the thumbnail is a JPEG.
 
-Options: `-- --encoder libx264`, `-- --bursty` (packets arrive in ~1 s bursts, like bad Wi-Fi),
+In parallel, a second recorder records **and** streams to a local ffmpeg RTMP server. The smoke
+checks that segments keep coming, the receiver gets video, killing the receiver leaves recording
+running with stream status *error*, and a new receiver is picked up again.
+
+Options: `-- --no-stream`, `-- --encoder libx264`, `-- --bursty` (packets arrive in ~1 s bursts, like bad Wi-Fi),
 and `-- --keep` (keep the temp folder).
 
 ### A fake RTSP camera (end-to-end with a local API)
@@ -307,6 +349,8 @@ clip from the court's QR page.
 - **Sessions:** session windows from `/config` protect their segments from pruning
   (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
   `selectPartSegments`).
+- **Streaming** (`src/stream.js`): tee-muxer arguments and escaping, stream-key masking,
+  reading ffmpeg's stream messages, and the restart rule.
 - **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
   202, and the job loop relays the press with `pressedAtMs`.
 - **Jobs** (`src/jobs.js`):
@@ -336,6 +380,9 @@ clip from the court's QR page.
 | Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
+| Stream *Can't reach the streaming service* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying every 10 s. |
+| Stream *rejected — check the stream key* | The key was reset or the live event ended. Paste the new ingest URL in Admin → Courts. |
+| Stream on, but the camera shows *not reachable* | Something else is connected to the camera (NVR, VLC, Tapo's own NVR mode). The C200 allows one RTSP client. |
 | Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
 
 Test a camera by hand (the password stays out of the box's logs, but not your shell history):
@@ -362,4 +409,5 @@ before the first venue goes live.
 | Recording gaps during a clip burst | none | TODO |
 | 6 courts in sessions: 6 × 5-min parts encoded per 5 min | < 5 min total | TODO |
 | 5-min session part size (720p / 1080p) | ≈ 40–50 MB | TODO |
+| 6 courts recording, 2 streaming: CPU, upload use | < 20%, ≈ 2 × camera bitrate | TODO |
 | 24 h soak: memory growth, restarts | flat, 0 | TODO |

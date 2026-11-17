@@ -64,6 +64,7 @@ export const useCourtPageHooks = () => {
     courtName: decodeHTML(court?.name),
     clipSeconds: court?.clipSeconds || 60,
     cameraReady: !!court?.cameraReady,
+    liveWatchUrl: court?.liveWatchUrl || null,
     isLoading,
     isFetching,
     notFound,

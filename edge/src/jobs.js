@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { isSessionPart } from "./clipper.js";
+import { clipWindow, isSessionPart } from "./clipper.js";
 import { queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
 
@@ -357,6 +357,14 @@ export class JobRunner {
   async drop(entry) {
     await this.queue.remove(queueKey(entry));
     if (entry.clipId) await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+  }
+
+  /** Windows of this court's clips/parts not cut yet (a recorder restart must not gap them). */
+  pendingWindows(courtId) {
+    return this.queue
+      .list()
+      .filter((e) => e.clipId && e.courtId === courtId && e.state === "waiting")
+      .map((e) => clipWindow(e));
   }
 
   // ─── Court buttons ─────────────────────────────────────────────────────────

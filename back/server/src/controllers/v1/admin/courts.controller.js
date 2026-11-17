@@ -3,7 +3,12 @@ import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsy
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { courtQrUrl, DEVICE_ONLINE_SECONDS, secondsAgoLocal } from "../../../utils/clips.js";
-import { decryptSecret, encryptSecret, maskStreamUrl } from "../../../utils/crypto/secretBox.js";
+import {
+  decryptSecret,
+  encryptSecret,
+  maskRtmpUrl,
+  maskStreamUrl,
+} from "../../../utils/crypto/secretBox.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
@@ -24,7 +29,8 @@ const router = express.Router();
 
 const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
-         c.cameraRtspUrl, c.qrToken, c.buttonCode,
+         c.cameraRtspUrl, c.qrToken, c.buttonCode, c.streamEnabled, c.streamRtmpUrl,
+         c.streamWatchUrl,
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
            SELECT 1 FROM devices d
@@ -48,7 +54,7 @@ const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
 };
 
 const toCourt = (row) => {
-  const { cameraRtspUrl, ...court } = row;
+  const { cameraRtspUrl, streamRtmpUrl, streamEnabled, streamWatchUrl, ...court } = row;
   const plain = decryptSecret(cameraRtspUrl);
   return {
     ...court,
@@ -59,6 +65,13 @@ const toCourt = (row) => {
       configured: Boolean(cameraRtspUrl),
       // null when set but unreadable (DEVICE_SECRET_KEY changed) — re-enter it
       display: maskStreamUrl(plain),
+    },
+    stream: {
+      enabled: Boolean(streamEnabled),
+      configured: Boolean(streamRtmpUrl),
+      // The stream key is a secret: only its last 4 characters are shown
+      display: maskRtmpUrl(decryptSecret(streamRtmpUrl)),
+      watchUrl: streamWatchUrl || null,
     },
   };
 };
@@ -182,7 +195,18 @@ router.post(
   checkPermission("venues", "courts", "write"),
   validateBody(createCourtSchema),
   catchAsync(async (req, res) => {
-    const { venueId, name, cameraRtspUrl, buttonCode } = req.body;
+    const {
+      venueId,
+      name,
+      cameraRtspUrl,
+      buttonCode,
+      streamEnabled,
+      streamRtmpUrl,
+      streamWatchUrl,
+    } = req.body;
+    if (streamEnabled && !streamRtmpUrl) {
+      return res.sendError("Enter the stream's RTMP address to turn live streaming on", 400);
+    }
     const now = getCurrentTimestampLocal();
 
     let conn;
@@ -219,9 +243,9 @@ router.post(
 
       await conn.execute(
         `INSERT INTO courts
-           (courtId, venueId, name, cameraRtspUrl, qrToken, buttonCode, status, dateCreated,
-            dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+           (courtId, venueId, name, cameraRtspUrl, qrToken, buttonCode, streamEnabled,
+            streamRtmpUrl, streamWatchUrl, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           courtId,
           venueId,
@@ -229,6 +253,9 @@ router.post(
           encryptSecret(cameraRtspUrl),
           qrToken,
           buttonCode || null,
+          streamEnabled ? 1 : 0,
+          encryptSecret(streamRtmpUrl),
+          streamWatchUrl || null,
           now,
           now,
         ]
@@ -257,7 +284,17 @@ router.put(
   validateBody(updateCourtSchema),
   catchAsync(async (req, res) => {
     const { courtId } = req.params;
-    const { name, cameraRtspUrl, removeCamera, buttonCode, status } = req.body;
+    const {
+      name,
+      cameraRtspUrl,
+      removeCamera,
+      buttonCode,
+      streamEnabled,
+      streamRtmpUrl,
+      removeStream,
+      streamWatchUrl,
+      status,
+    } = req.body;
     const now = getCurrentTimestampLocal();
 
     let conn;
@@ -265,7 +302,7 @@ router.put(
       conn = await req.db.beginTransaction();
 
       const [target] = await conn.execute(
-        `SELECT c.courtId, c.venueId, c.cameraRtspUrl
+        `SELECT c.courtId, c.venueId, c.cameraRtspUrl, c.streamRtmpUrl
          FROM courts c
          JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
          WHERE c.courtId = ? AND c.status != 'Deleted'
@@ -296,10 +333,30 @@ router.put(
       if (removeCamera) storedCamera = null;
       else if (cameraRtspUrl) storedCamera = encryptSecret(cameraRtspUrl);
 
+      let storedStream = target[0].streamRtmpUrl;
+      if (removeStream) storedStream = null;
+      else if (streamRtmpUrl) storedStream = encryptSecret(streamRtmpUrl);
+      if (streamEnabled && !removeStream && !storedStream) {
+        await req.db.rollback(conn);
+        return res.sendError("Enter the stream's RTMP address to turn live streaming on", 400);
+      }
+
       await conn.execute(
-        `UPDATE courts SET name = ?, cameraRtspUrl = ?, buttonCode = ?, status = ?, dateUpdated = ?
+        `UPDATE courts
+         SET name = ?, cameraRtspUrl = ?, buttonCode = ?, streamEnabled = ?, streamRtmpUrl = ?,
+             streamWatchUrl = ?, status = ?, dateUpdated = ?
          WHERE courtId = ?`,
-        [name, storedCamera, buttonCode || null, status || "Active", now, courtId]
+        [
+          name,
+          storedCamera,
+          buttonCode || null,
+          streamEnabled && !removeStream ? 1 : 0,
+          storedStream,
+          streamWatchUrl || null,
+          status || "Active",
+          now,
+          courtId,
+        ]
       );
 
       await req.db.commit(conn);

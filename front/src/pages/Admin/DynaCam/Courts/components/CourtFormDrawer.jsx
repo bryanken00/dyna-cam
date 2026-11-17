@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
+  Globe,
   Keyboard,
   Link2,
   Loader2,
@@ -10,6 +11,7 @@ import {
   Network,
   Plus,
   Radio,
+  RadioTower,
   Undo2,
   User,
   WandSparkles,
@@ -61,8 +63,10 @@ import {
   TAPO_DEFAULT_STREAM,
   TAPO_STREAMS,
   buildTapoRtspUrl,
+  isRtmpUrl,
   isRtspUrl,
   isValidIPv4,
+  isWebUrl,
 } from "../../../../../utils/tapo";
 import {
   useGetCourtOptions,
@@ -78,6 +82,15 @@ const CAMERA_TYPE_OPTIONS = [
 ];
 
 const RTSP_MAX = 500; // courts.validator.js caps the URL at 500
+const RTMP_MAX = 500;
+const WATCH_URL_MAX = 255;
+
+const STREAM_ON = "Streaming";
+const STREAM_OFF = "Off";
+const STREAM_TOGGLE_OPTIONS = [
+  { v: STREAM_OFF, dot: "var(--color-text-muted)" },
+  { v: STREAM_ON, dot: "var(--color-error)" },
+];
 const credLength = (v) =>
   v === "" || (v.length >= TAPO_CREDENTIAL_MIN && v.length <= TAPO_CREDENTIAL_MAX);
 const credMessage = `Use ${TAPO_CREDENTIAL_MIN}–${TAPO_CREDENTIAL_MAX} characters`;
@@ -86,7 +99,9 @@ const credMessage = `Use ${TAPO_CREDENTIAL_MIN}–${TAPO_CREDENTIAL_MAX} charact
 // edit mode blank camera fields mean "keep the current one". So every camera
 // field validates shape, not presence — except that a Tapo camera needs all
 // three of IP, username and password once any of them is filled.
-const buildSchema = (isEditMode) =>
+// `hasStoredStream`: the court already has an RTMP address saved (edit mode),
+// so streaming can be switched on without typing a new one.
+const buildSchema = (isEditMode, hasStoredStream) =>
   z
     .object({
       venueId: isEditMode
@@ -125,7 +140,41 @@ const buildSchema = (isEditMode) =>
           (v) => v === "" || BUTTON_CODE_PATTERN.test(v),
           "Use 3–32 letters, digits, - or _",
         ),
+      // Live stream — the RTMP address is write-only like the camera
+      streamEnabled: z.boolean(),
+      streamRtmpUrl: z
+        .string()
+        .trim()
+        .max(RTMP_MAX, `Keep the address under ${RTMP_MAX} characters`)
+        .refine(
+          (v) => v === "" || isRtmpUrl(v),
+          "Enter the stream's RTMP address (with the stream key), starting with rtmp://",
+        ),
+      removeStream: z.boolean(),
+      streamWatchUrl: z
+        .string()
+        .trim()
+        .max(WATCH_URL_MAX, `Keep the link under ${WATCH_URL_MAX} characters`)
+        .refine(
+          (v) => v === "" || isWebUrl(v),
+          "Enter the link players open to watch, starting with https://",
+        ),
       status: z.enum(["Active", "Inactive"]),
+    })
+    .superRefine((v, ctx) => {
+      // Streaming needs an address: a new one, or the one already saved
+      if (
+        v.streamEnabled &&
+        !v.removeStream &&
+        v.streamRtmpUrl === "" &&
+        !hasStoredStream
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["streamRtmpUrl"],
+          message: "Enter the stream's RTMP address to turn live streaming on",
+        });
+      }
     })
     .superRefine((v, ctx) => {
       if (v.removeCamera || v.cameraType !== TAPO) return;
@@ -154,6 +203,10 @@ const EMPTY = {
   rtspUrl: "",
   removeCamera: false,
   buttonCode: "",
+  streamEnabled: false,
+  streamRtmpUrl: "",
+  removeStream: false,
+  streamWatchUrl: "",
   status: "Active",
 };
 
@@ -180,16 +233,35 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   const isEditMode = !!entity;
   const req = <span style={{ color: "var(--color-error)" }}>*</span>;
 
-  const schema = useMemo(() => buildSchema(isEditMode), [isEditMode]);
+  const hasStoredStream = !!entity?.stream?.configured;
+  const schema = useMemo(
+    () => buildSchema(isEditMode, hasStoredStream),
+    [isEditMode, hasStoredStream],
+  );
   const form = useForm({ resolver: zodResolver(schema), defaultValues: EMPTY });
   const {
     formState: { isDirty, isSubmitSuccessful },
   } = form;
-  const [cameraType, removeCamera, watchedVenueId, watchedName, buttonCode] =
-    useWatch({
-      control: form.control,
-      name: ["cameraType", "removeCamera", "venueId", "name", "buttonCode"],
-    });
+  const [
+    cameraType,
+    removeCamera,
+    watchedVenueId,
+    watchedName,
+    buttonCode,
+    streamEnabled,
+    removeStream,
+  ] = useWatch({
+    control: form.control,
+    name: [
+      "cameraType",
+      "removeCamera",
+      "venueId",
+      "name",
+      "buttonCode",
+      "streamEnabled",
+      "removeStream",
+    ],
+  });
 
   // Same query as the Courts page filter, so it is usually already cached
   const { data: optionsData, isLoading: venuesLoading } = useGetCourtOptions({
@@ -216,6 +288,8 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             venueId: entity.venueId ?? "",
             name: decodeHTML(entity.name) ?? "",
             buttonCode: entity.buttonCode ?? "",
+            streamEnabled: !!entity.stream?.enabled,
+            streamWatchUrl: entity.stream?.watchUrl ?? "",
             status: entity.status === "Inactive" ? "Inactive" : "Active",
           }
         : EMPTY,
@@ -263,6 +337,16 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
     }
   };
 
+  const setRemoveStream = (next) => {
+    form.setValue("removeStream", next, { shouldDirty: true });
+    if (next) {
+      // Removing the address also turns streaming off (the API does the same)
+      form.setValue("streamRtmpUrl", "", { shouldValidate: false });
+      form.setValue("streamEnabled", false, { shouldDirty: true });
+      form.clearErrors(["streamRtmpUrl", "streamEnabled"]);
+    }
+  };
+
   const onSubmit = async (values) => {
     const cameraRtspUrl = cameraUrlFrom(values);
     if (cameraRtspUrl.length > RTSP_MAX) {
@@ -284,6 +368,14 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             buttonCode: values.buttonCode,
             // Omitted = keep the stored camera (the URL is write-only)
             ...(cameraRtspUrl ? { cameraRtspUrl } : {}),
+            // Live stream: enabled + watch link are a full update (always
+            // sent); the RTMP address is write-only — omitted keeps it
+            streamEnabled: values.removeStream ? false : values.streamEnabled,
+            removeStream: values.removeStream,
+            streamWatchUrl: values.streamWatchUrl,
+            ...(values.streamRtmpUrl && !values.removeStream
+              ? { streamRtmpUrl: values.streamRtmpUrl }
+              : {}),
           },
         });
       } else {
@@ -292,6 +384,9 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
           name: values.name,
           ...(values.buttonCode ? { buttonCode: values.buttonCode } : {}),
           ...(cameraRtspUrl ? { cameraRtspUrl } : {}),
+          streamEnabled: values.streamEnabled,
+          ...(values.streamRtmpUrl ? { streamRtmpUrl: values.streamRtmpUrl } : {}),
+          ...(values.streamWatchUrl ? { streamWatchUrl: values.streamWatchUrl } : {}),
         });
       }
       markSaved();
@@ -303,6 +398,7 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   };
 
   const camera = entity?.camera;
+  const stream = entity?.stream;
   const cameraLocked = isEditMode && removeCamera;
   const keepHint = isEditMode
     ? " Leave blank to keep the current camera."
@@ -688,6 +784,162 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                     )}
                   </>
                 )}
+              </div>
+
+              {/* Live stream */}
+              <div className="mt-7">
+                <SectionLabel>Live stream</SectionLabel>
+
+                <FormField
+                  control={form.control}
+                  name="streamEnabled"
+                  render={({ field }) => (
+                    <FormItem className="mb-5">
+                      <FormLabel>Stream this court live</FormLabel>
+                      <StatusToggle
+                        value={field.value ? STREAM_ON : STREAM_OFF}
+                        onChange={(v) => field.onChange(v === STREAM_ON)}
+                        options={STREAM_TOGGLE_OPTIONS}
+                      />
+                      <FormDescription>
+                        The recorder box sends the stream itself over its camera
+                        connection — nothing to set up on the camera (a Tapo
+                        C200 serves only one connection).
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {/* Edit: the saved address (key masked) + Remove */}
+                {isEditMode && (
+                  <div
+                    className="flex items-center justify-between gap-3 flex-wrap mb-5 px-3.5 py-3"
+                    style={{
+                      border: "1px solid var(--color-line)",
+                      borderRadius: 10,
+                      background: "var(--color-surface-sunken)",
+                    }}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <RadioTower
+                        className="w-4 h-4 shrink-0"
+                        style={
+                          stream?.configured && !removeStream
+                            ? { color: "var(--color-secondary-color)" }
+                            : mutedIcon
+                        }
+                      />
+                      <div className="min-w-0">
+                        <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                          {removeStream
+                            ? "The stream address will be removed when you save"
+                            : stream?.configured
+                              ? "Current stream address"
+                              : "No stream address set yet"}
+                        </div>
+                        {stream?.configured && !removeStream && (
+                          <div
+                            className="font-mono truncate"
+                            style={{ fontSize: 12.5, color: "var(--color-text-dark)" }}
+                            title={stream.display || undefined}
+                          >
+                            {stream.display || "Set, but can't be read — enter it again"}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {stream?.configured &&
+                      (removeStream ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRemoveStream(false)}
+                        >
+                          <Undo2 />
+                          Keep stream
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRemoveStream(true)}
+                        >
+                          <X />
+                          Remove stream
+                        </Button>
+                      ))}
+                  </div>
+                )}
+
+                {!(isEditMode && removeStream) && (
+                  <FormField
+                    control={form.control}
+                    name="streamRtmpUrl"
+                    render={({ field }) => (
+                      <FormItem className="mb-5">
+                        <FormLabel>
+                          {isEditMode && stream?.configured
+                            ? "New stream address"
+                            : "Stream address (RTMP)"}
+                          {streamEnabled && !hasStoredStream && <> {req}</>}
+                        </FormLabel>
+                        <FormControl>
+                          <PasswordInput
+                            showLock={false}
+                            placeholder="rtmp://a.rtmp.youtube.com/live2/xxxx-xxxx-xxxx-xxxx"
+                            className="font-mono"
+                            maxLength={RTMP_MAX}
+                            spellCheck={false}
+                            autoComplete="new-password"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          From YouTube Studio → Go live → Stream (Stream URL +
+                          Stream key joined with &apos;/&apos;), or Facebook Live
+                          Producer. The key stays secret — only its last 4
+                          characters are shown.
+                          {isEditMode && stream?.configured &&
+                            " Leave blank to keep the current address."}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name="streamWatchUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Watch link</FormLabel>
+                      <div className="relative">
+                        <Globe className={iconPrefix} style={mutedIcon} />
+                        <FormControl>
+                          <Input
+                            inputMode="url"
+                            placeholder="https://www.youtube.com/@yourvenue/live"
+                            className="h-10 pl-9"
+                            maxLength={WATCH_URL_MAX}
+                            spellCheck={false}
+                            autoComplete="off"
+                            {...field}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormDescription>
+                        The page players open to watch — shown as &quot;Watch
+                        live&quot; on the court&apos;s QR page while the stream
+                        is on and the recorder box is online.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* Court button */}

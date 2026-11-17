@@ -98,6 +98,9 @@ async function main() {
       }),
   });
 
+  // Stream restarts wait until no uncut clip/part window reaches into the last 70 s
+  recorders.pendingWindows = (courtId) => jobs.pendingWindows(courtId);
+
   let buttons = null;
   let shuttingDown = false;
   const shutdown = async (signal) => {

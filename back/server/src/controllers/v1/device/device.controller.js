@@ -94,7 +94,7 @@ router.get(
         [venueId]
       ),
       req.db.query(
-        `SELECT courtId, name, cameraRtspUrl
+        `SELECT courtId, name, cameraRtspUrl, streamEnabled, streamRtmpUrl
          FROM courts
          WHERE venueId = ? AND status = 'Active' AND cameraRtspUrl IS NOT NULL
          ORDER BY name ASC`,
@@ -119,6 +119,12 @@ router.get(
         courtId: court.courtId,
         name: court.name,
         cameraRtspUrl: decryptSecret(court.cameraRtspUrl),
+        // Phase 5: restream over the same camera connection (a Tapo camera
+        // serves one RTSP client). null = not streaming.
+        stream:
+          court.streamEnabled && court.streamRtmpUrl
+            ? { rtmpUrl: decryptSecret(court.streamRtmpUrl) }
+            : null,
       }))
       // An unreadable URL (DEVICE_SECRET_KEY changed) cannot be recorded
       .filter((court) => court.cameraRtspUrl);
@@ -168,6 +174,8 @@ router.post(
         courtName: names.get(camera.courtId),
         status: camera.status,
         message: camera.message || null,
+        streamStatus: camera.streamStatus || null,
+        streamMessage: camera.streamMessage || null,
       }));
 
     const now = getCurrentTimestampLocal();

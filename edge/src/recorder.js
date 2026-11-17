@@ -10,6 +10,15 @@ import {
   SEGMENT_LIST,
   segmentsToPrune,
 } from "./segments.js";
+import {
+  classifyStreamLine,
+  maskStreamKey,
+  maskStreamUrl,
+  parseLogLine,
+  streamRestartAllowed,
+  streamSlave,
+  teeSlave,
+} from "./stream.js";
 import { backoffMs, maskCredentials, safeId, truncate } from "./util.js";
 
 /**
@@ -31,6 +40,11 @@ const RTSP_TIMEOUT_US = "10000000"; // 10 s socket timeout: a stalled stream exi
 /**
  * ffmpeg arguments for one court's recorder. segments.csv lists each closed
  * segment's content start/end; segments.js turns those into wall-clock times.
+ *
+ * With `streamUrl` the same process also restreams to RTMP through the tee
+ * muxer (stream.js) — a Tapo C200 accepts only one RTSP client, so the stream
+ * can never open its own camera connection. The RTMP slave can fail without
+ * touching the recording. Logs are `level+info` so stream events can be read.
  */
 export function buildRecordArgs({
   rtspUrl,
@@ -38,12 +52,39 @@ export function buildRecordArgs({
   segmentSeconds,
   recordAudio = true,
   ffmpegMajor = 99,
+  streamUrl = null,
 }) {
+  const segmentOptions = {
+    segment_time: String(segmentSeconds),
+    segment_format: "mpegts",
+    segment_list: path.join(outDir, SEGMENT_LIST),
+    segment_list_type: "csv",
+    segment_list_size: "100",
+    reset_timestamps: "1",
+    strftime: "1",
+  };
+  const segmentsOut = path.join(outDir, "%s.ts");
+  const output = streamUrl
+    ? [
+        // FLV needs the codec headers up front; YouTube wants 44.1/48 kHz audio
+        "-flags",
+        "+global_header",
+        "-f",
+        "tee",
+        `${teeSlave({ f: "segment", ...segmentOptions }, segmentsOut)}|${streamSlave(streamUrl)}`,
+      ]
+    : [
+        "-f",
+        "segment",
+        ...Object.entries(segmentOptions).flatMap(([k, v]) => [`-${k}`, v]),
+        segmentsOut,
+      ];
   return [
     "-hide_banner",
     "-nostdin",
+    "-nostats",
     "-loglevel",
-    "error",
+    "level+info",
     "-y",
     "-rtsp_transport",
     "tcp",
@@ -55,26 +96,12 @@ export function buildRecordArgs({
     rtspUrl,
     "-map",
     "0:v:0",
-    ...(recordAudio ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "64k"] : ["-an"]),
+    ...(recordAudio
+      ? ["-map", "0:a?", "-c:a", "aac", "-b:a", "64k", ...(streamUrl ? ["-ar", "44100"] : [])]
+      : ["-an"]),
     "-c:v",
     "copy",
-    "-f",
-    "segment",
-    "-segment_time",
-    String(segmentSeconds),
-    "-segment_format",
-    "mpegts",
-    "-segment_list",
-    path.join(outDir, SEGMENT_LIST),
-    "-segment_list_type",
-    "csv",
-    "-segment_list_size",
-    "100",
-    "-reset_timestamps",
-    "1",
-    "-strftime",
-    "1",
-    path.join(outDir, "%s.ts"),
+    ...output,
   ];
 }
 
@@ -100,12 +127,29 @@ export function describeFailure(line) {
   return truncate(text ? `Recorder stopped: ${text}` : "Recorder stopped unexpectedly");
 }
 
+const hostOf = (url) => {
+  try {
+    return new URL(url).hostname || null;
+  } catch (_err) {
+    return null;
+  }
+};
+
 /** One camera → one ffmpeg, restarted with backoff whenever it exits or stalls. */
 export class CourtRecorder {
-  constructor({ court, dir, settings, ffmpegMajor, log, spawnImpl = spawn }) {
+  constructor({ court, dir, settings, ffmpegMajor, log, spawnImpl = spawn, lastStreamRestartAt }) {
+    this.court = court;
     this.courtId = court.courtId;
     this.name = court.name;
     this.rtspUrl = court.cameraRtspUrl;
+    this.streamUrl = court.stream?.rtmpUrl || null;
+    this.streamHost = this.streamUrl ? hostOf(this.streamUrl) : null;
+    this.streamStatus = this.streamUrl ? "starting" : "off";
+    this.streamMessage = null;
+    this.streamDead = false;
+    // A stream-only restart (config change, dead RTMP output) — see RecorderManager
+    this.lastStreamRestartAt = lastStreamRestartAt ?? Date.now();
+    this.wantStream = undefined;
     this.dir = dir;
     this.settings = settings;
     this.ffmpegMajor = ffmpegMajor;
@@ -123,7 +167,40 @@ export class CourtRecorder {
   }
 
   get label() {
-    return `${this.name || this.courtId} (${maskCredentials(this.rtspUrl)})`;
+    const stream = this.streamUrl ? `, streaming to ${maskStreamUrl(this.streamUrl)}` : "";
+    return `${this.name || this.courtId} (${maskCredentials(this.rtspUrl)}${stream})`;
+  }
+
+  /** Every stderr line: masked first, then read for stream events and recording errors. */
+  onStderrLine(raw) {
+    const line = maskCredentials(maskStreamKey(raw, this.streamUrl));
+    const parsed = parseLogLine(line);
+    const event = this.streamUrl ? classifyStreamLine(parsed) : null;
+    if (event) return this.onStreamEvent(event);
+    // e.g. "[tcp] Connection to tcp://<ingest host>:1935 failed" — the stream's, not the camera's
+    if (this.streamHost && parsed.text.includes(this.streamHost)) return undefined;
+    if (parsed.level === null || ["error", "fatal", "panic"].includes(parsed.level)) {
+      this.lastStderr = parsed.text;
+    }
+    return undefined;
+  }
+
+  onStreamEvent(event) {
+    const who = this.name || this.courtId;
+    if (event.event === "recovered") {
+      if (this.streamStatus !== "live") this.log.info(`stream for ${who} reconnected`);
+      this.streamStatus = "live";
+      this.streamMessage = "Streaming";
+      return;
+    }
+    if (this.streamStatus !== "error" || this.streamMessage !== event.message) {
+      this.log.warn(
+        `stream for ${who}: ${event.message}${event.event === "dead" ? " (output closed; the recorder restarts it within 5 min when no clip is being made)" : " — retrying"}`
+      );
+    }
+    this.streamStatus = "error";
+    this.streamMessage = event.message;
+    if (event.event === "dead") this.streamDead = true;
   }
 
   start() {
@@ -148,7 +225,11 @@ export class CourtRecorder {
       segmentSeconds: this.settings.segmentSeconds,
       recordAudio: this.settings.recordAudio,
       ffmpegMajor: this.ffmpegMajor,
+      streamUrl: this.streamUrl,
     });
+    this.streamStatus = this.streamUrl ? "starting" : "off";
+    this.streamMessage = this.streamUrl ? "Connecting to the streaming service" : null;
+    this.streamDead = false;
     this.state = "starting";
     this.message = "Connecting to camera";
     this.startedAt = Date.now();
@@ -173,11 +254,7 @@ export class CourtRecorder {
     child.stderr?.on("data", (chunk) => {
       const lines = (partial + chunk).split(/\r?\n/);
       partial = lines.pop();
-      const last = lines
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .pop();
-      if (last) this.lastStderr = maskCredentials(last);
+      for (const line of lines) if (line.trim()) this.onStderrLine(line);
     });
     child.on("error", (err) => {
       this.lastStderr = `cannot start ffmpeg: ${err.code || err.message}`;
@@ -216,6 +293,13 @@ export class CourtRecorder {
     if (!this.child) return;
 
     const fresh = this.lastVideoAt > this.startedAt && now - this.lastVideoAt < STALL_MS;
+    // The fifo reports failures and reconnects, not a first success: video
+    // flowing and no stream error for a few seconds counts as live
+    if (fresh && this.streamStatus === "starting" && now - this.startedAt >= 8000) {
+      this.streamStatus = "live";
+      this.streamMessage = "Streaming";
+      this.log.info(`streaming ${this.name || this.courtId} to ${maskStreamUrl(this.streamUrl)}`);
+    }
     if (fresh) {
       if (this.state !== "ok") this.log.info(`recording ${this.name || this.courtId}`);
       this.state = "ok";
@@ -235,7 +319,13 @@ export class CourtRecorder {
   }
 
   status() {
-    return { courtId: this.courtId, status: this.state, message: truncate(this.message, 255) };
+    return {
+      courtId: this.courtId,
+      status: this.state,
+      message: truncate(this.message, 255),
+      streamStatus: this.streamStatus,
+      ...(this.streamMessage ? { streamMessage: truncate(this.streamMessage, 255) } : {}),
+    };
   }
 
   get pidFile() {
@@ -297,6 +387,47 @@ export class RecorderManager {
     this.timer = null;
     this.sessions = [];
     this.disk = { lowWarnedAt: 0, critical: false };
+    /** Uncut clip/part windows of a court — set by index.js from the job queue. */
+    this.pendingWindows = () => [];
+  }
+
+  newRecorder(court, extra = {}) {
+    return new CourtRecorder({
+      court,
+      dir: this.courtDir(court.courtId),
+      settings: this.settings,
+      ffmpegMajor: this.ffmpegMajor,
+      log: this.log,
+      spawnImpl: this.spawnImpl,
+      ...extra,
+    });
+  }
+
+  /**
+   * Stream changes and dead RTMP outputs need a recorder restart, which leaves
+   * a few seconds' gap: only when no uncut clip/part window reaches into the
+   * last 70 s, and for a dead output at most every 5 min.
+   */
+  async applyStreamRestarts(now = Date.now()) {
+    for (const [courtId, recorder] of this.recorders) {
+      const change = recorder.wantStream !== undefined;
+      if (!change && !recorder.streamDead) continue;
+      const allowed = streamRestartAllowed({
+        nowMs: now,
+        lastRestartMs: change ? 0 : recorder.lastStreamRestartAt,
+        minIntervalMs: change ? 0 : undefined,
+        pendingWindows: this.pendingWindows(courtId),
+      });
+      if (!allowed) continue;
+      const court = change ? { ...recorder.court, stream: recorder.wantStream } : recorder.court;
+      this.log.info(
+        `restarting the recorder for ${recorder.name || courtId} (${change ? "stream settings changed" : "stream output closed"})`
+      );
+      await recorder.stop();
+      const next = this.newRecorder(court, { lastStreamRestartAt: now });
+      this.recorders.set(courtId, next);
+      next.start();
+    }
   }
 
   /** Sessions from /config: their footage outlives the rolling buffer (segments.js). */
@@ -360,11 +491,29 @@ export class RecorderManager {
     return this.recorders.has(courtId);
   }
 
+  /** A stream turned on/off/changed: the restart waits for applyStreamRestarts. */
+  noteStreamChange(recorder, next) {
+    const nextStream = next.stream?.rtmpUrl ? next.stream : null;
+    const nextUrl = nextStream?.rtmpUrl || null;
+    if (nextUrl === recorder.streamUrl) {
+      recorder.wantStream = undefined; // unchanged, or changed back before the restart
+      return;
+    }
+    if (recorder.wantStream === undefined || (recorder.wantStream?.rtmpUrl || null) !== nextUrl) {
+      const what = nextUrl ? (recorder.streamUrl ? "changed" : "turned on") : "turned off";
+      this.log.info(
+        `stream ${what} for ${next.name || recorder.courtId} — restarting the recorder when no clip is being made`
+      );
+    }
+    recorder.wantStream = nextStream;
+  }
+
   /** Make the running recorders match `courts` (from GET /config). */
   async sync(courts) {
     const wanted = new Map(courts.filter((c) => c.cameraRtspUrl).map((c) => [c.courtId, c]));
     for (const [courtId, recorder] of this.recorders) {
       const next = wanted.get(courtId);
+      if (next && next.cameraRtspUrl === recorder.rtspUrl) this.noteStreamChange(recorder, next);
       if (!next || next.cameraRtspUrl !== recorder.rtspUrl) {
         this.log.info(
           `${next ? "camera URL changed, restarting" : "court removed, stopping"} ${recorder.name || courtId}`
@@ -373,18 +522,12 @@ export class RecorderManager {
         await recorder.stop();
       } else {
         recorder.name = next.name;
+        recorder.court = { ...next, stream: recorder.court.stream };
       }
     }
     for (const [courtId, court] of wanted) {
       if (this.recorders.has(courtId)) continue;
-      const recorder = new CourtRecorder({
-        court,
-        dir: this.courtDir(courtId),
-        settings: this.settings,
-        ffmpegMajor: this.ffmpegMajor,
-        log: this.log,
-        spawnImpl: this.spawnImpl,
-      });
+      const recorder = this.newRecorder(court);
       this.recorders.set(courtId, recorder);
       recorder.start();
     }
@@ -408,6 +551,7 @@ export class RecorderManager {
           .catch((err) => this.log.warn(`tick failed for ${recorder.courtId}`, err));
       }
       await this.pruneOrphans().catch((err) => this.log.warn("prune failed", err));
+      await this.applyStreamRestarts().catch((err) => this.log.warn("stream restart failed", err));
       this.timer = setTimeout(run, intervalMs);
     };
     this.timer = setTimeout(run, intervalMs);

@@ -286,13 +286,28 @@
 
 ## Phase 5: Live streaming
 
-- [ ] Courts drawer: stream on/off + RTMP URL/key (encrypted, masked on read)
-- [ ] `/device/config` includes stream targets for the device's own venue only
-- [ ] `edge/`: per-court restream process (`-c copy` to RTMP), restart on failure, status in
-      heartbeat
-- [ ] Court public page shows "Watch live" link when streaming
-- [ ] Tried: toggle stream on → court visible on the YouTube/Facebook live page within 30s
-- [ ] Lint/test/build pass; changelog entry (`ref: PLAN-001`)
+- [x] Migration `006_add_streaming_to_courts.sql`: `courts.streamEnabled`, `streamRtmpUrl`
+      (encrypted, write-only), `streamWatchUrl`
+- [x] Courts API: stream on/off, RTMP address (masked on read: only the key's last 4
+      characters), watch link; can't enable without an address; `removeStream`
+- [x] `/device/config` gives each court's `stream.rtmpUrl` to the venue's own box only; heartbeat
+      carries `streamStatus` / `streamMessage`, shown on Recorder boxes
+- [x] Court public page: `liveWatchUrl` → "Watch live" button while streaming
+- [x] **One RTSP connection** (real C200 allows only one client): `edge/` restreams from the
+      recorder's own ffmpeg via `tee` + `fifo` (`onfail=ignore`, auto-recovery every 10 s, drops
+      stream packets rather than stall recording); config changes restart the recorder (never
+      while an uncut clip window is in the last 70 s); stream key masked in every log
+- [x] Web: Live stream section in the court drawer, "Live" chip, stream health per camera,
+      "Watch live" on the player page
+- [x] Tests: API `tests/streaming.test.js` (5); edge 95 unit tests + smoke with a local RTMP
+      receiver (live → receiver killed → error, recording continues → receiver back → live)
+- [x] Tried on the real C200 (throwaway database, local RTMP receiver instead of YouTube):
+      stream **live** within 45 s; receiver got 1280×720 H.264 + AAC 44.1 kHz, 83 s; a clip saved
+      while streaming Ready in 9 s; receiver stopped → "Can't reach the streaming service" while
+      recording continued and the next clip was Ready in 12 s; stream key in no log.
+      *(Not yet tried against YouTube / Facebook themselves — needs the venue's stream key.)*
+- [x] Lint/test/build pass (API 135 tests, edge 95 tests + smoke, web lint + build); changelog
+      entry (`ref: PLAN-001`)
 
 ## Phase 6: Staff mobile app screens (`app/`)
 

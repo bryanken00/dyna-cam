@@ -1,4 +1,11 @@
-import { CircleAlert, Loader2, RotateCcw, Timer, VideoOff } from "lucide-react";
+import {
+  CircleAlert,
+  Loader2,
+  Radio,
+  RotateCcw,
+  Timer,
+  VideoOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCourtPageHooks } from "./hooks";
 import PublicLayout from "../../../components/layout/PublicLayout";
@@ -26,6 +33,7 @@ const CourtPage = () => {
     courtName,
     clipSeconds,
     cameraReady,
+    liveWatchUrl,
     isLoading,
     isFetching,
     notFound,
@@ -119,6 +127,22 @@ const CourtPage = () => {
           )}
           {isSaving ? "Saving…" : `Save the last ${clipSeconds} seconds`}
         </Button>
+
+        {/* The venue streams this court — the API only sends the link while
+            streaming is on and the recorder box is online */}
+        {liveWatchUrl && (
+          <Button
+            asChild
+            variant="outline"
+            size="lg"
+            className="mt-3 w-full h-12 text-[15px] rounded-(--radius-card)"
+          >
+            <a href={liveWatchUrl} target="_blank" rel="noopener noreferrer">
+              <Radio className="size-4.5" style={{ color: "var(--color-error)" }} />
+              Watch live
+            </a>
+          </Button>
+        )}
 
         {cameraReady ? (
           <p

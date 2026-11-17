@@ -551,3 +551,10 @@ The checklist follows these phases. Each phase is shippable on its own.
     `t=…,te=…,li=…`. The signature is HMAC-SHA256 with the webhook secret over `{t}.{raw body}`,
     compared with `te` in test mode or `li` in live mode.
   - **Adding it later:** a new migration adds a provider to `payments.method`.
+- 2026-11-17: Phase 4 done and committed (cash only).
+- 2026-11-17: Phase 5 done. Tested on the real C200 against a local RTMP receiver; YouTube and
+  Facebook aren't tested yet (they need the venue's key).
+  - **No watermark in v1:** the stream is the camera's own picture.
+  - **Audio:** the stream's audio is the camera's 8 kHz G.711, resampled to 44.1 kHz AAC.
+  - **Bitrate:** a 720p C200 runs about 1–2 Mbps, so YouTube may warn about low bitrate.
+

@@ -70,3 +70,21 @@ export const isRtspUrl = (value) => {
     return false;
   }
 };
+
+/** True for an rtmp:// or rtmps:// ingest URL — the same rule the API applies. */
+export const isRtmpUrl = (value) => {
+  try {
+    return ["rtmp:", "rtmps:"].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
+
+/** True for an http(s) link players can open (a stream's watch page). */
+export const isWebUrl = (value) => {
+  try {
+    return ["https:", "http:"].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};

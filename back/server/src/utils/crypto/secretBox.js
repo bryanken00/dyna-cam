@@ -73,6 +73,26 @@ export const decryptSecret = (stored) => {
 };
 
 /**
+ * An RTMP ingest URL safe to show: the stream key (last path segment) hidden
+ * except its last 4 characters, e.g.
+ * `rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl` → `rtmp://a.rtmp.youtube.com/live2/••••ijkl`.
+ */
+export const maskRtmpUrl = (url) => {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    const parts = parsed.pathname.split("/");
+    const key = parts.pop() || "";
+    const shown = key.length > 4 ? `••••${key.slice(-4)}` : "••••";
+    return `${parsed.protocol}//${parsed.host}${parts.join("/")}/${shown}`;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * A camera URL safe to show in the Admin portal: credentials removed, e.g.
  * `rtsp://admin:pw@192.168.1.50:554/stream1` → `rtsp://192.168.1.50:554/stream1`.
  */

@@ -294,7 +294,7 @@ export const useCourtHooks = () => {
         title: "Camera",
         key: "camera",
         width: 230,
-        render: (_, record) => <CameraChip camera={record.camera} />,
+        render: (_, record) => <CameraChip camera={record.camera} stream={record.stream} />,
       },
       {
         title: "Button",

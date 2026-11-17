@@ -37,6 +37,13 @@ const CAMERA_STATE = {
   error: { tone: "error", label: "Error" },
 };
 
+/** Heartbeat stream status → dot tone + label ("off" / missing = not shown). */
+const STREAM_STATE = {
+  starting: { tone: "warning", label: "Stream starting" },
+  live: { tone: "success", label: "Streaming" },
+  error: { tone: "error", label: "Stream error" },
+};
+
 const DEVICE_STATUS_TONE = {
   Active: "success",
   Revoked: "error",
@@ -358,7 +365,7 @@ export const useDeviceHooks = () => {
         title: "Cameras",
         dataIndex: "cameras",
         key: "cameras",
-        width: 230,
+        width: 260,
         render: (cameras, record) => {
           if (!cameras?.length) {
             return (
@@ -379,20 +386,34 @@ export const useDeviceHooks = () => {
                   tone: "muted",
                   label: cam.status,
                 };
+                const streamState = STREAM_STATE[cam.streamStatus];
                 return (
-                  <StatusDot
-                    key={cam.courtId}
-                    tone={state.tone}
-                    title={cam.message || undefined}
-                  >
-                    <span className="truncate">
-                      {decodeHTML(cam.courtName)}
-                      <span style={{ color: "var(--color-text-muted)" }}>
-                        {" · "}
-                        {state.label}
+                  <div key={cam.courtId} className="min-w-0">
+                    <StatusDot tone={state.tone} title={cam.message || undefined}>
+                      <span className="truncate">
+                        {decodeHTML(cam.courtName)}
+                        <span style={{ color: "var(--color-text-muted)" }}>
+                          {" · "}
+                          {state.label}
+                        </span>
                       </span>
-                    </span>
-                  </StatusDot>
+                    </StatusDot>
+                    {streamState && (
+                      <div className="pl-3.5" style={{ fontSize: 12 }}>
+                        <StatusDot
+                          tone={streamState.tone}
+                          title={cam.streamMessage || undefined}
+                        >
+                          <span className="truncate" style={{ fontSize: 12 }}>
+                            {streamState.label}
+                            {cam.streamStatus === "error" && cam.streamMessage
+                              ? `: ${cam.streamMessage}`
+                              : ""}
+                          </span>
+                        </StatusDot>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

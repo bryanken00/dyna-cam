@@ -15,6 +15,10 @@
  *    duration ≈ 65 s, H.264 video + AAC audio, moov before mdat (faststart),
  *    JPEG thumbnail.
  * 4. Cuts a 60 s session part (exact window, capped bitrate) from the same buffer.
+ * 5. Meanwhile (skip with --no-stream) a second recorder records AND streams to
+ *    a local ffmpeg RTMP server through the tee muxer: segments keep coming,
+ *    the receiver gets video, killing the receiver leaves the recording running
+ *    and reports a stream error, and a new receiver is picked up again.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -25,6 +29,7 @@ import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
 import { loadTimeline } from "../src/segments.js";
+import { maskStreamUrl } from "../src/stream.js";
 import { sleep } from "../src/util.js";
 
 const argv = process.argv.slice(2);
@@ -115,14 +120,14 @@ const inputFormat = () => (flag("--bursty") ? "matroska" : "nut");
  * spawn() stand-in for the recorder: same arguments, except the RTSP-only
  * input options are dropped and the input is a real-time pipe from the file.
  */
-function pipedSpawn(cameraFile) {
+function pipedSpawn(cameraFile, format = inputFormat()) {
   return (bin, args) => {
     const out = [];
     for (let i = 0; i < args.length; i += 1) {
       if (args[i] === "-rtsp_transport" || args[i] === "-timeout" || args[i] === "-stimeout") {
         i += 1;
       } else if (args[i] === "-i") {
-        out.push("-f", inputFormat(), "-i", "pipe:0");
+        out.push("-f", format, "-i", "pipe:0");
         i += 1;
       } else {
         out.push(args[i]);
@@ -136,7 +141,7 @@ function pipedSpawn(cameraFile) {
         "-flush_packets",
         "1",
         "-f",
-        inputFormat(),
+        format,
         "pipe:1",
       ]),
       { stdio: ["ignore", "pipe", "inherit"] }
@@ -187,6 +192,103 @@ function check({ info, video, audio, boxes, frames, videoStart, thumb }) {
   if (videoStart > 0.2) fail(`video starts ${videoStart}s into the clip`);
   if (!thumb || thumb[0] !== 0xff || thumb[1] !== 0xd8 || thumb[2] !== 0xff)
     fail("thumbnail is not a JPEG");
+}
+
+const RTMP_URL = "rtmp://127.0.0.1:19350/live/smoke-key-9876";
+
+/** ffmpeg as a one-shot RTMP server, writing what it receives to an MPEG-TS file. */
+const rtmpReceiver = (file) =>
+  spawn(
+    FFMPEG,
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-listen",
+      "1",
+      "-i",
+      RTMP_URL,
+      "-c",
+      "copy",
+      "-f",
+      "mpegts",
+      file,
+    ],
+    {
+      stdio: ["ignore", "ignore", "ignore"],
+    }
+  );
+
+const countSegments = async (dir) =>
+  (await fs.readdir(dir).catch(() => [])).filter((n) => /^\d+\.ts$/.test(n)).length;
+
+/** Phase 5: record + stream from ONE recorder process; the stream can fail without hurting the recording. */
+async function streamPhase({ dir, file, settings }) {
+  const bufferDir = path.join(dir, "buffer", "court-stream");
+  const recvFile = path.join(dir, "received.ts");
+  const recvFile2 = path.join(dir, "received-2.ts");
+  let receiver = rtmpReceiver(recvFile);
+  await sleep(1000);
+  const recorder = new CourtRecorder({
+    court: {
+      courtId: "court-stream",
+      name: "Stream court",
+      cameraRtspUrl: "rtsp://smoke:secret@127.0.0.1/stream1",
+      stream: { rtmpUrl: RTMP_URL },
+    },
+    dir: bufferDir,
+    settings,
+    ffmpegMajor: 99,
+    log: createLogger("stream-recorder"),
+    // MKV input: NUT tags H.264 with a fourcc that FLV refuses (RTSP sets none)
+    spawnImpl: pipedSpawn(file, "matroska"),
+  });
+  const tickFor = async (ms) => {
+    for (const end = Date.now() + ms; Date.now() < end;) {
+      await sleep(1000);
+      await recorder.tick();
+    }
+  };
+  const results = [];
+  try {
+    recorder.start();
+    await tickFor(12_000);
+    const live = recorder.status();
+    const before = await countSegments(bufferDir);
+    receiver.kill("SIGKILL");
+    await tickFor(8_000);
+    const dead = recorder.status();
+    const during = await countSegments(bufferDir);
+    receiver = rtmpReceiver(recvFile2);
+    await tickFor(16_000);
+    const back = recorder.status();
+    const afterCount = await countSegments(bufferDir);
+    receiver.kill("SIGKILL");
+    await recorder.stop();
+    const got = await probeFile(FFPROBE, recvFile).catch(() => ({ duration: 0, streams: [] }));
+    const got2 = await probeFile(FFPROBE, recvFile2).catch(() => ({ duration: 0, streams: [] }));
+    results.push(
+      `stream to ${maskStreamUrl(RTMP_URL)} — after 12 s: recording ${live.status}, stream ${live.streamStatus}`,
+      `receiver 1 got ${got.streams.map((s) => s.codec).join("+") || "nothing"}, ${got.duration.toFixed(1)}s`,
+      `receiver killed → stream ${dead.streamStatus} ("${dead.streamMessage}"), recording ${dead.status}, segments ${before} → ${during}`,
+      `new receiver → stream ${back.streamStatus}, recording ${back.status}, segments → ${afterCount}; receiver 2 got ${got2.streams.map((s) => s.codec).join("+") || "nothing"}, ${got2.duration.toFixed(1)}s`
+    );
+    if (live.status !== "ok" || live.streamStatus !== "live")
+      fail(`stream did not go live: ${JSON.stringify(live)}`);
+    if (!got.streams.some((s) => s.codec === "h264") || got.duration < 5)
+      fail("the RTMP receiver got no video");
+    if (dead.status !== "ok" || dead.streamStatus !== "error")
+      fail(`after the receiver died: ${JSON.stringify(dead)}`);
+    if (during <= before || afterCount <= during)
+      fail("segments stopped while the stream was down");
+    if (back.streamStatus !== "live" || !got2.streams.some((s) => s.codec === "h264"))
+      fail("the stream did not reconnect");
+    return results;
+  } finally {
+    receiver.kill("SIGKILL");
+    await recorder.stop();
+  }
 }
 
 /** A session part: exactly [20 s, 80 s] of the recording, with the capped session bitrate. */
@@ -245,6 +347,9 @@ async function main() {
     });
     log.info(`fake camera ready (${SOURCE_SECONDS}s, pcm_alaw audio); clip encoder: ${encoder}`);
 
+    const streaming = flag("--no-stream")
+      ? Promise.resolve(null)
+      : streamPhase({ dir, file, settings }).catch((err) => err);
     const bufferDir = path.join(dir, "buffer", "court-smoke");
     recorder = new CourtRecorder({
       court: {
@@ -333,6 +438,9 @@ async function main() {
 
     const partInfo = await cutSessionPart({ dir, bufferDir, startedAt, logo, encoder, settings });
     const { kbps } = partInfo;
+    const streamResult = await streaming;
+    if (streamResult instanceof Error) throw streamResult;
+    if (streamResult) console.log(`\n${streamResult.join("\n")}\n`);
     log.info(
       `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s`
     );

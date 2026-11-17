@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, live streaming via the recorder's tee output, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -22,6 +22,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
+| `stream.js` | RTMP via the recorder's own ffmpeg (tee + fifo slave): escaping, key masking, stderr → stream status, restart rule |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
@@ -34,15 +35,10 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Base `${API_URL}/api/v1/device`. Every request sends `Authorization: Device <token>` **and**
   `User-Agent: DynaCamRecorder/<version>`. The API returns 403 for a missing UA or one containing
   bot, crawler, spider or scraper.
-- Responses are `{ success, message, data }`. `api.js` returns `data` and throws `ApiError`
-  (`status` 0 = never answered; `detail` = the server's message).
-- Error handling, everywhere:
-  - **404 / 409:** the clip is gone or already finished. Drop the job and don't retry.
-  - **401:** the token was revoked or is wrong. Log loudly with the fix, back off 30 s → 5 min,
-    and keep trying. Recording continues.
-  - **429:** honour `Retry-After`.
-  - **0 / 5xx:** back off exponentially.
-  - **Any other 4xx on upload:** report `POST /fail` with `Upload rejected: <detail>`.
+- Envelope `{ success, message, data }`: `api.js` returns `data`, throws `ApiError` (`status` 0 = no answer).
+- Errors: **404/409** clip gone or done → drop. **401** token revoked → log loudly, back off
+  30 s → 5 min, keep trying (recording continues). **429** → `Retry-After`. **0/5xx** →
+  exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
 - `logoUrl` is a signed **relative** path. Fetch it as `new URL(logoUrl, API_URL)`. Send the
   device token only to the API's own origin. It expires, so re-read `/config` and download again
   only when the path (without the query) changes.
@@ -53,7 +49,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   frames), otherwise fail with the coverage. Players' clips are cut before parts. `/config`
   `sessions` keep their court's segments (window ± 10 s) until end + 30 min
   (`retentionWindows`). Below `DISK_CRITICAL_MB` that keep is dropped, so recording never stops.
-- Claim (`/processing`) is best-effort, but exclusive: another box's claim → 409 → drop.
+- Claim (`/processing`) is best-effort but exclusive (another box's claim → 409 → drop).
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201 or 200 (merged) with `shareUrl`.
   It is queued (`state: "press"`) and retried while under 100 s old (the API refuses > 120 s).
   404, 409, 422 and 400 are final and logged in words.
@@ -65,12 +61,18 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - **The ring buffer is never re-encoded.** Recorder output options are
   `-map 0:v:0 -map 0:a? -c:v copy -c:a aac -b:a 64k`. Tapo cameras send G.711 A-law, which
   `-c copy` into MPEG-TS silently stores as unplayable `bin_data`. Never use a blanket `-c copy`.
-- RTSP input: `-rtsp_transport tcp -timeout 10000000` (µs, ffmpeg ≥ 5; `-stimeout` on 4.x,
-  where `-timeout` means *listen*). The stall watchdog kills a run with no new video for 20 s.
-  Restart backoff is 2 s → 30 s max.
+- RTSP: `-rtsp_transport tcp -timeout 10000000` (µs, ffmpeg ≥ 5; `-stimeout` on 4.x). No new
+  video for 20 s → kill; restart backoff 2 s → 30 s.
 - **Never `-use_wallclock_as_timestamps`**: it clumps frames that arrive together and the clip
   encoder drops them (half the frame rate). Keep the camera's timestamps.
-- **Mask credentials** (`maskCredentials`) in every log line and heartbeat message.
+- **Mask credentials** (`maskCredentials`) in every log line and heartbeat message — RTSP passwords
+  and RTMP stream keys (≤ last 4 chars shown; `maskStreamKey` on every stderr line).
+- **One RTSP connection per camera** (a C200 refuses a second). Streaming is a `tee` output of the
+  recorder: `[f=segment:…]…%s.ts|[f=flv:onfail=ignore:use_fifo=1:fifo_options=…]rtmp://…` —
+  never a second ffmpeg on the camera. Tee values are escaped twice, file names once (`stream.js`).
+  Recorders log `level+info`; stream lines set `streamStatus`, never the recording error.
+  Restart for streaming only on a config change or a closed output (≤ every 5 min), and never
+  while an uncut clip/part window reaches into the last 70 s (`streamRestartAllowed`).
 - Don't rely on `drawtext`, which some ffmpeg builds lack. The watermark is an image overlay:
   12% of the width, bottom-**right** (Tapo burns its own OSD top-left and bottom-left).
 - Clip encode:
@@ -81,15 +83,13 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
     / max 1200k with 64k audio (≈ 45 MB per 5 min). Hardware encoders use `-b:v` with the same
     maxrate.
   - If a hardware encoder fails, fall back to `libx264 -preset veryfast -crf 23` once.
-- `ENCODER=auto` test-encodes each listed hardware encoder. Being listed is not enough.
+- `ENCODER=auto` test-encodes each listed hardware encoder (being listed is not enough).
 
 ## Segment timing (`segments.js`)
 
-Segments are cut on keyframes, so lengths are irregular (1.7–6.1 s seen), and the `%s` name is
-only the second the file was opened. The real span of a closed segment is:
-
-- **content times** from `segments.csv` (CSV, from 0 per ffmpeg run);
-- plus the run's **anchor**, which is the smallest `mtime − content end` within ±120 s of that run.
+Segments are cut on keyframes (1.7–6.1 s seen) and the `%s` name is only when the file opened.
+A closed segment's real span = **content times** from `segments.csv` (from 0 per ffmpeg run) +
+the run's **anchor** (smallest `mtime − content end` within ±120 s of that run).
 
 Rows are merged into `index.json` keyed by the run id in `run.json`, which is written before
 each spawn. They are merged before every restart, because ffmpeg truncates the list. A segment

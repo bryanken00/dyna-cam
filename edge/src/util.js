@@ -4,16 +4,29 @@ import path from "node:path";
 
 /**
  * Hide the password in every URL inside `text`:
- * `rtsp://admin:secret@10.0.0.5/stream1` → `rtsp://admin:***@10.0.0.5/stream1`.
+ * `rtsp://admin:secret@10.0.0.5/stream1` → `rtsp://admin:***@10.0.0.5/stream1`,
+ * and the stream key of every RTMP URL: `rtmp://host/live2/abcdwxyz` → `rtmp://host/live2/****wxyz`.
  * The userinfo runs up to the LAST "@" before the first "/", so a raw "@" in a
  * password is still covered.
  */
 export function maskCredentials(text) {
   if (text === null || text === undefined) return text;
-  return String(text).replace(/([a-z][a-z0-9+.-]{0,20}:\/\/)([^\s/]*)@/gi, (_m, scheme, info) => {
-    const colon = info.indexOf(":");
-    return colon === -1 ? `${scheme}***@` : `${scheme}${info.slice(0, colon)}:***@`;
-  });
+  return (
+    String(text)
+      .replace(/([a-z][a-z0-9+.-]{0,20}:\/\/)([^\s/]*)@/gi, (_m, scheme, info) => {
+        const colon = info.indexOf(":");
+        return colon === -1 ? `${scheme}***@` : `${scheme}${info.slice(0, colon)}:***@`;
+      })
+      // RTMP ingest URLs carry the stream key in the path: keep the app, show ≤ 4 chars of the key
+      .replace(/(rtmps?:\/\/[^\s/'"|\])]+)(\/[^\s'"|\]),]*)/gi, (_m, base, pathPart) => {
+        const parts = pathPart.slice(1).split("/");
+        const keep = parts.length >= 2 ? `/${parts[0]}/` : "/";
+        const secret = parts.length >= 2 ? parts.slice(1).join("/") : parts[0];
+        return secret
+          ? `${base}${keep}****${secret.split("?")[0].slice(-4)}`
+          : `${base}${pathPart}`;
+      })
+  );
 }
 
 /** A business ID that is safe as a folder name; anything else is hashed. */

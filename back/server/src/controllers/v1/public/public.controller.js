@@ -63,6 +63,9 @@ router.get(
         venueName: court.venueName,
         venueLogoUrl: signUploadUrl(court.logoUrl),
         cameraReady: Boolean(court.hasCamera) && Boolean(court.recorderOnline),
+        // Phase 5: where to watch this court live (when the venue streams it)
+        liveWatchUrl:
+          court.streamEnabled && court.recorderOnline ? court.streamWatchUrl || null : null,
         clipSeconds: CLIP_DURATION_SECONDS,
       },
     });
