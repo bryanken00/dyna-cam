@@ -76,6 +76,7 @@ async function main() {
       { module: "venues", submodule: "courts", description: "Courts and cameras management" },
       { module: "venues", submodule: "devices", description: "Recorder boxes management" },
       { module: "clips", submodule: null, description: "Replay clips" },
+      { module: "payments", submodule: null, description: "Clip payments (cash)" },
     ];
 
     let seeded = 0;

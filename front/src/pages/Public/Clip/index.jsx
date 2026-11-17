@@ -1,11 +1,23 @@
-import { Download, Loader2, RotateCcw, Share2, Sparkles } from "lucide-react";
+import {
+  Download,
+  Film,
+  Loader2,
+  Lock,
+  RotateCcw,
+  Share2,
+  Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClipPageHooks } from "./hooks";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
 import { getImageUrl } from "../../../utils/upload";
-import { formatDateTime } from "../../../utils/dynaCam";
+import {
+  formatDateTime,
+  formatPayCode,
+  formatPeso,
+} from "../../../utils/dynaCam";
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -39,6 +51,95 @@ const ClipHeading = ({ clip, courtName, venueName }) => {
         >
           {venueName}
           {clip?.requestedAt && ` · ${formatDateTime(clip.requestedAt)}`}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/** The pay code, large and spaced, as the player shows it at the desk. */
+const PayCode = ({ code, size = 34 }) => (
+  <div
+    className="font-mono font-semibold select-all"
+    aria-label={`Pay code ${String(code || "").split("").join(" ")}`}
+    style={{
+      fontSize: size,
+      letterSpacing: "0.12em",
+      color: "var(--color-text-dark)",
+    }}
+  >
+    {formatPayCode(code)}
+  </div>
+);
+
+/**
+ * A Ready clip that isn't paid yet: the thumbnail under a lock, the price and
+ * the pay code. The page keeps polling, so it unlocks by itself once staff
+ * record the cash.
+ */
+const LockedClip = ({ clip }) => {
+  const thumb = getImageUrl(clip.thumbnailUrl);
+  return (
+    <div className="overflow-hidden" style={cardStyle}>
+      <div
+        className="relative w-full flex items-center justify-center"
+        style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+      >
+        {thumb ? (
+          <img src={thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <Film className="w-8 h-8" style={{ color: "var(--color-text-muted)" }} />
+        )}
+        {/* Dim the preview so the lock reads as the message */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{ background: "color-mix(in srgb, var(--color-canvas) 55%, transparent)" }}
+        />
+        <span
+          className="relative inline-flex items-center justify-center"
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 999,
+            background: "var(--color-surface)",
+            border: "1px solid var(--color-line)",
+            color: "var(--color-text-dark)",
+          }}
+        >
+          <Lock className="w-6 h-6" />
+        </span>
+      </div>
+
+      <div className="p-5 text-center" aria-live="polite">
+        <p
+          className="m-0 font-semibold"
+          style={{ fontSize: 17, color: "var(--color-text-dark)" }}
+        >
+          Pay {formatPeso(clip.price)} at the front desk to unlock this clip
+        </p>
+        <div
+          className="mt-4 py-4 px-3"
+          style={{
+            border: "1px dashed var(--color-line)",
+            borderRadius: 12,
+            background: "var(--color-surface-sunken)",
+          }}
+        >
+          <PayCode code={clip.payCode} />
+          <p
+            className="m-0 mt-1.5"
+            style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+          >
+            Show this code to the staff
+          </p>
+        </div>
+        <p
+          className="m-0 mt-3 inline-flex items-center gap-1.5"
+          style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+        >
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          This page unlocks by itself once you&apos;ve paid.
         </p>
       </div>
     </div>
@@ -196,7 +297,34 @@ const ClipPage = () => {
               }}
             />
           </div>
+          {clip.locked && clip.payCode && (
+            <div
+              className="mt-5 pt-4"
+              style={{ borderTop: "1px solid var(--color-line)" }}
+            >
+              <p
+                className="m-0"
+                style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
+              >
+                This clip costs {formatPeso(clip.price)} — pay at the front desk
+                with this code:
+              </p>
+              <div className="mt-2">
+                <PayCode code={clip.payCode} size={26} />
+              </div>
+            </div>
+          )}
         </div>
+      </PublicLayout>
+    );
+  }
+
+  if (clip.locked) {
+    return (
+      <PublicLayout>
+        {heading}
+        {mergedNotice}
+        <LockedClip clip={clip} />
       </PublicLayout>
     );
   }

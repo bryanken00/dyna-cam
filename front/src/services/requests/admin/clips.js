@@ -43,11 +43,12 @@ export const useGetClips = (filters = {}) => {
 };
 
 // Query: venues + courts for the filters → { venues, courts }
-export const useGetClipOptions = () => {
+export const useGetClipOptions = (options = {}) => {
   return useQuery({
     queryKey: ["clips", "options"],
     queryFn: getClipOptionsApi,
     staleTime: 5 * 60 * 1000,
+    ...options,
   });
 };
 

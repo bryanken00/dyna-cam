@@ -190,7 +190,7 @@ const VenuesPage = () => {
               columns={columns}
               rowKey="venueId"
               loading={isLoading}
-              scroll={{ x: 960 }}
+              scroll={{ x: 1080 }}
             />
             <PaginationFooter
               pagination={pagination}

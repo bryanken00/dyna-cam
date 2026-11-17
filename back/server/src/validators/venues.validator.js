@@ -14,6 +14,13 @@ const retentionDays = z.coerce
   .min(1, "Keep clips for at least 1 day")
   .max(365, "Keep clips for at most 365 days");
 
+// Pesos, 2 decimals; 0 = clips are free
+const clipPrice = z.coerce
+  .number()
+  .min(0, "The price can't be negative")
+  .max(100000, "The price is too high")
+  .refine((value) => Math.round(value * 100) === value * 100, "Use at most 2 decimals");
+
 // POST /
 export const createVenueSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
@@ -21,6 +28,7 @@ export const createVenueSchema = z.object({
   phone: optionalPhone(),
   logoUrl: optionalUploadPath(255),
   clipRetentionDays: retentionDays.default(30),
+  clipPrice: clipPrice.default(0),
 });
 
 // PUT /:venueId
@@ -30,6 +38,7 @@ export const updateVenueSchema = z.object({
   phone: optionalPhone(),
   logoUrl: optionalUploadPath(255),
   clipRetentionDays: retentionDays,
+  clipPrice: clipPrice.default(0),
   status: z.enum(["Active", "Inactive"]).optional(),
 });
 

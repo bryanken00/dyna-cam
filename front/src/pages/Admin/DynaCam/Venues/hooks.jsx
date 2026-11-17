@@ -6,6 +6,7 @@ import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../../utils/phoneFormat";
+import { formatPeso } from "../../../../utils/dynaCam";
 import { getImageUrl } from "../../../../utils/upload";
 import { confirm } from "../../../../store/confirmStore";
 import {
@@ -245,6 +246,25 @@ export const useVenueHooks = () => {
             style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
           >
             {plural(Number(days) || 0, "day", "days")}
+          </span>
+        ),
+      },
+      {
+        title: "Clip price",
+        dataIndex: "clipPrice",
+        key: "clipPrice",
+        width: 110,
+        render: (price) => (
+          <span
+            style={{
+              fontSize: 13.5,
+              color:
+                Number(price) > 0
+                  ? "var(--color-text-dark)"
+                  : "var(--color-text-muted)",
+            }}
+          >
+            {Number(price) > 0 ? formatPeso(price) : "Free"}
           </span>
         ),
       },

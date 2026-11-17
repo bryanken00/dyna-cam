@@ -18,6 +18,7 @@ const router = express.Router();
 const CLIP_SELECT = `
   SELECT cl.clipId, cl.venueId, v.name AS venueName, cl.courtId, c.name AS courtName,
          cl.source, cl.sessionId, cl.partIndex, cl.requestedAt, cl.durationSeconds,
+         cl.price, cl.paymentStatus, cl.payCode,
          cl.shareToken, cl.videoPath,
          cl.thumbnailPath, cl.sizeBytes, cl.failureReason, cl.expiresAt, cl.status,
          cl.dateCreated, cl.dateUpdated
@@ -30,6 +31,7 @@ const toClip = (row) => {
   const playable = row.status === "Ready";
   return {
     ...clip,
+    price: Number(row.price),
     shareUrl: clipShareUrl(shareToken),
     videoUrl: playable ? signUploadUrl(videoPath) : null,
     downloadUrl: playable ? signedDownloadUrl(videoPath) : null,
@@ -53,6 +55,7 @@ router.get(
       courtId,
       source,
       status,
+      paymentStatus,
       dateFrom,
       dateTo,
       sortBy = "requestedAt",
@@ -79,6 +82,10 @@ router.get(
     if (source) {
       whereClause += " AND cl.source = ?";
       params.push(source);
+    }
+    if (paymentStatus) {
+      whereClause += " AND cl.paymentStatus = ?";
+      params.push(paymentStatus);
     }
     if (dateFrom) {
       whereClause += " AND cl.requestedAt >= ?";

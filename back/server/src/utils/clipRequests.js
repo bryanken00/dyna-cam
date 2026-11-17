@@ -5,7 +5,7 @@ import {
   secondsAgoLocal,
 } from "./clips.js";
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
-import { randomToken } from "./crypto/tokens.js";
+import { randomPayCode, randomToken } from "./crypto/tokens.js";
 
 /**
  * Saving a clip — shared by every way a player or staff member can ask for one
@@ -24,7 +24,7 @@ const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 /** Columns every caller needs to decide whether a court can record. */
 export const COURT_RECORDING_COLUMNS = `
   c.courtId, c.venueId, c.name, c.cameraRtspUrl IS NOT NULL AS hasCamera,
-  v.name AS venueName, v.logoUrl,
+  v.name AS venueName, v.logoUrl, v.clipPrice,
   EXISTS (
     SELECT 1 FROM devices d
     WHERE d.venueId = c.venueId AND d.status = 'Active' AND d.lastSeenAt >= ?
@@ -60,13 +60,7 @@ export const requestClip = async (conn, court, { source, requestedAt }) => {
        AND requestedAt BETWEEN DATE_SUB(?, INTERVAL ? SECOND) AND DATE_ADD(?, INTERVAL ? SECOND)
      ORDER BY requestedAt DESC
      LIMIT 1`,
-    [
-      court.courtId,
-      requestedAt,
-      CLIP_COOLDOWN_SECONDS,
-      requestedAt,
-      CLIP_COOLDOWN_SECONDS,
-    ]
+    [court.courtId, requestedAt, CLIP_COOLDOWN_SECONDS, requestedAt, CLIP_COOLDOWN_SECONDS]
   );
   if (recent.length > 0) {
     return { ok: true, merged: true, clipId: recent[0].clipId, shareToken: recent[0].shareToken };
@@ -77,23 +71,39 @@ export const requestClip = async (conn, court, { source, requestedAt }) => {
   const shareToken = randomToken();
   const now = getCurrentTimestampLocal();
 
-  await conn.execute(
-    `INSERT INTO clips
-       (clipId, venueId, courtId, source, requestedAt, durationSeconds, shareToken, status,
-        dateCreated, dateUpdated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
-    [
-      clipId,
-      court.venueId,
-      court.courtId,
-      source,
-      requestedAt,
-      CLIP_DURATION_SECONDS,
-      shareToken,
-      now,
-      now,
-    ]
-  );
+  // Players' clips cost the venue's price (Phase 4, paid in cash at the desk);
+  // a staff save is free
+  const price = source === "STAFF" ? 0 : Number(court.clipPrice || 0);
+  const priced = price > 0;
+
+  // The pay code is unique; on the (rare) collision try another
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await conn.execute(
+        `INSERT INTO clips
+           (clipId, venueId, courtId, source, requestedAt, durationSeconds, price, paymentStatus,
+            payCode, shareToken, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
+        [
+          clipId,
+          court.venueId,
+          court.courtId,
+          source,
+          requestedAt,
+          CLIP_DURATION_SECONDS,
+          price,
+          priced ? "Unpaid" : "Free",
+          priced ? randomPayCode() : null,
+          shareToken,
+          now,
+          now,
+        ]
+      );
+      break;
+    } catch (err) {
+      if (err.code !== "ER_DUP_ENTRY" || attempt >= 4) throw err;
+    }
+  }
 
   return { ok: true, merged: false, clipId, shareToken };
 };

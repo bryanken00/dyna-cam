@@ -50,6 +50,9 @@ const ClipsPage = () => {
     handleClearFilters,
     previewClip,
     handlePreviewClose,
+    canTakePayment,
+    handleRecordPayment,
+    isRecordingPayment,
     saveDialogOpen,
     handleOpenSaveDialog,
     handleCloseSaveDialog,
@@ -218,6 +221,24 @@ const ClipsPage = () => {
                 </SelectContent>
               </Select>
             </FilterField>
+            <FilterField label="Payment">
+              <Select
+                value={filters.paymentStatus || ALL}
+                onValueChange={(v) =>
+                  handleFilterChange("paymentStatus", v === ALL ? "" : v)
+                }
+              >
+                <SelectTrigger className="h-10 w-40">
+                  <SelectValue placeholder="Any payment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Any payment</SelectItem>
+                  <SelectItem value="Free">Free</SelectItem>
+                  <SelectItem value="Unpaid">Unpaid</SelectItem>
+                  <SelectItem value="Paid">Paid</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterField>
             <FilterField label="From">
               <DatePicker
                 className="w-40"
@@ -264,7 +285,7 @@ const ClipsPage = () => {
               columns={columns}
               rowKey="clipId"
               loading={isLoading}
-              scroll={{ x: 1200 }}
+              scroll={{ x: 1340 }}
             />
             <PaginationFooter
               pagination={pagination}
@@ -286,6 +307,9 @@ const ClipsPage = () => {
         open={!!previewClip}
         clip={previewClip}
         canWrite={canWrite}
+        canTakePayment={canTakePayment}
+        isRecordingPayment={isRecordingPayment}
+        onRecordPayment={handleRecordPayment}
         onClose={handlePreviewClose}
         onCopyLink={handleCopyShareLink}
         onDelete={handleDeleteRequest}

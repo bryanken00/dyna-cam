@@ -1,4 +1,4 @@
-import { Copy, Download, Film, Trash2, X } from "lucide-react";
+import { Banknote, Copy, Download, Film, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/sheet";
 import DescriptionList from "../../../../../components/DescriptionList";
 import StatusDot from "../../../../../components/StatusDot";
+import PaymentStatusChip from "../../../../../components/PaymentStatusChip";
 import SourceChip from "./SourceChip";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { getImageUrl } from "../../../../../utils/upload";
@@ -17,6 +18,8 @@ import {
   formatDate,
   formatDateTime,
   formatDuration,
+  formatPayCode,
+  formatPeso,
 } from "../../../../../utils/dynaCam";
 
 /**
@@ -29,6 +32,9 @@ import {
  * @param {boolean} canWrite       shows Delete
  * @param {(clip) => void} onCopyLink
  * @param {(clip) => void} onDelete
+ * @param {boolean} canTakePayment  shows "Record cash payment" on Unpaid clips
+ * @param {boolean} isRecordingPayment
+ * @param {(clip) => void} onRecordPayment
  */
 const ClipPreviewSheet = ({
   open,
@@ -37,7 +43,12 @@ const ClipPreviewSheet = ({
   canWrite,
   onCopyLink,
   onDelete,
+  canTakePayment,
+  isRecordingPayment,
+  onRecordPayment,
 }) => {
+  const unpaid = clip?.paymentStatus === "Unpaid";
+  const payable = unpaid && ["Pending", "Processing", "Ready"].includes(clip?.status);
   const videoSrc = getImageUrl(clip?.videoUrl);
   // Signed `&download=1` link — the server answers it as an attachment
   const downloadHref = getImageUrl(clip?.downloadUrl);
@@ -145,6 +156,30 @@ const ClipPreviewSheet = ({
                     label: "Saved by",
                     value: <SourceChip source={clip?.source} partIndex={clip?.partIndex} />,
                   },
+                  {
+                    label: "Payment",
+                    value: (
+                      <PaymentStatusChip
+                        paymentStatus={clip?.paymentStatus}
+                        price={clip?.price}
+                      />
+                    ),
+                  },
+                  ...(unpaid && clip?.payCode
+                    ? [
+                        {
+                          label: "Pay code",
+                          value: (
+                            <span
+                              className="font-mono font-semibold"
+                              style={{ letterSpacing: "0.08em" }}
+                            >
+                              {formatPayCode(clip.payCode)}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                   { label: "Length", value: formatDuration(clip?.durationSeconds) },
                   { label: "File size", value: formatBytes(clip?.sizeBytes) },
                   { label: "Available until", value: formatDate(clip?.expiresAt) },
@@ -185,6 +220,18 @@ const ClipPreviewSheet = ({
               >
                 <Trash2 />
                 Delete
+              </Button>
+            )}
+            {canTakePayment && payable && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                disabled={isRecordingPayment}
+                onClick={() => onRecordPayment?.(clip)}
+              >
+                <Banknote />
+                Record cash payment · {formatPeso(clip?.price)}
               </Button>
             )}
             {downloadHref && (

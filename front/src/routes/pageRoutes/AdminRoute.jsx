@@ -27,6 +27,7 @@ const CourtSign = lazy(
 const Devices = lazy(() => import("../../pages/Admin/DynaCam/Devices"));
 const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
+const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
 
 const AdminRoute = () => {
   const navigations = [
@@ -119,6 +120,7 @@ const AdminRoute = () => {
           { module: "venues", submodule: "courts", accessLevel: "read" },
           { module: "venues", submodule: "devices", accessLevel: "read" },
           { module: "clips", submodule: null, accessLevel: "read" },
+          { module: "payments", submodule: null, accessLevel: "read" },
         ],
       },
       isFilter: true,
@@ -220,6 +222,25 @@ const AdminRoute = () => {
             </Suspense>
           ),
           permission: { module: "clips", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/payments",
+          name: "Payments",
+          label: "Payments",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="payments" accessLevel="read">
+                <Payments />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "payments",
+            submodule: null,
+            accessLevel: "read",
+          },
           isFilter: true,
           isShow: true,
         },

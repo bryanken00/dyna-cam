@@ -22,6 +22,7 @@ export const listClipsQuerySchema = z.object({
   courtId: emptyToUndefined(z.string().max(50).optional()),
   source: queryEnum(["QR", "BUTTON", "SESSION", "STAFF"]),
   status: queryEnum(["Pending", "Processing", "Ready", "Failed", "Expired", "Deleted"]),
+  paymentStatus: queryEnum(["Free", "Unpaid", "Paid"]),
   dateFrom: optionalDate(),
   dateTo: optionalDate(),
   sortBy: queryEnumDefault(["requestedAt", "dateCreated"], "requestedAt"),

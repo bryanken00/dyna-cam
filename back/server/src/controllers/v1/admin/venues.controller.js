@@ -18,14 +18,18 @@ import {
 const router = express.Router();
 
 const VENUE_COLUMNS = `v.venueId, v.name, v.address, v.phone, v.logoUrl, v.clipRetentionDays,
-  v.status, v.dateCreated, v.dateUpdated`;
+  v.clipPrice, v.status, v.dateCreated, v.dateUpdated`;
 
 // Courts and recorder boxes per venue, for the list and the detail view
 const COUNT_COLUMNS = `
   (SELECT COUNT(*) FROM courts c WHERE c.venueId = v.venueId AND c.status != 'Deleted') AS courtCount,
   (SELECT COUNT(*) FROM devices d WHERE d.venueId = v.venueId AND d.status = 'Active') AS deviceCount`;
 
-const toVenue = (row) => ({ ...row, logoUrl: signUploadUrl(row.logoUrl) });
+const toVenue = (row) => ({
+  ...row,
+  clipPrice: Number(row.clipPrice),
+  logoUrl: signUploadUrl(row.logoUrl),
+});
 
 /** A client-sent logo path must be one the caller may use (see file-uploads.md). */
 const assertLogo = (req, logoUrl) => {
@@ -132,7 +136,7 @@ router.post(
   checkPermission("venues", "list", "write"),
   validateBody(createVenueSchema),
   catchAsync(async (req, res) => {
-    const { name, address, phone, logoUrl, clipRetentionDays } = req.body;
+    const { name, address, phone, logoUrl, clipRetentionDays, clipPrice } = req.body;
     assertLogo(req, logoUrl);
     const now = getCurrentTimestampLocal();
 
@@ -154,8 +158,9 @@ router.post(
 
       await conn.execute(
         `INSERT INTO venues
-           (venueId, name, address, phone, logoUrl, clipRetentionDays, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+           (venueId, name, address, phone, logoUrl, clipRetentionDays, clipPrice, status,
+            dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           venueId,
           name,
@@ -163,6 +168,7 @@ router.post(
           phone || null,
           logoUrl || null,
           clipRetentionDays,
+          clipPrice,
           now,
           now,
         ]
@@ -186,7 +192,7 @@ router.put(
   validateBody(updateVenueSchema),
   catchAsync(async (req, res) => {
     const { venueId } = req.params;
-    const { name, address, phone, logoUrl, clipRetentionDays, status } = req.body;
+    const { name, address, phone, logoUrl, clipRetentionDays, clipPrice, status } = req.body;
     assertLogo(req, logoUrl);
     const now = getCurrentTimestampLocal();
 
@@ -216,8 +222,8 @@ router.put(
 
       await conn.execute(
         `UPDATE venues
-         SET name = ?, address = ?, phone = ?, logoUrl = ?, clipRetentionDays = ?, status = ?,
-             dateUpdated = ?
+         SET name = ?, address = ?, phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?,
+             status = ?, dateUpdated = ?
          WHERE venueId = ?`,
         [
           name,
@@ -225,6 +231,7 @@ router.put(
           phone || null,
           logoUrl || null,
           clipRetentionDays,
+          clipPrice,
           status || "Active",
           now,
           venueId,

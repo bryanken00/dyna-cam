@@ -259,20 +259,30 @@
 - [x] Lint/test/build pass (API 121 tests, web lint + build, edge 81 tests + smoke); changelog
       entry (`ref: PLAN-001`)
 
-## Phase 4: Paid clips
+## Phase 4: Paid clips — cash at the front desk
 
-- [ ] Migration: `payments` table + `payments` permission row
-- [ ] `lib/paymongo/`: create checkout session (GCash, Maya, card), verify webhook signature;
-      env `PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`
-- [ ] Clip creation sets `price` / `paymentStatus` from the venue (`0` → `Free`)
-- [ ] Public `POST /clips/:shareToken/checkout`; `POST /payments/webhook` idempotent on
-      `providerRef`; `GET /clips/:shareToken` withholds the video link while `Unpaid`
-- [ ] Admin `/payments` (list, get) behind `payments`; dashboard revenue card
-- [ ] Clip page: thumbnail + "Pay with GCash / Maya / Card" when unpaid; return URL re-polls
-- [ ] Tests: forged webhook signature → 401; replayed webhook → no double-paid; unpaid clip never
-      returns a video link
-- [ ] Tried with PayMongo test keys: pay with test GCash → clip unlocks
-- [ ] Lint/test/build pass; changelog entry (`ref: PLAN-001`)
+> Changed 2026-11-17 at the user's request: **cash only for now**; PayMongo (GCash / Maya /
+> card) is deferred. The PayMongo research is kept in plan.md for when it comes back.
+
+- [x] Migration `005_add_clip_payments.sql`: `venues.clipPrice`; `clips.price` /
+      `paymentStatus` (Free / Unpaid / Paid) / `payCode` (unique); `payments` (CASH, received by,
+      note, refund); `payments` permission (+ seed)
+- [x] Clip creation (`utils/clipRequests.js`): players' QR / button clips get the venue's price
+      and a 6-character pay code (no 0/O/1/I/L); staff saves and session parts are free
+- [x] Public `GET /clips/:shareToken`: an Unpaid clip is `locked` — thumbnail, price and pay
+      code only, no video or download link until paid
+- [x] Admin `/payments` (permission `payments`): list with today / month totals, `lookup` by pay
+      code (case and spaces ignored), record cash (by pay code or clip), refund (locks the clip
+      again); `paymentStatus` filter on Clips
+- [x] Tests (`tests/payments.test.js`, 8): locked page, lookup, pay once (409 after), read-only
+      403, totals, refund re-locks, pay from the clip, free venue + staff save free, no payment
+      for a failed clip, price validation
+- [x] Web: venue clip-price field + list column; locked player page (dimmed thumbnail, price,
+      spaced pay code, auto-unlocks within 5 s of payment); Payments page (totals, Take payment by
+      code, list, refund); payment chip / filter / "Record cash payment" on Clips;
+      `/payments/options` so the page needs only the payments permission
+- [x] Lint/test/build pass (API 130 tests incl. 9 payment tests, web lint + build); changelog
+      entry (`ref: PLAN-001`)
 
 ## Phase 5: Live streaming
 

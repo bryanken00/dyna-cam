@@ -14,6 +14,7 @@ import courtsController from "../../../controllers/v1/admin/courts.controller.js
 import devicesController from "../../../controllers/v1/admin/devices.controller.js";
 import clipsController from "../../../controllers/v1/admin/clips.controller.js";
 import sessionsController from "../../../controllers/v1/admin/sessions.controller.js";
+import paymentsController from "../../../controllers/v1/admin/payments.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -48,5 +49,6 @@ router.use("/courts", requireAuth, auditTrail("courts"), courtsController);
 router.use("/devices", requireAuth, auditTrail("devices"), devicesController);
 router.use("/clips", requireAuth, auditTrail("clips"), clipsController);
 router.use("/sessions", requireAuth, auditTrail("sessions"), sessionsController);
+router.use("/payments", requireAuth, auditTrail("payments"), paymentsController);
 
 export default router;

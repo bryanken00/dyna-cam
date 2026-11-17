@@ -4,6 +4,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { toast } from "sonner";
 import {
+  Banknote,
   CalendarClock,
   ImageUp,
   Loader2,
@@ -73,6 +74,12 @@ const venueSchema = z.object({
     .regex(/^\d+$/, "Enter a whole number of days")
     .refine((v) => Number(v) >= 1, "Keep clips for at least 1 day")
     .refine((v) => Number(v) <= 365, "Keep clips for at most 365 days"),
+  // Pesos, at most 2 decimals; 0 = clips are free
+  clipPrice: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d{1,2})?$/, "Enter an amount like 50 or 49.50")
+    .refine((v) => Number(v) <= 100000, "The price is too high"),
   status: z.enum(["Active", "Inactive"]),
 });
 
@@ -82,6 +89,7 @@ const EMPTY = {
   phone: "",
   logoUrl: "",
   clipRetentionDays: "30",
+  clipPrice: "0",
   status: "Active",
 };
 
@@ -114,6 +122,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             phone: entity.phone ?? "",
             logoUrl: entity.logoUrl ?? "",
             clipRetentionDays: String(entity.clipRetentionDays ?? 30),
+            clipPrice: String(Number(entity.clipPrice) || 0),
             status: entity.status === "Inactive" ? "Inactive" : "Active",
           }
         : EMPTY,
@@ -192,6 +201,8 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         phone: values.phone || null,
         logoUrl,
         clipRetentionDays: Number(values.clipRetentionDays),
+        // Always sent: the API treats a missing price as 0 (free)
+        clipPrice: Number(values.clipPrice),
       };
 
       if (isEditMode) {
@@ -464,6 +475,37 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                       <FormDescription>
                         Saved clips and their links are removed after this
                         many days (1–365).
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="clipPrice"
+                  render={({ field }) => (
+                    <FormItem className="mt-5">
+                      <FormLabel>Clip price (₱) {req}</FormLabel>
+                      <div className="relative max-w-60">
+                        <Banknote
+                          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                          style={{ color: "var(--color-text-muted)" }}
+                        />
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.01"
+                            className="h-10 pl-9"
+                            {...field}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormDescription>
+                        Players pay this at the front desk to unlock a clip. 0
+                        makes clips free. Applies to new clips.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

@@ -255,8 +255,11 @@ recorder box and the install guide.
     file name.
   - The camera burns its own date/time stamp (top-left) and "tapo" logo (bottom-left) into the
     picture, so our watermark goes bottom-right.
-- **Unverified:** how many simultaneous RTSP clients a C200 allows. Phase 5 live streaming should
-  reuse the recorder's single camera connection (ffmpeg `tee`) rather than open a second one.
+- **One RTSP client at a time (tested 2026-11-17).** With one connection streaming, a second and
+  a third were refused with a 4xx. So the recorder box takes the camera's only RTSP slot, and no
+  NVR or other RTSP viewer can pull it at the same time. Phase 5 live streaming goes out over the
+  recorder's own connection: a second `tee` output with `onfail=ignore`, so a failing stream
+  never stops recording.
 
 ### Data model (one new migration per table group; `schema.sql` stays untouched)
 
@@ -534,3 +537,17 @@ The checklist follows these phases. Each phase is shippable on its own.
   - Parts are created when a box polls, so no scheduler is needed.
   - The player gets one session link listing every part.
   - Sessions can also be ended early.
+- 2026-11-17: Phase 3 done and committed. Tested on the real C200: a session ended early gave
+  one 126 s part, ready in 10 s.
+- 2026-11-17: **Phase 4 changed to cash only**, at the user's request. PayMongo is deferred.
+  - **How it works:** a venue sets a clip price. A priced player clip shows only its thumbnail
+    and a 6-character pay code until staff record the cash in Admin → Payments. Staff saves and
+    session parts are free. Refunding a payment locks the clip again.
+  - **PayMongo notes, for later:** create a checkout with `POST /v2/checkout_sessions` (secret
+    key as Basic auth; `data.attributes.line_items`, `payment_method_types`, `success_url`,
+    `cancel_url`, `reference_number`). The pay link is `data.attributes.checkout_url`, and
+    PayMongo sends the `checkout_session.payment.paid` webhook.
+  - **Webhook check, for later:** the `Paymongo-Signature` header is
+    `t=…,te=…,li=…`. The signature is HMAC-SHA256 with the webhook secret over `{t}.{raw body}`,
+    compared with `te` in test mode or `li` in live mode.
+  - **Adding it later:** a new migration adds a provider to `payments.method`.

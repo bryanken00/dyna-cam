@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Copy, ExternalLink, Film, Play, Trash2 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
+import PaymentStatusChip from "../../../../components/PaymentStatusChip";
 import SourceChip from "./components/SourceChip";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
@@ -14,6 +15,8 @@ import {
   formatDate,
   formatDateTime,
   formatDuration,
+  formatPayCode,
+  formatPeso,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import {
@@ -21,12 +24,14 @@ import {
   useGetClipOptions,
   useDeleteClip,
 } from "../../../../services/requests/admin/clips";
+import { useCreatePayment } from "../../../../services/requests/admin/payments";
 
 const EMPTY_FILTERS = {
   venueId: "",
   courtId: "",
   source: "",
   status: "",
+  paymentStatus: "",
   dateFrom: "",
   dateTo: "",
 };
@@ -34,6 +39,8 @@ const EMPTY_FILTERS = {
 export const useClipHooks = () => {
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission("clips", null, "write");
+  // Taking cash for an unpaid clip is a Payments action
+  const canTakePayment = hasPermission("payments", null, "write");
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -59,6 +66,7 @@ export const useClipHooks = () => {
   const { data: optionsData } = useGetClipOptions();
 
   const deleteMutation = useDeleteClip();
+  const paymentMutation = useCreatePayment();
 
   const venueOptions = useMemo(
     () =>
@@ -129,6 +137,27 @@ export const useClipHooks = () => {
   const handleOpenSharePage = useCallback((record) => {
     window.open(record.shareUrl, "_blank", "noopener");
   }, []);
+
+  const handleRecordPayment = useCallback(
+    async (record) => {
+      const ok = await confirm({
+        title: "Record cash payment",
+        description: `Record ${formatPeso(record.price)} cash for this clip from ${decodeHTML(
+          record.courtName,
+        )}${record.payCode ? ` (pay code ${formatPayCode(record.payCode)})` : ""}? The player's clip unlocks right away.`,
+        confirmText: `Record ${formatPeso(record.price)}`,
+        cancelText: "Cancel",
+      });
+      if (!ok) return;
+      try {
+        await paymentMutation.mutateAsync({ clipId: record.clipId });
+      } catch (err) {
+        // the mutation's onError already surfaced a toast
+        console.error("Record payment error:", err);
+      }
+    },
+    [paymentMutation],
+  );
 
   const handleDeleteRequest = useCallback(
     async (record) => {
@@ -355,6 +384,15 @@ export const useClipHooks = () => {
         ),
       },
       {
+        title: "Payment",
+        dataIndex: "paymentStatus",
+        key: "paymentStatus",
+        width: 140,
+        render: (paymentStatus, record) => (
+          <PaymentStatusChip paymentStatus={paymentStatus} price={record.price} />
+        ),
+      },
+      {
         title: "Expires",
         dataIndex: "expiresAt",
         key: "expiresAt",
@@ -388,6 +426,9 @@ export const useClipHooks = () => {
   );
 
   const clips = apiData?.data?.clips || [];
+  const currentPreview = previewClip
+    ? clips.find((c) => c.clipId === previewClip.clipId) || previewClip
+    : null;
 
   return {
     // apiData = { success, message, data: { clips, pagination } }
@@ -405,8 +446,11 @@ export const useClipHooks = () => {
     handleTableChange,
     handleFilterChange,
     handleClearFilters,
-    previewClip,
+    previewClip: currentPreview,
     handlePreviewClose,
+    canTakePayment,
+    handleRecordPayment,
+    isRecordingPayment: paymentMutation.isPending,
     saveDialogOpen,
     handleOpenSaveDialog,
     handleCloseSaveDialog,

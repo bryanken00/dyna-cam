@@ -152,3 +152,34 @@ export const manilaNow = (offsetMinutes = 0) => {
     time: `${parts.hour}:${parts.minute}`,
   };
 };
+
+/* ── Clip payments (cash at the front desk) ──────────────────────────────── */
+
+/** 50 → "₱50", 49.5 → "₱49.50", 1250 → "₱1,250". Decimals only when needed. */
+export const formatPeso = (amount) => {
+  const n = Number(amount) || 0;
+  const whole = Math.round(n * 100) % 100 === 0;
+  return `₱${n.toLocaleString("en-PH", {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+/** What a player types or reads out → the stored form: "k7q m2p" → "K7QM2P". */
+export const normalizePayCode = (value) =>
+  String(value || "").replace(/\s+/g, "").toUpperCase();
+
+/** "K7QM2P" → "K7Q M2P" — easier to read out at the desk. */
+export const formatPayCode = (code) =>
+  (normalizePayCode(code).match(/.{1,3}/g) || []).join(" ");
+
+/** The API's pay-code rule, after normalising. */
+export const PAY_CODE_PATTERN = /^[A-Z0-9]{4,12}$/;
+
+/** Clip payment status → StatusDot tone. */
+export const PAYMENT_STATUS_TONE = {
+  Free: "muted",
+  Unpaid: "warning",
+  Paid: "success",
+  Refunded: "muted",
+};

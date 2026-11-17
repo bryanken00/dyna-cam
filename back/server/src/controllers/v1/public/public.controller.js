@@ -137,7 +137,8 @@ router.get(
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
       `SELECT cl.status, cl.requestedAt, cl.durationSeconds, cl.expiresAt, cl.videoPath,
-              cl.thumbnailPath, c.name AS courtName, v.name AS venueName, v.logoUrl
+              cl.thumbnailPath, cl.price, cl.paymentStatus, cl.payCode,
+              c.name AS courtName, v.name AS venueName, v.logoUrl
        FROM clips cl
        JOIN courts c ON c.courtId = cl.courtId
        JOIN venues v ON v.venueId = cl.venueId
@@ -151,6 +152,9 @@ router.get(
 
     const clip = rows[0];
     const ready = clip.status === "Ready";
+    // An unpaid clip shows only its thumbnail until it is paid at the desk
+    const locked = clip.paymentStatus === "Unpaid";
+    const playable = ready && !locked;
     return res.sendSuccess("Clip", {
       clip: {
         // Processing is an internal step; to the player it is still "saving"
@@ -161,9 +165,14 @@ router.get(
         courtName: clip.courtName,
         venueName: clip.venueName,
         venueLogoUrl: signUploadUrl(clip.logoUrl),
-        videoUrl: ready ? signUploadUrl(clip.videoPath) : null,
-        downloadUrl: ready ? signedDownloadUrl(clip.videoPath) : null,
+        videoUrl: playable ? signUploadUrl(clip.videoPath) : null,
+        downloadUrl: playable ? signedDownloadUrl(clip.videoPath) : null,
         thumbnailUrl: ready ? signUploadUrl(clip.thumbnailPath) : null,
+        price: Number(clip.price),
+        paymentStatus: clip.paymentStatus,
+        locked,
+        // Shown to the player to pay at the front desk (only while unpaid)
+        payCode: locked ? clip.payCode : null,
       },
     });
   })
