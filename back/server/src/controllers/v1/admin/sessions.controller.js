@@ -3,8 +3,11 @@ import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsy
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
-import { sessionShareUrl } from "../../../utils/clips.js";
+import { sessionShareUrl, toEpochMs } from "../../../utils/clips.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
+import { createPairingCode, PAIRING_CODE_TTL_MINUTES } from "../../../utils/pairing.js";
+import { createSessionPairingCodeSchema } from "../../../validators/pairing.validator.js";
 import {
   endSessionNow,
   materializeSessionParts,
@@ -20,7 +23,9 @@ import {
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
  * Phase 3). Permission: clips (a session's footage is delivered as clips).
- * See utils/sessions.js for how a session becomes 5-minute parts.
+ * See utils/sessions.js for how a session becomes 5-minute parts. Phones/tablets
+ * are paired to one session here (PLAN-002 Phase E, /:sessionId/pairing-codes)
+ * and see it live through /api/v1/app (utils/sessionDevices.js).
  */
 const router = express.Router();
 
@@ -33,7 +38,9 @@ const SESSION_SELECT = `
          s.dateCreated, s.dateUpdated,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
-           AS partsReady
+           AS partsReady,
+         (SELECT COUNT(*) FROM paired_apps d WHERE d.sessionId = s.sessionId AND d.status = 'Active')
+           AS devicesCount
   FROM recording_sessions s
   JOIN venues v ON v.venueId = s.venueId
   JOIN courts c ON c.courtId = s.courtId
@@ -47,6 +54,7 @@ const toSession = (row) => {
     durationMinutes: moment(row.endAt).diff(moment(row.startAt), "minutes"),
     partsTotal: partCount(row.startAt, row.endAt),
     partsReady: Number(row.partsReady || 0),
+    devicesCount: Number(row.devicesCount || 0),
     shareUrl: sessionShareUrl(shareToken),
   };
 };
@@ -141,9 +149,36 @@ router.get(
       [req.params.sessionId]
     );
 
+    const [devices, pairingCodes] = await Promise.all([
+      req.db.query(
+        `SELECT pairedAppId, name, platform, appVersion, lastSeenAt, status
+         FROM paired_apps
+         WHERE sessionId = ? AND status != 'Deleted'
+         ORDER BY dateCreated ASC`,
+        [req.params.sessionId]
+      ),
+      req.db.query(
+        `SELECT pairingCodeId, name, expiresAt
+         FROM pairing_codes
+         WHERE sessionId = ? AND kind = 'APP' AND status = 'Active' AND expiresAt > ?
+         ORDER BY dateCreated DESC`,
+        [req.params.sessionId, getCurrentTimestampLocal()]
+      ),
+    ]);
+    const secondsSince = (at) => Math.max(0, Math.round((Date.now() - toEpochMs(at)) / 1000));
+    const secondsUntil = (at) => Math.max(0, Math.round((toEpochMs(at) - Date.now()) / 1000));
+
     return res.sendSuccess("Session retrieved successfully", {
       session: {
         ...toSession(rows[0]),
+        devices: devices.map((device) => ({
+          ...device,
+          lastSeenSecondsAgo: device.lastSeenAt ? secondsSince(device.lastSeenAt) : null,
+        })),
+        pairingCodes: pairingCodes.map((key) => ({
+          ...key,
+          expiresInSeconds: secondsUntil(key.expiresAt),
+        })),
         parts: parts.map(({ videoPath, thumbnailPath, ...part }) => {
           const ready = part.status === "Ready";
           return {
@@ -168,8 +203,8 @@ router.post(
   checkPermission("clips", null, "write"),
   validateBody(createSessionSchema),
   catchAsync(async (req, res) => {
-    const { courtId, startAt, durationMinutes, playerName, phone } = req.body;
-    const start = moment.tz(startAt, FORMAT, TIMEZONE);
+    const { courtId, startNow, startAt, durationMinutes, playerName, phone } = req.body;
+    const start = startNow ? moment().tz(TIMEZONE) : moment.tz(startAt, FORMAT, TIMEZONE);
     if (!start.isValid()) {
       return res.sendError("Invalid start date and time", 400);
     }
@@ -214,7 +249,12 @@ router.post(
       );
       if (overlap.length > 0) {
         await req.db.rollback(conn);
-        return res.sendError("This court already has a session in that time", 409);
+        return res.sendError(
+          startNow
+            ? "This court already has a session running now — end it or pick a later time"
+            : "This court already has a session in that time",
+          409
+        );
       }
 
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
@@ -293,6 +333,105 @@ router.post(
         : res.sendError("Only a session that is recording can be ended", 409);
     }
     return res.sendSuccess("Session ended — its footage is being saved", { endAt: result.endAt });
+  })
+);
+
+/** Sessions a device can still be paired to. */
+const SESSION_PAIRABLE = ["Scheduled", "Recording"];
+
+/**
+ * POST /:sessionId/pairing-codes — a 6-digit key that pairs a phone/tablet to
+ * this session (PLAN-002 Phase E). Shown once; works for 10 minutes or until
+ * the session ends, whichever is first.
+ */
+router.post(
+  "/:sessionId/pairing-codes",
+  checkPermission("clips", null, "write"),
+  validateBody(createSessionPairingCodeSchema),
+  catchAsync(async (req, res) => {
+    const now = getCurrentTimestampLocal();
+    let conn;
+    let created;
+    try {
+      conn = await req.db.beginTransaction();
+      const [sessions] = await conn.execute(
+        `SELECT s.sessionId, s.venueId, s.endAt, s.status
+         FROM recording_sessions s JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
+         WHERE s.sessionId = ?
+         LIMIT 1 FOR UPDATE`,
+        [req.params.sessionId]
+      );
+      if (sessions.length === 0) {
+        await req.db.rollback(conn);
+        return res.sendError("Session not found", 404);
+      }
+      const session = sessions[0];
+      if (!SESSION_PAIRABLE.includes(session.status) || session.endAt <= now) {
+        await req.db.rollback(conn);
+        return res.sendError("This session has ended — devices can't be paired to it", 409);
+      }
+      created = await createPairingCode(conn, {
+        kind: "APP",
+        venueId: session.venueId,
+        sessionId: session.sessionId,
+        name: req.body.name,
+        accountId: req.user.accountId,
+        expiresBy: session.endAt,
+      });
+      await req.db.commit(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    noIdempotencyCache(res); // the key must never sit in the cache table
+    const expiresInSeconds = Math.max(
+      0,
+      Math.round((toEpochMs(created.expiresAt) - Date.now()) / 1000)
+    );
+    return res.sendSuccess(
+      `Pairing key created — it works once, for up to ${PAIRING_CODE_TTL_MINUTES} minutes`,
+      { ...created, expiresInSeconds },
+      201
+    );
+  })
+);
+
+/**
+ * DELETE /:sessionId/pairing-codes/:pairingCodeId — cancel a key nobody used yet
+ */
+router.delete(
+  "/:sessionId/pairing-codes/:pairingCodeId",
+  checkPermission("clips", null, "write"),
+  catchAsync(async (req, res) => {
+    const result = await req.db.query(
+      `UPDATE pairing_codes SET status = 'Cancelled', dateUpdated = ?
+       WHERE pairingCodeId = ? AND sessionId = ? AND kind = 'APP' AND status = 'Active'`,
+      [getCurrentTimestampLocal(), req.params.pairingCodeId, req.params.sessionId]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("Pairing key not found", 404);
+    }
+    return res.sendSuccess("Pairing key cancelled");
+  })
+);
+
+/**
+ * POST /:sessionId/devices/:pairedAppId/unpair — the device stops at its next request
+ */
+router.post(
+  "/:sessionId/devices/:pairedAppId/unpair",
+  checkPermission("clips", null, "write"),
+  catchAsync(async (req, res) => {
+    const result = await req.db.query(
+      `UPDATE paired_apps SET status = 'Revoked', dateUpdated = ?
+       WHERE pairedAppId = ? AND sessionId = ? AND status = 'Active'`,
+      [getCurrentTimestampLocal(), req.params.pairedAppId, req.params.sessionId]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("Device not found", 404);
+    }
+    return res.sendSuccess("Device unpaired");
   })
 );
 

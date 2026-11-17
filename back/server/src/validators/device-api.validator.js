@@ -38,6 +38,19 @@ export const heartbeatSchema = z.object({
     .max(100)
     .optional()
     .default([]),
+  // PLAN-002 Phase E: the box's LAN live view (edge/src/live.js) — its address
+  // and the key the API signs live-view links with. null = live view off.
+  live: z
+    .object({
+      url: z
+        .string()
+        .trim()
+        .max(255)
+        .regex(/^https?:\/\/[^\s/?#]+$/, "A base URL like http://192.168.1.50:8090"),
+      key: z.string().regex(/^[0-9a-f]{64}$/, "A 64-character hex key"),
+    })
+    .nullable()
+    .optional(),
 });
 
 // GET /jobs

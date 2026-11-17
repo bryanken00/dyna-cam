@@ -120,12 +120,14 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   never a bare `passport.authenticate`. A user can sign in and use the API only while their
   `users` row and credential are `Active`.
 - **Dyna Cam route families without a user login:** `/api/v1/device/*` (recorder boxes,
-  `Authorization: Device <token>`), `/api/v1/app/*` (paired staff phones,
-  `Authorization: App <token>`), both scoped to their venue (another venue's record is a 404);
-  `/api/v1/pair/*` trades a single-use 6-digit key from the Admin portal for one of those tokens;
-  `/api/v1/public/*` is the player's page (the court QR / clip share token is the credential).
-  The staff app keeps the paired token in `expo-secure-store`; the recorder box in
-  `DATA_DIR/device.json`.
+  `Authorization: Device <token>`, scoped to their venue — another venue's record is a 404);
+  `/api/v1/app/*` (a phone/tablet paired to **one recording session**,
+  `Authorization: App <token>`: the session, its live view and Stop; unpaired 10 min after the
+  session ends); `/api/v1/pair/*` trades a single-use 6-digit key from the Admin portal (Setup →
+  Recorder Boxes, or a session's "Pair a device") for one of those tokens; `/api/v1/public/*` is
+  the player's page (the court QR / clip share token is the credential). The app keeps its token
+  in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
+  only — staff work, including payments, happens on the web.
 - **Backend changes are tested:** `cd back && npm test` (throwaway database, never touches
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run

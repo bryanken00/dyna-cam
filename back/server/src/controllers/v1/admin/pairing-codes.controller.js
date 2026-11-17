@@ -7,19 +7,18 @@ import { createPairingCode, PAIRING_CODE_TTL_MINUTES } from "../../../utils/pair
 import { createPairingCodeSchema } from "../../../validators/pairing.validator.js";
 
 /**
- * Pairing keys (PLAN-002): a 6-digit, single-use, 10-minute key a staff phone
- * or recorder box redeems once at /api/v1/pair. Shown once, never stored in
+ * Recorder box pairing keys (PLAN-002): a 6-digit, single-use, 10-minute key a
+ * recorder box redeems once at /api/v1/pair/device. Shown once, never stored in
  * clear, never in the idempotency cache.
  *
- *   /apps       staff phones   — permission paired_apps
  *   /recorders  recorder boxes — permission venues/devices
  *
- * Each kind has its own routes so each sits behind its own permission.
+ * Keys for a phone/tablet belong to a recording session since Phase E — see
+ * /admin/sessions/:sessionId/pairing-codes (sessions.controller.js).
  */
 const router = express.Router();
 
 const KINDS = {
-  apps: { kind: "APP", permission: ["paired_apps", null] },
   recorders: { kind: "RECORDER", permission: ["venues", "devices"] },
 };
 

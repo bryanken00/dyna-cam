@@ -158,13 +158,6 @@ describe("clip payments (cash)", () => {
     assert.equal(page.data.clip.payCode, null);
     assert.ok(page.data.clip.videoUrl);
     assert.equal((await call("POST", "/admin/payments", { clipId: freeClip.clipId })).status, 409);
-
-    await ageClips(paid.courtId);
-    const staff = await call("POST", "/admin/clips", { courtId: paid.courtId });
-    assert.equal(staff.status, 201);
-    const adminView = await call("GET", `/admin/clips/${staff.data.clipId}`);
-    assert.equal(adminView.data.clip.paymentStatus, "Free");
-    assert.equal(adminView.data.clip.price, 0);
   });
 
   it("won't take payment for a clip that failed", async () => {

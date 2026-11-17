@@ -1,16 +1,16 @@
 // PLAN-001 Phase 2 — a court's physical button (relayed by the venue's
-// recorder box) and staff "save now" both save a clip by the same rules as a
-// QR scan; button codes are unique and freed when a court goes away.
+// recorder box) saves a clip by the same rules as a QR scan; button codes are
+// unique and freed when a court goes away. Staff "save now" was removed in
+// PLAN-002 Phase E (the Admin portal's Clips page is view only).
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { startTestApp } from "./helpers/testApp.js";
 
-describe("court buttons and staff save", () => {
+describe("court buttons", () => {
   let ctx;
   let admin;
-  let viewer;
   const home = {};
   const other = {};
 
@@ -48,7 +48,6 @@ describe("court buttons and staff save", () => {
   before(async () => {
     ctx = await startTestApp();
     admin = await ctx.createStaff("Admin", { access: "write" });
-    viewer = await ctx.createStaff("Viewer", { access: "read" });
     await setupVenue(home, "Button Courts", "home-court-1");
     await setupVenue(other, "Other Courts", "other-court-1");
   });
@@ -136,27 +135,19 @@ describe("court buttons and staff save", () => {
     });
   });
 
-  describe("staff save", () => {
-    it("saves a STAFF clip for a court", async () => {
+  describe("clips are view only in the Admin portal (PLAN-002 Phase E)", () => {
+    it("has no staff save and no delete", async () => {
       await ageClips(home.courtId);
-      const res = await call("POST", "/admin/clips", { courtId: home.courtId });
-      assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.data.merged, false);
+      assert.equal((await call("POST", "/admin/clips", { courtId: home.courtId })).status, 404);
       const rows = await clipsOf(home.courtId);
-      assert.equal(rows.at(-1).source, "STAFF");
-      assert.equal(rows.at(-1).status, "Pending");
+      assert.ok(rows.length > 0, "the court has clips from the button presses");
+      const clipId = rows.at(-1).clipId;
+      assert.equal((await call("DELETE", `/admin/clips/${clipId}`)).status, 404);
+      const [[row]] = await ctx.sql.query(`SELECT status FROM clips WHERE clipId = ?`, [clipId]);
+      assert.notEqual(row.status, "Deleted");
     });
 
-    it("refuses while the venue's recorder box is offline", async () => {
-      await ctx.sql.query(`UPDATE devices SET lastSeenAt = NULL WHERE venueId = ?`, [
-        other.venueId,
-      ]);
-      const res = await call("POST", "/admin/clips", { courtId: other.courtId });
-      assert.equal(res.status, 503);
-      assert.equal(res.body.code, "CAMERA_OFFLINE");
-    });
-
-    it("marks which courts can save in the picker options", async () => {
+    it("marks which courts are active in the filter options", async () => {
       const temp = await call("POST", "/admin/courts", { venueId: home.venueId, name: "Resting" });
       await call("PUT", `/admin/courts/${temp.data.courtId}`, {
         name: "Resting",
@@ -166,23 +157,6 @@ describe("court buttons and staff save", () => {
       const byId = new Map(options.data.courts.map((c) => [c.courtId, c.active]));
       assert.equal(byId.get(home.courtId), true);
       assert.equal(byId.get(temp.data.courtId), false);
-    });
-
-    it("needs write access and a live court", async () => {
-      assert.equal(
-        (await call("POST", "/admin/clips", { courtId: home.courtId }, viewer)).status,
-        403
-      );
-      const temp = await call("POST", "/admin/courts", { venueId: home.venueId, name: "Gone" });
-      await call("DELETE", `/admin/courts/${temp.data.courtId}`);
-      assert.equal(
-        (await call("POST", "/admin/clips", { courtId: temp.data.courtId })).status,
-        404
-      );
-      const [rows] = await ctx.sql.query(`SELECT COUNT(*) AS n FROM clips WHERE courtId = ?`, [
-        temp.data.courtId,
-      ]);
-      assert.equal(rows[0].n, 0);
     });
   });
 });

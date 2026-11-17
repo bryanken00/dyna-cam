@@ -321,7 +321,7 @@ describe("clips", () => {
     assert.equal(stalePage.data.clip.status, "Failed");
   });
 
-  it("treats a deleted clip as missing everywhere and removes its files", async () => {
+  it("treats a deleted clip as missing everywhere", async () => {
     await ageClips(home.courtId);
     const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
     const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
@@ -334,19 +334,24 @@ describe("clips", () => {
     const [[ready]] = await ctx.sql.query(`SELECT videoPath FROM clips WHERE clipId = ?`, [
       row.clipId,
     ]);
-    const videoFile = path.join(ctx.workDir, ready.videoPath.replace(/^\//, ""));
+    assert.ok(ready.videoPath);
 
-    assert.equal((await call("DELETE", `/admin/clips/${row.clipId}`)).status, 200);
+    // The Admin portal can't delete clips (view only since PLAN-002 Phase E);
+    // a clip is soft-deleted by maintenance, so set it the way the database would
+    assert.equal((await call("DELETE", `/admin/clips/${row.clipId}`)).status, 404);
+    await ctx.sql.query(
+      `UPDATE clips SET status = 'Deleted', videoPath = NULL, thumbnailPath = NULL
+       WHERE clipId = ?`,
+      [row.clipId]
+    );
 
     assert.equal((await call("GET", `/admin/clips/${row.clipId}`)).status, 404);
-    assert.equal((await call("DELETE", `/admin/clips/${row.clipId}`)).status, 404);
     assert.equal((await ctx.api("GET", `/public/clips/${save.data.shareToken}`)).status, 404);
     assert.equal(
       (await home.device("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() }))
         .status,
       404
     );
-    assert.equal(fs.existsSync(videoFile), false);
 
     const [[after]] = await ctx.sql.query(`SELECT status, courtId FROM clips WHERE clipId = ?`, [
       row.clipId,

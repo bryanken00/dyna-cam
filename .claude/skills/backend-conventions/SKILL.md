@@ -80,7 +80,8 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **Device, paired-app, pairing and public routes have no `req.user`.** `/api/v1/device/*` sits
   behind `requireDevice` (`middlewares/deviceAuth.middleware.js`) and `/api/v1/app/*` behind
   `requirePairedApp` (`middlewares/pairedAppAuth.middleware.js`): scope every query to
-  `req.device.venueId` / `req.pairedApp.venueId` and answer another venue's record with 404.
+  `req.device.venueId` / `req.pairedApp.sessionId` (a paired device sees only its own session)
+  and answer anything else with 404.
   `/api/v1/pair/*` trades a 6-digit key (`utils/pairing.js`, stored as a keyed HMAC) for a token:
   keep its per-IP and global limits, and send every token-bearing reply with
   `noIdempotencyCache(res)`. `/api/v1/public/*` has no auth at all: return only what the

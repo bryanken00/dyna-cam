@@ -24,17 +24,24 @@ const localDateTime = z
   });
 
 // POST /
-export const createSessionSchema = z.object({
-  courtId: z.string().min(1, "Court is required").max(50),
-  startAt: localDateTime,
-  durationMinutes: z.coerce
-    .number()
-    .int("Use whole minutes")
-    .min(5, "A session is at least 5 minutes")
-    .max(180, "A session is at most 3 hours"),
-  playerName: optionalString(100),
-  phone: optionalPhone(),
-});
+// startNow: true starts it now (PLAN-002 Phase E) — then startAt isn't needed
+export const createSessionSchema = z
+  .object({
+    courtId: z.string().min(1, "Court is required").max(50),
+    startNow: z.boolean().optional(),
+    startAt: emptyToUndefined(localDateTime.optional()),
+    durationMinutes: z.coerce
+      .number()
+      .int("Use whole minutes")
+      .min(5, "A session is at least 5 minutes")
+      .max(180, "A session is at most 3 hours"),
+    playerName: optionalString(100),
+    phone: optionalPhone(),
+  })
+  .refine((body) => body.startNow || body.startAt, {
+    message: "Pick a start date and time, or start now",
+    path: ["startAt"],
+  });
 
 // GET /
 export const listSessionsQuerySchema = z.object({

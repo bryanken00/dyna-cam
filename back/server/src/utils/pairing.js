@@ -32,14 +32,24 @@ export const hashPairingCode = (code) =>
 /**
  * Create a pairing key inside the caller's transaction. Never two Active,
  * unexpired keys with the same digits.
+ *
+ * @param {Object} options
+ * @param {"APP"|"RECORDER"} options.kind
+ * @param {string} [options.sessionId] - APP keys belong to one recording session (Phase E)
+ * @param {string} [options.expiresBy] - expire no later than this Manila timestamp
+ *   (a session key never outlives its session)
  * @returns {Promise<{ pairingCodeId: string, code: string, expiresAt: string }>}
  */
-export const createPairingCode = async (conn, { kind, venueId, name, accountId }) => {
+export const createPairingCode = async (
+  conn,
+  { kind, venueId, sessionId = null, name, accountId, expiresBy = null }
+) => {
   const now = getCurrentTimestampLocal();
-  const expiresAt = moment()
+  let expiresAt = moment()
     .tz(TIMEZONE)
     .add(PAIRING_CODE_TTL_MINUTES, "minutes")
     .format("YYYY-MM-DD HH:mm:ss");
+  if (expiresBy && expiresBy < expiresAt) expiresAt = expiresBy;
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const code = newPairingCode();
@@ -56,10 +66,21 @@ export const createPairingCode = async (conn, { kind, venueId, name, accountId }
     const pairingCodeId = uuidRow[0].id;
     await conn.execute(
       `INSERT INTO pairing_codes
-         (pairingCodeId, kind, venueId, name, codeHash, expiresAt, createdByAccountId, status,
-          dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
-      [pairingCodeId, kind, venueId, name, codeHash, expiresAt, accountId || null, now, now]
+         (pairingCodeId, kind, venueId, sessionId, name, codeHash, expiresAt, createdByAccountId,
+          status, dateCreated, dateUpdated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+      [
+        pairingCodeId,
+        kind,
+        venueId,
+        sessionId,
+        name,
+        codeHash,
+        expiresAt,
+        accountId || null,
+        now,
+        now,
+      ]
     );
     return { pairingCodeId, code, expiresAt };
   }
@@ -68,16 +89,26 @@ export const createPairingCode = async (conn, { kind, venueId, name, accountId }
 
 /**
  * Find a live key of this kind and lock it (inside the caller's transaction).
+ * An APP key is live only while its session is still to come or recording.
  * @returns {Promise<Object|null>} the pairing_codes row, or null
  */
 export const findLivePairingCode = async (conn, { code, kind }) => {
+  const now = getCurrentTimestampLocal();
+  const sessionLive =
+    kind === "APP"
+      ? `AND EXISTS (
+           SELECT 1 FROM recording_sessions s
+           WHERE s.sessionId = pc.sessionId AND s.status IN ('Scheduled', 'Recording')
+             AND s.endAt > ?)`
+      : "";
   const [rows] = await conn.execute(
-    `SELECT pc.pairingCodeId, pc.venueId, pc.name, v.name AS venueName
+    `SELECT pc.pairingCodeId, pc.venueId, pc.sessionId, pc.name, v.name AS venueName
      FROM pairing_codes pc
      JOIN venues v ON v.venueId = pc.venueId AND v.status != 'Deleted'
      WHERE pc.codeHash = ? AND pc.kind = ? AND pc.status = 'Active' AND pc.expiresAt > ?
+       ${sessionLive}
      LIMIT 1 FOR UPDATE`,
-    [hashPairingCode(code), kind, getCurrentTimestampLocal()]
+    kind === "APP" ? [hashPairingCode(code), kind, now, now] : [hashPairingCode(code), kind, now]
   );
   return rows[0] || null;
 };

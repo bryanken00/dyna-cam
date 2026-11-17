@@ -7,13 +7,14 @@ import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { hashToken, randomToken } from "../../../utils/crypto/tokens.js";
 import { findLivePairingCode, markPairingCodeUsed } from "../../../utils/pairing.js";
+import { loadDeviceSession, toDeviceSession } from "../../../utils/sessionDevices.js";
 import { pairAppSchema, pairDeviceSchema } from "../../../validators/pairing.validator.js";
 
 /**
  * Pairing (PLAN-002) — mounted at /api/v1/pair with NO login: the 6-digit key
  * is the credential, once.
  *
- *   POST /app      a staff phone redeems an APP key      → its token (shown once)
+ *   POST /app      a session device redeems a session key → its token (shown once)
  *   POST /device   a recorder box redeems a RECORDER key → its token (shown once)
  *
  * Guessing: a key is single-use and lives 10 minutes; each IP gets
@@ -68,7 +69,7 @@ const wrongKey = (req, res, kind) => {
 };
 
 /**
- * POST /app — pair a staff phone
+ * POST /app — pair a phone/tablet to the session its key belongs to (Phase E)
  */
 router.post(
   "/app",
@@ -93,12 +94,13 @@ router.post(
         const token = `dca_${randomToken(32)}`;
         await conn.execute(
           `INSERT INTO paired_apps
-             (pairedAppId, venueId, name, tokenHash, platform, appVersion, lastSeenAt, status,
-              dateCreated, dateUpdated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+             (pairedAppId, venueId, sessionId, name, tokenHash, platform, appVersion, lastSeenAt,
+              status, dateCreated, dateUpdated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
           [
             pairedAppId,
             key.venueId,
+            key.sessionId,
             key.name,
             hashToken(token),
             platform || null,
@@ -120,12 +122,13 @@ router.post(
     if (!result) return wrongKey(req, res, "APP");
 
     noIdempotencyCache(res); // the token must never sit in the cache table
+    const session = await loadDeviceSession(req.db, result.key.sessionId);
     return res.sendSuccess(
-      "This phone is paired",
+      "This device is paired to the session",
       {
         token: result.token,
-        pairedApp: { pairedAppId: result.pairedAppId, name: result.key.name },
-        venue: { venueId: result.key.venueId, name: result.key.venueName },
+        device: { pairedAppId: result.pairedAppId, name: result.key.name },
+        session: toDeviceSession(session),
       },
       201
     );

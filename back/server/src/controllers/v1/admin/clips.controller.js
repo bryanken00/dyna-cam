@@ -1,17 +1,14 @@
 import express from "express";
-import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
-import { ERROR_CODES } from "../../../utils/APIError.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { clipShareUrl } from "../../../utils/clips.js";
-import { removeClipFiles } from "../../../utils/file/clipFiles.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
-import { createClipSchema, listClipsQuerySchema } from "../../../validators/clips.validator.js";
-import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
+import { listClipsQuerySchema } from "../../../validators/clips.validator.js";
 
 /**
  * Clips — the replays saved from court cameras (PLAN-001).
- * Permission: clips.
+ * Permission: clips. View only since PLAN-002 Phase E: clips are saved by
+ * players (court QR / button) and sessions, never from the Admin portal.
  */
 const router = express.Router();
 
@@ -128,64 +125,6 @@ router.get(
 );
 
 /**
- * POST /
- * Staff save a court's last 60 seconds now (e.g. a player asked at the desk).
- * Same rules as a QR save (utils/clipRequests.js): merged into a clip made on
- * that court in the last few seconds, refused while the camera is offline.
- */
-router.post(
-  "/",
-  checkPermission("clips", null, "write"),
-  validateBody(createClipSchema),
-  catchAsync(async (req, res) => {
-    let conn;
-    let result;
-    try {
-      conn = await req.db.beginTransaction();
-      const [courts] = await conn.execute(
-        `SELECT ${COURT_RECORDING_COLUMNS}
-         FROM courts c
-         JOIN venues v ON v.venueId = c.venueId
-         WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
-         LIMIT 1`,
-        [onlineSince(), req.body.courtId]
-      );
-      if (courts.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError("Court not found or not active", 404);
-      }
-
-      result = await requestClip(conn, courts[0], {
-        source: "STAFF",
-        requestedAt: getCurrentTimestampLocal(),
-      });
-      await req.db.commit(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    if (!result.ok) {
-      return res.sendError(
-        "This court's camera or recorder box is offline, so nothing can be saved",
-        null,
-        503,
-        ERROR_CODES.CAMERA_OFFLINE
-      );
-    }
-
-    const body = {
-      clipId: result.clipId,
-      shareUrl: clipShareUrl(result.shareToken),
-      merged: result.merged,
-    };
-    return result.merged
-      ? res.sendSuccess("This moment is already being saved", body)
-      : res.sendSuccess("Saving the clip", body, 201);
-  })
-);
-
-/**
  * GET /options
  * Venues and courts for the Clips filters — under the clips permission, so
  * the page works without the Venues or Courts permissions.
@@ -231,52 +170,6 @@ router.get(
     }
 
     return res.sendSuccess("Clip retrieved successfully", { clip: toClip(rows[0]) });
-  })
-);
-
-/**
- * DELETE /:clipId — soft delete. The row stays; its files are removed and its
- * share link stops working.
- */
-router.delete(
-  "/:clipId",
-  checkPermission("clips", null, "write"),
-  catchAsync(async (req, res) => {
-    const { clipId } = req.params;
-    const now = getCurrentTimestampLocal();
-
-    let conn;
-    let files;
-    try {
-      conn = await req.db.beginTransaction();
-
-      const [rows] = await conn.execute(
-        `SELECT videoPath, thumbnailPath FROM clips
-         WHERE clipId = ? AND status != 'Deleted'
-         LIMIT 1 FOR UPDATE`,
-        [clipId]
-      );
-      if (rows.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError("Clip not found", 404);
-      }
-      files = rows[0];
-
-      await conn.execute(
-        `UPDATE clips SET status = 'Deleted', videoPath = NULL, thumbnailPath = NULL,
-                          dateUpdated = ?
-         WHERE clipId = ?`,
-        [now, clipId]
-      );
-
-      await req.db.commit(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    await removeClipFiles(files.videoPath, files.thumbnailPath);
-    return res.sendSuccess("Clip deleted successfully");
   })
 );
 

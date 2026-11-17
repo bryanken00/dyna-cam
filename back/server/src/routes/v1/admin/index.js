@@ -16,7 +16,6 @@ import clipsController from "../../../controllers/v1/admin/clips.controller.js";
 import sessionsController from "../../../controllers/v1/admin/sessions.controller.js";
 import paymentsController from "../../../controllers/v1/admin/payments.controller.js";
 import pairingCodesController from "../../../controllers/v1/admin/pairing-codes.controller.js";
-import pairedAppsController from "../../../controllers/v1/admin/paired-apps.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -53,8 +52,7 @@ router.use("/clips", requireAuth, auditTrail("clips"), clipsController);
 router.use("/sessions", requireAuth, auditTrail("sessions"), sessionsController);
 router.use("/payments", requireAuth, auditTrail("payments"), paymentsController);
 
-// PLAN-002 pairing
+// PLAN-002 recorder box pairing keys (session devices pair under /sessions)
 router.use("/pairing-codes", requireAuth, auditTrail("pairing-codes"), pairingCodesController);
-router.use("/paired-apps", requireAuth, auditTrail("paired-apps"), pairedAppsController);
 
 export default router;

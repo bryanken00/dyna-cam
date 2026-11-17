@@ -26,8 +26,6 @@ export const SESSION_MAX_DAYS_AHEAD = 14;
  * court at once and a Start right after it begins a new game.
  */
 export const SESSION_MIN_END_SECONDS = 1;
-/** A phone can't start a game when the court is booked within this many minutes. */
-export const SESSION_START_GAP_MINUTES = SESSION_MIN_MINUTES;
 
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
@@ -170,87 +168,7 @@ export const settleSessions = async (db, sessionId) => {
 };
 
 /**
- * The session recording on a court right now (a booking in progress or a game
- * started from a phone), locked. Inside the caller's transaction.
- * @returns {Promise<Object|null>} { sessionId, startAt, endAt, shareToken }
- */
-export const findRunningSession = async (conn, courtId) => {
-  const now = getCurrentTimestampLocal();
-  const [rows] = await conn.execute(
-    `SELECT sessionId, startAt, endAt, shareToken FROM recording_sessions
-     WHERE courtId = ? AND status IN ('Scheduled', 'Recording') AND startAt <= ? AND endAt > ?
-     ORDER BY startAt DESC
-     LIMIT 1 FOR UPDATE`,
-    [courtId, now, now]
-  );
-  return rows[0] || null;
-};
-
-/**
- * Start recording a whole game on a court now (PLAN-002 Phase D: "Start
- * recording" on a paired phone). It runs until it is ended, or stops by itself
- * after SESSION_MAX_MINUTES or at the court's next booking, whichever is first.
- * The caller locks the court row (FOR UPDATE) inside its transaction, so two
- * phones tapping Start together get the same session.
- *
- * @param {import("mysql2/promise").PoolConnection} conn
- * @param {Object} court - a row with COURT_RECORDING_COLUMNS (utils/clipRequests.js)
- * @param {{ pairedAppId?: string, accountId?: string }} by - who started it
- * @returns {Promise<{ ok: true, started: boolean, sessionId: string }
- *   | { ok: false, reason: "CAMERA_OFFLINE" }
- *   | { ok: false, reason: "BOOKED_SOON", bookedAt: string }>}
- */
-export const startSessionNow = async (conn, court, { pairedAppId = null, accountId = null }) => {
-  const running = await findRunningSession(conn, court.courtId);
-  if (running) return { ok: true, started: false, sessionId: running.sessionId };
-
-  if (!court.hasCamera || !court.recorderOnline) {
-    return { ok: false, reason: "CAMERA_OFFLINE" };
-  }
-
-  const nowM = moment().tz(TIMEZONE);
-  const now = formatLocal(nowM);
-  let end = nowM.clone().add(SESSION_MAX_MINUTES, "minutes");
-  const [next] = await conn.execute(
-    `SELECT startAt FROM recording_sessions
-     WHERE courtId = ? AND status NOT IN ('Cancelled', 'Failed') AND startAt > ? AND startAt < ?
-     ORDER BY startAt ASC
-     LIMIT 1`,
-    [court.courtId, now, formatLocal(end)]
-  );
-  if (next.length > 0) {
-    const bookedAt = parseLocal(next[0].startAt);
-    if (bookedAt.diff(nowM, "minutes", true) < SESSION_START_GAP_MINUTES) {
-      return { ok: false, reason: "BOOKED_SOON", bookedAt: next[0].startAt };
-    }
-    end = bookedAt;
-  }
-
-  const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
-  const sessionId = uuidRow[0].id;
-  await conn.execute(
-    `INSERT INTO recording_sessions
-       (sessionId, venueId, courtId, startAt, endAt, shareToken, createdByAccountId, pairedAppId,
-        status, dateCreated, dateUpdated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Recording', ?, ?)`,
-    [
-      sessionId,
-      court.venueId,
-      court.courtId,
-      now,
-      formatLocal(end),
-      randomToken(),
-      accountId,
-      pairedAppId,
-      now,
-      now,
-    ]
-  );
-  return { ok: true, started: true, sessionId };
-};
-
-/**
- * End a recording session now ("End recording" / the admin End button). The
+ * End a recording session now (the device's Stop recording / the admin End button). The
  * footage so far is kept: its last part is cut to the new end. A session is
  * at least SESSION_MIN_END_SECONDS long, so it always has one part.
  *

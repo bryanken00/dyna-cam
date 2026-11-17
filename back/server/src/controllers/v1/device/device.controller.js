@@ -15,7 +15,7 @@ import {
   daysFromNowLocal,
   toEpochMs,
 } from "../../../utils/clips.js";
-import { cameraVersion, decryptSecret } from "../../../utils/crypto/secretBox.js";
+import { cameraVersion, decryptSecret, encryptSecret } from "../../../utils/crypto/secretBox.js";
 import {
   clipUploadFolder,
   removeClipFiles,
@@ -167,7 +167,7 @@ router.post(
   "/heartbeat",
   validateBody(heartbeatSchema),
   catchAsync(async (req, res) => {
-    const { agentVersion, cameras } = req.body;
+    const { agentVersion, cameras, live } = req.body;
     const { venueId, deviceId } = req.device;
 
     const courtRows = await req.db.query(
@@ -189,13 +189,31 @@ router.post(
         cameraVersion: camera.cameraVersion || null,
       }));
 
+    // Live view (Phase E): keep the stored (encrypted) key unless it changed —
+    // every encryption has a fresh IV, so re-encrypting would rewrite it each beat
+    let liveUrl = null;
+    let liveKey = null;
+    if (live) {
+      const [current] = await req.db.query(`SELECT liveKey FROM devices WHERE deviceId = ?`, [
+        deviceId,
+      ]);
+      liveUrl = live.url;
+      liveKey =
+        current?.liveKey && decryptSecret(current.liveKey) === live.key
+          ? current.liveKey
+          : encryptSecret(live.key);
+    }
+
     const now = getCurrentTimestampLocal();
     await req.db.query(
-      `UPDATE devices SET agentVersion = ?, lastStatus = ?, lastSeenAt = ?, dateUpdated = ?
+      `UPDATE devices SET agentVersion = ?, lastStatus = ?, liveUrl = ?, liveKey = ?,
+                          lastSeenAt = ?, dateUpdated = ?
        WHERE deviceId = ?`,
       [
         agentVersion || null,
         JSON.stringify({ cameras: reported, reportedAt: now }),
+        liveUrl,
+        liveKey,
         now,
         now,
         deviceId,

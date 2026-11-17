@@ -17,8 +17,9 @@ Node + Express · MySQL via a custom `Database` class wrapping `mysql2/promise` 
 injected as `req.db`) · Passport JWT auth · Zod validators. One Admin portal (`/api/v1/admin/*`) plus
 the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a user login:
 `/api/v1/device/*` (recorder boxes, `Authorization: Device <token>`, every query scoped to
-`req.device.venueId`), `/api/v1/app/*` (paired staff phones, `Authorization: App <token>`, scoped
-to `req.pairedApp.venueId`), `/api/v1/pair/*` (a 6-digit pairing key → a phone or box token;
+`req.device.venueId`), `/api/v1/app/*` (a phone/tablet paired to one recording session,
+`Authorization: App <token>`, scoped to `req.pairedApp.sessionId`; see
+`utils/sessionDevices.js`), `/api/v1/pair/*` (a 6-digit pairing key → a device or box token;
 rate-limited) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
 credential). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.

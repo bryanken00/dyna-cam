@@ -77,8 +77,7 @@ async function main() {
       { module: "venues", submodule: "devices", description: "Recorder boxes management" },
       { module: "clips", submodule: null, description: "Replay clips" },
       { module: "payments", submodule: null, description: "Clip payments (cash)" },
-      // PLAN-002
-      { module: "paired_apps", submodule: null, description: "Paired staff phones (pairing keys)" },
+      // (PLAN-002's paired_apps was retired by migration 010 — devices pair to a session)
     ];
 
     let seeded = 0;
