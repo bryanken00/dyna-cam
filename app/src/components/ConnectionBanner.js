@@ -6,14 +6,14 @@ import { cn } from "@/lib/utils";
 import { isConnectionError } from "@/utils/dynaCam";
 
 /**
- * "Can't reach Dyna Cam — retrying" — shown on the paired screens while a
- * query can't reach the API (no response or 5xx). It renders nothing for any
- * other error, and nothing at all once the next poll succeeds; the queries
- * keep retrying on their own (services/requests/pairedApp.js).
+ * "Can't reach Dyna Cam — retrying" — shown on the Session and Ended screens
+ * while the session poll can't reach the API (no response or 5xx). It
+ * renders nothing for any other error, and nothing at all once the next poll
+ * succeeds; the poll keeps going on its own (services/requests/session.js).
  *
  *   <ConnectionBanner error={courts.error} />
  *
- * A connection error never unpairs the phone — only the API saying so does.
+ * A connection error never unpairs the device — only the API saying so does.
  */
 const ConnectionBanner = ({ error, className }) => {
   const colors = useThemeColors();
@@ -34,7 +34,7 @@ const ConnectionBanner = ({ error, className }) => {
           Can't reach Dyna Cam — retrying
         </Text>
         <Text className="text-muted-foreground text-[12px]">
-          Check the phone's Wi-Fi. It stays paired.
+          Check the device's Wi-Fi. It stays paired.
         </Text>
       </View>
     </View>

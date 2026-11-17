@@ -1,46 +1,32 @@
-import { useNavigation } from "@react-navigation/native";
 import { FlaskConical, Info, Link2 } from "lucide-react-native";
-import {
-  KeyboardAvoidingView,
-  ScrollView,
-  StatusBar,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAvoidingView, ScrollView, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import LogoMark from "@/components/LogoMark";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { IS_DEMO } from "@/constants";
-import { SCREEN_NAVIGATION } from "@/constants/navigations";
 import { useThemeColors } from "@/hooks/useTheme";
-import useThemeStore from "@/store/useThemeStore";
 import PairKeyInput from "./PairKeyInput";
 import { KEY_LENGTH, usePairScreen } from "./usePairScreen";
 
 /**
- * "Pair this phone" — the first screen on a phone that is neither paired nor
- * signed in (PLAN-002). A manager creates a 6-digit key in the web portal
- * (Dyna Cam → Paired Apps → Pair a phone); typing it here pairs the phone to
- * that venue, and it opens straight to the venue's courts from then on.
+ * "Pair this device" — the screen whenever the device isn't paired
+ * (PLAN-002 Phase E). Staff book a session on the web and tap "Pair a
+ * device", which shows a 6-digit key; typing it here pairs this device to
+ * that one session. It shows the session until it ends, then unpairs itself
+ * and comes back here — with a notice saying why.
  *
- * Managers who want the full app sign in with their staff account instead —
- * the small link at the bottom pushes the existing Login screen.
+ * There is no sign-in: staff work happens on the web.
  *
- * Layout follows Login (the design reference): centred card, LogoMark,
- * max-w-[440px], safe areas, keyboard avoidance.
+ * Centred card, LogoMark, max-w-[440px], keyboard avoidance. App.js
+ * provides the safe area and the status bar.
  */
 const PairScreen = () => {
-  const navigation = useNavigation();
   const colors = useThemeColors();
-  const isDark = useThemeStore((s) => s.isDarkMode);
   const m = usePairScreen();
 
   return (
-    <SafeAreaView className="bg-background flex-1" edges={["top", "bottom"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-
+    <View className="bg-background flex-1">
       <KeyboardAvoidingView className="flex-1" behavior="padding">
         <ScrollView
           contentContainerClassName="grow items-center justify-center p-6"
@@ -51,11 +37,11 @@ const PairScreen = () => {
             <View className="mb-6 items-center">
               <LogoMark />
               <Text className="font-sans-bold mt-[18px] text-[26px] tracking-tight">
-                Pair this phone
+                Pair this device
               </Text>
               <Text className="text-muted-foreground mt-1.5 text-center text-sm">
-                Enter the 6-digit key from the Admin portal:{"\n"}
-                Dyna Cam → Paired Apps → Pair a phone.
+                Enter the 6-digit key from the session in the Admin portal:{"\n"}
+                Sessions → the session → Pair a device.
               </Text>
 
               {IS_DEMO ? (
@@ -116,26 +102,16 @@ const PairScreen = () => {
                 <>
                   <Link2 size={18} color={colors.primaryForeground} />
                   <Text className="text-primary-foreground font-sans-bold text-[15.5px]">
-                    Pair phone
+                    Pair device
                   </Text>
                 </>
               )}
             </Button>
           </View>
 
-          <TouchableOpacity
-            onPress={() => navigation.navigate(SCREEN_NAVIGATION.Login)}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityRole="link"
-            className="mt-6 py-2"
-          >
-            <Text className="text-muted-foreground text-[13.5px]">
-              Sign in with a staff account instead
-            </Text>
-          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 };
 

@@ -3,6 +3,7 @@
     "name": "Dyna Cam",
     "slug": "dyna-cam",
     "version": "1.0.0",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "web": {
@@ -17,7 +18,14 @@
     },
     "ios": {
       "icon": "./assets/icon.png",
-      "bundleIdentifier": "com.dgsi.dynacam"
+      "bundleIdentifier": "com.dgsi.dynacam",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Dyna Cam shows the court's live video from the venue's recorder box."
+      }
     },
     "plugins": [
       "expo-sqlite",
@@ -32,7 +40,16 @@
       "expo-status-bar",
       "expo-font",
       "expo-splash-screen",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-video",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ]
   }
 }

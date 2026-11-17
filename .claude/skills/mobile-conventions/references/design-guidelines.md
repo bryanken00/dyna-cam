@@ -1,8 +1,11 @@
 # Design Steering
 
-The single source of truth for how screens should look and feel. The redesigned
-**Login screen** ([src/Screens/Login/Index.js](../../../../app/src/Screens/Login/Index.js)) is the
-reference implementation — when in doubt, copy its patterns. The goal is a clean,
+The single source of truth for how screens should look and feel. The **Pair
+screen** ([src/Screens/Pair/index.js](../../../../app/src/Screens/Pair/index.js)) is the
+reference for a form screen and the **Session screen**
+([src/Screens/Session/index.js](../../../../app/src/Screens/Session/index.js)) for a
+responsive one (side by side on a landscape tablet, stacked on a phone) —
+when in doubt, copy their patterns. The goal is a clean,
 modern product built on [React Native Reusables](https://reactnativereusables.com)
 that works in light **and** dark mode and looks correct on phones **and** tablets.
 
@@ -188,8 +191,8 @@ Tailwind's own weight utilities of the same name.
 
 ---
 
-_Reference: [Login](../../../../app/src/Screens/Login/Index.js) (full pattern set — gradient
-logo mark, staggered entrance, styled inputs, primary button states) ·
-[Dashboard](../../../../app/src/Screens/Home/Dashboard/index.js) (header, card, tablet
-`max-w`) · [Settings](../../../../app/src/Screens/Home/Settings/index.js) (grouped list
-sections, destructive action) · [global.css](../../../../app/global.css) (tokens)._
+_Reference: [Pair](../../../../app/src/Screens/Pair/index.js) (logo mark, centred card,
+`max-w`, primary button states, inline errors) ·
+[Session](../../../../app/src/Screens/Session/index.js) (header with status, landscape /
+portrait layouts, destructive action with a confirm) ·
+[global.css](../../../../app/global.css) (tokens)._

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Keyboard } from "react-native";
-import { pairErrorMessage, usePairPhone } from "@/services/requests/pairedApp";
+import { pairErrorMessage, usePairDevice } from "@/services/requests/pairing";
 import { usePairedStore } from "@/store/usePairedStore";
 
 export const KEY_LENGTH = 6;
@@ -9,17 +9,19 @@ export const KEY_LENGTH = 6;
 const toDigits = (value) => String(value ?? "").replace(/\D/g, "").slice(0, KEY_LENGTH);
 
 /**
- * State for "Pair this phone": the 6-digit key, submitting it, and what to
- * say when it fails (wrong / expired, too many tries, can't reach the API).
+ * State for "Pair this device": the 6-digit key, submitting it, and what to
+ * say when it fails (wrong / expired / used, too many tries, can't reach the
+ * API).
  *
  * The key submits itself when the 6th digit lands — typing or pasting — once
  * per distinct key, so a wrong key isn't re-sent (and re-counted against the
  * rate limit) by an unrelated re-render. On success the pairing store gets
- * the token and Navigation swaps to paired mode; nothing else to do here.
+ * the token and Navigation swaps to the Session screen; nothing else to do
+ * here.
  */
 export const usePairScreen = () => {
   const [code, setCode] = useState("");
-  const pairPhone = usePairPhone();
+  const pairDevice = usePairDevice();
   const notice = usePairedStore((s) => s.notice);
   const clearNotice = usePairedStore((s) => s.clearNotice);
   const lastSent = useRef(null);
@@ -27,11 +29,11 @@ export const usePairScreen = () => {
   const complete = code.length === KEY_LENGTH;
 
   const submit = () => {
-    if (!complete || pairPhone.isPending) return;
+    if (!complete || pairDevice.isPending) return;
     Keyboard.dismiss();
     lastSent.current = code;
     clearNotice();
-    pairPhone.mutate(code);
+    pairDevice.mutate(code);
   };
 
   useEffect(() => {
@@ -45,12 +47,12 @@ export const usePairScreen = () => {
       const next = toDigits(value);
       setCode(next);
       // Editing the key clears the last attempt's error
-      if (next !== lastSent.current && pairPhone.isError) pairPhone.reset();
+      if (next !== lastSent.current && pairDevice.isError) pairDevice.reset();
     },
     complete,
     submit,
-    pairing: pairPhone.isPending,
-    error: pairPhone.isError ? pairErrorMessage(pairPhone.error) : null,
+    pairing: pairDevice.isPending,
+    error: pairDevice.isError ? pairErrorMessage(pairDevice.error) : null,
     notice,
   };
 };

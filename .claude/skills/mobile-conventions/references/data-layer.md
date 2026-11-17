@@ -31,23 +31,21 @@ src/services/
 
 From `services/api/axios.js`:
 
-- `createAxiosInstanceWithInterceptor("data")` — authenticated JSON. The request
-  interceptor reads the token from `useUserAuthStore.getState()`; never pass a
-  token by hand. Create one per file at module scope.
-- `createAxiosInstanceWithInterceptor("multipart")` — authenticated `FormData`
-  uploads.
-- `axiosAuth` — unauthenticated, for sign-in only.
+- `createDeviceAxiosInstance()` — the paired device's calls to
+  `/api/v1/app/*`. The request interceptor reads the token from
+  `usePairedStore.getState()` and sends `Authorization: App <token>` (plus an
+  `Idempotency-Key` on mutations); never pass a token by hand. Create one per
+  file at module scope.
+- `axiosPair` — no credentials, for `POST /api/v1/pair/app` only.
 
 ```js
-// services/api/items.js
-import { createAxiosInstanceWithInterceptor } from "./axios";
+// services/api/session.js
+import { createDeviceAxiosInstance } from "./axios";
 
-const api = createAxiosInstanceWithInterceptor("data");
+const axiosDevice = createDeviceAxiosInstance();
 
-const BASE = "/api/v1/admin/items";
-
-export const getItemsApi = async (params = {}) => {
-  const response = await api.get(BASE, { params });
+export const getDeviceSessionApi = async () => {
+  const response = await axiosDevice.get("/api/v1/app/session");
   return response.data;
 };
 ```
@@ -56,8 +54,8 @@ export const getItemsApi = async (params = {}) => {
 
 `api/` returns `response.data` — the API's envelope. Every endpoint in this
 repo's API (`back/`) replies `{ success, message, data: { … } }`, so the payload
-is **one more `.data` hop**: a login is `response.data.user`, a list is
-`response.data.<entities>` + `response.data.pagination`. Read the controller in
+is **one more `.data` hop**: the device's session is `response.data.session`,
+a list would be `response.data.<entities>` + `response.data.pagination`. Read the controller in
 `back/server/src/controllers/` for the exact keys before writing an unwrap.
 
 Unwrap **once**, in the module hook (or in a `requests/` hook's `onSuccess`),
@@ -65,34 +63,29 @@ and return plain arrays and numbers from it, so the screen never knows the
 envelope:
 
 ```js
-const rows = data?.data?.clips ?? [];
-const total = data?.data?.pagination?.total ?? rows.length;
+const data = query.data?.data ?? null;
+const session = data?.session ?? null;
+const live = data?.live ?? null;
 ```
 
 Demo-mode fixtures return the same envelope (see `demoEnvelope()` in
 `constants/demo.js`), so the unwrap needs no demo branch.
 
-### Auth, CSRF and sessions
+### The device token
 
-(The staff-account rules. A **paired phone** uses neither CSRF nor refresh —
-see architecture-and-traps.md, "Two credentials, never mixed", and
-`createPairedAxiosInstance()` at the end of `axios.js`.)
+There is no staff sign-in, so none of the web client's Bearer / CSRF /
+refresh rules apply (the `/app/*` routes use no cookies). The device
+instance's one piece of session logic, in `axios.js`:
 
-`services/api/axios.js` mirrors the web client's rules for this API — don't
-re-implement them per call:
-
-- `axiosAuth` (no Bearer) is for login / refresh / logout;
-  `createAxiosInstanceWithInterceptor("data" | "multipart")` for everything
-  else.
-- Every mutation gets an `x-csrf-token` (fetched from
-  `/api/v1/admin/auth/csrf-token`, refetched once on 403
-  `CSRF_VALIDATION_FAILED`) and an `Idempotency-Key`.
-- A 401 refreshes the token pair once (the API rotates refresh tokens, so the
-  new one is always stored) and retries; a failed refresh clears the session.
-- A 403 `PASSWORD_CHANGE_REQUIRED` sets `user.mustChangePassword`, and
-  Navigation holds the user on the change-password screen.
-- `INVALID_CREDENTIALS` (a wrong password typed into a form) never triggers a
-  refresh or a sign-out.
+- A **401 `TOKEN_INVALID`** carrying the CURRENT token clears the pairing
+  (`usePairedStore.unpair`), with a notice for the Pair screen — "The session
+  has ended…" if the device already knew it had, else "This device was
+  unpaired…". A request from an older pairing can't unpair a newer one.
+- **Anything else** — no response, 5xx, 409 — is only an error for the
+  screen. The device stays paired.
+- **Never log** an axios error or response on these paths: the error's
+  `config.headers` holds the token, `POST /pair/app`'s body holds it, and
+  `GET /app/session`'s holds the live link's `sig`.
 
 ---
 
@@ -179,28 +172,30 @@ queryFn: async () => {
 },
 ```
 
-Fixtures go in `constants/demo.js` next to the auth ones. `EXPO_PUBLIC_*` is
+Fixtures go in `constants/demo.js`. `EXPO_PUBLIC_*` is
 inlined at build time: a release built with demo mode on ships with it on.
 
 ---
 
 ## Zustand stores (`src/store/`)
 
-- Three stores: `useUserAuthStore` (staff-account session) and
-  `useThemeStore` (theme) persist to AsyncStorage under `user-auth` and
-  `theme-storage`; `usePairedStore` (a paired phone's token + venue, PLAN-002)
-  persists to **expo-secure-store** under `paired-app`, because that token is
-  the shared phone's only credential. Anything secret goes in secure store,
-  never AsyncStorage (unencrypted).
-- **Server data never goes in a store.** It goes in React Query.
-- Read with a selector: `useUserAuthStore((s) => s.isAuthenticated)`. Outside
-  React (interceptors), use `getState()`.
-- `isAuthenticated` is the only thing that decides whether the user is signed
-  in. Navigation swaps the whole navigator on it.
+- Two stores: `usePairedStore` (the device's pairing: token, device,
+  sessionId, whether the session has ended) persists to
+  **expo-secure-store** under `paired-app`, because that token is a shared
+  device's only credential; `useThemeStore` (theme) persists to AsyncStorage
+  under `theme-storage`. Anything secret goes in secure store, never
+  AsyncStorage (unencrypted).
+- **Server data never goes in a store.** The session is React Query data
+  (`["session"]`), polled every 5 s.
+- Read with a selector: `usePairedStore((s) => s.token)`. Outside React
+  (interceptors), use `getState()`.
+- `token` is the only thing that decides whether the device is paired.
+  Navigation swaps the whole navigator on it (and on the session's state).
 - **Renaming a persist `name`, or changing the persisted shape, resets every
-  installed user's saved state.** For `user-auth` that means everyone is
-  signed out. Add a `version` + `migrate` to the persist options instead, and
-  record it in the changelog entry's Dev notes.
+  installed device's saved state** — for `paired-app` that unpairs it. Bump
+  the persist `version` and add a `migrate` instead (`paired-app` is on
+  version 1: v0 was the Phase C/D venue-wide pairing, dropped on upgrade),
+  and record it in the changelog entry's Dev notes.
 
 ---
 

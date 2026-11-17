@@ -1,14 +1,22 @@
-# Dyna Cam — staff app
+# Dyna Cam — session device
 
-The Expo / React Native app venue staff use at the court: court and camera status, "save clip
-now", recent clips, and session recordings. It signs in with the same accounts and permissions as
-the web Admin portal and talks to the same API (`back/`). See
-[PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the roadmap.
+The Expo / React Native app on the phone or tablet at the court. Staff book a session on the web
+(Sessions → Book session) and tap **Pair a device**, which shows a 6-digit key. Typed into this
+app, the key pairs the device to **that one session**:
+
+1. **Pair this device** — enter the key.
+2. **Session** — the court's live video (from the venue's recorder box, over the venue Wi-Fi),
+   the session's download QR, a REC timer and **Stop recording**.
+3. **Ended** — the QR full screen with the saving progress, **Done**, and "This device unpairs in
+   9:41". After Done or 10 minutes the device unpairs itself and is back at step 1.
+
+There is **no sign-in**: staff work (booking, clips, payments at the counter) happens on the web.
+See [PLAN-002](../docs/plans/PLAN-002-setup-menu-device-pairing/plan.md) §5.
 
 **Stack:** Expo SDK 58 · React Native 0.88 · React 19.3 · React Navigation 7 ·
 [React Native Reusables](https://reactnativereusables.com) + NativeWind
-(Tailwind) · TanStack Query 5 · Zustand 5 · Axios · expo-sqlite · lucide icons ·
-Onest + JetBrains Mono
+(Tailwind) · TanStack Query 5 · Zustand 5 · Axios · expo-secure-store · expo-video ·
+expo-keep-awake · lucide icons · Onest + JetBrains Mono
 
 Conventions, architecture, the component kit and the traps live in the
 [`mobile-conventions`](../.claude/skills/mobile-conventions/SKILL.md) skill. Plans, bug reports,
@@ -27,16 +35,25 @@ cp .env.example .env          # then set EXPO_PUBLIC_API_URL
 npx expo start
 ```
 
-On a physical phone, `localhost` is the phone itself — set `EXPO_PUBLIC_API_URL` to your
-computer's LAN IP, e.g. `http://192.168.1.20:4021`. The first screen is **Pair this phone**:
-enter a 6-digit key from the Admin portal (Dyna Cam → Paired Apps → Pair a phone), or tap
-"Sign in with a staff account instead" and use an Admin portal account.
+On a physical device, `localhost` is the device itself — set `EXPO_PUBLIC_API_URL` to your
+computer's LAN IP, e.g. `http://192.168.1.20:4021`. The first screen is **Pair this device**:
+book a session in the Admin portal, open it, tap **Pair a device**, and type the key shown. The
+live video only plays when the device is on the same network as the venue's recorder box.
 
 Press `a` for Android, `i` for iOS, or scan the QR code with Expo Go.
 
-Some dependencies need native code, so **Expo Go will not run everything**.
-Paired mode keeps its token in `expo-secure-store` (native, added in PLAN-002), so a dev
-build made before it **must be rebuilt** — an old build fails as soon as the app starts.
+Some dependencies need native code, so **Expo Go will not run everything**. The app needs a
+dev build that includes `expo-secure-store` (the pairing token), `expo-video` (live view) and
+the `app.json` native settings below — a build made before PLAN-002 Phase E **must be rebuilt**:
+
+- **Android:** plain-HTTP traffic is allowed (`expo-build-properties` →
+  `usesCleartextTraffic`), because the recorder box serves the live video over `http://` on
+  the LAN.
+- **iOS:** `NSAllowsLocalNetworking` and a Local Network usage text ("Dyna Cam shows the
+  court's live video from the venue's recorder box"); iOS asks the user once.
+- **Orientation:** any (`"orientation": "default"`, `ios.supportsTablet`), so a tablet can sit
+  in landscape with the video and QR side by side.
+
 For a full build:
 
 ```bash
@@ -58,29 +75,16 @@ npx expo export --platform android --clear  # does it bundle?
 ## Demo mode
 
 Set `EXPO_PUBLIC_DEMO_MODE=true` in `.env` and the app stops talking to
-the network entirely. Any valid email and password signs you in as a fake user;
-the login screen shows an amber **Demo mode** badge so a demo session can never
-be mistaken for a real one. Useful for UI work without the API running.
+the network entirely; the Pair screen shows an amber **Demo mode** badge so a
+demo can never be mistaken for a real session. Useful for UI work without the
+API running.
 
 | | Demo on | Demo off |
 | --- | --- | --- |
-| `useLoginAuth` | any credentials, fake user | `POST /api/v1/admin/auth/login` |
-| `useGetMe` | the signed-in demo user | `GET /api/v1/admin/auth/me` |
-| `useChangePassword` | succeeds, saves nothing | `PUT /api/v1/admin/auth/me/password` |
-| `useLogout` | clears local state | `POST /api/v1/admin/auth/logout` |
-
-The Dyna Cam screens (Courts, Clips, Sessions, Take payment, Recorder boxes,
-the Dashboard numbers and the Menu's permissions) resolve from fixtures too:
-two venues, four courts, a handful of clips and sessions, every permission at
-write level. Writes (save clip, book, cancel, end, record cash) succeed and
-save nothing. Demo pay codes to try in Take payment: `K7QM2P` (unpaid),
-`H3XR9A` (already paid).
-
-Paired mode works in demo too: on "Pair this phone" any 6-digit key pairs
-the phone to the first demo venue (`000000` answers like a wrong key). Court 2
-starts out recording a whole game; Start recording / End recording work on any
-court with a camera, and an ended game goes Saving… → Ready after about 8 s.
-"Save last 60 s" goes Saving… → Ready after a few seconds.
+| `usePairDevice` | any 6-digit key pairs (`000000` is "wrong") | `POST /api/v1/pair/app` |
+| `useGetDeviceSession` | "Court 1", recording since 3 min ago, no live video | `GET /api/v1/app/session` (every 5 s) |
+| `useStopSession` | Processing, then Ready after ~8 s; the 10-min countdown starts | `POST /api/v1/app/session/stop` |
+| Done | forgets the token | `POST /api/v1/app/unpair`, then forgets it |
 
 The switch is an `IS_DEMO` check inside each hook in
 [src/services/requests/](src/services/requests/); fixtures live
@@ -96,7 +100,7 @@ in [src/constants/demo.js](src/constants/demo.js).
 | Variable | What |
 | --- | --- |
 | `EXPO_PUBLIC_API_URL` | Base URL of the API (`back/`), e.g. `http://192.168.1.20:4021` |
-| `EXPO_PUBLIC_DEMO_MODE` | `"true"` to sign in locally with no API (dev only) |
+| `EXPO_PUBLIC_DEMO_MODE` | `"true"` to pair to a demo session with no API (dev only) |
 
 Only `EXPO_PUBLIC_*` variables reach the app, and they are **inlined into the
 bundle at build time** — readable by anyone who unpacks the APK. API hosts and
@@ -104,7 +108,7 @@ feature flags are fine; secrets are not. Restart with `npx expo start --clear`
 after editing `.env`.
 
 ⚠️ Because it is inlined, **a build made with `EXPO_PUBLIC_DEMO_MODE=true`
-ships with auth permanently bypassed.** The `production` profile in
+ships permanently in demo mode.** The `production` profile in
 [eas.json](eas.json) forces it off.
 
 ---
@@ -121,9 +125,10 @@ ships with auth permanently bypassed.** The `production` profile in
 
 ## Notes
 
-- **Token storage.** The JWT is persisted to AsyncStorage, which is not
-  encrypted. For sensitive data, swap the storage in
-  [useUserAuthStore.js](src/store/useUserAuthStore.js) for `expo-secure-store`.
+- **Token storage.** The device's pairing token is kept in `expo-secure-store`
+  (Keychain / Android Keystore) by [usePairedStore.js](src/store/usePairedStore.js) — never
+  AsyncStorage. Never log it, an axios error (its headers hold it), or a live-video link (its
+  `sig` is a signature).
 - **Upgrading the SDK later.** `npx expo install expo@^59.0.0 --fix`, then
   `npx expo-doctor@latest`, then delete `android/`+`ios/` and re-run
   `npx expo prebuild`. NativeWind is the piece most likely to lag a new SDK —

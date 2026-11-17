@@ -7,25 +7,16 @@ one. Paths are relative to `app/`. (Moved here from `app/README.md`.)
 
 ```
 src/
-├─ Navigation/        Stack navigator, auth-gated
+├─ Navigation/        One navigator, swapped on the pairing and the session's state
 ├─ Screens/
-│  ├─ Login/          Reference implementation for the design guidelines
-│  ├─ Pair/           "Pair this phone" — 6-digit key (first screen when unpaired)
-│  ├─ Paired/         Paired-phone mode: Courts, Court (Start/End game, Save last 60 s), ShareQr (clip or game), TakePayment
-│  ├─ Account/        Change password (forced and voluntary)
-│  ├─ Courts/         List + CourtDetail/ (Save clip now, court QR) — read-only variant
-│  ├─ Clips/          List + ClipDetail/ (play, share, take payment)
-│  ├─ Sessions/       Reference module — list, filters, Fab, BookSessionSheet, SessionDetail/
-│  ├─ TakePayment/    Pay code → lookup → record cash
-│  ├─ RecorderBoxes/  Read-only list with per-camera status
-│  └─ Home/           Bottom-tab shell
-│     ├─ Dashboard/   Today's numbers (from the list endpoints) + shortcuts
-│     └─ Settings/    Menu: permission-gated module rows + account + theme + sign out
+│  ├─ Pair/           "Pair this device" — the 6-digit key (reference form screen)
+│  ├─ Session/        Live video (LivePanel + useLiveSource), QR, REC timer, Stop
+│  └─ Ended/          Full-screen QR, saving progress, Done, unpair countdown
 ├─ components/        Shared UI — see the component kit below
 │  ├─ ui/             React Native Reusables primitives (copied in, yours to edit)
 │  └─ pattern/        The list-module kit
 ├─ constants/         navigation names, env-derived config, demo fixtures, version
-├─ hooks/             useTheme, useAppFonts, useCustomDialog, useCamera
+├─ hooks/             useTheme, useAppFonts, useCustomDialog, useCamera, useNow
 ├─ lib/               cn() helper, JS colour mirror + NAV_THEME
 ├─ services/
 │  ├─ api/            Pure API calls — no side effects
@@ -63,26 +54,22 @@ src/
 | `Fab` + `FAB_CLEARANCE` | Floating create action, and the padding the list needs to clear it |
 | `SectionLabel` · `StatusToggle` · `StatusDot` · `InitialAvatar` | Form and row primitives |
 
-[src/Screens/Sessions/](../../../../app/src/Screens/Sessions/) composes them into a working
-module; the conventions are in [module-pattern.md](module-pattern.md).
+No screen uses the module kit today (the session device has no admin
+lists); the conventions for when one does are in
+[module-pattern.md](module-pattern.md).
 
 **Dyna Cam building blocks** — [src/components/](../../../../app/src/components/)
 
 | Component | Use for |
 | --- | --- |
-| `StatusChip` | Outlined pill, coloured dot + label, `tone` success / warning / danger / muted |
-| `ChoiceChips` | Single choice among several options — filters, short pickers (scrolls or wraps) |
 | `QrCode` | A QR of any string, black on white in both themes (`toqr` + react-native-svg) |
-| `ShareLink` · `ShareLinkSheet` | A player link with QR + share sheet; the sheet is the full-screen result after a save/booking |
-| `DetailCard` + `DetailRow` | Read-only label/value card on detail screens (empty values are skipped) |
-| `QueryState` | Loading / error-with-retry for a single-record screen |
-| `ElapsedTimer` | A running "12:34" timer ticked locally from a server `elapsedSeconds` + the query's `dataUpdatedAt`; owns its clock so only it re-renders |
+| `TickingTimer` | A "12:34" timer counting up (REC) or down (unpair countdown) from an API "…Seconds" value + the query's `dataUpdatedAt`; owns its clock so only it re-renders |
 | `ConnectionBanner` | "Can't reach Dyna Cam — retrying" for a connection error (no response / 5xx); nothing otherwise |
-| `ClipThumb` | 16:9 clip thumbnail from a signed link, with a placeholder |
+| `QueryState` | Loading / error-with-retry for a single-record screen |
 
-Helpers: `utils/dynaCam.js` (Manila time, ₱, pay codes, status tones,
-`fileUrl()`), `utils/phoneFormat.js`, `hooks/usePermissions.js`,
-`hooks/useDebounce.js`.
+Helpers: `utils/dynaCam.js` (Manila `formatTime`, `formatElapsed`,
+`secondsSince`, `shortLink`, `isConnectionError`, live-link `liveIdentity` /
+`liveExpiryMs`), `hooks/useNow.js`.
 
 **RNR primitives** — [src/components/ui/](../../../../app/src/components/ui/) holds `Button`,
 `Text`, `Input`, `Switch`, `Card`, `Separator`, `Label`, `Dialog`,

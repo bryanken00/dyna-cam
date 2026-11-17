@@ -13,15 +13,13 @@
 export const BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? "http://192.168.254.121:4021";
 
-/** Where the API serves uploaded/static files from. */
-export const BASE_URL_FILES = `${BASE_URL}/public`;
-
 /**
- * Demo mode — auth resolves locally and makes **no network calls at all**.
- * Any non-empty email and password signs you in. See `constants/demo.js`.
+ * Demo mode — the app makes **no network calls at all**. Any 6-digit key
+ * pairs the device to a demo session (000000 is "wrong"). See
+ * `constants/demo.js`.
  *
- * Use it to explore the template, build UI before a backend exists, or ship a
- * clickable demo. Turn it off before shipping anything real.
+ * Use it to build UI before a backend exists, or for a clickable demo. Turn
+ * it off before shipping anything real.
  *
  * Env vars arrive as strings, so `"false"` would be truthy — compare exactly.
  */

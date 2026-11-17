@@ -1,6 +1,6 @@
 ---
 name: new-mobile-module
-description: Scaffold a complete list/detail module in the Expo staff app (app/) — the list screen (ScreenHeader, stat row, DataList card, FilterBar, ListFooter, Fab), its use<Module>Module state hook, the create/edit FormSheet, its data source (in-memory, API via services/api + services/requests with demo-mode fixtures, or local SQLite via a table + db_ endpoints), the SCREEN_NAVIGATION route, stack registration, and the row under the Menu tab. Use whenever the user asks to add, create, or scaffold a new module, screen, list, or CRUD feature in the mobile app (e.g. "add a Clips screen to the app", "new Courts screen in the staff app"). Also use to add just the data layer or just the screen of such a module. For the web Admin portal and API half use new-module instead (it runs first when the module needs a new table or endpoint).
+description: Scaffold a complete list/detail module in the Expo app (app/) — currently a session device with no modules, so read the status note first — the list screen (ScreenHeader, stat row, DataList card, FilterBar, ListFooter, Fab), its use<Module>Module state hook, the create/edit FormSheet, its data source (in-memory, API via services/api + services/requests with demo-mode fixtures, or local SQLite via a table + db_ endpoints), the SCREEN_NAVIGATION route, stack registration, and the row under the Menu tab. Use whenever the user asks to add, create, or scaffold a new module, screen, list, or CRUD feature in the mobile app (e.g. "add a Clips screen to the app", "new Courts screen in the staff app"). Also use to add just the data layer or just the screen of such a module. For the web Admin portal and API half use new-module instead (it runs first when the module needs a new table or endpoint).
 argument-hint: "<module name> [fields…]"
 ---
 
@@ -8,13 +8,23 @@ argument-hint: "<module name> [fields…]"
 
 All paths below are relative to `app/`.
 
+> **Status (PLAN-002 Phase E): read before scaffolding.** The app is now a
+> session device — Pair → Session → Ended — with **no staff sign-in, no Menu
+> tab, no Home tab shell and no list modules**. Staff work happens on the web.
+> A module only makes sense if staff screens come back to the app, and then
+> several removed pieces come back first: a staff-account credential (Bearer
+> + CSRF + refresh in `services/api/axios.js`, an auth store, Login), the
+> `Screens/Home/` tab shell with the Menu, and permission gating
+> (`usePermissions`). All of them are in git history at `0fec6f7`. **Confirm
+> with the user before reviving any of that** — it is a product decision,
+> not a scaffold step.
+
 Builds one entity's full vertical slice — data source to Menu row — to this
-repo's conventions. `src/Screens/Sessions/` is the reference implementation
-and the starting point (API data, demo fixtures, debounced search, filter
-chips, Fab, create sheet, row actions, detail screen); `src/Screens/Courts/`
-is the read-only variant. A new module starts as a copy of one of them,
-renamed, with the templates below filling in what it lacks (an edit sheet,
-delete, a local SQLite source).
+repo's conventions. The last reference implementation is `src/Screens/Sessions/`
+at `0fec6f7` (API data, demo fixtures, debounced search, filter chips, Fab,
+create sheet, row actions, detail screen), with `src/Screens/Courts/` as the
+read-only variant. A new module starts from the templates below, which are
+self-contained.
 
 Request: **$ARGUMENTS**
 
@@ -28,8 +38,9 @@ Read before writing anything (they override this skill if they disagree):
   row and sheet anatomy, and the per-module conversion checklist
 - [engineering-checklist.md](../mobile-conventions/references/engineering-checklist.md) — §2,
   §3, §5 and §6 in particular
-- The files in `src/Screens/Sessions/` (and `SessionDetail/` if the module
-  has a detail screen)
+- The reference module `src/Screens/Sessions/` at `0fec6f7`
+  (`git show 0fec6f7:app/src/Screens/Sessions/index.js`), if you need more
+  than the templates
 
 ## Step 1 — Pin the spec, then stop
 
@@ -91,8 +102,8 @@ source doesn't use.
 | 12 | `src/Navigation/index.js` | always | `<Stack.Screen>` in the authenticated stack |
 | 13 | `src/Screens/Home/Settings/index.js` | always | a row in the Modules section |
 
-Steps 8–10 start from `src/Screens/Sessions/` (or the templates) and then
-change. Templates for every step, using `Product` as the worked example:
+Steps 8–10 start from the templates (or the `0fec6f7` Sessions module) and
+then change. Templates for every step, using `Product` as the worked example:
 **[references/templates.md](references/templates.md)**.
 
 ## Step 3 — Verify before reporting done

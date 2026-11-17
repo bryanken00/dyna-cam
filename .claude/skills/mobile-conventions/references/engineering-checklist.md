@@ -185,8 +185,7 @@ deliberate to-do, not an oversight.
 
 | Gap | Where | Impact |
 | --- | --- | --- |
-| No `React.memo` on `DataListRow` | [DataListRow.js](../../../../app/src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes. The Dyna Cam module rows (`CourtRow`, `ClipRow`, `SessionRow`, `DeviceRow`) are memoised |
+| No `React.memo` on `DataListRow` | [DataListRow.js](../../../../app/src/components/pattern/DataListRow.js) | Every row re-renders when any list state changes — memoise module rows |
 | No `getItemLayout` / windowing props | [DataList.js](../../../../app/src/components/pattern/DataList.js) | Fine at 5 rows, degrades in the hundreds |
-| `FilterBar` itself doesn't debounce | [FilterBar.js](../../../../app/src/components/pattern/FilterBar.js) | The module hooks debounce with `hooks/useDebounce.js` before the query key; a new module must too |
-| Only the tab shell reads `useWindowDimensions` | [Home/index.js](../../../../app/src/Screens/Home/index.js) | Nothing else adapts to width; tablet layout is `max-w-*` only |
-| No in-app video player | [ClipDetail/useClipDetail.js](../../../../app/src/Screens/Clips/ClipDetail/useClipDetail.js) | Clips open in the phone's own player via `Linking`; `expo-video` needs a new dev build |
+| `FilterBar` itself doesn't debounce | [FilterBar.js](../../../../app/src/components/pattern/FilterBar.js) | A module hook must debounce search before the query key (see `new-mobile-module` templates §7) |
+| Live video untested on a real LAN | [Session/LivePanel.js](../../../../app/src/Screens/Session/LivePanel.js) | `expo-video` HLS over plain HTTP from the recorder box; cleartext/local-network config is in `app.json` but not yet tried on devices |

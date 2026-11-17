@@ -20,21 +20,20 @@ and in `App.js`.
 
 | Item | Convention | Example |
 | --- | --- | --- |
-| Screen folder | PascalCase, entry file `index.js` | `Screens/Sessions/index.js` |
-| Module state hook | `use<Folder>Module.js`, next to the screen | `Screens/Sessions/useSessionsModule.js` |
-| Module sheet | `<Entity>FormSheet.js` (or `<Verb><Entity>Sheet.js` for a create-only form), next to the screen | `Screens/Sessions/BookSessionSheet.js` |
-| Detail screen | sub-folder of its module, `index.js` + `use<Entity>Detail.js` | `Screens/Clips/ClipDetail/` |
+| Screen folder | PascalCase, entry file `index.js` | `Screens/Session/index.js` |
+| Screen state hook | `use<Folder>Screen.js` (a list module: `use<Folder>Module.js`), next to the screen | `Screens/Session/useSessionScreen.js` |
+| Screen-only component | PascalCase `.js`, next to the screen | `Screens/Session/LivePanel.js` |
+| Module sheet | `<Entity>FormSheet.js`, next to the screen | `Screens/Products/ProductFormSheet.js` |
 | Hand-written component | PascalCase `.js` | `components/ScreenHeader.js` |
 | RNR primitive | kebab-case `.jsx`, CLI-generated | `components/ui/dropdown-menu.jsx` |
 | Hook | `useX.js` | `hooks/useAppFonts.js` |
 | Zustand store | `useXStore.js` | `store/useThemeStore.js` |
-| API / requests file | lowercase domain, same name in both folders | `services/api/auth.js` ↔ `services/requests/auth.js` |
+| API / requests file | lowercase domain, same name in both folders | `services/api/session.js` ↔ `services/requests/session.js` |
 | SQLite table / endpoints | `<table>.table.js` / `<table>.endpoints.js` | `products.table.js`, `products.endpoints.js` |
 | Migration | `NNN_<what>.js` | `001_add_item_note.js` |
 | Util | camelCase `.js` | `utils/dateFormat.js` |
 
-`Screens/Login/Index.js` has a capital `I` for historical reasons. New screens
-use `index.js`.
+Every screen's entry file is `index.js` (lowercase).
 
 ---
 
@@ -42,11 +41,11 @@ use `index.js`.
 
 | What | Style | Example |
 | --- | --- | --- |
-| Screen | `export default` | `export default SessionsScreen;` |
+| Screen | `export default` | `export default SessionScreen;` |
 | Component | `export default` | `export default ScreenHeader;` |
-| Hook | named, plus default if it is the file's only export | `export const useSessionsModule = …; export default useSessionsModule;` |
-| API function | named, `…Api` suffix | `export const loginApi = async (payload) => …` |
-| Request hook | named, `use…` | `export const useLoginAuth = () => …` |
+| Hook | named, plus default if it is the file's only export | `export const useSessionScreen = …; export default useSessionScreen;` |
+| API function | named, `…Api` suffix | `export const pairDeviceApi = async (payload) => …` |
+| Request hook | named, `use…` | `export const usePairDevice = () => …` |
 | SQLite endpoint | named, `db_` prefix | `export const db_getItems = () => …` |
 
 Hand-written components are arrow functions with a default export:
@@ -112,10 +111,12 @@ a new dev build, and it won't run in Expo Go.
 
 1. **Server data** → React Query, through a hook in `services/requests/`.
    Never copied into Zustand.
-2. **Session and app-wide preferences** → Zustand (`useUserAuthStore`,
+2. **The pairing and app-wide preferences** → Zustand (`usePairedStore`,
    `useThemeStore`). Read with a narrow selector.
-3. **A screen's UI state** (search, filters, page, which record is open) → the
-   module's `use<Folder>Module.js` hook. The screen file stays layout-only.
+3. **A screen's UI state** (the typed key, which record is open, a list's
+   search and page) → the screen's own hook (`use<Folder>Screen.js`, or
+   `use<Folder>Module.js` for a list module). The screen file stays
+   layout-only.
 4. **A form's draft** → `useState` inside the sheet, reset when a different
    record opens.
 5. **Local records** → SQLite, through `db_*` endpoints.

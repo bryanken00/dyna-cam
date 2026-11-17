@@ -7,11 +7,14 @@ Ported from a web design system built on Ant Design; §1 records what had to
 change for a phone and why. This document is self-contained — you do not need
 the web original to use it.
 
-[src/Screens/Sessions/](../../../../app/src/Screens/Sessions/) is the reference
-implementation (API data with demo fixtures, debounced search, filter chips,
-Fab, create sheet, row actions); copy that folder's shape to start a module.
-[src/Screens/Courts/](../../../../app/src/Screens/Courts/) is the read-only
-variant (no Fab, no sheet).
+> **Status (PLAN-002 Phase E):** the app is a session device with **no list
+> modules, no Menu tab and no staff sign-in** today. This pattern and the
+> `components/pattern/` kit stay for when admin-style screens come back. The
+> last working reference modules — `src/Screens/Sessions/` (API data with
+> demo fixtures, debounced search, filter chips, Fab, create sheet, row
+> actions) and `src/Screens/Courts/` (read-only) — are in git history at
+> `0fec6f7`; copy their shape from there. The `new-mobile-module` skill's
+> templates are self-contained.
 
 > Everything visual is driven by tokens in [global.css](../../../../app/global.css).
 > **Never hardcode a hex in a screen.**
@@ -90,12 +93,14 @@ background.
 
 **Modules are not tabs.** The tab bar is for top-level destinations only —
 Dashboard and Menu. A module is a row in a `GroupedList` under the Menu tab that
-pushes onto the stack:
+pushes onto the stack. (The tab shell, `Screens/Home/`, was removed with the
+staff app in PLAN-002 Phase E; a module coming back brings it back too —
+from git history at `0fec6f7`.)
 
 1. Name the route in [constants/navigations.js](../../../../app/src/constants/navigations.js)
    under `SCREEN_NAVIGATION.Modules`
 2. Register the screen in [Navigation/index.js](../../../../app/src/Navigation/index.js)
-3. Add a row in [Settings](../../../../app/src/Screens/Home/Settings/index.js) with an
+3. Add a row in the Menu tab (`Screens/Home/Settings/index.js`) with an
    `onPress` that navigates to it
 
 The navigator runs with `headerShown: false`, so **pass `onBack` to
@@ -188,21 +193,20 @@ adds nothing.
 
 When `DataListRow`'s avatar + two lines doesn't fit the record — a clip needs
 a thumbnail, a session a status chip and a progress line — write a
-module-local row next to the screen (`ClipRow.js`, `SessionRow.js`) with the
-same padding (`px-4 py-3`), `active:bg-secondary/60` press state and
-`numberOfLines` truncation, wrapped in `React.memo`. Status goes in
-`components/StatusChip` (outlined, coloured dot + label), not a pastel chip.
+module-local row next to the screen (e.g. `ClipRow.js`) with the same
+padding (`px-4 py-3`), `active:bg-secondary/60` press state and
+`numberOfLines` truncation, wrapped in `React.memo`. Status goes in an
+outlined chip (coloured dot + label), never a pastel one.
 
 ---
 
 ## 6. Create / edit sheet
 
 Follow the template in the `new-mobile-module` skill
-(`references/templates.md` §9) for an edit sheet, or
-[BookSessionSheet.js](../../../../app/src/Screens/Sessions/BookSessionSheet.js) for a
-create-only one. Props are `{ open, onClose, onSubmit, entity, saving }` —
-the sheet owns its own `FormSheet`. Single choices with more than two
-options use `components/ChoiceChips` (scrolls or wraps), not a picker.
+(`references/templates.md` §9). Props are `{ open, onClose, onSubmit,
+entity, saving }` — the sheet owns its own `FormSheet`. A single choice with
+more than two options is a row of selectable pills (scrolling or wrapping),
+not a picker.
 
 - **Header** — accent-free primary chip + title + subtitle + bordered X. Handled
   by `FormSheet`; pass `icon`, `title`, `subtitle`.
@@ -260,6 +264,6 @@ options use `components/ChoiceChips` (scrolls or wraps), not a picker.
 
 ---
 
-_Reference: [Sessions module](../../../../app/src/Screens/Sessions/) ·
+_Reference: the Sessions module at `0fec6f7` (git history) ·
 [pattern components](../../../../app/src/components/pattern/) ·
 [global.css](../../../../app/global.css) · [design-guidelines.md](design-guidelines.md)_

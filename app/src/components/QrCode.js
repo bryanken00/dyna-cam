@@ -12,7 +12,7 @@ const QUIET_ZONE = 4;
 
 /**
  * A QR code drawn with react-native-svg — for showing a link to a player so
- * they can scan it off the staff phone.
+ * they can scan it off the device.
  *
  *   <QrCode value={shareUrl} size={220} />
  *

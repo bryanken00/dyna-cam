@@ -4,32 +4,31 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 /**
- * Paired-phone store (PLAN-002) — the venue's shared staff phone.
+ * Pairing store — the app's only credential (PLAN-002 Phase E).
  *
- * A phone is paired once with a 6-digit key from the web portal and then
- * calls `/api/v1/app/*` with `Authorization: App <token>`. That token is the
- * phone's only credential, so it is persisted to **expo-secure-store**
- * (Keychain / Android Keystore), not AsyncStorage: a shared front-desk phone
- * is exactly the device someone else picks up. This sits beside
- * `useUserAuthStore` (a person's staff-account session), never inside it.
+ * Staff book a session on the web and pair a device to THAT session with a
+ * 6-digit key. The device gets a token, calls `/api/v1/app/*` with
+ * `Authorization: App <token>`, and is unpaired again when the session is
+ * over. The token is persisted to **expo-secure-store** (Keychain / Android
+ * Keystore), never AsyncStorage: these are shared devices at the court.
  *
- * Navigation switches on `token`: a token means paired mode.
+ * Navigation switches on `token`: no token → "Pair this device".
  *
- * The token is cleared in exactly two cases:
- *  • the API answers a paired call with 401 `TOKEN_INVALID` (the phone was
- *    revoked on the web) — see the paired instance in services/api/axios.js;
- *  • someone taps "Unpair this phone" (local only; the web still lists the
- *    phone until it is revoked there).
+ * The token is cleared when:
+ *  • the API answers 401 `TOKEN_INVALID` (grace over, session cancelled, or
+ *    unpaired on the web) — see services/api/axios.js;
+ *  • staff tap Done on the Ended screen, or its 10-minute countdown runs out.
  * A network error or a 5xx never unpairs.
  *
- * `hydrated` turns true once the secure store has been read, so the app can
- * hold the splash screen instead of flashing the Pair screen at a phone that
- * is already paired.
+ * `sessionEnded` is set once the API reports the session over, so a later
+ * 401 can say "The session has ended" rather than "This device was unpaired".
+ * `hydrated` turns true once the secure store has been read (App.js holds the
+ * splash until then).
  */
 
 /**
  * SecureStore as a zustand storage. It does not exist on web, where the
- * pairing simply isn't remembered (paired mode is a phone feature).
+ * pairing simply isn't remembered.
  */
 const secureStorage =
   Platform.OS === "web"
@@ -44,32 +43,31 @@ const secureStorage =
         removeItem: (name) => SecureStore.deleteItemAsync(name),
       };
 
+const EMPTY = { token: null, device: null, sessionId: null, sessionEnded: false };
+
 export const usePairedStore = create(
   persist(
     (set) => ({
-      token: null,
-      /** { pairedAppId, name } — the phone's name, set on the web */
-      pairedApp: null,
-      /** { venueId, name } */
-      venue: null,
-      /** Shown once on the Pair screen, e.g. after the web revoked the phone */
+      ...EMPTY,
+      /** Shown once on the Pair screen — why the device is back there */
       notice: null,
       hydrated: false,
 
-      /** Called by usePairPhone with the POST /pair/app response. */
-      pair: ({ token, pairedApp, venue }) =>
-        set({ token, pairedApp, venue, notice: null }),
+      /** Called by usePairDevice with POST /pair/app's `data`. */
+      pair: ({ token, device, session }) =>
+        set({
+          token,
+          device: device ?? null,
+          sessionId: session?.sessionId ?? null,
+          sessionEnded: false,
+          notice: null,
+        }),
 
-      /** Keep the name/venue fresh from GET /app/me (renamed on the web). */
-      setDetails: ({ pairedApp, venue }) =>
-        set((s) => ({
-          pairedApp: pairedApp ?? s.pairedApp,
-          venue: venue ? { venueId: venue.venueId, name: venue.name } : s.venue,
-        })),
+      /** The API says the session is over (its grace has started). */
+      markSessionEnded: () => set({ sessionEnded: true }),
 
       /** Forget the pairing. `notice` explains why on the Pair screen. */
-      unpair: (notice = null) =>
-        set({ token: null, pairedApp: null, venue: null, notice }),
+      unpair: (notice = null) => set({ ...EMPTY, notice }),
 
       clearNotice: () => set({ notice: null }),
     }),
@@ -77,12 +75,17 @@ export const usePairedStore = create(
       // SecureStore keys allow letters, digits, ".", "-" and "_" only
       name: "paired-app",
       storage: createJSONStorage(() => secureStorage),
-      // Only the pairing itself is secret-worthy and worth keeping
       partialize: (s) => ({
         token: s.token,
-        pairedApp: s.pairedApp,
-        venue: s.venue,
+        device: s.device,
+        sessionId: s.sessionId,
+        sessionEnded: s.sessionEnded,
       }),
+      // v0 was a venue-wide phone pairing (Phase C/D). Those tokens were
+      // revoked by migration 010 — drop them so the device opens straight on
+      // "Pair this device" instead of waiting for a 401.
+      version: 1,
+      migrate: (persisted, version) => (version < 1 ? EMPTY : persisted),
       onRehydrateStorage: () => (state, error) => {
         if (error) console.error("[Paired] Couldn't read the pairing:", error.message);
         usePairedStore.setState({ hydrated: true });

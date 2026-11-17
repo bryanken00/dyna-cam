@@ -1,6 +1,6 @@
 # Mobile app: architecture and traps
 
-How the Expo staff app in `app/` is put together, and the traps that bite. Paths
+How the Expo app in `app/` — a Dyna Cam session device — is put together, and the traps that bite. Paths
 are relative to `app/` unless they say otherwise. (This was `app/CLAUDE.md` before
 the app's docs moved into the `mobile-conventions` skill.)
 
@@ -13,25 +13,35 @@ the app's docs moved into the `mobile-conventions` skill.)
 
 ## What the app is
 
-Dyna Cam's **staff app** (see `docs/plans/PLAN-001-court-replay-cameras/` at the
-repo root). It started as an Expo SDK 58 / React Native 0.88 starter, in plain
-JavaScript (no `.tsx`). UI is [React Native Reusables](https://reactnativereusables.com)
-on NativeWind (Tailwind v3). It ships auth, theming, navigation, data fetching
-and offline SQLite, and signs in against the repo's API (`back/`).
+A Dyna Cam **session device** (see `docs/plans/PLAN-002-setup-menu-device-pairing/`
+§5 at the repo root): a phone or tablet at the court, paired to ONE recording
+session with a 6-digit key that staff create on the web. It started as an
+Expo SDK 58 / React Native 0.88 starter, in plain JavaScript (no `.tsx`). UI
+is [React Native Reusables](https://reactnativereusables.com) on NativeWind
+(Tailwind v3).
+
+```
+Pair this device ──key──▶ Session ──Stop / end time / web End──▶ Ended ──Done / 10 min──▶ Pair
+                          live video · QR · REC timer · Stop       QR · saving progress · countdown
+```
 
 Consequences for how you work here:
 
-- The starter's placeholders (`Screens/Example/`, the example `items`
-  SQLite table and endpoints, the placeholder Dashboard) were **replaced by
-  the real staff screens in PLAN-001 Phase 6**: Courts, Clips, Sessions, Take
-  payment, Recorder boxes, and a Dashboard summary. There are no local
-  SQLite tables yet; the layer stays wired for the first offline feature.
-  `constants/demo.js` backs demo mode and stays — every request hook has a
-  fixture branch, so the whole app runs with `EXPO_PUBLIC_DEMO_MODE=true`.
+- **There is no sign-in.** PLAN-001 Phase 6 and PLAN-002 Phases C–D built a
+  staff-account app (Courts, Clips, Sessions, Take payment, Recorder boxes,
+  Dashboard, a venue-wide paired mode); Phase E removed all of it — staff work
+  happens on the web. Git history has it (up to `0fec6f7`) if it is ever
+  needed again.
+- There are no local SQLite tables; the layer stays wired for the first
+  offline feature. `constants/demo.js` backs demo mode — every request hook
+  has a fixture branch, so the whole app runs with `EXPO_PUBLIC_DEMO_MODE=true`.
 - Several files under `src/` are unreachable from `index.js` **by design** —
-  some `utils/*`, `useCamera`, `LoadingScreen`, `DateRangePicker`,
-  `version.js`, the SQLite wrapper, and any `components/ui/*` not yet used on a
-  screen. They're a kit to build with. "Unused" is not a defect here.
+  the template's kit: most of `components/pattern/`, `ScreenHeader`,
+  `GroupedList`, `StyledInput`, `AnimatedField`, `DateRangePicker`,
+  `LoadingScreen`, `useCamera`, the generic `utils/*`, and any
+  `components/ui/*` not yet used on a screen. They're a kit to build with.
+  "Unused" is not a defect here — but code written for a feature leaves with
+  the feature.
 - Doc comments carry more weight than usual. Match the existing density rather
   than trimming them.
 
@@ -86,7 +96,7 @@ else — no toasts, no store writes, no navigation. `requests/` wraps them in
 from `requests/`.**
 
 Demo mode's bypass lives in `requests/`, not `api/`, for this reason: `api/`
-describes the server, and a fake user is not something the server does.
+describes the server, and a fake session is not something the server does.
 
 ### Local database layering
 
@@ -105,36 +115,57 @@ rather than a network request.
 
 ### Navigation
 
-`Navigation/index.js` swaps the **entire navigator** on who is using the
-phone rather than pushing a screen, so signing out or unpairing cannot be
-navigated back into. Four stacks, in this order:
+`Navigation/index.js` swaps the **entire navigator** on the device's state
+rather than pushing a screen, so an unpaired device cannot be navigated back
+into a session:
 
-1. staff account with a temporary password → ChangePassword only
-2. staff account signed in (`useUserAuthStore.isAuthenticated`) → the full app
-3. phone paired to a venue (`usePairedStore.token`, PLAN-002) → paired mode:
-   `Screens/Paired/` (Courts → Court → Share QR, Take payment)
-4. neither → `Screens/Pair/` ("Pair this phone"), with Login pushed from it
+1. no pairing token (`usePairedStore.token`) → `Screens/Pair/`
+2. paired, the session not over → `Screens/Session/`
+3. paired, the session over — `GET /app/session` returns a non-null
+   `unpairInSeconds` (its 10-minute grace) → `Screens/Ended/`
 
-Nothing renders until `usePairedStore.hydrated` (the secure store is read
-asynchronously); `App.js` holds the splash until then, so a paired phone
-never flashes the Pair screen.
+The session query (polled every 5 s) is read in Navigation too, so the switch
+to Ended follows the first answer that says it's over — Stop on this device,
+the end time, or staff ending it on the web. Nothing renders until
+`usePairedStore.hydrated` (the secure store is read asynchronously); `App.js`
+holds the splash until then, so a paired device never flashes the Pair screen.
 
-### Two credentials, never mixed
+### The one credential
 
-| | Staff account | Paired phone (PLAN-002) |
-| --- | --- | --- |
-| Store | `useUserAuthStore` (AsyncStorage) | `usePairedStore` (**expo-secure-store**) |
-| API | `/api/v1/admin/*` | `/api/v1/app/*` (one venue), `POST /api/v1/pair/app` to pair |
-| Header | `Authorization: Bearer <jwt>` + CSRF + refresh | `Authorization: App <token>` — no CSRF, no refresh |
-| axios | `createAxiosInstanceWithInterceptor()` | `createPairedAxiosInstance()`; `axiosPair` (no auth) to pair |
-| Ends when | refresh fails / sign out | **only** a 401 `TOKEN_INVALID` from `/app/*`, or "Unpair this phone" |
-| Gating | `usePermissions().can()` | none — the API scopes everything to the venue |
+| | Session device |
+| --- | --- |
+| Store | `usePairedStore` (**expo-secure-store**, key `paired-app`, persist `version` 1) |
+| API | `POST /api/v1/pair/app` to pair (no auth); `/api/v1/app/*` after |
+| Header | `Authorization: App <token>` — no Bearer, no CSRF, no refresh |
+| axios | `axiosPair` (no credentials) and `createDeviceAxiosInstance()` |
+| Ends when | a 401 `TOKEN_INVALID` (grace over, session cancelled, unpaired on the web), **Done**, or the unpair countdown reaching 0 |
 
-A paired phone must **never unpair on a network error or a 5xx** — those show
+A device must **never unpair on a network error or a 5xx** — those show
 `components/ConnectionBanner` ("Can't reach Dyna Cam — retrying") while the
-queries keep polling. The paired token and `POST /pair/app`'s response are
-secrets: never `console.*` an axios error or response on those paths (an
-axios error carries `config.headers`). Route
+session poll keeps going. The token, `POST /pair/app`'s response and the live
+link's `sig` are secrets: never `console.*` an axios error, a response, or
+`live.hlsUrl` (an axios error carries `config.headers`).
+
+### Live video
+
+`Screens/Session/LivePanel.js` plays the court through **`expo-video`**: an
+HLS playlist served by the venue's recorder box over **plain HTTP on the
+LAN** (`http://<box IP>:8090/live/<courtId>/index.m3u8?exp=…&sig=…`, about
+5 s behind). Things that matter:
+
+- `live` is null when the session isn't recording, the box is offline or has
+  no LAN address — show the calm "Live view needs the venue Wi-Fi" panel;
+  recording is never affected.
+- The link is signed and expires (~15 min); the 5-second session poll brings
+  fresh ones. `useLiveSource` keeps the player's source **stable** — it only
+  swaps when the stream's host/path changes or the playing link is within
+  2 minutes of expiry — because every swap restarts the video.
+- Plain HTTP to a LAN IP needs `usesCleartextTraffic` (Android, via
+  `expo-build-properties`) and `NSAllowsLocalNetworking` plus the Local
+  Network usage text (iOS) in `app.json`. These are native config: a new dev
+  build.
+
+Route
 names live in `constants/navigations.js` as `SCREEN_NAVIGATION` — navigate with
 the constant, never a string literal.
 
@@ -197,23 +228,26 @@ weights and ships ~576KB of unused `.ttf`.
 ### List/detail modules
 
 `components/pattern/` is a kit for admin-style screens — header, stat row,
-searchable card list, create/edit sheet. `Screens/Sessions/` is the reference
-implementation to copy. See [module-pattern.md](module-pattern.md), which also records what
-changed from the web original (table → card list, drawer → full-screen sheet).
+searchable card list, create/edit sheet. The session device has no such
+screens today; [module-pattern.md](module-pattern.md) describes the pattern
+for when it does (and what changed from the web original: table → card
+list, drawer → full-screen sheet).
 
 `DataList` is a `FlatList`. Never nest it in a `ScrollView` — put headers in
 `ListHeaderComponent`.
 
-[design-guidelines.md](design-guidelines.md) is the full spec. `Screens/Login/Index.js` is the
-reference for standalone screens, `Screens/Sessions/` for modules and
-`Screens/Clips/ClipDetail/` for detail screens.
+[design-guidelines.md](design-guidelines.md) is the full spec. `Screens/Pair/` is the
+reference for a standalone form screen, `Screens/Session/` for a polled,
+responsive screen.
 
 ### Demo mode
 
-`EXPO_PUBLIC_DEMO_MODE=true` makes all four auth hooks resolve locally with
-zero network calls. Demo returns the **same response shape** as the real API,
-so `onSuccess` needs no branch and every downstream behaviour is identical.
-Keep it that way when adding auth surface.
+`EXPO_PUBLIC_DEMO_MODE=true` makes every request hook resolve locally with
+zero network calls: any 6-digit key pairs (000000 answers like a wrong key)
+to a session recording since 3 minutes ago, with no live video; Stop →
+Processing → Ready after ~8 s, then the 10-minute countdown. Demo returns the
+**same response shape** as the real API, so `onSuccess` and every screen need
+no branch. Keep it that way when adding API surface.
 
 ## Traps
 

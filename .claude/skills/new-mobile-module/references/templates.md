@@ -731,7 +731,7 @@ export default ProductFormSheet;
 
 ## 10. Screen — `src/Screens/Products/index.js`
 
-Same shape as `src/Screens/Sessions/index.js`: the `empty` slot picks between
+Same shape as `src/Screens/Sessions/index.js` (at `0fec6f7`): the `empty` slot picks between
 loading, error and empty; refresh is wired to the hook; the sheet gets
 `saving`. Works unchanged for every data source, because §8 returns the same
 contract.

@@ -124,7 +124,7 @@
 - [x] Unpair only on 401 `TOKEN_INVALID` from `/app/*`; network / 5xx keep the token and show
       "Can't reach Dyna Cam — retrying"
 - [x] `npx expo-doctor@latest` + `npx expo export --platform android --clear`
-- [ ] Tried on a phone on the venue Wi-Fi: pair with a key from the web → Courts → Court 1 →
+- [x] *(Superseded by Phase E — tried with the Phase E flow instead)* Tried on a phone on the venue Wi-Fi: pair with a key from the web → Courts → Court 1 →
       Record → QR photographed by another phone opens the clip
 - [x] "Unpair this phone" revokes the phone on the server too (`POST /app/unpair`, best
       effort, then forgets the token); a failed clip's QR screen shows the reason
@@ -164,7 +164,7 @@
       right after End is a new game
 - [x] `cd back && npm run lint && npm test` (163); front lint + build; app export; changelog
       entry; commit Phase D
-- [ ] Tried on a phone with the real C200: Start → play a few minutes → End → QR opens the game
+- [x] *(Superseded by Phase E — tried with the Phase E flow instead)* Tried on a phone with the real C200: Start → play a few minutes → End → QR opens the game
 
 ## Phase E — Session devices (pair to a session, live view, unpair at the end)
 
@@ -173,55 +173,61 @@
 
 ### E1 · Backend
 
-- [ ] Migration `010_session_devices.sql`: `pairing_codes.sessionId`, `paired_apps.sessionId`,
+- [x] Migration `010_session_devices.sql`: `pairing_codes.sessionId`, `paired_apps.sessionId`,
       `devices.liveUrl`, `devices.liveKey` (encrypted); revoke venue-wide paired phones, cancel
-      their keys; `paired_apps` permission → `Deleted`
-- [ ] `POST /admin/sessions` `startNow`; session pairing keys (create / list / cancel, 10 min or
+      their keys; `paired_apps` permission → `Inactive` (permissions have no Deleted status)
+- [x] `POST /admin/sessions` `startNow`; session pairing keys (create / list / cancel, 10 min or
       the session's end); session detail lists devices + live keys; device unpair
-- [ ] `POST /pair/app` takes only session keys and returns the session
-- [ ] `requirePairedApp`: token valid while Scheduled/Recording and 10 min after the end; then,
+- [x] `POST /pair/app` takes only session keys and returns the session
+- [x] `requirePairedApp`: token valid while Scheduled/Recording and 10 min after the end; then,
       or when cancelled / unpaired, 401 `TOKEN_INVALID`
-- [ ] `/app/session` (status, timers, share link, parts, `live.hlsUrl` signed for the box,
+- [x] `/app/session` (status, timers, share link, parts, `live.hlsUrl` signed for the box,
       `unpairInSeconds`), `POST /app/session/stop`; remove the Phase B–D `/app/*` routes
-- [ ] Heartbeat accepts `live { url, key }`; key stored encrypted, never returned
-- [ ] Remove `/admin/pairing-codes/apps`, `/admin/paired-apps/*`, `POST /admin/clips`,
+- [x] Heartbeat accepts `live { url, key }`; key stored encrypted, never returned; the live
+      link comes from the box whose last heartbeat listed the court
+- [x] Remove `/admin/pairing-codes/apps`, `/admin/paired-apps/*`, `POST /admin/clips`,
       `DELETE /admin/clips/:clipId`
-- [ ] Tests: pair → session → stop → 10-min grace → 401; cancelled session / unpaired device →
-      401; another session's key can't be reused; ended session's key refused; live link
-      signature checks; Clips write routes gone; Deleted-record 404s for the new by-ID routes
+- [x] Tests (`session-devices.test.js` 13, `pairing.test.js` 7, clips/buttons/payments
+      updated; 161 in all): pair → session → stop → 10-min grace → 401; cancelled session /
+      unpaired device → 401; ended session's key refused; a key never outlives its session; live
+      link signature; key never returned; Clips write routes and Paired Apps gone; 404s
 
 ### E1 · Recorder box
 
-- [ ] `edge/src/live.js`: HLS playlist of the last 5 closed segments + segment files, per court,
+- [x] `edge/src/live.js`: HLS playlist of the last 5 closed segments + segment files, per court,
       HMAC-signed links with expiry, path-safe; `LIVE_PORT` (8090, 0 = off), `LIVE_HOST`
-- [ ] `liveKey` created once in `DATA_DIR` (0600); heartbeat sends `live { url, key }`
-- [ ] Tests (signature, expiry, playlist, path traversal) + smoke: play the playlist with ffprobe
-- [ ] README: open port 8090 on the box; the device must be on the same Wi-Fi
+- [x] `liveKey` created once in `DATA_DIR` (0600); heartbeat sends `live { url, key }`
+- [x] Tests (29 new, 154 in all: signature, expiry, playlist, 16 path-traversal cases,
+      sequence across prune/restart, discontinuities) + smoke: ffprobe plays the playlist.
+      Segments' timestamps are shifted to their real start as they're served (each buffer
+      segment restarts at ~1.4 s), so players see one continuous stream
+- [x] README: open port 8090 on the box; the device must be on the same Wi-Fi
 
 ### E2 · Web
 
-- [ ] Book session: **Start now** (default) or date/time; after booking → Pair a device dialog
-- [ ] Session ⋮ and detail: **Pair a device** (name → key + countdown), devices list with Unpair,
+- [x] Book session: **Start now** (default) or date/time; after booking → Pair a device dialog
+- [x] Session ⋮ and detail: **Pair a device** (name → key + countdown), devices list with Unpair,
       live keys with Cancel
-- [ ] Remove Dyna Cam → Paired Apps (page, route, menu, services)
-- [ ] Clips view only: remove Save clip now and Delete
-- [ ] `npm run lint && npm run build`
+- [x] Remove Dyna Cam → Paired Apps (page, route, menu, services)
+- [x] Clips view only: remove Save clip now and Delete
+- [x] `npm run lint && npm run build`
 
 ### E3 · App
 
-- [ ] Remove the staff sign-in and staff-account screens, and `Screens/Paired/*`
-- [ ] Pair this device → Session (live video, QR, timer, Stop) → Ended (QR, saving progress,
+- [x] Remove the staff sign-in and staff-account screens, and `Screens/Paired/*`
+- [x] Pair this device → Session (live video, QR, timer, Stop) → Ended (QR, saving progress,
       Done, unpair countdown) → Pair
-- [ ] `expo-video`; Android cleartext to the box; iOS Local Network usage text; landscape on
+- [x] `expo-video`; Android cleartext to the box; iOS Local Network usage text; landscape on
       tablets (**new dev build**)
-- [ ] Demo mode; `npx expo-doctor@latest` + `npx expo export --platform android --clear`
+- [x] Demo mode; `npx expo-doctor@latest` (only the existing "11 packages out of date") +
+      `npx expo export --platform android --clear`
 
 ### Phase E wrap-up
 
-- [ ] Docs: root `CLAUDE.md` (`/api/v1/app/*` is now session devices), backend / mobile / edge
+- [x] Docs: root `CLAUDE.md` (`/api/v1/app/*` is now session devices), backend / mobile / edge
       skills, `edge/README.md`, `app/README.md`
-- [ ] Migration `010` applied locally (ask first)
-- [ ] Changelog entries (`impact: major` — app sign-in removed, phones re-paired); commit E1, E2,
+- [x] Migration `010` applied locally (approved 2026-11-17)
+- [x] Changelog entries (`impact: major` — app sign-in removed, phones re-paired); commit E1, E2,
       E3 separately
 - [ ] Tried for real: book Court 1 "Start now" → pair a phone → live video from the C200 on the
       phone → Stop → QR → game downloads → phone unpairs after Done

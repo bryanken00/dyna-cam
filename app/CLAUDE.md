@@ -1,4 +1,4 @@
-# Mobile app — (Expo React Native staff app)
+# Mobile app — (Expo React Native session device)
 
 ## ⚠️ Before writing any code in `app/`, load the `mobile-conventions` skill
 
@@ -9,8 +9,11 @@ layer, the design guidelines, and the list-module pattern. The skill's table say
 read for the area you're touching. Read `architecture-and-traps.md` first: the theming, font-weight
 and Reanimated traps there are easy to walk into.
 
-Building a whole new screen module? Use the **`new-mobile-module`** skill. If it needs a new table
-or endpoint, the API and web half comes from **`new-module`** first.
+The app is a **session device** (PLAN-002 §5): Pair this device → Session (live video, QR, Stop)
+→ Ended → Pair. There is no sign-in and no staff-account app. A new admin-style list module would
+use the **`new-mobile-module`** skill — read its status note first, since it needs the removed
+staff sign-in back. If it needs a new table or endpoint, the API and web half comes from
+**`new-module`** first.
 
 ## Stack
 

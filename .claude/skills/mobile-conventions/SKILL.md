@@ -1,6 +1,6 @@
 ---
 name: mobile-conventions
-description: The non-negotiable conventions for the Expo React Native staff app in app/ (app/src, app/App.js) — file naming, exports and imports, the library set, the services/api + services/requests split, React Query keys and invalidation, demo mode, the SQLite tables/endpoints/migrations layering, Zustand stores, navigation constants, NativeWind theme tokens and font families, the list-module pattern, the app's architecture and its traps. Load BEFORE writing or editing anything under app/ — any screen, hook, component, sheet, service, store, table, route, app.json or Metro/Tailwind/Babel config. Also load when reviewing app code, answering how the mobile app is structured, or deciding where a new file goes. Not for front/ (that is frontend-conventions).
+description: The non-negotiable conventions for the Expo React Native app in app/ (app/src, app/App.js) — a Dyna Cam session device paired to one recording session with a 6-digit key — file naming, exports and imports, the library set, the services/api + services/requests split, React Query keys and invalidation, demo mode, the SQLite tables/endpoints/migrations layering, Zustand stores, navigation constants, NativeWind theme tokens and font families, the list-module pattern, the app's architecture and its traps. Load BEFORE writing or editing anything under app/ — any screen, hook, component, sheet, service, store, table, route, app.json or Metro/Tailwind/Babel config. Also load when reviewing app code, answering how the mobile app is structured, or deciding where a new file goes. Not for front/ (that is frontend-conventions).
 ---
 
 # Mobile conventions (`app/`)
@@ -10,15 +10,18 @@ TypeScript · React Native Reusables on NativeWind (Tailwind v3) ·
 lucide-react-native · Zustand · TanStack React Query 5 · axios · expo-sqlite ·
 React Navigation 7 (native stack).
 
-The app is Dyna Cam's **staff app**. It signs in against the same API as the web
-Admin portal (`back/`, `/api/v1/admin/*`) and uses the same accounts and
-permissions. Every path below is relative to `app/` unless it says otherwise.
+The app is a Dyna Cam **session device** (PLAN-002 Phase E): staff book a
+session on the web and pair a phone or tablet to THAT session with a 6-digit
+key. It shows the session — live video from the venue's recorder box, the
+download QR, a timer, Stop recording — then the QR with saving progress, and
+unpairs itself. There is **no sign-in and no staff-account app**: staff work
+happens on the web. Its only API is `/api/v1/pair/app` and `/api/v1/app/*`.
+Every path below is relative to `app/` unless it says otherwise.
 
 These rules are **non-negotiable** unless the user says otherwise. Reference
-implementations: `src/Screens/Login/Index.js` for a standalone screen,
-`src/Screens/Sessions/` for a list module (API + demo fixtures, filters,
-Fab, create sheet), `src/Screens/Clips/ClipDetail/` for a detail screen —
-copy their shape.
+implementations: `src/Screens/Pair/` for a standalone form screen,
+`src/Screens/Session/` for a polled, responsive screen (side by side on a
+landscape tablet, stacked on a phone) — copy their shape.
 
 ## Read the doc for the area you're touching
 
@@ -65,9 +68,11 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
   `["items", { page, search, status }]`.
 - **Read Zustand with a selector** — `useStore((s) => s.field)`, never
   `useStore()`.
-- **Navigate with `SCREEN_NAVIGATION` constants**, never a string literal. A
-  module is a row under the Menu tab, not a new tab, and its `ScreenHeader`
-  gets `onBack` because the stack has no header.
+- **Navigate with `SCREEN_NAVIGATION` constants**, never a string literal.
+  Today the app's three screens (Pair, Session, Ended) are switched by the
+  navigator itself, from the pairing and the session's state — nothing
+  navigates by hand. A pushed screen's `ScreenHeader` gets `onBack` because
+  the stack has no header.
 - **`DataList` is a `FlatList`.** Never nest it in a `ScrollView`; put headers
   and stat cards in `ListHeaderComponent`.
 - **`cond ? <X/> : null`, not `cond && <X/>`, when `cond` can be `0` or a
@@ -82,31 +87,31 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **RNR components come from the CLI** into `src/components/ui/`. Re-adding
   `switch.jsx` with `--overwrite` undoes its local fix.
 - **Phone is always `09XX XXXX XXX`** with the example `0912 3456 789` as the
-  hint, same as the web app and the API — use `utils/phoneFormat.js`
-  (`PHONE_PLACEHOLDER`, `formatPhoneOnChange`, `isValidPhoneNumber`,
-  `formatPhoneDisplay`).
-- **Two credentials, never mixed.** A staff account (`useUserAuthStore`,
-  Bearer, `/admin/*`) and a paired phone (`usePairedStore` in
-  expo-secure-store, `Authorization: App`, `/app/*`). A paired phone unpairs
-  **only** on 401 `TOKEN_INVALID` — never on a network error or 5xx — and its
-  token is never logged. See architecture-and-traps.md.
-- **Gate on permissions like the web does.** `usePermissions().can(module,
-  submodule, level)` (`hooks/usePermissions.js`) checks the same
-  `GET /admin/permissions/user` rows as the web portal. A Menu row needs
-  read; a write action (save, book, record) needs write. Permissions are
-  React Query data, never the auth store.
+  hint, same as the web app and the API. The app has no phone field today;
+  if one comes back, port `front/src/utils/phoneFormat.js` (without zod).
+- **One credential: the device's pairing token.** `usePairedStore` keeps it
+  in **expo-secure-store**, never AsyncStorage; the device axios instance
+  sends `Authorization: App <token>` (no Bearer, CSRF or refresh). It is
+  cleared **only** by a 401 `TOKEN_INVALID`, Done, or the unpair countdown —
+  never by a network error or a 5xx. See architecture-and-traps.md.
+- **Never log a secret.** Not the token, not POST /pair/app's response, not
+  an axios error (its `config.headers` holds the token), not `live.hlsUrl`
+  (its `sig` is a signature).
 - **API timestamps are Manila wall-clock strings** with no zone. Format them
-  with `utils/dynaCam.js` (`formatDateTime`, `manilaNow`, …), never
-  `new Date(str)` — Hermes misparses the space-separated form and a Date
-  shifts it into the phone's zone.
-- **Signed upload links are relative** — prefix with `fileUrl()` from
-  `utils/dynaCam.js`, use the rest unchanged.
+  with `utils/dynaCam.js` (`formatTime`), never `new Date(str)` — Hermes
+  misparses the space-separated form and a Date shifts it into the device's
+  zone. **Running timers tick from the API's "…Seconds" values** plus the
+  time since the response (`TickingTimer`), never from the device clock
+  against an API time.
+- **Live video is `expo-video`, playing HLS from the recorder box** over
+  plain HTTP on the LAN (`LivePanel`). Keep its source stable across polls
+  (`useLiveSource`); swapping the source restarts the video.
 
 ## Related
 
-- Building a whole new list/detail module? Use the **`new-mobile-module`**
-  skill — it drives this one in the right order. If the module also needs a
-  table and API, the web/back-end half comes from **`new-module`** first.
+- The **`new-mobile-module`** skill scaffolds an admin-style list/detail
+  module. The session device has none today (no Menu tab, no staff sign-in),
+  so read that skill's status note before using it.
 - Verification (run in `app/`) is `npx expo-doctor@latest` and
   `npx expo export --platform android --clear`. There is no test runner, linter
   or formatter; don't invent `npm test`.
