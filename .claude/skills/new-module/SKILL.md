@@ -88,10 +88,10 @@ Copy-paste templates with every placeholder marked:
 ## Step 3 — The permission row is not optional
 
 A page whose permission isn't in the `permissions` table is invisible to every non-Owner user and
-its API returns 403. `setup-database.js` skips seeding entirely when the table is non-empty, so an
-already-provisioned DB will never pick up a new entry there — that is why the row goes in **both**
-the seed array (fresh installs) and the numbered migration (existing installs). The migration
-INSERT must be idempotent (`WHERE NOT EXISTS`). See `references/backend.md` §3.
+its API returns 403. The row goes in **both** the numbered migration (what `npm run db:migrate`
+applies to existing installs) and the seed array in `setup-database.js` (which inserts each
+permission that is missing, after the migrations run). Both must be idempotent — the migration
+uses `WHERE NOT EXISTS`, the seed skips rows that exist. See `references/backend.md` §3.
 
 Grant it to the Owner role too, or the Owner can't see the page — the migration template does
 this (re-running `npm run db:setup` also grants the Owner any permission it lacks).

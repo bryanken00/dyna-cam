@@ -8,6 +8,7 @@ import path from "path";
 import app, { db } from "../config/express.js";
 import { logger } from "../config/logger.js";
 import { scheduleIdempotencyCleanup } from "../src/middlewares/idempotency.middleware.js";
+import { scheduleClipMaintenance } from "../src/jobs/clipMaintenance.js";
 import { close as closeRateLimiter } from "../src/utils/rateLimiterService.js";
 
 const debug = debugLib("wb:server");
@@ -103,6 +104,7 @@ let server;
 
 // Set once the server starts; a no-op until then so shutdown can always call it
 let stopIdempotencyCleanup = () => {};
+let stopClipMaintenance = () => {};
 
 /**
  * Create HTTPS server.
@@ -139,6 +141,7 @@ async function gracefulShutdown(signal) {
 
   // Stop background jobs before the database pool closes
   stopIdempotencyCleanup();
+  stopClipMaintenance();
 
   // Stop accepting new connections
   server.close(() => {
@@ -286,6 +289,9 @@ function onListening() {
 
     // Purge expired idempotency keys now and then hourly
     stopIdempotencyCleanup = scheduleIdempotencyCleanup(db);
+
+    // Expire old clips (and delete their files), fail clips no recorder picked up — hourly
+    stopClipMaintenance = scheduleClipMaintenance(db);
 
     // Start listening only after health checks pass
     server.listen(port);

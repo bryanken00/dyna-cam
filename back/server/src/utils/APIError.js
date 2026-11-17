@@ -67,6 +67,9 @@ export const ERROR_CODES = {
   // Rate Limiting (429)
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
 
+  // Unavailable (503)
+  CAMERA_OFFLINE: 'CAMERA_OFFLINE',
+
   // Server Errors (500)
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   DATABASE_ERROR: 'DATABASE_ERROR',

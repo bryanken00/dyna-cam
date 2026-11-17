@@ -23,5 +23,15 @@ import { requirePasswordChanged } from "../middlewares/requirePasswordChanged.mi
 const requireAuth = [passport.authenticate("jwt", { session: false }), requirePasswordChanged];
 router.use("/v1/upload", requireAuth, auditTrail("upload"), uploadRoute);
 
+// Dyna Cam (PLAN-001)
+// Recorder boxes — authenticated by their device token, not a user JWT
+import deviceRoute from "../controllers/v1/device/device.controller.js";
+import { requireDevice } from "../middlewares/deviceAuth.middleware.js";
+router.use("/v1/device", requireDevice, deviceRoute);
+
+// Players — no login; the court QR code / clip share link is the credential
+import publicRoute from "../controllers/v1/public/public.controller.js";
+router.use("/v1/public", publicRoute);
+
 // Exporting the router to be used in the main app
 export default router;

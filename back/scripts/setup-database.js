@@ -62,28 +62,43 @@ async function main() {
     console.log("\n🔐 Seeding permissions...");
     const timestamp = now();
 
-    const [permCount] = await connection.query(`SELECT COUNT(*) as count FROM permissions`);
-    if (permCount[0].count > 0) {
-      console.log("   ⏭️  Permissions already seeded — skipping");
-    } else {
-      const permissions = [
-        { module: "dashboard", submodule: null, description: "Dashboard access" },
-        { module: "users", submodule: "list", description: "Users list management" },
-        { module: "users", submodule: "roles", description: "Roles management" },
-        { module: "settings", submodule: null, description: "Settings management" },
-        { module: "audit_trail", submodule: null, description: "Audit Trail access" },
-      ];
+    // Each permission is inserted only if it is missing. Not "only when the table
+    // is empty": migrations run first and may already have inserted their own
+    // permission rows, which must not stop the base set from being seeded.
+    const permissions = [
+      { module: "dashboard", submodule: null, description: "Dashboard access" },
+      { module: "users", submodule: "list", description: "Users list management" },
+      { module: "users", submodule: "roles", description: "Roles management" },
+      { module: "settings", submodule: null, description: "Settings management" },
+      { module: "audit_trail", submodule: null, description: "Audit Trail access" },
+      // PLAN-001 — also inserted by migrations 001/002 on existing databases
+      { module: "venues", submodule: "list", description: "Venues management" },
+      { module: "venues", submodule: "courts", description: "Courts and cameras management" },
+      { module: "venues", submodule: "devices", description: "Recorder boxes management" },
+      { module: "clips", submodule: null, description: "Replay clips" },
+    ];
 
-      for (const perm of permissions) {
-        const [uuidRow] = await connection.query(`SELECT UUID() as id`);
-        await connection.query(
-          `INSERT INTO permissions (permissionId, module, submodule, description, portal, status, dateCreated, dateUpdated)
-           VALUES (?, ?, ?, ?, 'ADMIN', 'Active', ?, ?)`,
-          [uuidRow[0].id, perm.module, perm.submodule, perm.description, timestamp, timestamp]
-        );
-      }
-      console.log(`   ✅ ${permissions.length} permissions seeded`);
+    let seeded = 0;
+    for (const perm of permissions) {
+      const [existing] = await connection.query(
+        `SELECT 1 FROM permissions WHERE module = ? AND submodule <=> ? LIMIT 1`,
+        [perm.module, perm.submodule]
+      );
+      if (existing.length > 0) continue;
+
+      const [uuidRow] = await connection.query(`SELECT UUID() as id`);
+      await connection.query(
+        `INSERT INTO permissions (permissionId, module, submodule, description, portal, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, 'ADMIN', 'Active', ?, ?)`,
+        [uuidRow[0].id, perm.module, perm.submodule, perm.description, timestamp, timestamp]
+      );
+      seeded += 1;
     }
+    console.log(
+      seeded > 0
+        ? `   ✅ ${seeded} permission(s) seeded`
+        : "   ⏭️  Permissions already seeded — skipping"
+    );
 
     // Seed the Owner role + account (account skipped when one exists) — see _seed-owner.js
     console.log("\n👤 Creating Owner account...");

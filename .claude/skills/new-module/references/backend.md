@@ -90,8 +90,10 @@ For a **submodule** permission, swap `submodule` from `NULL` to `'{{submodule}}'
 
 ## 3. Seed array in `back/scripts/setup-database.js`
 
-Add one line so fresh installs (`npm run db:setup`) get the permission. The block is skipped when
-`permissions` is already non-empty — which is exactly why step 2 also inserts it.
+Add one line so `npm run db:setup` always ends with the full permission set. The script runs the
+migrations first, then inserts each listed permission **only if it is missing** (matched on
+`module` + `submodule`), so the row from step 2 and this one never duplicate. A database that is
+only migrated (`npm run db:migrate`) gets the permission from step 2 alone.
 
 ```js
 const permissions = [

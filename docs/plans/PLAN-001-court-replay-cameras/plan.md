@@ -424,3 +424,16 @@ The checklist follows these phases. Each phase is shippable on its own.
     README.
   - Still open: a device sign-in test, and `expo-doctor`'s pre-existing "11 packages out of date"
     failure.
+- 2026-11-17: Phase 1 API built. Changes from the design above:
+  - Columns arrive with the phase that uses them. `venues.clipPrice`/`sessionPricePerHour` and
+    `clips.price`/`paymentStatus` come in Phase 4, `courts.buttonCode` in Phase 2, `courts.stream*`
+    in Phase 5, and `clips.sessionId` in Phase 3, each as its own migration.
+  - Public links reuse `APP_URL` instead of a new `PUBLIC_APP_URL`.
+  - The expiry job (`jobs/clipMaintenance.js`) runs hourly and also fails clips still pending
+    after 15 min.
+  - Saving a clip while the venue's box is offline returns 503 `CAMERA_OFFLINE`, rather than
+    queueing a clip that can never be cut.
+  - Admins can re-issue a box token (`POST /devices/:id/token`).
+  - Fixed `setup-database.js` permission seeding. It skipped the whole base set whenever the table
+    was non-empty, which a migration's permission row would have caused on every fresh
+    install.

@@ -27,7 +27,7 @@ else
 fi
 
 # KEY:bytes — each becomes a random hex string of 2 × bytes characters
-node - CSRF_SECRET:32 LOG_SALT:32 UPLOAD_URL_SECRET:64 <<'NODE'
+node - CSRF_SECRET:32 LOG_SALT:32 UPLOAD_URL_SECRET:64 DEVICE_SECRET_KEY:32 <<'NODE'
 const fs = require("fs");
 const crypto = require("crypto");
 

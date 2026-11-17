@@ -9,6 +9,10 @@ import userPermissionsController from "../../../controllers/v1/admin/user-permis
 import auditTrailController from "../../../controllers/v1/admin/audit-trail.controller.js";
 import settingsController from "../../../controllers/v1/admin/settings.controller.js";
 import dashboardController from "../../../controllers/v1/admin/dashboard.controller.js";
+import venuesController from "../../../controllers/v1/admin/venues.controller.js";
+import courtsController from "../../../controllers/v1/admin/courts.controller.js";
+import devicesController from "../../../controllers/v1/admin/devices.controller.js";
+import clipsController from "../../../controllers/v1/admin/clips.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -36,5 +40,11 @@ router.use(
 router.use("/audit-trail", requireAuth, auditTrailController);
 router.use("/settings", requireAuth, auditTrail("settings"), settingsController);
 router.use("/dashboard", requireAuth, dashboardController);
+
+// Dyna Cam (PLAN-001)
+router.use("/venues", requireAuth, auditTrail("venues"), venuesController);
+router.use("/courts", requireAuth, auditTrail("courts"), courtsController);
+router.use("/devices", requireAuth, auditTrail("devices"), devicesController);
+router.use("/clips", requireAuth, auditTrail("clips"), clipsController);
 
 export default router;

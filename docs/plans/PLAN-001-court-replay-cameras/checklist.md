@@ -79,42 +79,48 @@
 
 ### Backend
 
-- [ ] Migration `001_create_venues_courts_devices.sql`: `venues`, `courts`, `devices` tables +
+- [x] Migration `001_create_venues_courts_devices.sql`: `venues`, `courts`, `devices` tables +
       permission rows `venues/list`, `venues/courts`, `venues/devices` (idempotent
       `WHERE NOT EXISTS`) granted to Owner
-- [ ] Migration `002_create_clips.sql`: `clips` table + `clips` permission row
-- [ ] Add the same permissions to the seed array in
-      [`setup-database.js`](../../../back/scripts/setup-database.js)
-- [ ] `utils/crypto/secretBox.js`: encrypt/decrypt RTSP & RTMP URLs with `DEVICE_SECRET_KEY`;
-      add `DEVICE_SECRET_KEY`, `CLIP_MAX_UPLOAD_MB`, `PUBLIC_APP_URL` to `back/.env.example`
-- [ ] Validators: `venues`, `courts`, `devices`, `clips` (`_helpers.js` wrappers, `optionalPhone()`
-      on venue phone, `optionalUploadPath()` on `logoUrl`)
-- [ ] `venues.controller.js`: CRUD behind `checkPermission("venues", "list", …)`; `logoUrl`
-      returned via `signUploadUrl()`
-- [ ] `courts.controller.js`: CRUD + `POST /:courtId/rotate-qr` behind `venues/courts`;
-      `cameraRtspUrl` never returned in lists (masked in get-one)
-- [ ] `devices.controller.js`: CRUD + revoke behind `venues/devices`; create returns the
-      plaintext token once, stores SHA-256 `tokenHash`
-- [ ] `clips.controller.js` (admin): list with filters, get-one with signed video/thumbnail links,
-      soft delete, behind `clips`
-- [ ] Mount the four groups in [`routes/v1/admin/index.js`](../../../back/server/src/routes/v1/admin/index.js)
+- [x] Migration `002_create_clips.sql`: `clips` table + `clips` permission row
+- [x] Add the same permissions to the seed array in
+      [`setup-database.js`](../../../back/scripts/setup-database.js) — and fix its seeding to
+      insert each *missing* permission (it used to skip seeding whenever the table was
+      non-empty, so a migration's permission row blocked the base set on fresh installs)
+- [x] `utils/crypto/secretBox.js`: AES-256-GCM for camera URLs with `DEVICE_SECRET_KEY`; added
+      `DEVICE_SECRET_KEY`, `CLIP_MAX_UPLOAD_MB`, `RATE_LIMIT_PUBLIC_CLIP_POINTS`,
+      `RATE_LIMIT_DEVICE_UPLOAD_POINTS` to `back/.env.example` and `DEVICE_SECRET_KEY` to
+      `setup.sh` (public links reuse the existing `APP_URL`, no `PUBLIC_APP_URL` needed)
+- [x] Validators: `venues`, `courts`, `devices`, `clips`, `device-api`, `public`
+      (`_helpers.js` wrappers, `optionalPhone()` on venue phone, `optionalUploadPath()` on
+      `logoUrl`, RTSP-only camera URLs)
+- [x] `venues.controller.js`: CRUD behind `venues/list`; `logoUrl` signed; delete also retires
+      the venue's courts and revokes its boxes
+- [x] `courts.controller.js`: CRUD + `POST /:courtId/rotate-qr` behind `venues/courts`; camera
+      URL write-only (responses show `camera.configured` + a credential-free `display`)
+- [x] `devices.controller.js`: CRUD + revoke + re-issue token behind `venues/devices`; token
+      shown once, SHA-256 stored; `online` from `lastSeenAt` (90 s)
+- [x] `clips.controller.js` (admin): list with filters, get-one with signed video/thumbnail
+      links, soft delete (removes the files), behind `clips`
+- [x] Mount the four groups in [`routes/v1/admin/index.js`](../../../back/server/src/routes/v1/admin/index.js)
       with `requireAuth` + `auditTrail(...)`
-- [ ] `middlewares/deviceAuth.middleware.js`: `Authorization: Device <token>` → `req.device`
+- [x] `middlewares/deviceAuth.middleware.js`: `Authorization: Device <token>` → `req.device`
       (`deviceId`, `venueId`); updates `lastSeenAt`; 401 on revoked/deleted
-- [ ] `routes/v1/device/index.js` + controllers: `heartbeat`, `config`, `jobs` (long-poll),
-      `clips/:clipId/{processing,upload,fail}`; mounted at `/v1/device` in
+- [x] `controllers/v1/device/device.controller.js`: `heartbeat`, `config`, `jobs` (long-poll,
+      `?wait=0..30`), `clips/:clipId/{processing,upload,fail}`; mounted at `/v1/device` in
       [`route.js`](../../../back/server/src/routes/route.js)
-- [ ] Clip upload: multer to `uploads/admin/clips/{venueId}/{clipId}/` via `uploadFolderId()`,
-      `uploadLimiter`, size cap `CLIP_MAX_UPLOAD_MB`, mp4 + jpeg only
-- [ ] `routes/v1/public/index.js` + controllers: `GET /courts/:qrToken`,
-      `POST /courts/:qrToken/clips` (20s cooldown merge, per-IP + per-court rate limit),
-      `GET /clips/:shareToken`; mounted at `/v1/public`
-- [ ] Confirm the signed-upload static handler serves HTTP `Range` (video seeking on iOS Safari);
-      fix if not
-- [ ] `jobs/expireClips.js`: daily — mark clips past `expiresAt` `Expired`, unlink their files
-- [ ] Tests: CRUD + 404-on-Deleted for venues/courts/devices/clips; device cross-venue
-      isolation (device A can't fetch/upload venue B's clip); public cooldown merge; revoked
-      device 401
+- [x] Clip upload: multer to `uploads/admin/clips/{venueId}/{clipId}/` via `uploadFolderId()`,
+      a per-box limiter (not the per-IP `uploadLimiter`, which a busy venue would hit), size
+      cap `CLIP_MAX_UPLOAD_MB`, mp4 + jpeg only (content-checked)
+- [x] `controllers/v1/public/public.controller.js`: `GET /courts/:qrToken`,
+      `POST /courts/:qrToken/clips` (20 s per-court merge, per-IP limit, 503 `CAMERA_OFFLINE`
+      when the box is offline), `GET /clips/:shareToken`; mounted at `/v1/public`
+- [x] Confirm the signed-upload static handler serves HTTP `Range` — it does (tested: 206)
+- [x] `jobs/clipMaintenance.js`: at startup + hourly — expire clips past `expiresAt` (files
+      deleted), fail clips still Pending/Processing after 15 min
+- [x] Tests (`tests/venues-courts-devices.test.js`, `tests/clips.test.js`, 27 tests): CRUD +
+      404-on-Deleted for venues/courts/devices/clips; device cross-venue isolation; public
+      cooldown merge; revoked device 401; upload + Range playback; expiry
 
 ### Recorder box (`edge/`)
 

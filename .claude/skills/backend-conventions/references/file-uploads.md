@@ -12,8 +12,14 @@ public/uploads/
 └── admin/
     ├── avatars/{accountId}/      ← User avatars (per-user)
     ├── signatures/{accountId}/   ← User signatures (per-user)
-    └── images/                   ← General images
+    ├── images/                   ← General images (venue logos too)
+    └── clips/{venueId}/{clipId}/ ← Replay clips (mp4 + jpg) uploaded by recorder boxes
 ```
+
+`clips/` is written only by the device API (`controllers/v1/device/`), with both IDs taken from
+the clip row the box is allowed to touch, never from the request. Use the helpers in
+`utils/file/clipFiles.js` (`clipUploadFolder()`, `removeClipFiles()`); expiry deletes the files
+(`jobs/clipMaintenance.js`).
 
 ---
 
@@ -73,6 +79,7 @@ request never writes a file.
 | User avatar    | `uploads/admin/avatars/{accountId}/`    | `req.user.accountId`          |
 | User signature | `uploads/admin/signatures/{accountId}/` | `req.user.accountId`          |
 | General image  | `uploads/admin/images/`                 | —                             |
+| Replay clip    | `uploads/admin/clips/{venueId}/{clipId}/` | the clip row (`req.clip`)   |
 
 ---
 
