@@ -249,42 +249,44 @@
 
 ### G1 · Backend
 
-- [ ] Migration `011_session_streams.sql`: `recording_sessions.streamUrl` (encrypted),
+- [x] Migration `011_session_streams.sql`: `recording_sessions.streamUrl` (encrypted),
       `streamPlatform`, `streamUpdatedAt`, `streamSetupTokenHash`, `streamSetupExpiresAt`
-- [ ] Device: `POST /app/session/stream-link`, `POST /app/session/stream/stop`; `/app/session`
+- [x] Device: `POST /app/session/stream-link`, `POST /app/session/stream/stop`; `/app/session`
       adds `stream`
-- [ ] Public `/public/stream-setup/:code` GET / PUT / DELETE (rate-limited; Facebook / YouTube
+- [x] Public `/public/stream-setup/:code` GET / PUT / DELETE (rate-limited; Facebook / YouTube
       key or a full RTMP(S) address; only while the session is to come or recording)
-- [ ] `/device/config` sessions carry `stream.url` while recording; heartbeat
+- [x] `/device/config` sessions carry `stream.url` while recording; heartbeat
       `sessionStreams[]` status; the key is cleared when the session ends
-- [ ] Admin session detail: stream platform / status / masked address, **Stop stream**
-- [ ] Tests: code expiry and single session; key never returned (masked); refused after the
-      end; cleared at the end; box gets it only while recording; status round trip; 404s
+- [x] Admin session detail: stream platform / status / masked address, **Stop stream**
+- [x] Tests (`session-streams.test.js` 11; 173 in all): code expiry and replacement; key never
+      returned (masked) and stored encrypted; refused after the end; cleared at the end and on
+      cancel; box gets it only while recording; status round trip; bad keys/addresses 400; 404s
 
 ### G1 · Recorder box
 
-- [ ] Session restream process: ffmpeg reads the court's signed live HLS on 127.0.0.1 →
-      `-c copy -f flv` to the player's address; starts/stops with the session; retries with
-      backoff; reports status in the heartbeat; never logs the key
-- [ ] Tests + smoke (restream to a local RTMP-less sink, e.g. `-f null`, from the smoke
-      recording); README
+- [x] Session restream process (`edge/src/restream.js`): ffmpeg reads the court's signed live
+      HLS on 127.0.0.1 → video copied, audio resampled to 44.1 kHz (the camera's 8 kHz) → FLV to
+      the player's address; starts/stops with the session; backoff 5 s → 60 s; max 4; status in
+      the heartbeat; key masked everywhere and never in the cached config
+- [x] Tests (186) + smoke: restreamed to a local RTMP listener → live in ~6 s; listener killed →
+      error, recording unaffected; new listener → live again; README
 
 ### G2 · Web
 
-- [ ] Public `/stream/:code` page for the player's phone: platform, key, help, Start / Stop,
+- [x] Public `/stream/:code` page for the player's phone: platform, key, help, Start / Stop,
       live status
-- [ ] Session detail: stream line + Stop stream
-- [ ] `npm run lint && npm run build`
+- [x] Session detail: stream line + Stop stream
+- [x] `npm run lint && npm run build`
 
 ### G3 · App
 
-- [ ] Session screen: **Stream to your Facebook / YouTube** → sheet with the setup QR; streaming
+- [x] Session screen: **Stream to your Facebook / YouTube** → sheet with the setup QR; streaming
       chip with status and **Stop streaming**
-- [ ] Demo mode; `npx expo export --platform android --clear`
+- [x] Demo mode; `npx expo export --platform android --clear`
 
 ### Phase G wrap-up
 
-- [ ] Migration `011` applied locally (ask first); changelog; commit G1, G2, G3
+- [x] Migration `011` applied locally (approved 2026-11-17); changelog; commit G1, G2, G3
 - [ ] Tried for real: session on Court 1 → player scans the stream QR → pastes a Facebook key →
       the session appears live on Facebook → Stop
 

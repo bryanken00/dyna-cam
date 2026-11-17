@@ -1,16 +1,19 @@
 import { useKeepAwake } from "expo-keep-awake";
-import { Square } from "lucide-react-native";
+import { Radio, Square } from "lucide-react-native";
 import { Alert, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import ConnectionBanner from "@/components/ConnectionBanner";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import QrCode from "@/components/QrCode";
 import QueryState from "@/components/QueryState";
 import TickingTimer from "@/components/TickingTimer";
+import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import { formatTime, isConnectionError, shortLink } from "@/utils/dynaCam";
 import LivePanel from "./LivePanel";
+import StreamChip from "./StreamChip";
+import StreamSetupSheet from "./StreamSetupSheet";
 import { useSessionScreen } from "./useSessionScreen";
 
 /** Wide enough to put video and QR side by side (a landscape tablet). */
@@ -73,6 +76,12 @@ const QrCard = ({ url, size, className }) => (
  * them — video, QR, then Stop. The screen stays awake. Before a booked
  * session starts it says "Starts at 3:00 PM", with the QR already up.
  *
+ * The player can also stream the session to their own Facebook / YouTube
+ * (Phase G): a secondary button under Stop opens a QR for their phone; while
+ * a stream is set up, a one-line strip under the header shows its state and
+ * the buttons become Change stream / Stop streaming. It is deliberately
+ * quieter than Stop recording.
+ *
  * When the session ends (Stop, its end time, or staff on the web) the
  * navigator swaps to the Ended screen on the next answer.
  */
@@ -93,6 +102,59 @@ const SessionScreen = () => {
       { text: "Keep recording", style: "cancel" },
       { text: "Stop recording", style: "destructive", onPress: m.stop },
     ]);
+
+  const confirmStopStream = () =>
+    Alert.alert("Stop streaming?", "The recording keeps going.", [
+      { text: "Keep streaming", style: "cancel" },
+      { text: "Stop streaming", style: "destructive", onPress: m.stopStream },
+    ]);
+
+  // The player's own stream — secondary, below Stop recording
+  const streamBlock = m.canStream ? (
+    <View>
+      {m.stream ? (
+        <View className="flex-row gap-3">
+          <Button
+            variant="outline"
+            onPress={m.streamSetup.openSheet}
+            className="h-12 flex-1"
+          >
+            <Text>Change stream</Text>
+          </Button>
+          <Button
+            variant="outline"
+            onPress={confirmStopStream}
+            disabled={m.stoppingStream}
+            className="h-12 flex-1"
+            accessibilityState={{ busy: m.stoppingStream }}
+          >
+            {m.stoppingStream ? (
+              <DotsLoader color={colors.foreground} />
+            ) : (
+              <Text className="text-destructive">Stop streaming</Text>
+            )}
+          </Button>
+        </View>
+      ) : (
+        <Button
+          variant="outline"
+          onPress={m.streamSetup.openSheet}
+          className="h-12 flex-row gap-2"
+        >
+          <Radio size={17} color={colors.foreground} />
+          <Text>Stream to your Facebook / YouTube</Text>
+        </Button>
+      )}
+      {m.streamError ? (
+        <Text
+          className="text-destructive mt-2 text-center text-[13px]"
+          accessibilityRole="alert"
+        >
+          {m.streamError}
+        </Text>
+      ) : null}
+    </View>
+  ) : null;
 
   const stopBlock = s ? (
     <View>
@@ -160,6 +222,9 @@ const SessionScreen = () => {
         {s ? <StatusPill m={m} /> : null}
       </View>
 
+      {/* The player's stream, one fixed-height line — only while one is set up */}
+      {s && m.stream ? <StreamChip stream={m.stream} /> : null}
+
       {!s ? (
         m.isLoading || isConnectionError(m.error) ? (
           <View className="flex-1 items-center justify-center gap-4 p-6">
@@ -185,6 +250,7 @@ const SessionScreen = () => {
               <View className="flex-[3] gap-4">
                 <LivePanel live={m.live} scheduled={m.isScheduled} />
                 {stopBlock}
+                {streamBlock}
               </View>
               <QrCard url={s.shareUrl} size={qrSize} className="flex-[2] self-start" />
             </View>
@@ -193,10 +259,13 @@ const SessionScreen = () => {
               <LivePanel live={m.live} scheduled={m.isScheduled} />
               <QrCard url={s.shareUrl} size={qrSize} />
               {stopBlock}
+              {streamBlock}
             </View>
           )}
         </ScrollView>
       )}
+
+      <StreamSetupSheet s={m.streamSetup} />
     </View>
   );
 };

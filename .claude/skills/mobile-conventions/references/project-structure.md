@@ -10,7 +10,8 @@ src/
 ├─ Navigation/        One navigator, swapped on the pairing and the session's state
 ├─ Screens/
 │  ├─ Pair/           "Pair this device" — the 6-digit key (reference form screen)
-│  ├─ Session/        Live video (LivePanel + useLiveSource), QR, REC timer, Stop
+│  ├─ Session/        Live video (LivePanel + useLiveSource), QR, REC timer, Stop,
+│  │                  the player's stream (StreamChip, StreamSetupSheet + useStreamSetup)
 │  └─ Ended/          Full-screen QR, saving progress, Done, unpair countdown
 ├─ components/        Shared UI — see the component kit below
 │  ├─ ui/             React Native Reusables primitives (copied in, yours to edit)

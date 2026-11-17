@@ -13,6 +13,10 @@
  * session on "Court 1" that started recording 3 minutes ago, with no live
  * video (there is no recorder box). Stop → Processing, its parts filling in,
  * → Ready after DEMO_SAVE_MS; then the 10-minute unpair countdown runs.
+ *
+ * The player's stream: a stream-link "is used" by the player 6 s after it is
+ * made — the session then reports a Facebook stream "starting", "live" 5 s
+ * later. Stop streaming (or the session ending) clears it.
  */
 
 /** Fake latency, so loading states are actually visible while developing. */
@@ -29,6 +33,9 @@ const DEMO_APP_URL = "https://dynacam.example";
 const DEMO_SAVE_MS = 8000;
 const UNPAIR_GRACE_SECONDS = 10 * 60;
 const SESSION_LENGTH_MS = 60 * 60000;
+const STREAM_LINK_SECONDS = 15 * 60;
+const DEMO_STREAM_SAVED_MS = 6000; // the "player" pastes their key
+const DEMO_STREAM_LIVE_MS = 5000; // then the box gets it live
 const PART_MS = 5 * 60000;
 
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -44,7 +51,32 @@ let demoGame = null;
 
 const startDemoGame = () => {
   const startMs = Date.now() - 3 * 60000;
-  demoGame = { startMs, stopMs: startMs + SESSION_LENGTH_MS, endedMs: null };
+  demoGame = {
+    startMs,
+    stopMs: startMs + SESSION_LENGTH_MS,
+    endedMs: null,
+    streamSavedMs: null, // when the "player" saved the current stream
+    streamPendingMs: null, // when a new link's "player" will save one
+  };
+};
+
+/** The demo session's player stream, as GET /app/session's `stream`. */
+const demoStream = (ended) => {
+  // A link's "player" saving their key replaces the current stream
+  if (demoGame.streamPendingMs && demoGame.streamPendingMs <= Date.now()) {
+    demoGame.streamSavedMs = demoGame.streamPendingMs;
+    demoGame.streamPendingMs = null;
+  }
+  const savedMs = demoGame.streamSavedMs;
+  if (!savedMs || ended) return null;
+  const live = Date.now() - savedMs >= DEMO_STREAM_LIVE_MS;
+  return {
+    platform: "FACEBOOK",
+    status: live ? "live" : "starting",
+    message: null,
+    maskedUrl: "rtmps://live-api-s.facebook.com:443/rtmp/••••a1b2",
+    updatedAt: stampAt(live ? savedMs + DEMO_STREAM_LIVE_MS : savedMs),
+  };
 };
 
 /** The demo session as the API's AppSession. */
@@ -100,7 +132,38 @@ export const makeDemoPairing = () => {
 /** GET /app/session's `data`. No recorder box in demo, so `live` is null. */
 export const demoDeviceSession = () => {
   if (!demoGame) startDemoGame(); // a demo pairing restored after a restart
-  return { ...demoSession(), live: null, device: DEMO_DEVICE };
+  const data = demoSession();
+  return {
+    ...data,
+    live: null,
+    device: DEMO_DEVICE,
+    stream: demoStream(data.unpairInSeconds != null),
+  };
+};
+
+/**
+ * POST /app/session/stream-link → its `data`, or null once the session has
+ * ended (the API's 409). The "player" uses it DEMO_STREAM_SAVED_MS later.
+ */
+export const demoStreamLink = () => {
+  if (!demoGame) startDemoGame();
+  if (demoSession().unpairInSeconds != null) return null;
+  demoGame.streamPendingMs = Date.now() + DEMO_STREAM_SAVED_MS;
+  const code = Math.random().toString(36).slice(2, 10);
+  return {
+    url: `${DEMO_APP_URL}/stream/${code}`,
+    expiresAt: stampAt(Date.now() + STREAM_LINK_SECONDS * 1000),
+    expiresInSeconds: STREAM_LINK_SECONDS,
+  };
+};
+
+/** POST /app/session/stream/stop. */
+export const demoStopStream = () => {
+  if (demoGame) {
+    demoGame.streamSavedMs = null;
+    demoGame.streamPendingMs = null;
+  }
+  return { stream: null };
 };
 
 /** POST /app/session/stop → its `data`, or null when it isn't recording. */

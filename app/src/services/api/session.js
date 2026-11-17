@@ -21,7 +21,13 @@ const BASE = "/api/v1/app";
 
 /**
  * data: { session: AppSession, live: { hlsUrl, expiresAt } | null,
- *         unpairInSeconds: number | null, device: { pairedAppId, name } }
+ *         unpairInSeconds: number | null, device: { pairedAppId, name },
+ *         stream: Stream | null }
+ *
+ * Stream = the player's own live stream of this session (PLAN-002 Phase G):
+ *   { platform: "FACEBOOK" | "YOUTUBE" | "OTHER", status: "waiting" (the
+ *   session hasn't started recording) | "starting" | "live" | "error",
+ *   message, maskedUrl, updatedAt }. null when nobody set one up.
  *
  * `live` is null unless the session is recording AND the venue's recorder box
  * is online with a LAN address. `hlsUrl` is a plain-HTTP link to the box,
@@ -45,5 +51,28 @@ export const stopSessionApi = async () => {
 /** "Done": unpair this device on the server. 200. */
 export const unpairDeviceApi = async () => {
   const response = await axiosDevice.post(`${BASE}/unpair`);
+  return response.data;
+};
+
+// ── The player's own live stream (PLAN-002 Phase G) ─────────────────────────
+
+/**
+ * A fresh setup link for the player's phone: the device shows it as a QR,
+ * the player opens it and pastes their Facebook / YouTube stream key.
+ * Each call makes a new code and the previous one stops working (unless a
+ * stream was already saved with it).
+ * 201 data: { url, expiresAt, expiresInSeconds } · 409 the session has ended
+ *
+ * ⚠️ `url` carries the code, which is the credential for that page — never
+ * log it.
+ */
+export const createStreamLinkApi = async () => {
+  const response = await axiosDevice.post(`${BASE}/session/stream-link`);
+  return response.data;
+};
+
+/** Stop the player's stream (the recording goes on). 200 data: { stream: null } */
+export const stopStreamApi = async () => {
+  const response = await axiosDevice.post(`${BASE}/session/stream/stop`);
   return response.data;
 };

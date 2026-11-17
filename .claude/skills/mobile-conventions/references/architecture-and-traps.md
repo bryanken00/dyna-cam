@@ -165,6 +165,22 @@ LAN** (`http://<box IP>:8090/live/<courtId>/index.m3u8?exp=…&sig=…`, about
   Network usage text (iOS) in `app.json`. These are native config: a new dev
   build.
 
+### The player's own stream (PLAN-002 Phase G)
+
+A player can stream their session to their own Facebook / YouTube. The
+device never sees the stream key: "Stream to your Facebook / YouTube" asks
+`POST /app/session/stream-link` for a short-lived setup link and shows it as
+a QR the **player** scans; they paste the key on that page (in `front/`).
+
+- The link is a **mutation, never a query** — every call kills the previous
+  code, so it runs only when the sheet opens or on "New code".
+- The sheet closes by itself when `GET /app/session` reports the stream (a
+  different one, for "Change stream"); `stream.status` (waiting / starting /
+  live / error) shows as a one-line `StreamChip` under the header.
+- Streaming is secondary: its buttons sit under Stop recording and never
+  compete with it. The Ended screen has no stream UI — the API stops it.
+- The link's code is a credential — never log `url`.
+
 Route
 names live in `constants/navigations.js` as `SCREEN_NAVIGATION` — navigate with
 the constant, never a string literal.

@@ -1,9 +1,24 @@
-import { useGetDeviceSession, useStopSession } from "@/services/requests/session";
+import {
+  useGetDeviceSession,
+  useStopSession,
+  useStopStream,
+} from "@/services/requests/session";
 import { isConnectionError } from "@/utils/dynaCam";
+import { useStreamSetup } from "./useStreamSetup";
+
+/** What to say when a Stop (recording or stream) fails. */
+const actionError = (error, what) => {
+  if (!error || error.response?.status === 401) return null; // unpaired — moving on
+  if (isConnectionError(error)) {
+    return `Can't reach Dyna Cam — check the Wi-Fi and ${what} again.`;
+  }
+  return error.response?.data?.message || "Something went wrong — try again.";
+};
 
 /**
  * State for the Session screen: the session (polled every 5 s), its live
- * link, and Stop recording.
+ * link, Stop recording, and the player's own stream (Phase G: the setup
+ * sheet, Stop streaming).
  *
  * `since` is when the last answer arrived — every running number on screen
  * (the REC timer) ticks from it, so it re-syncs on each poll.
@@ -11,16 +26,11 @@ import { isConnectionError } from "@/utils/dynaCam";
 export const useSessionScreen = () => {
   const query = useGetDeviceSession();
   const stop = useStopSession();
+  const stopStream = useStopStream();
   const data = query.data?.data ?? null;
   const session = data?.session ?? null;
-
-  const stopError = stop.error
-    ? stop.error.response?.status === 401
-      ? null // unpaired — Navigation is already moving on
-      : isConnectionError(stop.error)
-        ? "Can't reach Dyna Cam — check the Wi-Fi and press Stop again."
-        : stop.error.response?.data?.message || "Couldn't stop — try again."
-    : null;
+  const stream = data?.stream ?? null;
+  const streamSetup = useStreamSetup(stream);
 
   return {
     session,
@@ -33,11 +43,24 @@ export const useSessionScreen = () => {
     isRecording: session?.status === "Recording",
     isScheduled: session?.status === "Scheduled",
     stopping: stop.isPending,
-    stopError,
+    stopError: actionError(stop.error, "press Stop"),
     stop: () => {
       if (stop.isPending) return;
       stop.reset();
       stop.mutate();
+    },
+
+    // ── The player's own stream ──
+    stream,
+    // Set up / change only before the game ends (the API 409s after)
+    canStream: ["Scheduled", "Recording"].includes(session?.status),
+    streamSetup,
+    stoppingStream: stopStream.isPending,
+    streamError: actionError(stopStream.error, "try"),
+    stopStream: () => {
+      if (stopStream.isPending) return;
+      stopStream.reset();
+      stopStream.mutate();
     },
   };
 };

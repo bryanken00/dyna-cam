@@ -6,7 +6,9 @@ app, the key pairs the device to **that one session**:
 
 1. **Pair this device** — enter the key.
 2. **Session** — the court's live video (from the venue's recorder box, over the venue Wi-Fi),
-   the session's download QR, a REC timer and **Stop recording**.
+   the session's download QR, a REC timer and **Stop recording**. A secondary **Stream to your
+   Facebook / YouTube** button shows a QR the player scans with their own phone to paste their
+   stream key; the stream's state then shows under the header, with Change / Stop streaming.
 3. **Ended** — the QR full screen with the saving progress, **Done**, and "This device unpairs in
    9:41". After Done or 10 minutes the device unpairs itself and is back at step 1.
 
@@ -84,6 +86,8 @@ API running.
 | `usePairDevice` | any 6-digit key pairs (`000000` is "wrong") | `POST /api/v1/pair/app` |
 | `useGetDeviceSession` | "Court 1", recording since 3 min ago, no live video | `GET /api/v1/app/session` (every 5 s) |
 | `useStopSession` | Processing, then Ready after ~8 s; the 10-min countdown starts | `POST /api/v1/app/session/stop` |
+| `useCreateStreamLink` | a demo link; ~6 s later the session reports a Facebook stream "starting", "live" 5 s after | `POST /api/v1/app/session/stream-link` |
+| `useStopStream` | clears the stream | `POST /api/v1/app/session/stream/stop` |
 | Done | forgets the token | `POST /api/v1/app/unpair`, then forgets it |
 
 The switch is an `IS_DEMO` check inside each hook in

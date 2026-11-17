@@ -14,6 +14,7 @@
  * ── Demo mode ───────────────────────────────────────────────────────────────
  * Resolves from `constants/demo.js` with no network: a session recording
  * since 3 minutes ago, no live video; Stop → Processing → Ready after ~8 s.
+ * A stream link is "used" ~6 s after it's made (Facebook, starting → live).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -24,11 +25,15 @@ import {
   demoEnvelope,
   demoError,
   demoStopSession,
+  demoStopStream,
+  demoStreamLink,
 } from "../../constants/demo";
 import { usePairedStore } from "../../store/usePairedStore";
 import {
+  createStreamLinkApi,
   getDeviceSessionApi,
   stopSessionApi,
+  stopStreamApi,
   unpairDeviceApi,
 } from "../api/session";
 
@@ -137,4 +142,57 @@ export const useFinishPairing = () => {
     }
     unpair(notice);
   };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The player's own live stream (PLAN-002 Phase G)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A fresh setup link for the player's phone — a mutation, not a query: every
+ * call makes a new code and kills the previous one, so it must only run when
+ * the sheet asks for one (opened, or "New code"), never on a refetch.
+ *
+ * `data.data` = { url, expiresAt, expiresInSeconds }. Errors (409 the session
+ * has ended, connection) are shown in the sheet. ⚠️ Never log `url` — its
+ * code is the credential for the player's page.
+ */
+export const useCreateStreamLink = () =>
+  useMutation({
+    mutationFn: async () => {
+      if (IS_DEMO) {
+        await demoDelay();
+        const link = demoStreamLink();
+        if (!link) throw demoError(409, "This session has ended");
+        return demoEnvelope("Stream setup link", link);
+      }
+      return createStreamLinkApi();
+    },
+    retry: false,
+  });
+
+/**
+ * Stop the player's stream (the recording goes on). The session cache drops
+ * its `stream` at once, then the next poll confirms. Errors are shown by the
+ * screen from `error`.
+ */
+export const useStopStream = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (IS_DEMO) {
+        await demoDelay();
+        return demoEnvelope("Stream stopped", demoStopStream());
+      }
+      return stopStreamApi();
+    },
+    retry: false,
+    onSuccess: () => {
+      queryClient.setQueryData(SESSION_KEY, (old) =>
+        old ? { ...old, data: { ...old.data, stream: null } } : old,
+      );
+      queryClient.invalidateQueries({ queryKey: SESSION_KEY });
+    },
+  });
 };
