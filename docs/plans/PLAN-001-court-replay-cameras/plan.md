@@ -25,7 +25,7 @@ their phone. This plan builds that pattern, with these decisions taken on 2026-1
 | Decision | Choice |
 | --- | --- |
 | How a highlight is saved | **QR scan** on court, **physical button**, and **full-session recording** |
-| Camera setup | Off-the-shelf **RTSP IP cameras** per court + a small **on-site recorder box** per venue |
+| Camera setup | Off-the-shelf **RTSP IP cameras** per court + a small **on-site recorder box** per venue. The venue's cameras today are **TP-Link Tapo C200** (Wi-Fi), connected over RTSP; see [Camera: TP-Link Tapo](#camera-tp-link-tapo) |
 | Who gets clips | **Anyone, via a share link / QR**. No player accounts in v1. |
 | Extras in v1 | **Venue logo watermark**, **live streaming**, **paid clips** |
 
@@ -187,9 +187,11 @@ expect `{ message, token, user }`), refresh-token rotation, and the 403
 ### Recorder box (`edge/`)
 
 - **Rolling buffer per court:**
-  `ffmpeg -rtsp_transport tcp -i <rtsp> -c copy -f segment -segment_time 2 -segment_wrap 90 …`
-  This stream-copies 2-second `.ts` segments in a ring of about 3 minutes, so recording costs almost no
-  CPU.
+  `ffmpeg -rtsp_transport tcp -i <rtsp> -map 0:v:0 -map 0:a? -c:v copy -c:a aac -f segment -segment_time 2 …`
+  This writes 2-second `.ts` segments in a ring of about 3 minutes. Video is stream-copied, so
+  recording costs almost no CPU. Audio is re-encoded to AAC because Tapo cameras commonly send
+  G.711 A-law audio, which MPEG-TS can't carry. A plain `-c copy` doesn't error; it silently
+  stores the audio as unplayable data (tested 2026-11-17).
 - **Clip job:** select the segments that cover `[requestedAt − 60s, requestedAt + 5s]`, concat,
   overlay the venue logo, and encode H.264 MP4 at 1080p. It uses hardware encoding (`h264_qsv` /
   `h264_vaapi`) when available and falls back to `libx264 -preset veryfast`. It also makes a JPEG
@@ -208,6 +210,53 @@ expect `{ message, token, user }`), refresh-token rotation, and the 403
 - **Live streaming:** for each court with streaming on, a second ffmpeg process restreams RTSP to
   the configured RTMP target (YouTube or Facebook Live key), using `-c copy` and adding no
   watermark in v1.
+
+### Camera: TP-Link Tapo
+
+The venue uses **Tapo C200** cameras: indoor, pan/tilt, 1080p, 2.4 GHz Wi-Fi only (no Ethernet
+port). Tapo cameras support RTSP and ONVIF Profile S once a camera account is set up. Nothing
+Tapo-specific is needed on the API, which takes any RTSP URL. The work is in the Admin portal, the
+recorder box and the install guide.
+
+- **Connection:** `rtsp://<camera-account-user>:<password>@<camera-ip>:554/stream1`. `stream1` is
+  high quality (1080p on the C200) and `stream2` is low quality. The **camera account** is created
+  in the Tapo app (Camera settings → Advanced settings → Camera Account). It is separate from the
+  Tapo cloud login, and its username and password must each be 6–32 characters. The ONVIF port is
+  2020; we don't need ONVIF.
+- **Admin portal:** the court drawer gets a **"Tapo camera" helper**. Staff enter the camera's
+  IP, the camera account's username and password, and the quality (`stream1`/`stream2`). The
+  page builds the RTSP URL with the credentials URL-encoded, so nobody hand-types it. "Other RTSP
+  camera" keeps the raw URL field. The URL is still stored encrypted and never shown back.
+- **Recorder box:** uses `-rtsp_transport tcp`, transcodes audio to AAC (see above), and uses an
+  input timeout so a dropped Wi-Fi stream ends the ffmpeg process instead of hanging. It reconnects
+  with backoff and reports "Camera not reachable" in its heartbeat, which the Recorder boxes page
+  shows.
+- **Camera settings for a court** (go in the install guide):
+  - Reserve the camera's IP in the router (DHCP reservation) so the URL doesn't change.
+  - Turn off privacy mode, motion tracking and patrol so the pan/tilt view stays fixed on the
+    court.
+  - Pick the best fixed position with the Tapo app's pan/tilt.
+- **Wi-Fi:** the C200 is 2.4 GHz only. Check the signal at each court's mounting point, keep
+  the recorder box wired to the router, and expect some drop-outs. Wired Tapo models (for example
+  the C310 or C320WS, which have an Ethernet port) suit outdoor courts and larger venues better.
+- **Not usable:** battery-powered Tapo cameras. TP-Link says battery models such as the C410,
+  C420, C425 and D230 don't support RTSP.
+- **Tapo's own limit:** SD-card recording, Tapo Care and NVR/RTSP streaming can't all run at
+  once; only two of the three can. Turn Tapo Care or SD recording off if RTSP stops working.
+- **Not used:** the Tapo S200B smart button. It works only through a Tapo hub, and TP-Link
+  publishes no API for it, so the Phase 2 button stays a Shelly or ESP32 button that calls the box.
+- **Tested on the venue's C200 (2026-11-17):**
+  - `stream1` is H.264 1280×720 at about 30 fps (720p was the camera's quality setting at the
+    time). Audio is G.711 A-law, 8 kHz mono.
+  - Recording, cutting and watermarking all work.
+  - Segments split only on keyframes, so their lengths vary (1.7–6.1 s).
+  - When the camera connects it sends a burst of buffered video, so file-creation times run
+    ahead of the content. The recorder therefore times segments by real receive time, not by
+    file name.
+  - The camera burns its own date/time stamp (top-left) and "tapo" logo (bottom-left) into the
+    picture, so our watermark goes bottom-right.
+- **Unverified:** how many simultaneous RTSP clients a C200 allows. Phase 5 live streaming should
+  reuse the recorder's single camera connection (ffmpeg `tee`) rather than open a second one.
 
 ### Data model (one new migration per table group; `schema.sql` stays untouched)
 
@@ -364,6 +413,10 @@ The checklist follows these phases. Each phase is shippable on its own.
 - **Venue internet is slow or drops:** clips queue on the box and upload with retry. The public
   page says "processing" and the share link keeps working when the upload lands. Clips are capped
   at 1080p, about 8 Mbps.
+- **Wi-Fi cameras (Tapo C200) drop out:** a lost stream leaves a gap in the ring buffer, and a
+  clip saved during the gap fails with a clear reason. The recorder reconnects with backoff and
+  the Admin portal shows each camera's state. Mitigations: DHCP reservation, a strong 2.4 GHz
+  signal at the court, and wired models for venues where drop-outs persist.
 - **Recorder box CPU when several courts save at once:** recording stream-copies (no re-encode).
   Only clip jobs encode, through a per-box queue with hardware encoding. Size the box to the court
   count and load-test with 6 courts.
@@ -395,8 +448,9 @@ The checklist follows these phases. Each phase is shippable on its own.
 - [ ] **Paid-clip model:** pay to unlock each clip, pay per session, or a prepaid court pass?
   Does an unpaid clip show a short watermarked preview or only a thumbnail?
 - [ ] **Clip length:** fixed 60s, or let the player pick 30/60/90s?
-- [ ] **Hardware:** which IP camera model and recorder box to standardise on, and which Wi-Fi
-  button (Shelly Button 1, ESP32 DIY, or other)? Who installs and supports it?
+- [ ] **Hardware:** the cameras are Tapo C200 for now (2026-11-17). Still open: should larger or
+  outdoor venues standardise on a wired Tapo model? Which recorder box, and which button (Shelly,
+  ESP32 or other; not the Tapo S200B)? Who installs and supports it?
 - [ ] **PayMongo account:** is there a merchant account, and is it per venue or one for Dyna
   Cam, with payouts to venues handled offline?
 - [ ] **Storage:** keep clips on the API server's disk in v1, or go straight to S3 or
@@ -437,3 +491,11 @@ The checklist follows these phases. Each phase is shippable on its own.
   - Fixed `setup-database.js` permission seeding. It skipped the whole base set whenever the table
     was non-empty, which a migration's permission row would have caused on every fresh
     install.
+- 2026-11-17: Added Tapo camera support, at the user's request. The venue's cameras are Tapo
+  C200 (Wi-Fi). New: the [Camera: TP-Link Tapo](#camera-tp-link-tapo) section, a Tapo helper in
+  the court form, audio transcoded to AAC in the recorder (found by testing), Wi-Fi drop-out
+  handling, a Tapo setup guide, and a check against a real C200. The Tapo S200B button was ruled
+  out for Phase 2.
+- 2026-11-17: Tested the venue's real C200 (720p, H.264 + A-law audio). The full recording and
+  watermarked-clip pipeline worked. Found that segment timing is irregular, so the recorder must
+  time segments by real receive time; added a checklist item for it.

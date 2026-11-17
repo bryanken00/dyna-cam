@@ -154,13 +154,47 @@
       status polling, player, download, Web Share); routes in
       [`routes/index.jsx`](../../../front/src/routes/index.jsx)
 
+### Tapo cameras (added 2026-11-17 — venue uses Tapo C200, Wi-Fi)
+
+- [ ] `edge/`: record with `-c:v copy -c:a aac` (Tapo A-law audio can't be stream-copied into
+      `.ts` — it silently becomes unplayable data); unit test asserts the args; smoke test uses an
+      A-law source and checks the final mp4 has AAC audio
+- [ ] `edge/`: input timeout so a dropped Wi-Fi stream ends ffmpeg instead of hanging; reconnect
+      with backoff (≤ 30 s); heartbeat reports "Camera not reachable" with the reason
+- [ ] `edge/README.md`: "Tapo C200 setup" — camera account (Tapo app → Advanced settings →
+      Camera Account, 6–32 chars), DHCP reservation, privacy mode / motion tracking / patrol off,
+      fixed pan-tilt position, 2.4 GHz signal check, the SD / Tapo Care / RTSP two-of-three rule,
+      battery Tapo models unsupported
+- [ ] Courts drawer: "Tapo camera" helper (camera IP + camera-account username + password +
+      quality `stream1`/`stream2`) that builds `rtsp://user:pass@ip:554/streamN` with URL-encoded
+      credentials; "Other RTSP camera" keeps the raw URL field. No API change.
+- [x] Probe the venue's real C200 (hardware 2.0, firmware 1.3.17) from a laptop on the same LAN,
+      2026-11-17. Results:
+      - `stream1`: H.264 High 1280×720, about 30 fps. `stream2`: 640×360. Audio on both: G.711
+        A-law (`pcm_alaw`) 8 kHz mono.
+      - The first try was refused (401). It works with the Camera Account, not the Tapo login.
+      - A 30 s recording with video copied and audio converted to AAC: 13 segments, all
+        H.264 + AAC.
+      - A 20 s cut with the logo overlay and libx264: exactly 20.000 s, 1280×720, about
+        0.75 Mbps, so a 65 s clip is about 6 MB.
+- [ ] `edge/`: give segments real wall-clock start/end times and pick segments by those, not by
+      file name. On the real C200, segments split only on keyframes (1.7–6.1 s long), and the
+      buffered burst at connect made file names run up to a few seconds ahead of their content.
+      Use `-use_wallclock_as_timestamps 1` plus a segment list, or probe each segment. Unit test
+      with uneven durations.
+- [ ] Confirm a full clip end to end with the real C200 through the API (QR save → box cuts →
+      clip plays on `/clip/:shareToken`)
+- [ ] Install guide: set the C200's video quality to 1080p in the Tapo app if the venue wants it
+      (it was sending 720p). Optionally turn off the camera's own date/time stamp; it and the
+      "tapo" logo are burned into the video, which is why our watermark goes bottom-right.
+
 ### Phase 1 wrap-up
 
 - [ ] `cd back && npm run lint && npm test` passes
 - [ ] `cd front && npm run lint && npm run build` passes
 - [ ] Migrations applied locally (`npm run db:migrate`), or noted as pending for deploy
-- [ ] Tried end to end: create venue → court → device → run `edge/` against a test RTSP
-      camera → scan court QR on a phone → clip with logo plays on `/clip/:shareToken`
+- [ ] Tried end to end: create venue → court → device → run `edge/` against the venue's Tapo
+      C200 → scan court QR on a phone → clip with logo plays on `/clip/:shareToken`
 - [ ] Changelog entry (`ref: PLAN-001`, added: QR replay clips)
 
 ## Phase 2: Physical button + staff save
