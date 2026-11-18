@@ -16,3 +16,5 @@ replays keep working even if the stream drops.
 - `edge/`: update every recorder box. The stream goes out from the box over its existing camera
   connection (a Tapo C200 allows only one), using about the camera's bitrate (~1–2 Mbps) of
   upload per streamed court.
+- `edge/` (BUG-003): Cam 1 / Cam 2 streams drop the empty H.264 units some cameras send (Android
+  RTSP camera apps), which otherwise left the stream without a picture. No re-encoding.

@@ -35,3 +35,5 @@ Drive connected, the game's folder gets the whole video. 60-second replays are u
   chunks; it keeps a game's footage until it's sent. Plan disk for the longest games.
 - `app/`: the session device's end screen shows "Saving your game… uploading N%". JavaScript
   only: an over-the-air update, no new store build.
+- `edge/` (BUG-003): the game file drops the empty H.264 units some cameras send (Android RTSP
+  camera apps), which otherwise made the video grey and unplayable. Still a copy, no re-encoding.

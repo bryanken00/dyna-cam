@@ -190,7 +190,10 @@ describe("game copy: ffmpeg arguments", () => {
     });
     const joined = args.join(" ");
     assert.match(joined, /-f concat -safe 0 -i \/j\/list\.ffconcat/);
-    assert.match(joined, /-map 0:v:0 -map 0:a\? -c:v copy -c:a copy -bsf:a aac_adtstoasc/);
+    assert.match(
+      joined,
+      /-map 0:v:0 -map 0:a\? -c:v copy -bsf:v filter_units=remove_types=0 -c:a copy -bsf:a aac_adtstoasc/
+    );
     assert.match(joined, /-t 600\.500 -movflags \+faststart -f mp4 \/j\/game\.mp4$/);
     for (const banned of [
       "-filter_complex",

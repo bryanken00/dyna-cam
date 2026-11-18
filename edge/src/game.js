@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "./api.js";
 import { buildThumbnailArgs, isWindowClosed, jobCamera, pinSegments } from "./clipper.js";
-import { FfmpegError, probeFile, runFfmpeg } from "./ffmpeg.js";
+import { FfmpegError, H264_COPY_CLEANUP, probeFile, runFfmpeg } from "./ffmpeg.js";
 import { loadTimeline } from "./segments.js";
 
 /**
@@ -171,6 +171,7 @@ export function buildGameCopyArgs({ listPath, cutMs, outPath }) {
     "0:a?",
     "-c:v",
     "copy",
+    ...H264_COPY_CLEANUP,
     "-c:a",
     "copy",
     "-bsf:a",

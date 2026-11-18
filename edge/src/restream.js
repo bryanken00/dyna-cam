@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { encoderSettings } from "./clipper.js";
+import { H264_COPY_CLEANUP } from "./ffmpeg.js";
 import { maskStreamKey, maskStreamUrl, parseLogLine } from "./stream.js";
 import { backoffMs, maskCredentials, truncate } from "./util.js";
 
@@ -204,6 +205,7 @@ export function buildRestreamArgs({
       "0:a?",
       "-c:v",
       "copy",
+      ...H264_COPY_CLEANUP,
       ...AUDIO_OUT,
       ...FLV_OUT,
       outputUrl,
