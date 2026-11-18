@@ -44,6 +44,12 @@ export const createSessionSchema = z
   });
 
 // GET /
+/** CR-003: POST /:sessionId/videos/:camera/retry — camera 0 (one / stacked), 1 or 2. */
+export const sessionVideoParamsSchema = z.object({
+  sessionId: z.string().trim().min(1).max(50),
+  camera: z.coerce.number().int().min(0).max(2),
+});
+
 export const listSessionsQuerySchema = z.object({
   page: queryInt(1),
   pageSize: queryInt(20, { max: 100 }),

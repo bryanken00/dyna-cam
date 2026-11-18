@@ -41,7 +41,12 @@ export const requireSignedUpload = (req, res, next) => {
   if (req.query.download === "1") {
     // A friendly name for the saved file (the stored one is 64 random hex characters)
     const extension = storedPath.slice(storedPath.lastIndexOf("."));
-    res.attachment(`dyna-cam-replay${extension}`);
+    // CR-003: a whole-game video is stored as game-cam<N>-… → dyna-cam-game(-camN)
+    const game = storedPath.match(/\/game-cam(\d)-[^/]*$/);
+    const name = game
+      ? `dyna-cam-game${game[1] === "0" ? "" : `-cam${game[1]}`}`
+      : "dyna-cam-replay";
+    res.attachment(`${name}${extension}`);
   }
   next();
 };

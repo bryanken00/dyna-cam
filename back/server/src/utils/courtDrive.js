@@ -38,22 +38,28 @@ export const driveSummary = (row, queue = null) => {
  * @returns {Promise<{ waiting: number, failed: number, lastUploadedAt: string|null, lastError: string|null }>}
  */
 export const driveQueue = async (db, courtId) => {
+  // Replays (clips) and whole-game videos (CR-003) of the court, together
+  const ITEMS = `
+    SELECT driveStatus, driveUploadedAt, driveError, dateUpdated
+    FROM clips WHERE courtId = ? AND driveStatus IS NOT NULL AND status != 'Deleted'
+    UNION ALL
+    SELECT sv.driveStatus, sv.driveUploadedAt, sv.driveError, sv.dateUpdated
+    FROM session_videos sv JOIN recording_sessions s ON s.sessionId = sv.sessionId
+    WHERE s.courtId = ? AND sv.driveStatus IS NOT NULL AND sv.status != 'Deleted'`;
   const [counts] = await db.query(
     `SELECT
        SUM(driveStatus IN ('Pending','Uploading')) AS waiting,
        SUM(driveStatus = 'Failed') AS failed,
        MAX(driveUploadedAt) AS lastUploadedAt
-     FROM clips
-     WHERE courtId = ? AND driveStatus IS NOT NULL AND status != 'Deleted'`,
-    [courtId]
+     FROM (${ITEMS}) items`,
+    [courtId, courtId]
   );
   // The latest reason an upload is being retried or gave up
   const errors = await db.query(
-    `SELECT driveError FROM clips
-     WHERE courtId = ? AND driveError IS NOT NULL AND driveStatus IN ('Pending','Failed')
-       AND status != 'Deleted'
+    `SELECT driveError FROM (${ITEMS}) items
+     WHERE driveError IS NOT NULL AND driveStatus IN ('Pending','Failed')
      ORDER BY dateUpdated DESC LIMIT 1`,
-    [courtId]
+    [courtId, courtId]
   );
   return {
     waiting: Number(counts?.waiting || 0),
@@ -128,6 +134,12 @@ export const connectCourtDrive = async (db, { courtId, accountId, refreshToken, 
        WHERE courtId = ? AND driveStatus = 'Pending'`,
       [courtId]
     );
+    await conn.execute(
+      `UPDATE session_videos sv JOIN recording_sessions s ON s.sessionId = sv.sessionId
+       SET sv.driveNextAttemptAt = NULL
+       WHERE s.courtId = ? AND sv.driveStatus = 'Pending'`,
+      [courtId]
+    );
     await db.commit(conn);
   } catch (err) {
     await db.rollback(conn);
@@ -173,6 +185,13 @@ export const disconnectCourtDrive = async (db, courtId) => {
      WHERE courtId = ? AND driveStatus = 'Pending'`,
     [courtId]
   );
+  await db.query(
+    `UPDATE session_videos sv JOIN recording_sessions s ON s.sessionId = sv.sessionId
+     SET sv.driveStatus = 'Skipped', sv.driveError = 'Google Drive was disconnected',
+         sv.driveNextAttemptAt = NULL
+     WHERE s.courtId = ? AND sv.driveStatus = 'Pending'`,
+    [courtId]
+  );
   if (rows[0].driveRefreshToken) {
     await releaseGrant(db, rows[0].driveRefreshToken, rows[0].driveEmail);
   }
@@ -182,7 +201,8 @@ export const disconnectCourtDrive = async (db, courtId) => {
 /**
  * Queue a clip that just became Ready for its court's Drive, when the court
  * has a Google account (also one that needs reconnecting: it uploads once
- * reconnected).
+ * reconnected). Whole-game parts are not queued: the game goes to Drive as
+ * its joined whole video per camera (CR-003, jobs/sessionJoin.js).
  */
 export const queueClipForDrive = (db, clipId) =>
   db.query(
@@ -191,6 +211,7 @@ export const queueClipForDrive = (db, clipId) =>
      SET cl.driveStatus = 'Pending', cl.driveAttempts = 0, cl.driveNextAttemptAt = NULL,
          cl.driveError = NULL
      WHERE cl.clipId = ? AND cl.status = 'Ready' AND cl.driveStatus IS NULL
+       AND cl.sessionId IS NULL
        AND c.driveRefreshToken IS NOT NULL AND c.status != 'Deleted'`,
     [clipId]
   );

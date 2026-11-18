@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { moment } from "./dateUtils.js";
 import { DEVICE_ONLINE_SECONDS, secondsAgoLocal, sessionShareUrl, toEpochMs } from "./clips.js";
 import { decryptSecret } from "./crypto/secretBox.js";
-import { partCount } from "./sessions.js";
+import { expectedParts } from "./sessions.js";
 
 /**
  * Session devices (PLAN-002 Phase E): a phone/tablet paired to ONE recording
@@ -30,7 +30,7 @@ const RUNNING = ["Scheduled", "Recording"];
 
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
-  v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
+  v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken, s.partCameras,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
@@ -58,9 +58,7 @@ export const sessionEnded = (row, nowMs = Date.now()) =>
 
 /** Is the session recording right now? */
 export const sessionRecording = (row, nowMs = Date.now()) =>
-  RUNNING.includes(row.status) &&
-  toEpochMs(row.startAt) <= nowMs &&
-  toEpochMs(row.endAt) > nowMs;
+  RUNNING.includes(row.status) && toEpochMs(row.startAt) <= nowMs && toEpochMs(row.endAt) > nowMs;
 
 /** Seconds left before a device of this session is unpaired; null while it runs. */
 export const unpairInSeconds = (row, nowMs = Date.now()) => {
@@ -94,7 +92,7 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
     endsInSeconds: recording ? seconds(endMs - nowMs) : 0,
     durationSeconds: seconds(Math.min(nowMs, endMs) - startMs),
     partsReady: Number(row.partsReady || 0),
-    partsTotal: partCount(row.startAt, row.endAt),
+    partsTotal: expectedParts(row),
     shareUrl: sessionShareUrl(row.shareToken),
     failureReason: row.failureReason || null,
   };

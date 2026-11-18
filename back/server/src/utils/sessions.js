@@ -34,6 +34,53 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const parseLocal = (value) => moment.tz(value, FORMAT, TIMEZONE);
 const formatLocal = (m) => m.clone().tz(TIMEZONE).format(FORMAT);
 
+/**
+ * CR-003: the capability a recorder box reports in its heartbeat when it can
+ * cut a session part from one camera of a two-camera court (instead of both
+ * stacked).
+ */
+export const PER_CAMERA_PARTS_CAPABILITY = "session-part-camera";
+
+/** A box counts as current for this check when it was heard from this recently. */
+const CAPABILITY_RECENT_MINUTES = 10;
+
+/**
+ * Parts a session should end up with: its windows × its part cameras (1 set,
+ * or one set per camera on a two-camera court).
+ */
+export const expectedParts = (session) =>
+  partCount(session.startAt, session.endAt) * (Number(session.partCameras) === 2 ? 2 : 1);
+
+/**
+ * How a session's parts are cut, decided once when its first part is made:
+ * 2 = a set of parts per camera (the court has camera 2 and every recorder box
+ * of the venue heard from lately can cut per camera), else 1 (the box's usual
+ * output — one camera, or both stacked for a box that can't).
+ */
+const decidePartCameras = async (db, session) => {
+  const [court] = await db.query(
+    `SELECT camera2RtspUrl IS NOT NULL AS hasCamera2 FROM courts WHERE courtId = ? LIMIT 1`,
+    [session.courtId]
+  );
+  if (!court || !Number(court.hasCamera2)) return 1;
+  const boxes = await db.query(
+    `SELECT lastStatus FROM devices
+     WHERE venueId = ? AND status = 'Active' AND lastSeenAt >= ?`,
+    [
+      session.venueId,
+      formatLocal(moment().tz(TIMEZONE).subtract(CAPABILITY_RECENT_MINUTES, "minutes")),
+    ]
+  );
+  const capable = (row) => {
+    const status = typeof row.lastStatus === "string" ? JSON.parse(row.lastStatus) : row.lastStatus;
+    return (
+      Array.isArray(status?.capabilities) &&
+      status.capabilities.includes(PER_CAMERA_PARTS_CAPABILITY)
+    );
+  };
+  return boxes.length > 0 && boxes.every(capable) ? 2 : 1;
+};
+
 /** Number of parts a session window splits into. */
 export const partCount = (startAt, endAt) =>
   Math.max(
@@ -72,7 +119,7 @@ export const materializeSessionParts = async (db, { venueId } = {}) => {
   }
 
   const sessions = await db.query(
-    `SELECT s.sessionId, s.venueId, s.courtId, s.startAt, s.endAt, s.status
+    `SELECT s.sessionId, s.venueId, s.courtId, s.startAt, s.endAt, s.status, s.partCameras
      FROM recording_sessions s
      WHERE ${where}`,
     params
@@ -81,32 +128,52 @@ export const materializeSessionParts = async (db, { venueId } = {}) => {
   let created = 0;
   for (const session of sessions) {
     const total = partCount(session.startAt, session.endAt);
+    const firstDue = partWindow(session.startAt, session.endAt, 0).windowEndAt <= now;
+    if (firstDue && !session.partCameras) {
+      // CR-003: fixed for the whole game once its first part is made
+      const decided = await decidePartCameras(db, session);
+      await db.query(
+        `UPDATE recording_sessions SET partCameras = ? WHERE sessionId = ? AND partCameras IS NULL`,
+        [decided, session.sessionId]
+      );
+      const [row] = await db.query(
+        `SELECT partCameras FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+        [session.sessionId]
+      );
+      session.partCameras = row.partCameras;
+    }
+    // 0 = the box's usual output; 1 and 2 = one camera each (CR-003)
+    const cameras = Number(session.partCameras) === 2 ? [1, 2] : [0];
     for (let index = 0; index < total; index += 1) {
       const window = partWindow(session.startAt, session.endAt, index);
       if (window.windowEndAt > now) break; // later parts aren't due yet
 
-      const [{ id }] = await db.query(`SELECT UUID() AS id`);
-      const result = await db.query(
-        `INSERT IGNORE INTO clips
-           (clipId, venueId, courtId, sessionId, partIndex, source, requestedAt, windowStartAt,
-            windowEndAt, durationSeconds, shareToken, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, 'SESSION', ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
-        [
-          id,
-          session.venueId,
-          session.courtId,
-          session.sessionId,
-          index,
-          window.windowEndAt,
-          window.windowStartAt,
-          window.windowEndAt,
-          window.durationSeconds,
-          randomToken(),
-          now,
-          now,
-        ]
-      );
-      created += result.affectedRows || 0;
+      for (const camera of cameras) {
+        const [{ id }] = await db.query(`SELECT UUID() AS id`);
+        const result = await db.query(
+          `INSERT IGNORE INTO clips
+             (clipId, venueId, courtId, sessionId, partIndex, camera, source, requestedAt,
+              windowStartAt, windowEndAt, durationSeconds, shareToken, status, dateCreated,
+              dateUpdated)
+           VALUES (?, ?, ?, ?, ?, ?, 'SESSION', ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
+          [
+            id,
+            session.venueId,
+            session.courtId,
+            session.sessionId,
+            index,
+            camera,
+            window.windowEndAt,
+            window.windowStartAt,
+            window.windowEndAt,
+            window.durationSeconds,
+            randomToken(),
+            now,
+            now,
+          ]
+        );
+        created += result.affectedRows || 0;
+      }
     }
 
     const nextStatus = session.endAt <= now ? "Processing" : "Recording";
@@ -139,20 +206,20 @@ export const settleSessions = async (db, sessionId) => {
   }
 
   const rows = await db.query(
-    `SELECT s.sessionId, s.startAt, s.endAt,
+    `SELECT s.sessionId, s.startAt, s.endAt, s.partCameras,
             SUM(cl.status IN ('Pending', 'Processing')) AS open,
             SUM(cl.status IN ('Ready', 'Expired')) AS ready,
             COUNT(cl.clipId) AS parts
      FROM recording_sessions s
      LEFT JOIN clips cl ON cl.sessionId = s.sessionId AND cl.status != 'Deleted'
      WHERE ${where}
-     GROUP BY s.sessionId, s.startAt, s.endAt`,
+     GROUP BY s.sessionId, s.startAt, s.endAt, s.partCameras`,
     params
   );
 
   const now = getCurrentTimestampLocal();
   for (const row of rows) {
-    const expected = partCount(row.startAt, row.endAt);
+    const expected = expectedParts(row);
     if (Number(row.parts) < expected || Number(row.open) > 0) continue;
     const ready = Number(row.ready);
     const status = ready > 0 ? "Ready" : "Failed";

@@ -1,6 +1,8 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { DEVICE_CAPABILITIES } from "./config.js";
 import { probeVideo } from "./ffmpeg.js";
+import { courtCameras } from "./recorder.js";
 import { backoffMs, readJson, sleep, writeJsonAtomic } from "./util.js";
 
 const CLOCK_SKEW_WARN_MS = 2000;
@@ -49,6 +51,12 @@ export class DeviceSync {
 
   courtKnown(courtId) {
     return Boolean(this.config?.courts?.some((c) => c.courtId === courtId));
+  }
+
+  /** The cameras /config lists for a court: [1], [1, 2], or [] (unknown court). */
+  courtCameras(courtId) {
+    const court = this.config?.courts?.find((c) => c.courtId === courtId);
+    return court ? courtCameras(court).map((cam) => cam.camera) : [];
   }
 
   /** First config: from the API, else from the cache, else keep trying. */
@@ -154,6 +162,8 @@ export class DeviceSync {
   async heartbeat() {
     await this.api.heartbeat({
       agentVersion: this.agentVersion,
+      // What this box understands, e.g. per-camera session parts (CR-003)
+      capabilities: [...DEVICE_CAPABILITIES],
       // One entry per camera (`camera: 1 | 2`); the venue's court stream status
       // (streamStatus/streamMessage) rides on camera 1's entry, as before
       cameras: this.recorders

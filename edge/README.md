@@ -226,8 +226,9 @@ contains:
 ## Sessions (full-session recording)
 
 Staff can book a court for a window of 5 min to 3 h (Admin portal → Sessions). The API splits the
-booking into **5-minute parts**. Each part becomes an ordinary clip job when its window ends, and
-the players get every part as its own clip.
+booking into **5-minute parts**. Each part becomes an ordinary clip job when its window ends. The
+box cuts and uploads the parts one by one (safe on a weak venue line); the API then **joins each
+camera's parts into one whole-game video** (CR-003), so players download one file, not parts.
 
 What the box does:
 
@@ -248,6 +249,22 @@ What the box does:
      session".
 5. **Puts players first.** A player's clip is always cut before a session part, because a part's
    footage is kept and a clip's isn't.
+6. **Cuts one camera per part when asked (CR-003).** A part job may carry `camera`:
+   - `0` or absent: as before — stacked on a two-camera court (see below), else the one camera.
+   - `1` or `2`: **that camera only**, never stacked and never the other camera: a normal
+     single-camera video (up to 1080p, 720p for a C200) with the session caps above, the logo and a
+     thumbnail. On a two-camera court the API sends one job per camera for each 5-minute window
+     (separate clip ids, cut in any order) and joins them into "Cam 1 – whole game" and
+     "Cam 2 – whole game".
+   - The 80 % rule applies to that camera alone, and the reason names it: "Camera 2 was not
+     recording during this part of the session", "Camera 2 recorded only N% of this part of the
+     session".
+   - A camera-2 job for a court that has no camera 2 (in `/config`) and no camera-2 footage for the
+     window fails at once with "This court has no camera 2". Footage camera 2 recorded before it was
+     removed is still cut.
+   - The box tells the API it understands this with `capabilities: ["session-part-camera"]` in every
+     heartbeat; an older box never gets per-camera jobs. Jobs saved in `data/queue.json` by an older
+     box (no `camera`) still run, as `0`.
 
 **Disk sizing.** A C200 `stream1` records at about 1–2 Mbit/s, which is about 0.45–0.9 GB per
 court-hour, so a 3 h session keeps up to about 2.7 GB until 30 min after it ends. Plan for:
@@ -312,9 +329,14 @@ A court can have a second camera (PLAN-002 §7), for example one behind each bas
   `data/buffer/<court>/`, camera 2 in `data/buffer/<court>~cam2/` — with its own status, camera
   details and preview (`camera: 1 | 2` in the heartbeat). **Losing camera 2 never stops camera
   1.** Removing camera 2 stops its recorder; its folder ages out like any other.
-- **Clips and session parts** are **stacked**: Cam 1 above Cam 2, each scaled to 1280×720, one
+- **60-second clips** are **stacked**: Cam 1 above Cam 2, each scaled to 1280×720, one
   1280×1440 video with the venue logo bottom-right. If one camera has no footage for that window,
   the clip is the other camera alone (the log says so).
+- **Session parts** (whole-game recording) are cut **per camera** when the API asks for it
+  (`camera: 1 | 2` on the job, CR-003): each part is one camera, full size, and the API joins each
+  camera's parts into its own whole-game video ("Cam 1 – whole game", "Cam 2 – whole game"). A
+  part job without a camera (an older API) is stacked like a clip. See
+  [Sessions](#sessions-full-session-recording).
 - **Live streams** (the venue's court stream and a player's own stream) can be *Cam 1*, *Cam 2*
   or *Both (stacked)*:
   - *Cam 1* / *Cam 2* copy that camera's video: no extra CPU.
@@ -333,8 +355,8 @@ A court can have a second camera (PLAN-002 §7), for example one behind each bas
 - **Storage:** a second camera doubles that court's buffer and session footage (about
   0.5–1 GB per camera per hour at 720p). Stacked clips and parts are about twice the size of
   one camera's (a 5-min part stays under ~75 MB).
-- **Upload:** stacked clips and parts upload about twice the bytes; a stacked live stream sends
-  ~3 Mbit/s.
+- **Upload:** stacked clips and parts upload about twice the bytes; per-camera session parts are
+  two single-camera parts (≤ ~47 MB each) per window. A stacked live stream sends ~3 Mbit/s.
 - **The session device's live view** stays Cam 1 (`/live/<courtId>/index.m3u8`); camera 2's is
   `/live/<courtId>/cam2/index.m3u8`, with the same signature.
 
@@ -572,7 +594,7 @@ clip from the court's QR page.
   from the camera.
 - **Sessions:** session windows from `/config` protect their segments from pruning
   (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
-  `selectPartSegments`).
+  `selectPartSegments`), from the camera the job names (`planClip`, CR-003).
 - **Stream keys** (`src/stream.js`): stream-key masking and reading ffmpeg's log lines.
 - **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
   segments into a signed HLS live playlist and streams the files with their timestamps shifted.
@@ -618,6 +640,8 @@ clip from the court's QR page.
 | Player stream *Can't reach facebook.com / youtube.com* | Venue internet up? Some networks block outgoing RTMP (port 1935) or RTMPS (443 to `live-api-s.facebook.com`). |
 | Player stream *No video from the camera yet* | The court isn't recording (camera offline) — fix that first. The stream retries on its own. |
 | Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
+| Session part failed "Camera 2 was not recording…" / "Camera 2 recorded only N%…" | Same, for that camera of a two-camera court; the other camera's part is made on its own. |
+| Session part failed "This court has no camera 2" | Camera 2 was removed from the court while a game was booked. Cam 1's video is unaffected. |
 | `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
 | Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |
 | Court stream *Can't reach youtube.com / facebook.com* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying (5 s → 60 s). |

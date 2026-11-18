@@ -25,7 +25,10 @@ revoked with `npm run boxes[:revoke]`) and `/api/v1/public/*` (players, no login
 credential; `/public/stream-setup/:code` takes a player's own stream key, see
 `utils/sessionStreams.js`). CR-001 adds `/api/v1/oauth/google/callback` (Google's redirect after
 a court's "Connect Google Drive"; the encrypted `state` is the credential — see
-`utils/googleDrive.js`, `utils/courtDrive.js` and the 30-second `jobs/driveUploads.js`). Queries see the whole database (soft deletes aside); the seeded
+`utils/googleDrive.js`, `utils/courtDrive.js` and the 30-second `jobs/driveUploads.js`).
+CR-003: a finished game's 5-minute parts are joined into one whole video per camera by the
+20-second `jobs/sessionJoin.js` (ffmpeg stream copy, `utils/sessionVideos.js`, `session_videos`);
+the server needs ffmpeg for that (`FFMPEG_PATH`). Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.

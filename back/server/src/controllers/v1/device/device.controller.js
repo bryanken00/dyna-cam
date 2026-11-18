@@ -189,7 +189,7 @@ router.post(
   "/heartbeat",
   validateBody(heartbeatSchema),
   catchAsync(async (req, res) => {
-    const { agentVersion, cameras, live, sessionStreams } = req.body;
+    const { agentVersion, capabilities, cameras, live, sessionStreams } = req.body;
     const { venueId, deviceId } = req.device;
 
     const courtRows = await req.db.query(
@@ -234,7 +234,12 @@ router.post(
        WHERE deviceId = ?`,
       [
         agentVersion || null,
-        JSON.stringify({ cameras: reported, sessionStreams, reportedAt: now }),
+        JSON.stringify({
+          cameras: reported,
+          sessionStreams,
+          capabilities: capabilities || [],
+          reportedAt: now,
+        }),
         liveUrl,
         liveKey,
         now,
@@ -269,7 +274,7 @@ router.get(
     const findJobs = () =>
       req.db.query(
         `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source,
-                cl.sessionId, cl.partIndex, cl.windowStartAt, cl.windowEndAt
+                cl.sessionId, cl.partIndex, cl.camera, cl.windowStartAt, cl.windowEndAt
          FROM clips cl
          JOIN courts c ON c.courtId = cl.courtId AND c.status != 'Deleted'
          WHERE cl.venueId = ? AND cl.status = 'Pending'
@@ -308,6 +313,9 @@ router.get(
         // seconds around requestedAt
         sessionId: row.sessionId || null,
         partIndex: row.partIndex ?? null,
+        // CR-003: 0 = the box's usual output (one camera, or both stacked);
+        // 1 / 2 = that camera only (whole-game parts on a two-camera court)
+        camera: row.camera ?? 0,
         windowStartMs: toEpochMs(row.windowStartAt),
         windowEndMs: toEpochMs(row.windowEndAt),
       })),

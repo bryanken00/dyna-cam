@@ -15,6 +15,7 @@ import {
   cancelSessionPairingCodeApi,
   unpairSessionDeviceApi,
   stopSessionStreamApi,
+  retrySessionVideoApi,
 } from "../../api/admin/sessions";
 
 /** Statuses that still change on their own (parts arrive, status settles). */
@@ -48,7 +49,9 @@ export const useGetSessionById = (sessionId) => {
     refetchInterval: (query) => {
       const session = query.state.data?.data?.session;
       if (session?.pairingCodes?.length > 0) return 5 * 1000;
-      return SESSION_LIVE_STATUSES.includes(session?.status) ? 15 * 1000 : false;
+      if (SESSION_LIVE_STATUSES.includes(session?.status)) return 15 * 1000;
+      // CR-003: the whole video is being joined
+      return session?.wholeVideo === "Pending" ? 15 * 1000 : false;
     },
   });
 };
@@ -182,6 +185,23 @@ export const useStopSessionStream = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to stop the stream");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
+// Mutation: CR-003 — join a whole-game video again after it failed
+export const useRetrySessionVideo = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: retrySessionVideoApi,
+    onSuccess: (response) => {
+      toast.success(response?.message || "Joining the whole video again");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Couldn't try again");
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

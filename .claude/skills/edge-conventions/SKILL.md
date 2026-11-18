@@ -19,7 +19,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court **camera** (`CourtRecorder`; camera 2 in `buffer/<safeId>~cam2`), restart/backoff, stall watchdog, pruning, heartbeat status with `camera` (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
-| `clipper.js` | Pure window and selection math, ffmpeg argument builders, encoder detection, `cutClip`, `makeClip` |
+| `clipper.js` | Pure window and selection math, `jobCamera` + `planClip` (which camera(s), wait/fail/cut), ffmpeg argument builders, encoder detection, `cutClip`, `makeClip` |
 | `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
@@ -57,7 +57,14 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   drop. Claim is best-effort but exclusive (another box's claim → 409 → drop).
 - Session parts = clip jobs with `sessionId`, `partIndex`, `windowStartMs/EndMs` (null for clips):
   cut exactly that window, ≥ 80 % covered (holes → held frames) or fail with the coverage; clips
-  go first. `/config` `sessions` keep their segments (± 10 s) until end + 30 min
+  go first. Jobs may carry `camera: 0 | 1 | 2` (absent/null = 0, also for old `queue.json` entries;
+  `jobCamera`): 0 = stacked/fallback as below (every 60 s clip); 1/2 = that camera's buffer ONLY
+  (CR-003 whole-game video per camera — the API joins the parts): single-camera output, `session`
+  caps, logo + thumbnail, never stacked, never the other camera; its 80 % rule and reason name it
+  ("Camera 2 was not recording during this part of the session"). Camera 2 not in `/config` and no
+  camera-2 footage for the window → fail at once "This court has no camera 2". `planClip` decides.
+- Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today
+  `["session-part-camera"]`): the API sends per-camera parts only to a box reporting it. `/config` `sessions` keep their segments (± 10 s) until end + 30 min
   (`retentionWindows`), dropped below `DISK_CRITICAL_MB` so recording never stops.
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
   retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
@@ -93,7 +100,8 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   - **Stacked** (2-camera court, both cover the window — else the camera that does, logged): one
     concat per camera, each `trim`med to the window in the filter (own offset) → 1280×720 (keep
     aspect, pad) at the slower fps → `vstack` → logo (`logoLayout(1280)`) → 1280×1440 (no 1080 cap),
-    audio `atrim` from Cam 1 (Cam 2's if Cam 1 has none). Parts: the stretch both recorded, if ≥ 80 %.
+    audio `atrim` from Cam 1 (Cam 2's if Cam 1 has none). Parts (`camera` 0 only): the stretch both
+    recorded, if ≥ 80 %. A `camera: 1 | 2` part is one camera, not stacked.
     `QUALITY.clipStacked` (max 4200k) / `sessionStacked` (max 1900k: a 5-min part < 75 MB, API cap 100 MB).
   - Scale to ≤ 1920×1080, end the filter with `format=yuv420p` (`nv12`/`hwupload` for QSV/VAAPI); `-c:a aac`, `+faststart`.
   - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s), session parts crf 26
@@ -169,7 +177,8 @@ npm run lint     # eslint (security plugin) + prettier-compatible; must be clean
 npm test         # node:test — no network, no ffmpeg
 npm run smoke    # ~2 min: two real recorders on ONE court (Tapo-like cam 1: pcm_alaw, irregular GOP;
                  # cam 2: 25 fps, no audio): stacked 65 s clip 1280x1440 (h264+aac, all frames,
-                 # faststart, JPEG) + stacked 60 s session part (capped) + the live view played by
+                 # faststart, JPEG) + stacked 60 s session part (capped) + the same window as a
+                 # camera-2-only part (1280x720, silent, single-camera cap) + the live view played by
                  # ffprobe (clock never goes back, bad sig 403, /cam2/) + restreams to local RTMP:
                  # venue STACKED → CAM2 and a player CAM1, recorders never restarted
 ```

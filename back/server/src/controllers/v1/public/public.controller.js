@@ -5,7 +5,8 @@ import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
-import { materializeSessionParts, partCount, settleSessions } from "../../../utils/sessions.js";
+import { expectedParts, materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
+import { loadSessionVideos, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
   clipTokenParamsSchema,
@@ -197,7 +198,8 @@ router.get(
   validateParams(sessionTokenParamsSchema),
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
-      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName, s.driveUrl,
+      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName, s.driveUrl, s.partCameras,
+              s.wholeVideo,
               c.name AS courtName, v.name AS venueName, v.logoUrl, s.venueId
        FROM recording_sessions s
        JOIN courts c ON c.courtId = s.courtId
@@ -219,24 +221,44 @@ router.get(
     );
 
     const parts = await req.db.query(
-      `SELECT partIndex, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
+      `SELECT partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
               thumbnailPath, expiresAt, driveStatus, driveUrl
        FROM clips
-       WHERE sessionId = ? AND status != 'Deleted'
-       ORDER BY partIndex ASC`,
+       WHERE sessionId = ? AND status != 'Deleted' AND joinedAt IS NULL
+       ORDER BY partIndex ASC, camera ASC`,
       [rows[0].sessionId]
     );
+    // CR-003: the whole game, one video per camera, once its parts are joined
+    const videos = await loadSessionVideos(req.db, rows[0].sessionId);
 
-    const { sessionId: _sessionId, venueId: _venueId, logoUrl, driveUrl, ...info } = rows[0];
+    const {
+      sessionId: _sessionId,
+      venueId: _venueId,
+      logoUrl,
+      driveUrl,
+      partCameras,
+      wholeVideo,
+      ...info
+    } = rows[0];
     const inDrive = (part) => part.driveStatus === "Uploaded" && Boolean(part.driveUrl);
     return res.sendSuccess("Session", {
       session: {
         ...info,
         status: session.status,
         venueLogoUrl: signUploadUrl(logoUrl),
-        partsTotal: partCount(info.startAt, info.endAt),
-        // CR-001: the game's folder in the venue's Google Drive, once a part is in it
-        driveUrl: driveUrl && parts.some(inDrive) ? driveUrl : null,
+        partsTotal: expectedParts({ ...info, partCameras }),
+        // CR-001: the game's folder in the venue's Google Drive, once a video is in it
+        driveUrl:
+          driveUrl && (parts.some(inDrive) || videos.some((v) => v.driveStatus === "Uploaded"))
+            ? driveUrl
+            : null,
+        // CR-003: one whole video per camera (camera 0 = the court's only / stacked view).
+        // `parts` then holds only parts not joined yet (while the game is being saved).
+        videos: videos.map(toPublicVideo),
+        // True while the whole video is still being made (the page keeps checking)
+        savingWholeVideo:
+          ["Processing", "Ready"].includes(session.status) &&
+          (wholeVideo === null || wholeVideo === "Pending"),
         parts: parts.map(
           ({ videoPath, thumbnailPath, driveStatus, driveUrl: partDriveUrl, ...part }) => {
             const ready = part.status === "Ready";

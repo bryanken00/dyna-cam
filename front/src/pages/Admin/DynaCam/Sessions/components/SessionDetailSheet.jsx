@@ -1,4 +1,4 @@
-import { Ban, Copy, Download, Film, Square, X } from "lucide-react";
+import { Ban, Cloud, Copy, Download, Film, RotateCcw, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import { getImageUrl } from "../../../../../utils/upload";
 import {
   CLIP_STATUS_TONE,
   SESSION_STATUS_TONE,
+  formatBytes,
   formatDate,
   formatMinutes,
   formatTimeRange,
@@ -29,7 +30,108 @@ import {
   useCancelSession,
   useEndSession,
   useGetSessionById,
+  useRetrySessionVideo,
 } from "../../../../../services/requests/admin/sessions";
+
+/** CR-003: whole-video status → StatusDot tone. */
+const VIDEO_STATUS_TONE = {
+  Pending: "warning",
+  Joining: "warning",
+  Ready: "success",
+  Failed: "error",
+  Expired: "muted",
+};
+
+/**
+ * CR-003: one camera's whole-game video — what the player downloads — with
+ * its status, the stretches it skips, and Try again when joining failed.
+ */
+const WholeVideoRow = ({ video, sessionId, canWrite }) => {
+  const retryMutation = useRetrySessionVideo();
+  const ready = video.status === "Ready";
+  const videoSrc = getImageUrl(video.videoUrl);
+  const downloadHref = getImageUrl(video.downloadUrl);
+  const muted = { fontSize: 12, color: "var(--color-text-muted)" };
+  return (
+    <div className="p-3.5" style={{ borderTop: "1px solid var(--color-line)" }}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <span className="font-semibold" style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
+            {video.label}
+          </span>
+          {ready && (
+            <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+              {" · "}
+              {formatMinutes(Math.round((video.durationSeconds || 0) / 60))}
+              {video.sizeBytes ? ` · ${formatBytes(video.sizeBytes)}` : ""}
+              {` · ${video.partsJoined} ${video.partsJoined === 1 ? "part" : "parts"}`}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusDot tone={VIDEO_STATUS_TONE[video.status] || "muted"} title={video.failureReason || undefined}>
+            {video.status === "Joining" ? "Joining" : video.status}
+          </StatusDot>
+          {ready && downloadHref && (
+            <Button asChild variant="outline" size="sm">
+              <a href={downloadHref} download>
+                <Download />
+                Download
+              </a>
+            </Button>
+          )}
+          {video.driveUrl && (
+            <Button asChild variant="ghost" size="sm" title="Open in Google Drive">
+              <a href={video.driveUrl} target="_blank" rel="noopener noreferrer">
+                <Cloud />
+              </a>
+            </Button>
+          )}
+          {video.status === "Failed" && canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={retryMutation.isPending}
+              onClick={() => retryMutation.mutate({ sessionId, camera: video.camera })}
+            >
+              <RotateCcw />
+              Try again
+            </Button>
+          )}
+        </div>
+      </div>
+      {video.status === "Failed" && video.failureReason && (
+        <p className="m-0 mt-1" style={muted}>
+          {video.failureReason}. The parts are kept until it works.
+        </p>
+      )}
+      {video.gaps?.length > 0 && (
+        <p className="m-0 mt-1" style={muted}>
+          Skips{" "}
+          {video.gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")} (no
+          footage)
+        </p>
+      )}
+      {ready && videoSrc && (
+        <video
+          key={videoSrc}
+          src={videoSrc}
+          poster={getImageUrl(video.thumbnailUrl) || undefined}
+          controls
+          playsInline
+          preload="none"
+          className="w-full block mt-3"
+          style={{
+            aspectRatio: "16 / 9",
+            borderRadius: 10,
+            border: "1px solid var(--color-line)",
+            background: "var(--color-surface-sunken)",
+          }}
+        />
+      )}
+    </div>
+  );
+};
 
 /** One 5-minute part: label, window, status, and the player + download when Ready. */
 const PartRow = ({ part }) => {
@@ -48,6 +150,7 @@ const PartRow = ({ part }) => {
             style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
           >
             {partLabel(part.partIndex)}
+            {part.camera > 0 && ` · Cam ${part.camera}`}
           </span>
           <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
             {" · "}
@@ -56,10 +159,10 @@ const PartRow = ({ part }) => {
         </div>
         <div className="flex items-center gap-2">
           <StatusDot
-            tone={CLIP_STATUS_TONE[part.status] || "muted"}
+            tone={part.joinedAt ? "muted" : CLIP_STATUS_TONE[part.status] || "muted"}
             title={part.failureReason || undefined}
           >
-            {part.status}
+            {part.joinedAt ? "In whole video" : part.status}
           </StatusDot>
           {ready && downloadHref && (
             <Button asChild variant="outline" size="sm">
@@ -107,6 +210,7 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
   const { data, isLoading, error } = useGetSessionById(open ? sessionId : null);
   const session = data?.data?.session || null;
   const parts = session?.parts || [];
+  const videos = session?.videos || [];
   // While it can take a device, or while one is still paired (the device
   // keeps the download QR for a few minutes after the end)
   const showDevices =
@@ -281,6 +385,35 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                     canWrite={canWrite}
                     onPairDevice={onPairDevice}
                   />
+                )}
+
+                {/* CR-003: the whole game, one video per camera */}
+                {videos.length > 0 && (
+                  <div
+                    className="mt-6 overflow-hidden"
+                    style={{ border: "1px solid var(--color-line)", borderRadius: 10 }}
+                  >
+                    <div
+                      className="px-3.5 py-2.5 uppercase"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "var(--color-text-muted)",
+                        background: "var(--color-surface-sunken)",
+                      }}
+                    >
+                      Whole video
+                    </div>
+                    {videos.map((video) => (
+                      <WholeVideoRow
+                        key={video.camera}
+                        video={video}
+                        sessionId={session.sessionId}
+                        canWrite={canWrite}
+                      />
+                    ))}
+                  </div>
                 )}
 
                 {/* Parts */}

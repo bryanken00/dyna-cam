@@ -18,7 +18,9 @@
  *    (faststart), JPEG thumbnail.
  * 4. Camera setup: reads camera 1's details and a preview JPEG from the
  *    latest closed segment (no camera connection).
- * 5. Cuts a 60 s session part (exact window, stacked, capped bitrate).
+ * 5. Cuts a 60 s session part (exact window, stacked, capped bitrate), then
+ *    the same window per camera (CR-003, `camera: 2`): camera 2 alone,
+ *    1280x720 (not stacked), single-camera session cap, logo + thumbnail.
  * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
  *    HLS; ffprobe plays the signed playlist URL and the video clock must run
  *    on across segments (each file restarts at 0 on disk), a bad signature
@@ -495,6 +497,51 @@ async function cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, setti
   return { ...partInfo, kbps };
 }
 
+/** CR-003: the same window as a per-camera part — camera 2 alone, never stacked. */
+async function cutCameraPart({ dir, bufferDirs, startedAt, logo, encoder, settings }) {
+  const part = await makeClip(
+    {
+      clipId: "smoke-part-cam2",
+      courtId: "court-smoke",
+      requestedAtMs: startedAt + 80_000,
+      windowStartMs: startedAt + 20_000,
+      windowEndMs: startedAt + 80_000,
+      camera: 2,
+    },
+    {
+      segmentsDirs: bufferDirs,
+      courtKnown: true,
+      courtCameras: [1, 2],
+      workDir: path.join(dir, "jobs", "smoke-part-cam2"),
+      logoPath: logo,
+      encoder,
+      settings,
+      log: createLogger("clip"),
+    }
+  );
+  if (part.status !== "done") fail(`camera 2 part not made: ${JSON.stringify(part)}`);
+  const info = await probeFile(FFPROBE, part.videoPath);
+  const { size } = await fs.stat(part.videoPath);
+  const kbps = Math.round((size * 8) / info.duration / 1000);
+  const video = info.streams.find((s) => s.type === "video");
+  console.log(
+    `\ncamera 2 part: ${info.duration.toFixed(3)}s, ${info.streams.map((s) => s.codec).join("+")}, ` +
+      `${video?.width}x${video?.height}, ${size} bytes (${kbps} kb/s), coverage ${(part.coverage * 100).toFixed(1)}%\n`
+  );
+  if (part.cameras !== 1) fail(`camera 2 part used ${part.cameras} cameras`);
+  if (Math.abs(info.duration - 60) > 1) fail(`camera 2 part duration ${info.duration}s`);
+  if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 720)
+    fail(
+      `camera 2 part is ${video?.codec} ${video?.width}x${video?.height}, expected h264 1280x720`
+    );
+  // Camera 2 has no sound: the part is silent, never camera 1's audio
+  if (info.streams.some((s) => s.type === "audio")) fail("camera 2 part took camera 1's sound");
+  // Single-camera session parts: maxrate 1200k (+ 64k audio)
+  if (kbps > 1400) fail(`camera 2 part bitrate ${kbps} kb/s is over the session cap`);
+  if (!part.thumbnailPath) fail("camera 2 part has no thumbnail");
+  return { ...info, kbps };
+}
+
 /** One camera of the smoke court, fed in real time from its fake camera file. */
 const smokeRecorder = ({ bufferDir, file, settings, camera = 1 }) =>
   new CourtRecorder({
@@ -623,8 +670,10 @@ async function main() {
     await cameraSetupPhase({ dir, bufferDir, settings });
     const partInfo = await cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, settings });
     const { kbps } = partInfo;
+    const cam2Part = await cutCameraPart({ dir, bufferDirs, startedAt, logo, encoder, settings });
     log.info(
-      `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s`
+      `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s, ` +
+        `camera 2 part ${cam2Part.duration.toFixed(2)}s at ${cam2Part.kbps} kb/s`
     );
   } finally {
     await recorder?.stop();

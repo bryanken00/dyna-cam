@@ -104,37 +104,80 @@ const sessionFolder = async (db, token, row, parentId) => {
   return folder.id;
 };
 
-const CLIP_SELECT = `
-  SELECT cl.clipId, cl.courtId, cl.sessionId, cl.partIndex, cl.status, cl.videoPath,
-         cl.requestedAt, cl.windowStartAt, cl.windowEndAt, cl.driveAttempts,
-         c.name AS courtName, c.driveRefreshToken, c.driveFolderId, c.driveStatus AS courtDriveStatus,
-         c.status AS courtStatus, v.name AS venueName,
-         s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId
-  FROM clips cl
-  JOIN courts c ON c.courtId = cl.courtId
-  JOIN venues v ON v.venueId = cl.venueId
-  LEFT JOIN recording_sessions s ON s.sessionId = cl.sessionId`;
+/** What a Drive upload works on: a clip (a replay), or a whole-game video (CR-003). */
+const KINDS = {
+  clip: {
+    table: "clips",
+    key: "clipId",
+    select: `
+      SELECT cl.clipId AS id, cl.courtId, cl.sessionId, cl.partIndex, cl.status, cl.videoPath,
+             cl.requestedAt, cl.windowStartAt, cl.windowEndAt, cl.driveAttempts,
+             c.name AS courtName, c.driveRefreshToken, c.driveFolderId,
+             c.status AS courtStatus, v.name AS venueName,
+             s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId
+      FROM clips cl
+      JOIN courts c ON c.courtId = cl.courtId
+      JOIN venues v ON v.venueId = cl.venueId
+      LEFT JOIN recording_sessions s ON s.sessionId = cl.sessionId
+      WHERE cl.clipId = ? LIMIT 1`,
+    due: `
+      SELECT cl.clipId AS id
+      FROM clips cl
+      JOIN courts c ON c.courtId = cl.courtId
+      WHERE cl.driveStatus = 'Pending'
+        AND (cl.driveNextAttemptAt IS NULL OR cl.driveNextAttemptAt <= ?)
+        AND (c.driveStatus = 'Connected' OR c.driveRefreshToken IS NULL OR c.status = 'Deleted')
+      ORDER BY cl.dateUpdated ASC`,
+    fileName: clipFileName,
+  },
+  sessionVideo: {
+    table: "session_videos",
+    key: "sessionVideoId",
+    select: `
+      SELECT sv.sessionVideoId AS id, s.courtId, sv.sessionId, sv.camera, sv.status,
+             sv.videoPath, sv.driveAttempts,
+             c.name AS courtName, c.driveRefreshToken, c.driveFolderId,
+             c.status AS courtStatus, v.name AS venueName,
+             s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId
+      FROM session_videos sv
+      JOIN recording_sessions s ON s.sessionId = sv.sessionId
+      JOIN courts c ON c.courtId = s.courtId
+      JOIN venues v ON v.venueId = sv.venueId
+      WHERE sv.sessionVideoId = ? LIMIT 1`,
+    due: `
+      SELECT sv.sessionVideoId AS id
+      FROM session_videos sv
+      JOIN recording_sessions s ON s.sessionId = sv.sessionId
+      JOIN courts c ON c.courtId = s.courtId
+      WHERE sv.driveStatus = 'Pending'
+        AND (sv.driveNextAttemptAt IS NULL OR sv.driveNextAttemptAt <= ?)
+        AND (c.driveStatus = 'Connected' OR c.driveRefreshToken IS NULL OR c.status = 'Deleted')
+      ORDER BY sv.dateUpdated ASC`,
+    // "Cam 1 – whole game.mp4", or "Whole game.mp4" on a one-camera court
+    fileName: (row) => (row.camera ? `Cam ${row.camera} – whole game.mp4` : "Whole game.mp4"),
+  },
+};
 
-const finish = (db, clipId, fields) => {
+const finish = (db, kind, id, fields) => {
   const columns = Object.keys(fields);
   return db.query(
-    `UPDATE clips SET ${columns.map((column) => `${column} = ?`).join(", ")}
-     WHERE clipId = ? AND driveStatus = 'Uploading'`,
-    [...columns.map((column) => fields[column]), clipId]
+    `UPDATE ${kind.table} SET ${columns.map((column) => `${column} = ?`).join(", ")}
+     WHERE ${kind.key} = ? AND driveStatus = 'Uploading'`,
+    [...columns.map((column) => fields[column]), id]
   );
 };
 
 /**
- * Upload one claimed clip.
+ * Upload one claimed clip or whole-game video.
  * @param {Map<string, string>} tokens - access tokens per court, for this run
  * @returns {Promise<"uploaded"|"skipped"|"waiting"|"retry"|"failed">}
  */
-const uploadClip = async (db, clipId, tokens) => {
-  const [row] = await db.query(`${CLIP_SELECT} WHERE cl.clipId = ? LIMIT 1`, [clipId]);
+const uploadItem = async (db, kind, id, tokens) => {
+  const [row] = await db.query(kind.select, [id]);
   if (!row) return "skipped";
 
   const skip = async (reason) => {
-    await finish(db, clipId, {
+    await finish(db, kind, id, {
       driveStatus: "Skipped",
       driveError: reason,
       driveNextAttemptAt: null,
@@ -156,7 +199,7 @@ const uploadClip = async (db, clipId, tokens) => {
        WHERE courtId = ? AND driveRefreshToken = ?`,
       [row.courtId, row.driveRefreshToken]
     );
-    await finish(db, clipId, { driveStatus: "Pending", driveNextAttemptAt: null });
+    await finish(db, kind, id, { driveStatus: "Pending", driveNextAttemptAt: null });
     return "waiting";
   }
 
@@ -170,7 +213,7 @@ const uploadClip = async (db, clipId, tokens) => {
     const send = async () => {
       let parentId = await courtFolder(db, token, row);
       if (row.sessionId) parentId = await sessionFolder(db, token, row, parentId);
-      return uploadFile(token, { filePath, name: clipFileName(row), parentId });
+      return uploadFile(token, { filePath, name: kind.fileName(row), parentId });
     };
 
     let file;
@@ -185,7 +228,7 @@ const uploadClip = async (db, clipId, tokens) => {
     }
     await shareWithLink(token, file.id);
 
-    await finish(db, clipId, {
+    await finish(db, kind, id, {
       driveStatus: "Uploaded",
       driveFileId: file.id,
       driveUrl: fileViewUrl(file.id, file.webViewLink),
@@ -203,14 +246,14 @@ const uploadClip = async (db, clipId, tokens) => {
          WHERE courtId = ? AND driveRefreshToken = ?`,
         [err.message.slice(0, 255), row.courtId, row.driveRefreshToken]
       );
-      await finish(db, clipId, { driveStatus: "Pending", driveNextAttemptAt: null });
+      await finish(db, kind, id, { driveStatus: "Pending", driveNextAttemptAt: null });
       return "waiting";
     }
     if (err.code === "ENOENT") return skip("The video was no longer on the server");
 
     const attempts = (row.driveAttempts || 0) + 1;
     const giveUp = err.retryable === false || attempts >= DRIVE_MAX_ATTEMPTS;
-    await finish(db, clipId, {
+    await finish(db, kind, id, {
       driveStatus: giveUp ? "Failed" : "Pending",
       driveAttempts: attempts,
       driveError: String(err.message || "Upload failed").slice(0, 255),
@@ -218,51 +261,42 @@ const uploadClip = async (db, clipId, tokens) => {
         ? null
         : minutesFromNow(BACKOFF_MINUTES[Math.min(attempts - 1, BACKOFF_MINUTES.length - 1)]),
     });
-    logger.warn("Google Drive upload failed", { clipId, attempts, error: err.message });
+    logger.warn("Google Drive upload failed", { [kind.key]: id, attempts, error: err.message });
     return giveUp ? "failed" : "retry";
   }
 };
 
 /**
- * One pass: release stale claims, then upload up to `limit` waiting clips of
- * connected courts.
+ * One pass: release stale claims, then upload up to `limit` waiting clips and
+ * up to `limit` waiting whole-game videos of connected courts.
  * @param {import("../../config/database.js").default} db
- * @returns {Promise<Record<string, number>>} how each clip ended
+ * @returns {Promise<Record<string, number>>} how each upload ended
  */
 export const runDriveUploads = async (db, { limit = BATCH } = {}) => {
   const tally = {};
   if (!driveConfigured()) return tally;
 
   const now = getCurrentTimestampLocal();
-  // An upload cut off by a restart: its lease ran out
-  await db.query(
-    `UPDATE clips SET driveStatus = 'Pending'
-     WHERE driveStatus = 'Uploading' AND driveNextAttemptAt <= ?`,
-    [now]
-  );
-
-  const due = await db.query(
-    `SELECT cl.clipId
-     FROM clips cl
-     JOIN courts c ON c.courtId = cl.courtId
-     WHERE cl.driveStatus = 'Pending'
-       AND (cl.driveNextAttemptAt IS NULL OR cl.driveNextAttemptAt <= ?)
-       AND (c.driveStatus = 'Connected' OR c.driveRefreshToken IS NULL OR c.status = 'Deleted')
-     ORDER BY cl.dateUpdated ASC
-     LIMIT ${Math.max(1, Math.min(50, Number(limit) || BATCH))}`,
-    [now]
-  );
-
+  const max = Math.max(1, Math.min(50, Number(limit) || BATCH));
   const tokens = new Map();
-  for (const { clipId } of due) {
-    const claimed = await db.query(
-      `UPDATE clips SET driveStatus = 'Uploading', driveNextAttemptAt = ?
-       WHERE clipId = ? AND driveStatus = 'Pending'`,
-      [minutesFromNow(LEASE_MINUTES), clipId]
+  for (const kind of Object.values(KINDS)) {
+    // An upload cut off by a restart: its lease ran out
+    await db.query(
+      `UPDATE ${kind.table} SET driveStatus = 'Pending'
+       WHERE driveStatus = 'Uploading' AND driveNextAttemptAt <= ?`,
+      [now]
     );
-    if (!claimed.affectedRows) continue;
-    const result = await uploadClip(db, clipId, tokens);
-    tally[result] = (tally[result] || 0) + 1;
+    const due = await db.query(`${kind.due} LIMIT ${max}`, [now]);
+    for (const { id } of due) {
+      const claimed = await db.query(
+        `UPDATE ${kind.table} SET driveStatus = 'Uploading', driveNextAttemptAt = ?
+         WHERE ${kind.key} = ? AND driveStatus = 'Pending'`,
+        [minutesFromNow(LEASE_MINUTES), id]
+      );
+      if (!claimed.affectedRows) continue;
+      const result = await uploadItem(db, kind, id, tokens);
+      tally[result] = (tally[result] || 0) + 1;
+    }
   }
   return tally;
 };

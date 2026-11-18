@@ -71,6 +71,8 @@ router.get(
     } else {
       whereClause = "WHERE cl.status != 'Deleted'";
     }
+    // CR-003: a game's parts that went into its whole video live on in Sessions
+    whereClause += " AND cl.joinedAt IS NULL";
     if (venueId) {
       whereClause += " AND cl.venueId = ?";
       params.push(venueId);

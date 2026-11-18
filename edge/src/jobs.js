@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { isSessionPart } from "./clipper.js";
+import { isSessionPart, jobCamera } from "./clipper.js";
 import { queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
 
@@ -164,6 +164,9 @@ export class JobRunner {
       partIndex: job.partIndex ?? null,
       windowStartMs: Number.isFinite(job.windowStartMs) ? job.windowStartMs : null,
       windowEndMs: Number.isFinite(job.windowEndMs) ? job.windowEndMs : null,
+      // 0 = the box chooses (stacked on a two-camera court); 1 | 2 = that camera
+      // only (CR-003). A job persisted without it by an older box runs as 0.
+      camera: job.camera ?? 0,
       state: "waiting",
       claimed: false,
       attempts: 0,
@@ -171,9 +174,10 @@ export class JobRunner {
       receivedAt: now,
     };
     await this.queue.put(entry);
+    const camera = jobCamera(entry) ? `, camera ${entry.camera}` : "";
     const what = isSessionPart(entry)
-      ? `session ${entry.sessionId} part ${entry.partIndex}, ${new Date(entry.windowStartMs).toISOString()} → ${new Date(entry.windowEndMs).toISOString()}`
-      : `${entry.source || "?"}, requested ${new Date(requestedAtMs).toISOString()}`;
+      ? `session ${entry.sessionId} part ${entry.partIndex}${camera}, ${new Date(entry.windowStartMs).toISOString()} → ${new Date(entry.windowEndMs).toISOString()}`
+      : `${entry.source || "?"}${camera}, requested ${new Date(requestedAtMs).toISOString()}`;
     this.log.info(`job ${entry.clipId}: court ${entry.courtId}, ${what}`);
     await this.claim(entry);
     this.wake();

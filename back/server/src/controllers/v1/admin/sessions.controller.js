@@ -1,5 +1,10 @@
 import express from "express";
-import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
+import {
+  catchAsync,
+  validateBody,
+  validateParams,
+  validateQuery,
+} from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
@@ -11,15 +16,17 @@ import { createSessionPairingCodeSchema } from "../../../validators/pairing.vali
 import { clearStream, describeStream, FORGET_STREAM_SQL } from "../../../utils/sessionStreams.js";
 import {
   endSessionNow,
+  expectedParts,
   materializeSessionParts,
-  partCount,
   SESSION_MAX_DAYS_AHEAD,
   settleSessions,
 } from "../../../utils/sessions.js";
 import {
   createSessionSchema,
   listSessionsQuerySchema,
+  sessionVideoParamsSchema,
 } from "../../../validators/sessions.validator.js";
+import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -36,7 +43,7 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
-         s.dateCreated, s.dateUpdated,
+         s.partCameras, s.wholeVideo, s.dateCreated, s.dateUpdated,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
            AS partsReady,
@@ -53,7 +60,7 @@ const toSession = (row) => {
   return {
     ...session,
     durationMinutes: moment(row.endAt).diff(moment(row.startAt), "minutes"),
-    partsTotal: partCount(row.startAt, row.endAt),
+    partsTotal: expectedParts(row),
     partsReady: Number(row.partsReady || 0),
     devicesCount: Number(row.devicesCount || 0),
     shareUrl: sessionShareUrl(shareToken),
@@ -142,13 +149,15 @@ router.get(
     }
 
     const parts = await req.db.query(
-      `SELECT clipId, partIndex, windowStartAt, windowEndAt, durationSeconds, status,
-              failureReason, videoPath, thumbnailPath, expiresAt
+      `SELECT clipId, partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status,
+              failureReason, videoPath, thumbnailPath, expiresAt, joinedAt
        FROM clips
        WHERE sessionId = ? AND status != 'Deleted'
-       ORDER BY partIndex ASC`,
+       ORDER BY partIndex ASC, camera ASC`,
       [req.params.sessionId]
     );
+    // CR-003: the whole video per camera
+    const videos = await loadSessionVideos(req.db, req.params.sessionId);
 
     const [devices, pairingCodes] = await Promise.all([
       req.db.query(
@@ -190,8 +199,10 @@ router.get(
           ...key,
           expiresInSeconds: secondsUntil(key.expiresAt),
         })),
+        videos: videos.map(toAdminVideo),
+        // A part joined into its whole video has no file of its own any more
         parts: parts.map(({ videoPath, thumbnailPath, ...part }) => {
-          const ready = part.status === "Ready";
+          const ready = part.status === "Ready" && Boolean(videoPath);
           return {
             ...part,
             videoUrl: ready ? signUploadUrl(videoPath) : null,
@@ -460,6 +471,36 @@ router.post(
       return res.sendError("Device not found", 404);
     }
     return res.sendSuccess("Device unpaired");
+  })
+);
+
+/**
+ * POST /:sessionId/videos/:camera/retry  (CR-003)
+ * Join a whole-game video again after it failed (e.g. ffmpeg was missing or
+ * the disk was full). The parts are still there until a join works.
+ */
+router.post(
+  "/:sessionId/videos/:camera/retry",
+  checkPermission("clips", null, "write"),
+  validateParams(sessionVideoParamsSchema),
+  catchAsync(async (req, res) => {
+    const result = await req.db.query(
+      `UPDATE session_videos sv
+       JOIN recording_sessions s ON s.sessionId = sv.sessionId AND s.status != 'Cancelled'
+       SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL,
+           sv.failureReason = NULL, sv.dateUpdated = ?
+       WHERE sv.sessionId = ? AND sv.camera = ? AND sv.status = 'Failed'`,
+      [getCurrentTimestampLocal(), req.params.sessionId, req.params.camera]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("No failed whole-game video for this camera", 404);
+    }
+    await req.db.query(
+      `UPDATE recording_sessions SET wholeVideo = 'Pending'
+       WHERE sessionId = ? AND wholeVideo = 'Done'`,
+      [req.params.sessionId]
+    );
+    return res.sendSuccess("Joining the whole video again — it's ready in a minute or two");
   })
 );
 

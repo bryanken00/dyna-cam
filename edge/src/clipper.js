@@ -111,11 +111,28 @@ export function selectPartSegments(
   };
 }
 
-/** The fail reason for a session part the buffer does not cover. */
-export const partFailureReason = (selection) =>
-  selection.reason === "NO_FOOTAGE"
-    ? "Camera was not recording during this part of the session"
-    : `Camera recorded only ${Math.round(selection.coverage * 100)}% of this part of the session`;
+/**
+ * The fail reason for a session part the buffer does not cover. A per-camera
+ * part (CR-003) names its camera: "Camera 2 was not recording …".
+ */
+export const partFailureReason = (selection, camera = 0) => {
+  const who = camera ? `Camera ${camera}` : "Camera";
+  return selection.reason === "NO_FOOTAGE"
+    ? `${who} was not recording during this part of the session`
+    : `${who} recorded only ${Math.round(selection.coverage * 100)}% of this part of the session`;
+};
+
+/**
+ * Which camera a job asks for (CR-003): 0 = the box chooses (stacked on a
+ * two-camera court, else the camera with footage), 1 or 2 = that camera only.
+ * Absent/null — an older API, or a job persisted by an older box — is 0.
+ * Anything else is -1 (the job is failed).
+ */
+export function jobCamera(entry) {
+  const value = entry?.camera;
+  if (value === undefined || value === null) return 0;
+  return [0, 1, 2].includes(value) ? value : -1;
+}
 
 const even = (value) => Math.max(2, Math.round(value / 2) * 2);
 
@@ -577,71 +594,122 @@ export function chooseSources(selections, window, { part = false } = {}) {
   };
 }
 
+const overlaps = (timeline, window) =>
+  timeline.some((s) => s.startMs < window.endMs && s.endMs > window.startMs);
+
 /**
- * One attempt at a queued clip:
+ * What to do with a queued job, from the court's camera time lines
+ * ([cam 1, cam 2]; an empty one is a camera without footage):
  *   { status: "wait" }                       the post-window is not on disk yet
- *   { status: "fail", reason }               the buffer does not cover the window
- *   { status: "done", videoPath, thumbnailPath, ... }
- * `segmentsDirs` = the court's camera folders ([cam 1, cam 2]; a missing
- * folder is a camera without footage). Both cameras covering the window →
- * one stacked video; only one → that camera alone (logged).
- * Throws FfmpegError when ffmpeg fails.
+ *   { status: "fail", reason, detail? }      the buffer does not cover the window
+ *   { status: "cut", sources, durationMs, cameras, quality, coverage? }
+ * Camera 0 (every 60 s clip, and parts from an older API): both cameras
+ * stacked when both cover the window, else the one that does. Camera 1 or 2
+ * (whole-game parts per camera, CR-003): that camera alone, never the other.
+ * `courtCameras` = the cameras /config lists for the court ([1] or [1, 2]).
  */
-export async function makeClip(entry, ctx) {
-  const { courtKnown, workDir, logoPath, encoder, settings, signal, log } = ctx;
-  const dirs = ctx.segmentsDirs ?? [ctx.segmentsDir];
-  const now = ctx.now ?? Date.now();
+export function planClip(entry, timelines, { courtKnown, courtCameras = [], now, settings }) {
   const window = clipWindow(entry);
-  const timelines = await Promise.all(dirs.map((dir) => loadTimeline(dir)));
+  const camera = jobCamera(entry);
+  const part = isSessionPart(entry);
+  const quality = part ? "session" : "clip";
+  if (camera < 0) {
+    return { status: "fail", reason: `This court has no camera ${String(entry.camera)}` };
+  }
+  const own = camera ? [timelines[camera - 1] ?? []] : timelines;
+  // Camera 2 taken off the court: fail at once, unless it recorded this window before
+  if (camera === 2 && !courtCameras.includes(2) && !overlaps(own[0], window)) {
+    return { status: "fail", reason: "This court has no camera 2" };
+  }
   // Keyframes can be 6 s apart and a reconnect takes ~10 s: give up waiting after 30 s
   const waitLimit = window.endMs + Math.max(30_000, settings.segmentSeconds * 4000);
-  // Wait for every camera that is recording around the window
-  const active = timelines.filter((t) => t.some((s) => s.endMs > window.startMs));
+  // Wait for every camera (of this job) that is recording around the window
+  const active = own.filter((t) => t.some((s) => s.endMs > window.startMs));
   const ready = active.length > 0 && active.every((t) => isWindowClosed(t, window.endMs));
   if (!ready && now < waitLimit) return { status: "wait" };
 
   if (!courtKnown && timelines.every((t) => t.length === 0)) {
     return { status: "fail", reason: "This court's camera is not set up on the recorder box" };
   }
-  const part = isSessionPart(entry);
-  const selections = timelines.map((t, i) => {
-    if (i > 0 && t.length === 0) return null; // no second camera
-    return part
+  const select = (t) =>
+    part
       ? selectPartSegments(t, window.startMs, window.endMs)
       : selectSegments(t, window.startMs, window.endMs);
-  });
-  const choice = chooseSources(selections, window, { part });
-  if (choice.fail) {
-    const reason = part
-      ? partFailureReason(choice.fail)
-      : coverageReason(choice.fail, {
+  const failure = (sel) =>
+    part
+      ? partFailureReason(sel, camera)
+      : coverageReason(sel, {
           windowStartMs: window.startMs,
           nowMs: now,
           bufferMs: settings.bufferSeconds * 1000,
         });
-    return { status: "fail", reason, detail: choice.fail };
+
+  if (camera) {
+    const sel = select(own[0]);
+    if (!sel.ok) return { status: "fail", reason: failure(sel), detail: sel };
+    return {
+      status: "cut",
+      sources: [{ segments: sel.segments, offsetMs: sel.offsetMs }],
+      durationMs: part ? sel.durationMs : window.endMs - window.startMs,
+      cameras: [camera],
+      quality,
+      ...(part ? { coverage: sel.coverage } : {}),
+    };
   }
-  if (selections.filter(Boolean).length > 1 && choice.cameras.length === 1) {
-    const other = choice.cameras[0] === 1 ? 2 : 1;
+  // no second camera → null
+  const selections = timelines.map((t, i) => (i > 0 && t.length === 0 ? null : select(t)));
+  const choice = chooseSources(selections, window, { part });
+  if (choice.fail) return { status: "fail", reason: failure(choice.fail), detail: choice.fail };
+  return {
+    status: "cut",
+    ...choice,
+    quality,
+    fallback: selections.filter(Boolean).length > 1 && choice.cameras.length === 1,
+  };
+}
+
+/**
+ * One attempt at a queued clip:
+ *   { status: "wait" }                       the post-window is not on disk yet
+ *   { status: "fail", reason }               the buffer does not cover the window
+ *   { status: "done", videoPath, thumbnailPath, ... }
+ * `segmentsDirs` = the court's camera folders ([cam 1, cam 2]; a missing
+ * folder is a camera without footage). See planClip for which camera(s).
+ * Throws FfmpegError when ffmpeg fails.
+ */
+export async function makeClip(entry, ctx) {
+  const { workDir, logoPath, encoder, settings, signal, log } = ctx;
+  const dirs = ctx.segmentsDirs ?? [ctx.segmentsDir];
+  const now = ctx.now ?? Date.now();
+  const timelines = await Promise.all(dirs.map((dir) => loadTimeline(dir)));
+  const plan = planClip(entry, timelines, {
+    courtKnown: ctx.courtKnown,
+    courtCameras: ctx.courtCameras,
+    now,
+    settings,
+  });
+  if (plan.status !== "cut") return plan;
+  if (plan.fallback) {
+    const other = plan.cameras[0] === 1 ? 2 : 1;
     log?.info(
-      `${entry.clipId}: camera ${other} has no footage for that window — camera ${choice.cameras[0]} only`
+      `${entry.clipId}: camera ${other} has no footage for that window — camera ${plan.cameras[0]} only`
     );
   }
   await fsp.mkdir(workDir, { recursive: true });
   const result = await cutClip({
-    sources: choice.sources,
-    durationMs: choice.durationMs,
+    sources: plan.sources,
+    durationMs: plan.durationMs,
     workDir,
     logoPath,
     encoder,
-    quality: part ? "session" : "clip",
+    quality: plan.quality,
     settings,
     signal,
     log,
   });
   return {
     status: "done",
-    ...(part ? { coverage: choice.coverage } : {}),
+    ...(isSessionPart(entry) ? { coverage: plan.coverage } : {}),
     ...result,
   };
 }

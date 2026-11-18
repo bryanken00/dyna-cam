@@ -605,11 +605,18 @@ describe("heartbeat", () => {
     assert.deepEqual(sent, [
       {
         agentVersion: "1.2.3",
+        capabilities: ["session-part-camera"],
         cameras: [],
         live: { url: "http://192.168.1.50:8090", key: KEY },
         sessionStreams: [],
       },
-      { agentVersion: "1.2.3", cameras: [], live: null, sessionStreams: [] },
+      {
+        agentVersion: "1.2.3",
+        capabilities: ["session-part-camera"],
+        cameras: [],
+        live: null,
+        sessionStreams: [],
+      },
     ]);
   });
 });

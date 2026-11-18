@@ -11,6 +11,15 @@ export const AGENT_VERSION = pkg.version;
 // The API blocks requests with no User-Agent or one containing "bot"
 export const USER_AGENT = `DynaCamRecorder/${pkg.version}`;
 
+/**
+ * Heartbeat `capabilities`: what this box understands beyond the base device
+ * contract. "session-part-camera" (CR-003): session-part jobs may carry
+ * `camera: 1 | 2` and are cut from that camera alone — the API only sends
+ * per-camera parts to a box that reports it.
+ */
+export const CAPABILITY_SESSION_PART_CAMERA = "session-part-camera";
+export const DEVICE_CAPABILITIES = Object.freeze([CAPABILITY_SESSION_PART_CAMERA]);
+
 export const ENCODERS = ["auto", "libx264", "h264_qsv", "h264_vaapi", "h264_videotoolbox"];
 
 export class ConfigError extends Error {}

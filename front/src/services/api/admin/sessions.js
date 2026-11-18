@@ -69,6 +69,14 @@ export const unpairSessionDeviceApi = async (sessionId, pairedAppId) => {
   return response.data;
 };
 
+// CR-003: join a camera's whole-game video again after it failed (camera 0, 1 or 2)
+export const retrySessionVideoApi = async ({ sessionId, camera }) => {
+  const response = await api.post(
+    `/api/v1/admin/sessions/${sessionId}/videos/${camera}/retry`,
+  );
+  return response.data;
+};
+
 // Stop the player's own live stream (Phase G)
 export const stopSessionStreamApi = async (sessionId) => {
   const response = await api.post(`/api/v1/admin/sessions/${sessionId}/stream/stop`);

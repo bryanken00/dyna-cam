@@ -6,6 +6,9 @@ import { emptyToUndefined, optionalString, queryInt } from "./_helpers.js";
 // POST /heartbeat
 export const heartbeatSchema = z.object({
   agentVersion: optionalString(50),
+  // CR-003: what this box can do, e.g. "session-part-camera" (cut one camera of
+  // a two-camera court). Unknown names are kept as reported.
+  capabilities: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   cameras: z
     .array(
       z.object({

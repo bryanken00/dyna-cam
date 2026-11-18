@@ -6,6 +6,8 @@ import { readJson, writeJsonAtomic } from "./util.js";
  * to be cut (the buffer segments survive a reboot too).
  *
  * Clip entry:  { key, courtId, source, requestedAtMs, preSeconds, postSeconds,
+ *               sessionId, partIndex, windowStartMs, windowEndMs, camera (0 | 1 | 2;
+ *               missing in entries from older boxes = 0),
  *               state: "waiting" | "ready" | "failing", claimed, attempts,
  *               nextAttemptAt, videoPath?, thumbnailPath?, failReason?, receivedAt }
  * Press entry: { pressId, buttonCode, requestedAtMs (= pressedAtMs), state: "press",

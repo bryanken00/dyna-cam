@@ -10,6 +10,7 @@ import { materializeSessionParts, settleSessions } from "../utils/sessions.js";
  * 1. Expire: a Ready clip past its `expiresAt` (the venue's retention days)
  *    becomes Expired and its files are deleted. The row stays (soft), so the
  *    share link says "expired" instead of "not found".
+ *    Whole-game videos (CR-003) expire the same way.
  * 2. Give up: a clip still Pending/Processing after CLIP_STALE_MINUTES (a
  *    session part: SESSION_PART_STALE_MINUTES) is marked Failed — the recorder
  *    box never answered, and its footage is gone by then anyway.
@@ -43,6 +44,26 @@ export const runClipMaintenance = async (db) => {
     );
     if (result.affectedRows > 0) {
       await removeClipFiles(clip.videoPath, clip.thumbnailPath);
+      expired += 1;
+    }
+  }
+
+  // CR-003: whole-game videos expire like clips (their Drive copy stays)
+  const dueVideos = await db.query(
+    `SELECT sessionVideoId, videoPath, thumbnailPath FROM session_videos
+     WHERE status = 'Ready' AND expiresAt IS NOT NULL AND expiresAt <= ?
+     LIMIT 200`,
+    [now]
+  );
+  for (const video of dueVideos) {
+    const result = await db.query(
+      `UPDATE session_videos SET status = 'Expired', videoPath = NULL, thumbnailPath = NULL,
+                                 dateUpdated = ?
+       WHERE sessionVideoId = ? AND status = 'Ready'`,
+      [now, video.sessionVideoId]
+    );
+    if (result.affectedRows > 0) {
+      await removeClipFiles(video.videoPath, video.thumbnailPath);
       expired += 1;
     }
   }

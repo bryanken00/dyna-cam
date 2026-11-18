@@ -3,6 +3,7 @@ import {
   CircleAlert,
   Cloud,
   Download,
+  Video,
   Loader2,
   Radio,
   RotateCcw,
@@ -18,7 +19,9 @@ import StatusDot from "../../../components/StatusDot";
 import { getImageUrl } from "../../../utils/upload";
 import {
   SESSION_STATUS_TONE,
+  formatBytes,
   formatDate,
+  formatMinutes,
   formatDateTime,
   formatTimeRange,
   partLabel,
@@ -50,7 +53,7 @@ const StatusNotice = ({ session, remaining, readyCount }) => {
           </strong>
           {!dayjs(session.startAt).isSame(dayjs(), "day") &&
             ` on ${formatDate(session.startAt)}`}
-          . Keep this link — your footage appears here in 5-minute parts.
+          . Keep this link — your whole game appears here as one video after it ends.
         </span>
       </div>
     );
@@ -60,9 +63,10 @@ const StatusNotice = ({ session, remaining, readyCount }) => {
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
         <Radio className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-error)" }} />
         <span>
-          <strong className="font-semibold">Recording now.</strong> A new part
-          is saved every 5 minutes
-          {remaining > 0 && ` — ${remaining} still to come`}.
+          <strong className="font-semibold">Recording now.</strong> What&apos;s
+          recorded so far shows below every 5 minutes
+          {remaining > 0 && ` (${remaining} more to come)`}; the whole game
+          arrives as one video after it ends.
         </span>
       </div>
     );
@@ -94,6 +98,134 @@ const StatusNotice = ({ session, remaining, readyCount }) => {
   return null;
 };
 
+/** CR-003: Cam 1 / Cam 2 switch above the whole video (two-camera courts). */
+const CameraTabs = ({ videos, active, onSelect }) => (
+  <div className="grid grid-cols-2 gap-2 mt-4" role="tablist" aria-label="Camera">
+    {videos.map((video) => (
+      <Button
+        key={video.camera}
+        role="tab"
+        aria-selected={active?.camera === video.camera}
+        variant={active?.camera === video.camera ? "default" : "outline"}
+        className="h-10"
+        onClick={() => onSelect(video.camera)}
+      >
+        <Video />
+        {video.label}
+      </Button>
+    ))}
+  </div>
+);
+
+/**
+ * CR-003: the whole game as one video (per camera) — play, Download one file,
+ * the stretches the camera missed, and the Google Drive copy.
+ */
+const WholeVideoCard = ({ video, twoCameras }) => {
+  const videoSrc = getImageUrl(video.videoUrl);
+  const downloadHref = getImageUrl(video.downloadUrl);
+  const title = twoCameras ? `${video.label} — whole game` : "Whole game";
+  const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
+
+  return (
+    <div className="overflow-hidden mt-3" style={cardStyle}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
+          {title}
+        </span>
+        {video.status === "Ready" && (
+          <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+            {[
+              video.durationSeconds ? formatMinutes(Math.round(video.durationSeconds / 60)) : null,
+              video.sizeBytes ? formatBytes(video.sizeBytes) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        )}
+        {video.status === "Saving" && (
+          <span className="inline-flex items-center gap-1.5 shrink-0" style={muted}>
+            <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
+            Putting it together…
+          </span>
+        )}
+      </div>
+
+      {video.status === "Ready" && videoSrc && (
+        <>
+          <video
+            key={videoSrc}
+            src={videoSrc}
+            poster={getImageUrl(video.thumbnailUrl) || undefined}
+            controls
+            playsInline
+            preload="metadata"
+            className="w-full block"
+            style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+          />
+          <div className="p-3 space-y-2">
+            {downloadHref && (
+              <Button asChild size="lg" className="h-11 w-full">
+                <a href={downloadHref} download>
+                  <Download />
+                  {twoCameras ? `Download ${video.label}` : "Download whole game"}
+                </a>
+              </Button>
+            )}
+            {video.driveUrl && (
+              <Button asChild variant="outline" size="lg" className="h-11 w-full">
+                <a href={video.driveUrl} target="_blank" rel="noopener noreferrer">
+                  <Cloud />
+                  Open in Google Drive
+                </a>
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+
+      {video.gaps?.length > 0 && video.status !== "Saving" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          No footage{" "}
+          {video.gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")} — the
+          camera wasn&apos;t recording then, so the video skips it.
+        </p>
+      )}
+      {video.status === "Saving" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          Joining the parts into one video — usually a minute or two. The parts are below
+          until then.
+        </p>
+      )}
+      {video.status === "Failed" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          The whole video couldn&apos;t be made yet. The parts are below — the front desk can
+          try again.
+        </p>
+      )}
+      {video.status === "Expired" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          This video has expired here.
+          {video.driveUrl && (
+            <>
+              {" "}
+              <a
+                href={video.driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+                style={{ color: "var(--color-text-dark)" }}
+              >
+                Open it in Google Drive
+              </a>
+            </>
+          )}
+        </p>
+      )}
+    </div>
+  );
+};
+
 /** One part: video + Download when Ready, "Saving…" when Pending, a note otherwise. */
 const PartCard = ({ part }) => {
   const videoSrc = getImageUrl(part.videoUrl);
@@ -104,6 +236,7 @@ const PartCard = ({ part }) => {
         <div className="min-w-0">
           <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
             {partLabel(part.partIndex)}
+            {part.camera > 0 && ` · Cam ${part.camera}`}
           </span>
           <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
             {" · "}
@@ -179,6 +312,11 @@ const SessionPage = () => {
   const {
     session,
     parts,
+    videos,
+    activeVideo,
+    setCameraTab,
+    twoCameras,
+    savingWholeVideo,
     remaining,
     readyCount,
     expiresAt,
@@ -278,11 +416,22 @@ const SessionPage = () => {
         </Button>
       )}
 
-      {/* Parts, in order */}
+      {/* CR-003: the whole game, one video per camera */}
+      {videos.length > 1 && (
+        <CameraTabs videos={videos} active={activeVideo} onSelect={setCameraTab} />
+      )}
+      {activeVideo && <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />}
+
+      {/* Parts not joined yet: while recording, or until the whole video is made */}
       {parts.length > 0 && (
         <div className="mt-4 space-y-3">
+          {(videos.length > 0 || savingWholeVideo) && (
+            <div className="font-semibold" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+              So far
+            </div>
+          )}
           {parts.map((part) => (
-            <PartCard key={part.partIndex} part={part} />
+            <PartCard key={`${part.partIndex}-${part.camera ?? 0}`} part={part} />
           ))}
         </div>
       )}

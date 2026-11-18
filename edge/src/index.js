@@ -96,6 +96,8 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
         // Both cameras' folders: stacked when both have the window
         segmentsDirs: recorders.courtDirs(entry.courtId),
         courtKnown: sync.courtKnown(entry.courtId),
+        // A camera-2 job (CR-003) on a court without camera 2 fails at once
+        courtCameras: sync.courtCameras(entry.courtId),
         workDir,
         logoPath: sync.logoPath,
         encoder,
