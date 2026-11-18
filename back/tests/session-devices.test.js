@@ -145,6 +145,8 @@ describe("session devices", () => {
         .digest("hex");
       assert.equal(url.searchParams.get("sig"), expected);
       assert.ok(Number(exp) > Date.now() / 1000 + 10 * 60);
+      // CR-007: a one-camera court has no Cam 1 | Cam 2 switch
+      assert.equal(res.data.live.cameras, undefined);
 
       // The key is stored encrypted and never shown
       const [[row]] = await ctx.sql.query(`SELECT liveKey FROM devices WHERE venueId = ?`, [
@@ -153,6 +155,46 @@ describe("session devices", () => {
       assert.ok(!String(row.liveKey).includes(LIVE_KEY));
       const courts = await call("GET", `/admin/courts?venueId=${home.venueId}`);
       assert.ok(!JSON.stringify(courts.body).includes(LIVE_KEY));
+    });
+
+    it("gets each camera's live link on a two-camera court (CR-007)", async () => {
+      courtCount += 1;
+      const court = await call("POST", "/admin/courts", {
+        venueId: home.venueId,
+        name: `Court ${courtCount + 1}`,
+        cameraRtspUrl: "rtsp://u:p@10.0.0.9:554/stream1",
+        camera2RtspUrl: "rtsp://u:p@10.0.0.10:554/stream1",
+      });
+      assert.equal(court.status, 201, JSON.stringify(court.body));
+      const booked = await call("POST", "/admin/sessions", {
+        courtId: court.data.courtId,
+        startNow: true,
+        durationMinutes: 60,
+      });
+      assert.equal(booked.status, 201, JSON.stringify(booked.body));
+      const twoCam = await pairTo(booked.data.sessionId, "Two-camera tablet");
+
+      const res = await twoCam.app("GET", "/app/session");
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const { live } = res.data;
+      const courtId = court.data.courtId;
+      assert.deepEqual(
+        live.cameras.map((c) => c.camera),
+        [1, 2]
+      );
+      // Camera 1 is the same link as hlsUrl (apps without the switch keep working)
+      assert.equal(live.cameras[0].hlsUrl, live.hlsUrl);
+      const cam2 = new URL(live.cameras[1].hlsUrl);
+      assert.equal(cam2.origin, "http://192.168.1.50:8090");
+      assert.equal(cam2.pathname, `/live/${courtId}/cam2/index.m3u8`);
+      // Same signature as camera 1: the box signs the court, not the camera
+      const exp = cam2.searchParams.get("exp");
+      const expected = crypto
+        .createHmac("sha256", LIVE_KEY)
+        .update(`${courtId}.${exp}`)
+        .digest("hex");
+      assert.equal(cam2.searchParams.get("sig"), expected);
+      assert.equal(new URL(live.hlsUrl).searchParams.get("sig"), expected);
     });
 
     it("is listed on the session with its live keys", async () => {
