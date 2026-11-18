@@ -136,6 +136,7 @@ they can enrol again after a reset.
 | `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. Must differ from `BUTTON_PORT`. |
 | `MAX_STACKED_STREAMS` | `2` | Stacked (two-camera, re-encoded) live streams at once, court and player streams together. `0` = never stack. |
 | `LIVE_HOST` | detected | The box's LAN address as phones reach it (e.g. `192.168.1.50`). Leave empty to detect it; set it when the box has several networks (Docker, VPN) or detection picks the wrong one. |
+| `CERT_PATH` | — | Folder with `privkey.pem`, `cert.pem` and (optional) `chain.pem`, the same files as the API's `certPath`. Set it to serve the [live view over HTTPS](#https-cert_path). `LIVE_HOST` must then be the certificate's host name. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
 
@@ -370,6 +371,25 @@ GET http://<box-ip>:8090/live/<courtId>/cam2/index.m3u8?exp=…&sig=…         
   The live view moves each segment's clock forward by its start time in `segments.csv` as it
   sends it, so players see one running clock; a recorder restart is marked
   `#EXT-X-DISCONTINUITY`.
+
+### HTTPS (`CERT_PATH`)
+
+Set `CERT_PATH` to the certificate folder (for Let's Encrypt, `/etc/letsencrypt/live/<name>`) to
+serve the live view as `https://<LIVE_HOST>:8090`. Use it when the session device or page can't
+load plain-HTTP video.
+
+- **`LIVE_HOST` must be a name the certificate covers** (e.g. `box1.example.com`), and that name
+  must resolve to the box's **LAN** address on the venue Wi-Fi (local DNS, or a public DNS record
+  pointing at the LAN IP). Phones refuse the certificate otherwise. At start the box warns if the
+  certificate doesn't cover `LIVE_HOST` (or the detected IP), or has expired.
+- **Readable by the box's user:** `privkey.pem` under `/etc/letsencrypt` is root-only. Copy the
+  files to a folder the pm2 user can read (a renewal hook), or grant read access.
+- **Renewals** are picked up within 6 hours, without a restart. A renewed file that can't be loaded
+  is logged, and the previous certificate stays in use.
+- **Unreadable certificate:** the box logs *"live view off — could not read privkey.pem and
+  cert.pem in CERT_PATH …"* and keeps recording, without live view.
+- Court and player live streams keep reading the box's own live view over plain HTTP on
+  `127.0.0.1` (a second listener, loopback only). The court-button listener stays plain HTTP.
 
 Check it from a laptop on the venue Wi-Fi (with a link from the API, which carries the signature):
 `ffplay '<hlsUrl>'`. Note that ffmpeg tools need `-extension_picky 0` for segment links that end

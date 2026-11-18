@@ -24,7 +24,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
 | `restream.js` | Every live stream (`Restreams`): venue court streams + players' own, one ffmpeg each reading the box's live HLS on 127.0.0.1; CAM1/CAM2 copied, STACKED encoded; backoff, status, caps, heartbeat `sessionStreams` + camera 1's `streamStatus` |
-| `live.js` | LAN live view `GET\|HEAD /live/:courtId/[cam2/]{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
+| `live.js` | LAN live view (HTTP, or HTTPS with `CERT_PATH`) `GET\|HEAD /live/:courtId/[cam2/]{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
 | `stream.js` | Stream-key masking (`maskStreamKey`, `maskStreamUrl`) and `parseLogLine` |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
@@ -113,7 +113,12 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   Newest closed segment > 30 s old → 404.
 - Buffer files restart their clock at 0 (`reset_timestamps`): segments are served with PTS/DTS/PCR
   + the csv content start (90 kHz) — a Transform over `createReadStream`, in place, no remux.
-- Heartbeat: `live: { url: "http://<LIVE_HOST | first private IPv4>:<port>", key } | null`.
+- Heartbeat: `live: { url: "http(s)://<LIVE_HOST | first private IPv4>:<port>", key } | null`.
+- HTTPS (CR-002): optional `CERT_PATH` (`privkey.pem`, `cert.pem`, optional `chain.pem`, the API's `certPath` layout) →
+  LIVE_PORT is HTTPS, `url` is `https://`. One `createLiveHandler` shared by that server and a loopback-only plain-HTTP
+  listener (127.0.0.1, ephemeral port) that `localPlaylistUrl` uses, so restreams never need TLS. Unreadable/unusable
+  cert → warn, live view off, recording goes on. Warn on expiry or a cert not covering LIVE_HOST (or the detected IP).
+  Renewals: file stamps checked every 6 h → `setSecureContext`; a broken one keeps the old. Buttons stay plain HTTP.
 
 ## Streams (`restream.js`, PLAN-002 §6.1, §7.3)
 

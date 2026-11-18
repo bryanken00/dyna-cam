@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { loadConfig } from "../src/config.js";
 import {
   buildPlaylist,
+  CERT_FILES,
+  certificateProblems,
   checkSignature,
   createLiveServer,
   lanAddress,
@@ -25,6 +29,9 @@ import {
   writePts,
 } from "../src/live.js";
 import { DeviceSync } from "../src/sync.js";
+
+/** Self-signed test certificate: box.test + 127.0.0.1, valid until 2126 (test/fixtures/tls). */
+const TLS_DIR = fileURLToPath(new URL("./fixtures/tls/", import.meta.url));
 
 const silent = { debug() {}, info() {}, warn() {}, error() {} };
 const KEY = "a".repeat(64);
@@ -616,11 +623,214 @@ describe("config", () => {
     assert.equal(loadConfig({ ...base, LIVE_PORT: "0" }).livePort, 0);
     assert.equal(loadConfig({ ...base, LIVE_HOST: " 192.168.1.50 " }).liveHost, "192.168.1.50");
   });
+  it("has no CERT_PATH by default; a relative one resolves from edge/", () => {
+    assert.equal(loadConfig(base).certPath, null);
+    assert.equal(loadConfig({ ...base, CERT_PATH: "  " }).certPath, null);
+    assert.equal(loadConfig({ ...base, CERT_PATH: "/etc/ssl/box" }).certPath, "/etc/ssl/box");
+    const rel = loadConfig({ ...base, CERT_PATH: "./certs" }).certPath;
+    assert.ok(path.isAbsolute(rel) && rel.endsWith(`${path.sep}certs`), rel);
+  });
   it("rejects a bad port or host, and the button port", () => {
     assert.throws(() => loadConfig({ ...base, LIVE_PORT: "70000" }), /LIVE_PORT/);
     assert.throws(() => loadConfig({ ...base, LIVE_PORT: "8089" }), /must differ/);
     for (const bad of ["http://1.2.3.4", "1.2.3.4:8090", "a/b", "x y"]) {
       assert.throws(() => loadConfig({ ...base, LIVE_HOST: bad }), /LIVE_HOST/, bad);
+    }
+  });
+});
+
+describe("HTTPS live view (CR-002)", () => {
+  const interfaces = () => ({
+    wlan0: [{ address: "192.168.1.50", family: "IPv4", internal: false }],
+  });
+  const NOW = Date.UTC(2027, 0, 1); // the test certificate is valid from 2026-11-18
+  let certDir;
+  beforeEach(async () => {
+    certDir = path.join(dir, "certs");
+    await fs.mkdir(certDir);
+    for (const name of [CERT_FILES.key, CERT_FILES.cert]) {
+      await fs.copyFile(path.join(TLS_DIR, name), path.join(certDir, name));
+    }
+  });
+
+  async function freePort() {
+    const probe = net.createServer();
+    await new Promise((resolve) => probe.listen(0, "0.0.0.0", resolve));
+    const port = probe.address().port;
+    await new Promise((resolve) => probe.close(resolve));
+    return port;
+  }
+
+  const recorder = () => {
+    const lines = { info: [], warn: [] };
+    return {
+      lines,
+      log: { ...silent, info: (m) => lines.info.push(m), warn: (m) => lines.warn.push(m) },
+    };
+  };
+
+  /** GET over TLS, trusting only the test certificate. */
+  async function tlsGet(port, rawPath, servername = "box.test") {
+    const ca = await fs.readFile(path.join(TLS_DIR, CERT_FILES.cert));
+    return new Promise((resolve, reject) => {
+      const req = https.request(
+        { host: "127.0.0.1", port, path: rawPath, ca, servername, agent: false },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode }));
+        }
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("certificateProblems: fine for its host and IP, flags another host and expiry", async () => {
+    const pem = await fs.readFile(path.join(TLS_DIR, CERT_FILES.cert), "utf8");
+    assert.deepEqual(certificateProblems(pem, "box.test", NOW), []);
+    assert.deepEqual(certificateProblems(pem, "127.0.0.1", NOW), []);
+    assert.deepEqual(certificateProblems(pem, null, NOW), []);
+    assert.match(
+      certificateProblems(pem, "192.168.1.50", NOW).join(),
+      /does not cover "192\.168\.1\.50".*LIVE_HOST/
+    );
+    assert.match(certificateProblems(pem, "box.test", Date.UTC(2127, 0, 1)).join(), /expired/);
+    assert.match(
+      certificateProblems(pem, "box.test", Date.UTC(2020, 0, 1)).join(),
+      /not valid before/
+    );
+    assert.match(certificateProblems("nope", "box.test", NOW).join(), /not a PEM certificate/);
+  });
+
+  it("serves HTTPS on LIVE_PORT, reports https://, restreams read a loopback HTTP listener", async () => {
+    const port = await freePort();
+    const { lines, log } = recorder();
+    const view = new LiveView({
+      settings: { livePort: port, dataDir: dir, certPath: certDir, liveHost: "box.test" },
+      log,
+      now: () => NOW,
+      interfaces,
+    });
+    try {
+      assert.equal(await view.start(), true);
+      assert.deepEqual(lines.warn, []);
+      const key = await loadLiveKey(dir);
+      assert.deepEqual(view.info(), { url: `https://box.test:${port}`, key });
+
+      // TLS on the public port: a bad signature is refused over HTTPS
+      const res = await tlsGet(port, "/live/court-1/index.m3u8?exp=1&sig=00");
+      assert.equal(res.status, 403);
+
+      // Restreams: plain HTTP on 127.0.0.1, another port, signed with the same key
+      const exp = Math.floor(NOW / 1000) + 600;
+      const local = new URL(view.localPlaylistUrl("court-1", exp, 2));
+      assert.equal(local.protocol, "http:");
+      assert.equal(local.hostname, "127.0.0.1");
+      assert.notEqual(Number(local.port), port);
+      assert.equal(local.pathname, "/live/court-1/cam2/index.m3u8");
+      assert.equal(local.searchParams.get("sig"), signLive(key, "court-1", String(exp)));
+      // No footage → 404, which proves the signature passed on the loopback listener
+      const plain = await rawGet(Number(local.port), `${local.pathname}${local.search}`);
+      assert.equal(plain.status, 404);
+    } finally {
+      view.close();
+    }
+    assert.equal(view.server, null);
+    assert.equal(view.localServer, null);
+  });
+
+  it("warns when the certificate doesn't cover the address phones use", async () => {
+    const { lines, log } = recorder();
+    const view = new LiveView({
+      settings: { livePort: await freePort(), dataDir: dir, certPath: certDir },
+      log,
+      now: () => NOW,
+      interfaces,
+    });
+    try {
+      assert.equal(await view.start(), true);
+      assert.match(lines.warn.join("\n"), /does not cover "192\.168\.1\.50".*set LIVE_HOST/);
+      assert.match(view.info().url, /^https:\/\/192\.168\.1\.50:/);
+    } finally {
+      view.close();
+    }
+  });
+
+  it("stays off — never throws — with a missing or mismatched certificate", async () => {
+    await fs.rm(path.join(certDir, CERT_FILES.cert));
+    const missing = recorder();
+    const port = await freePort();
+    const view = new LiveView({
+      settings: { livePort: port, dataDir: dir, certPath: certDir, liveHost: "box.test" },
+      log: missing.log,
+      interfaces,
+    });
+    assert.equal(await view.start(), false);
+    assert.equal(view.info(), null);
+    assert.match(
+      missing.lines.warn.join("\n"),
+      /live view off .*cert\.pem.*ENOENT.*Recording goes on/
+    );
+
+    await fs.copyFile(path.join(TLS_DIR, CERT_FILES.cert), path.join(certDir, CERT_FILES.cert));
+    await fs.copyFile(path.join(TLS_DIR, "other-key.pem"), path.join(certDir, CERT_FILES.key));
+    const mismatched = recorder();
+    view.log = mismatched.log;
+    view.now = () => NOW;
+    assert.equal(await view.start(), false);
+    assert.match(
+      mismatched.lines.warn.join("\n"),
+      /could not be used .*privkey\.pem belong to cert\.pem/
+    );
+    view.close();
+  });
+
+  it("reloads a renewed certificate and keeps the old one when the new one is broken", async () => {
+    const { lines, log } = recorder();
+    const port = await freePort();
+    const view = new LiveView({
+      settings: { livePort: port, dataDir: dir, certPath: certDir, liveHost: "box.test" },
+      log,
+      now: () => NOW,
+      interfaces,
+    });
+    try {
+      assert.equal(await view.start(), true);
+      assert.equal(await view.reloadCertificate(), false, "unchanged → nothing to do");
+
+      // Renewed (same files rewritten, newer mtime) → setSecureContext
+      const later = new Date(NOW + 60_000);
+      for (const name of [CERT_FILES.key, CERT_FILES.cert]) {
+        await fs.utimes(path.join(certDir, name), later, later);
+      }
+      assert.equal(await view.reloadCertificate(), true);
+      assert.match(lines.info.join("\n"), /certificate reloaded .*valid until/);
+      assert.equal((await tlsGet(port, "/live/court-1/index.m3u8?exp=1&sig=00")).status, 403);
+
+      // A broken renewal: warned, previous certificate still served
+      await fs.writeFile(path.join(certDir, CERT_FILES.cert), "not a certificate");
+      assert.equal(await view.reloadCertificate(), false);
+      assert.match(lines.warn.join("\n"), /could not be loaded — still using the previous one/);
+      assert.equal((await tlsGet(port, "/live/court-1/index.m3u8?exp=1&sig=00")).status, 403);
+    } finally {
+      view.close();
+    }
+  });
+
+  it("keeps plain HTTP without CERT_PATH (no loopback listener)", async () => {
+    const port = await freePort();
+    const view = new LiveView({
+      settings: { livePort: port, dataDir: dir },
+      log: silent,
+      interfaces,
+    });
+    try {
+      assert.equal(await view.start(), true);
+      assert.equal(view.localServer, null);
+      assert.match(view.info().url, /^http:\/\//);
+      assert.equal(new URL(view.localPlaylistUrl("court-1", 1)).port, String(port));
+    } finally {
+      view.close();
     }
   });
 });

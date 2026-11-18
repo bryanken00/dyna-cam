@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pipeline, Transform } from "node:stream";
@@ -34,6 +36,10 @@ import { cameraDirName, readJson, writeJsonAtomic } from "./util.js";
  */
 
 export const LIVE_SEGMENTS = 5;
+/** CERT_PATH files (CR-002) — the same names the API reads from its certPath. chain.pem is optional. */
+export const CERT_FILES = Object.freeze({ key: "privkey.pem", cert: "cert.pem", ca: "chain.pem" });
+/** How often a renewed certificate (e.g. Let's Encrypt) is looked for. */
+export const CERT_CHECK_MS = 6 * 60 * 60 * 1000;
 export const LIVE_KEY_FILE = "live-key";
 /** Newest closed segment older than this → the court isn't recording: 404, not a frozen picture. */
 export const STALE_MS = 30_000;
@@ -360,11 +366,93 @@ function sendText(req, res, status, text, extra = {}) {
 }
 
 /**
- * The HTTP server. `bufferDir` = DATA_DIR/buffer; a camera's folder is
+ * The certificate in CERT_PATH: { key, cert, ca? } as PEM text. Throws (ENOENT,
+ * EACCES…) when privkey.pem or cert.pem can't be read.
+ */
+export async function readCertificate(certPath) {
+  const read = (name) => fsp.readFile(path.join(certPath, name), "utf8");
+  const [key, cert] = await Promise.all([read(CERT_FILES.key), read(CERT_FILES.cert)]);
+  const ca = await read(CERT_FILES.ca).catch((err) => {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  });
+  return ca ? { key, cert, ca } : { key, cert };
+}
+
+/** Changes when any CERT_PATH file is replaced (renewal); "" when none can be read. */
+export async function certificateStamp(certPath) {
+  const stats = await Promise.all(
+    Object.values(CERT_FILES).map((name) =>
+      fsp.stat(path.join(certPath, name)).then(
+        (st) => `${st.mtimeMs}:${st.size}`,
+        () => "-"
+      )
+    )
+  );
+  return stats.join("|");
+}
+
+/**
+ * What a person must fix for phones to trust the live view: an expired or
+ * not-yet-valid certificate, or one that doesn't name `host` (LIVE_HOST, or
+ * the detected LAN address). [] = fine.
+ */
+export function certificateProblems(certPem, host, nowMs) {
+  let x509;
+  try {
+    x509 = new crypto.X509Certificate(certPem);
+  } catch (_err) {
+    return ["cert.pem is not a PEM certificate"];
+  }
+  const problems = [];
+  if (Date.parse(x509.validTo) <= nowMs) {
+    problems.push(`the certificate expired on ${x509.validTo} — renew it`);
+  } else if (Date.parse(x509.validFrom) > nowMs) {
+    problems.push(`the certificate is not valid before ${x509.validFrom} (check the box clock)`);
+  }
+  if (host) {
+    const bare = host.replace(/^\[|\]$/g, "");
+    const covered = net.isIP(bare) ? x509.checkIP(bare) : x509.checkHost(host);
+    if (!covered) {
+      problems.push(
+        `it does not cover "${host}", so phones will refuse it — set LIVE_HOST to the host name the certificate was issued for`
+      );
+    }
+  }
+  return problems;
+}
+
+/** listen(); resolves the server, or null with the error code when it can't. */
+function listenOn(server, port, host) {
+  return new Promise((resolve) => {
+    const onError = (err) => resolve({ server: null, err });
+    server.once("error", onError);
+    server.listen(port, host, () => {
+      server.off("error", onError);
+      resolve({ server, err: null });
+    });
+  });
+}
+
+/**
+ * The HTTP server — HTTPS when `tls` ({ key, cert, ca? }) is given. Built on
+ * createLiveHandler; pass `handler` to share one (and its playlist numbering)
+ * between servers.
+ */
+export function createLiveServer({ tls = null, handler, ...options }) {
+  const onRequest = handler || createLiveHandler(options);
+  const server = tls ? https.createServer(tls, onRequest) : http.createServer(onRequest);
+  server.requestTimeout = 10_000;
+  server.headersTimeout = 10_000;
+  return server;
+}
+
+/**
+ * The request handler. `bufferDir` = DATA_DIR/buffer; a camera's folder is
  * `cameraDirName(courtId, camera)` inside it. The URL (it holds the signature)
  * is never logged.
  */
-export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }) {
+export function createLiveHandler({ bufferDir, key, log, now = () => Date.now() }) {
   const courts = new Map(); // camera folder → { sequencer, read: { at, promise } }
   const court = (dir) => {
     if (!courts.has(dir)) courts.set(dir, { sequencer: new LiveSequencer(), read: null });
@@ -441,7 +529,7 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
     }
   }
 
-  const server = http.createServer((req, res) => {
+  return (req, res) => {
     req.resume();
     const route = routeLive(req.method, req.url);
     if (route.status) {
@@ -460,16 +548,17 @@ export function createLiveServer({ bufferDir, key, log, now = () => Date.now() }
       if (!res.headersSent) sendText(req, res, 500, "Live view error");
       else res.destroy();
     });
-  });
-  server.requestTimeout = 10_000;
-  server.headersTimeout = 10_000;
-  return server;
+  };
 }
 
 /**
  * The live view of this box: key, server and the heartbeat's `live` field.
- * Never throws — a taken port or an unwritable key file leaves the box
- * recording without live view.
+ * Never throws — a taken port, an unwritable key file or an unusable
+ * certificate leaves the box recording without live view.
+ *
+ * With `settings.certPath` (CR-002) LIVE_PORT serves HTTPS and the heartbeat
+ * reports https://; the box's own restreams then read a second, loopback-only
+ * plain-HTTP listener (same handler), so ffmpeg never needs TLS or the host name.
  */
 export class LiveView {
   constructor({
@@ -483,12 +572,16 @@ export class LiveView {
     this.now = now;
     this.interfaces = interfaces;
     this.server = null;
+    this.localServer = null; // HTTPS only: 127.0.0.1, plain HTTP, for restreams
+    this.tls = false;
+    this.certStamp = null;
+    this.certTimer = null;
     this.key = null;
     this.warnedNoHost = false;
   }
 
   async start() {
-    const { livePort: port, dataDir } = this.settings;
+    const { livePort: port, dataDir, certPath } = this.settings;
     if (!port) {
       this.log.info("live view off (LIVE_PORT=0)");
       return false;
@@ -499,24 +592,62 @@ export class LiveView {
       this.log.warn("live view off — could not create the live-view key in DATA_DIR", err);
       return false;
     }
-    const server = createLiveServer({
+
+    let tls = null;
+    if (certPath) {
+      try {
+        tls = await readCertificate(certPath);
+        this.certStamp = await certificateStamp(certPath);
+      } catch (err) {
+        this.log.warn(
+          `live view off — could not read ${CERT_FILES.key} and ${CERT_FILES.cert} in CERT_PATH (${certPath}): ${err.code || err.message}. Recording goes on; fix CERT_PATH or remove it for plain HTTP`
+        );
+        return false;
+      }
+      this.warnCertificate(tls.cert);
+    }
+
+    const handler = createLiveHandler({
       bufferDir: path.join(dataDir, "buffer"),
       key: this.key,
       log: this.log,
       now: this.now,
     });
-    this.server = await new Promise((resolve) => {
-      server.once("error", (err) => {
-        const why =
-          err.code === "EADDRINUSE" ? "the port is already in use" : err.code || err.message;
+    let server;
+    try {
+      server = createLiveServer({ tls, handler });
+    } catch (err) {
+      this.log.warn(
+        `live view off — the certificate in CERT_PATH could not be used (does ${CERT_FILES.key} belong to ${CERT_FILES.cert}?): ${err.message}`
+      );
+      return false;
+    }
+    const main = await listenOn(server, port, "0.0.0.0");
+    if (!main.server) {
+      const why =
+        main.err.code === "EADDRINUSE"
+          ? "the port is already in use"
+          : main.err.code || main.err.message;
+      this.log.warn(
+        `live view could not start on port ${port} (${why}) — recording goes on without live view; free the port or change LIVE_PORT`
+      );
+      return false;
+    }
+    this.server = main.server;
+    this.tls = Boolean(tls);
+
+    if (tls) {
+      const local = await listenOn(createLiveServer({ handler }), 0, "127.0.0.1");
+      this.localServer = local.server;
+      if (!local.server) {
         this.log.warn(
-          `live view could not start on port ${port} (${why}) — recording goes on without live view; free the port or change LIVE_PORT`
+          `live view: no loopback listener for live streams (${local.err.code || local.err.message}) — court and player streams can't start`
         );
-        resolve(null);
-      });
-      server.listen(port, "0.0.0.0", () => resolve(server));
-    });
-    if (!this.server) return false;
+      }
+      this.certTimer = setInterval(() => this.reloadCertificate(), CERT_CHECK_MS);
+      this.certTimer.unref?.();
+    }
+
     const url = this.url();
     this.log.info(
       url
@@ -526,19 +657,54 @@ export class LiveView {
     return true;
   }
 
-  url() {
-    if (!this.server) return null;
+  /** Log what's wrong with the certificate for phones (expired, host not covered). */
+  warnCertificate(certPem) {
     const host = this.settings.liveHost || lanAddress(this.interfaces());
-    return host ? `http://${host}:${this.server.address().port}` : null;
+    for (const problem of certificateProblems(certPem, host, this.now())) {
+      this.log.warn(`live view certificate: ${problem}`);
+    }
   }
 
   /**
-   * The box's own signed playlist link for a court camera on 127.0.0.1
-   * (restreams read it, restream.js); null while the server isn't running.
+   * Use a renewed certificate without a restart. A broken renewal keeps the
+   * one in use. Returns true when a new certificate was loaded.
+   */
+  async reloadCertificate() {
+    const { certPath } = this.settings;
+    if (!this.server || !this.tls || !certPath) return false;
+    const stamp = await certificateStamp(certPath);
+    if (stamp === this.certStamp) return false;
+    try {
+      const tls = await readCertificate(certPath);
+      this.server.setSecureContext(tls);
+      this.certStamp = stamp;
+      const validTo = new crypto.X509Certificate(tls.cert).validTo;
+      this.log.info(`live view certificate reloaded from CERT_PATH (valid until ${validTo})`);
+      this.warnCertificate(tls.cert);
+      return true;
+    } catch (err) {
+      this.log.warn(
+        `live view certificate in CERT_PATH changed but could not be loaded — still using the previous one: ${err.code || err.message}`
+      );
+      return false;
+    }
+  }
+
+  url() {
+    if (!this.server) return null;
+    const host = this.settings.liveHost || lanAddress(this.interfaces());
+    const scheme = this.tls ? "https" : "http";
+    return host ? `${scheme}://${host}:${this.server.address().port}` : null;
+  }
+
+  /**
+   * The box's own signed playlist link for a court camera on 127.0.0.1, plain
+   * HTTP (restreams read it, restream.js); null while the server isn't running.
    */
   localPlaylistUrl(courtId, exp, camera = 1) {
-    if (!this.server) return null;
-    const port = this.server.address().port;
+    const server = this.tls ? this.localServer : this.server;
+    if (!server) return null;
+    const port = server.address().port;
     const sig = signLive(this.key, courtId, exp);
     const cam = camera === 2 ? "cam2/" : "";
     return `http://127.0.0.1:${port}/live/${encodeURIComponent(courtId)}/${cam}index.m3u8?exp=${exp}&sig=${sig}`;
@@ -558,9 +724,14 @@ export class LiveView {
   }
 
   close() {
-    if (!this.server) return;
-    this.server.close();
-    this.server.closeAllConnections?.();
+    clearInterval(this.certTimer);
+    this.certTimer = null;
+    for (const server of [this.server, this.localServer]) {
+      if (!server) continue;
+      server.close();
+      server.closeAllConnections?.();
+    }
     this.server = null;
+    this.localServer = null;
   }
 }

@@ -147,6 +147,9 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`LIVE_PORT and BUTTON_PORT must differ (both are ${livePort})`);
   }
   const liveHost = parseLiveHost(env.LIVE_HOST);
+  // HTTPS live view (CR-002): a folder with privkey.pem, cert.pem (+ chain.pem), like back's certPath
+  const certRaw = String(env.CERT_PATH ?? "").trim();
+  const certPath = certRaw ? path.resolve(ROOT_DIR, certRaw) : null;
   const dataDir = path.resolve(ROOT_DIR, env.DATA_DIR || "./data");
   const { enrollKey, venueId, boxName } = parseEnrollment(env, dataDir);
 
@@ -177,6 +180,7 @@ export function loadConfig(env = process.env) {
     buttonKey: String(env.BUTTON_KEY ?? "").trim(),
     livePort,
     liveHost,
+    certPath,
     // Stacked (two-camera, re-encoded) live streams at once, court and player streams together
     maxStackedStreams: int(env, "MAX_STACKED_STREAMS", 2, 0, 8),
     logLevel: ["debug", "info", "warn", "error"].includes(logLevel) ? logLevel : "info",
