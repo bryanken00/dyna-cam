@@ -124,8 +124,10 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
       for (const job of game.jobs) assert.equal((await upload(home, job.clipId)).status, 200);
 
       let shown = await page(game.token);
-      assert.equal(shown.parts.length, 3, "the parts show while the game is being saved");
-      assert.equal(shown.partsTotal, 3);
+      // CR-004: no parts for players — progress in minutes instead
+      assert.deepEqual(shown.parts, []);
+      assert.deepEqual([shown.savedSeconds, shown.totalSeconds], [12 * 60, 12 * 60]);
+      assert.equal(shown.savingWholeVideo, true);
 
       assert.deepEqual(await runSessionJoins(ctx.db, { limit: 10 }), { joined: 1 });
 
@@ -247,7 +249,12 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
         ]
       );
       for (const job of game.jobs) assert.equal((await upload(both, job.clipId)).status, 200);
-      assert.equal((await page(game.token)).partsTotal, 4);
+      const saving = await page(game.token);
+      assert.deepEqual(
+        [saving.savedSeconds, saving.totalSeconds],
+        [10 * 60, 10 * 60],
+        "two cameras' parts count once"
+      );
 
       assert.deepEqual(await runSessionJoins(ctx.db, { limit: 10 }), { joined: 2 });
       const shown = await page(game.token);
@@ -312,7 +319,7 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
 
         const tally = await runSessionJoins(ctx.db, { limit: 10 });
         assert.deepEqual(tally, { waiting: 1, joined: 1 });
-        assert.equal((await page(long.token)).parts.length, 2, "the player still has the parts");
+        assert.deepEqual((await page(long.token)).parts, [], "players never see parts (CR-004)");
         assert.equal((await page(long.token)).videos[0].status, "Saving");
         assert.equal((await page(short.token)).videos[0].status, "Ready");
       } finally {
@@ -354,7 +361,9 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
         parts.every((part) => part.videoPath && !part.joinedAt),
         "parts are kept"
       );
-      assert.equal((await page(broken.token)).parts.length, 2);
+      const failedPage = await page(broken.token);
+      assert.deepEqual(failedPage.parts, []);
+      assert.equal(failedPage.videos[0].status, "Failed", "the page says check back soon");
 
       const denied = await call(
         "POST",

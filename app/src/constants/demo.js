@@ -112,6 +112,9 @@ const demoSession = () => {
       durationSeconds: Math.floor(lengthMs / 1000),
       partsReady,
       partsTotal,
+      // CR-004: minutes saved, as the API reports them
+      savedSeconds: Math.round((partsReady / partsTotal) * Math.floor(lengthMs / 1000)),
+      totalSeconds: Math.floor(lengthMs / 1000),
       shareUrl: `${DEMO_APP_URL}/session/demo-share-1`,
       failureReason: null,
     },

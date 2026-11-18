@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { moment } from "./dateUtils.js";
 import { DEVICE_ONLINE_SECONDS, secondsAgoLocal, sessionShareUrl, toEpochMs } from "./clips.js";
 import { decryptSecret } from "./crypto/secretBox.js";
-import { expectedParts } from "./sessions.js";
+import { expectedParts, savingProgress, SETTLED_PART_SECONDS_SQL } from "./sessions.js";
 
 /**
  * Session devices (PLAN-002 Phase E): a phone/tablet paired to ONE recording
@@ -34,7 +34,8 @@ export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
-    AS partsReady`;
+    AS partsReady,
+  ${SETTLED_PART_SECONDS_SQL}`;
 
 export const SESSION_DEVICE_FROM = `FROM recording_sessions s
   JOIN courts c ON c.courtId = s.courtId
@@ -91,6 +92,9 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
     elapsedSeconds: recording || ended ? seconds(Math.min(nowMs, endMs) - startMs) : 0,
     endsInSeconds: recording ? seconds(endMs - nowMs) : 0,
     durationSeconds: seconds(Math.min(nowMs, endMs) - startMs),
+    // CR-004: "Saving your game… 25 of 30 minutes saved" (savedSeconds / totalSeconds);
+    // partsReady / partsTotal stay for app builds from before it
+    ...savingProgress(row),
     partsReady: Number(row.partsReady || 0),
     partsTotal: expectedParts(row),
     shareUrl: sessionShareUrl(row.shareToken),

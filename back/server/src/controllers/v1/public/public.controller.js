@@ -5,7 +5,12 @@ import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
-import { expectedParts, materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
+import {
+  materializeSessionParts,
+  savingProgress,
+  SETTLED_PART_SECONDS_SQL,
+  settleSessions,
+} from "../../../utils/sessions.js";
 import { loadSessionVideos, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
@@ -216,26 +221,27 @@ router.get(
     await materializeSessionParts(req.db, { venueId: rows[0].venueId });
     await settleSessions(req.db, rows[0].sessionId);
     const [session] = await req.db.query(
-      `SELECT status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      `SELECT s.status, ${SETTLED_PART_SECONDS_SQL}
+       FROM recording_sessions s WHERE s.sessionId = ? LIMIT 1`,
       [rows[0].sessionId]
     );
 
-    let parts = await req.db.query(
-      `SELECT partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
-              thumbnailPath, expiresAt, driveStatus, driveUrl
-       FROM clips
-       WHERE sessionId = ? AND status != 'Deleted' AND joinedAt IS NULL
-       ORDER BY partIndex ASC, camera ASC`,
-      [rows[0].sessionId]
-    );
-    // CR-003: the whole game, one video per camera, once its parts are joined
+    // CR-003: the whole game, one video per camera
     const videos = await loadSessionVideos(req.db, rows[0].sessionId);
-    // A camera whose whole video is made needs no parts on the page: its missing
-    // stretches are the video's gaps. (A failed join keeps showing its parts.)
-    const done = new Set(
-      videos.filter((v) => ["Ready", "Expired"].includes(v.status)).map((v) => v.camera)
-    );
-    parts = parts.filter((part) => !done.has(part.camera));
+
+    // CR-004: players never see parts. Only a game from before whole videos
+    // (wholeVideo 'Skipped' with saved parts) still lists its parts.
+    const legacy = rows[0].wholeVideo === "Skipped";
+    const parts = legacy
+      ? await req.db.query(
+          `SELECT partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status,
+                  videoPath, thumbnailPath, expiresAt
+           FROM clips
+           WHERE sessionId = ? AND status = 'Ready' AND videoPath IS NOT NULL
+           ORDER BY partIndex ASC, camera ASC`,
+          [rows[0].sessionId]
+        )
+      : [];
 
     const {
       sessionId: _sessionId,
@@ -246,39 +252,27 @@ router.get(
       wholeVideo,
       ...info
     } = rows[0];
-    const inDrive = (part) => part.driveStatus === "Uploaded" && Boolean(part.driveUrl);
     return res.sendSuccess("Session", {
       session: {
         ...info,
         status: session.status,
         venueLogoUrl: signUploadUrl(logoUrl),
-        partsTotal: expectedParts({ ...info, partCameras }),
+        // CR-004: "Saving your game… 25 of 30 minutes saved"
+        ...savingProgress({ ...info, partCameras, settledPartSeconds: session.settledPartSeconds }),
         // CR-001: the game's folder in the venue's Google Drive, once a video is in it
-        driveUrl:
-          driveUrl && (parts.some(inDrive) || videos.some((v) => v.driveStatus === "Uploaded"))
-            ? driveUrl
-            : null,
-        // CR-003: one whole video per camera (camera 0 = the court's only / stacked view).
-        // `parts` then holds only parts not joined yet (while the game is being saved).
+        driveUrl: driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
+        // CR-003: one whole video per camera (camera 0 = the court's only / stacked view)
         videos: videos.map(toPublicVideo),
         // True while the whole video is still being made (the page keeps checking)
         savingWholeVideo:
           ["Processing", "Ready"].includes(session.status) &&
           (wholeVideo === null || wholeVideo === "Pending"),
-        parts: parts.map(
-          ({ videoPath, thumbnailPath, driveStatus, driveUrl: partDriveUrl, ...part }) => {
-            const ready = part.status === "Ready";
-            return {
-              ...part,
-              // To the player a part being cut is still "saving"
-              status: part.status === "Processing" ? "Pending" : part.status,
-              videoUrl: ready ? signUploadUrl(videoPath) : null,
-              downloadUrl: ready ? signedDownloadUrl(videoPath) : null,
-              thumbnailUrl: ready ? signUploadUrl(thumbnailPath) : null,
-              driveUrl: inDrive({ driveStatus, driveUrl: partDriveUrl }) ? partDriveUrl : null,
-            };
-          }
-        ),
+        parts: parts.map(({ videoPath, thumbnailPath, ...part }) => ({
+          ...part,
+          videoUrl: signUploadUrl(videoPath),
+          downloadUrl: signedDownloadUrl(videoPath),
+          thumbnailUrl: signUploadUrl(thumbnailPath),
+        })),
       },
     });
   })

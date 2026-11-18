@@ -20,8 +20,19 @@ export const useSessionPageHooks = () => {
     videos.find((video) => video.camera === cameraTab) || videos[0] || null;
   const twoCameras = parts.some((part) => part.camera > 0) || videos.length > 1;
 
-  // Parts that aren't due yet (recording still to come)
-  const remaining = Math.max(0, (Number(session?.partsTotal) || 0) - parts.length);
+  // CR-004: after Stop / End, "Saving your game… 25 of 30 minutes saved", then
+  // "Putting your video together…" until a whole video is ready
+  const hasReadyVideo = videos.some((video) => ["Ready", "Expired"].includes(video.status));
+  const saving =
+    session &&
+    (session.status === "Processing" ||
+      (session.savingWholeVideo && !hasReadyVideo && !videos.some((v) => v.status === "Failed")))
+      ? {
+          savedMinutes: Math.floor((Number(session.savedSeconds) || 0) / 60),
+          totalMinutes: Math.max(1, Math.round((Number(session.totalSeconds) || 0) / 60)),
+          joining: session.status !== "Processing",
+        }
+      : null;
   const readyCount =
     parts.filter((p) => p.status === "Ready").length +
     videos.filter((v) => v.status === "Ready").length;
@@ -64,8 +75,7 @@ export const useSessionPageHooks = () => {
     activeVideo,
     setCameraTab,
     twoCameras,
-    savingWholeVideo: Boolean(session?.savingWholeVideo),
-    remaining,
+    saving,
     readyCount,
     expiresAt,
     courtName,

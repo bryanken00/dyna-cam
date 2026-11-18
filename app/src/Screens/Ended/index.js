@@ -14,7 +14,18 @@ import { useEndedScreen } from "./useEndedScreen";
 /** Wide enough to put the QR beside the text (landscape tablet / phone). */
 const SIDE_BY_SIDE_MIN_WIDTH = 640;
 
-/** "Saving your game… 2 of 5 parts" → "Ready — scan to download", or why not. */
+/**
+ * CR-004: "Saving your game… 25 of 30 minutes saved" — never "parts". An API
+ * from before CR-004 sends no totalSeconds: then just "Saving your game…".
+ */
+const savingText = (session) => {
+  if (session.totalSeconds == null) return "Saving your game…";
+  const total = Math.max(1, Math.round(session.totalSeconds / 60));
+  const saved = Math.min(total, Math.floor((session.savedSeconds ?? 0) / 60));
+  return `Saving your game… ${saved} of ${total} ${total === 1 ? "minute" : "minutes"} saved`;
+};
+
+/** The saving progress → "Ready — scan to download", or why not. */
 const SavingLine = ({ session }) => {
   const colors = useThemeColors();
   if (!session) return null;
@@ -26,7 +37,7 @@ const SavingLine = ({ session }) => {
             <CheckCircle2 size={24} color={colors.foreground} />
             <Text className="font-sans-semibold text-[22px]">Ready — scan to download</Text>
           </View>
-          {/* Ready can still mean some parts failed — the API says which */}
+          {/* Ready can still mean some minutes weren't recorded — the API says which */}
           {session.failureReason ? (
             <Text className="text-muted-foreground text-center text-[13px]">
               {session.failureReason}
@@ -52,10 +63,8 @@ const SavingLine = ({ session }) => {
       // Processing (and the moment right after Stop)
       return (
         <View className="flex-row items-center gap-2">
-          <Text className="font-sans-semibold text-center text-[20px]">
-            {session.partsTotal
-              ? `Saving your game… ${session.partsReady ?? 0} of ${session.partsTotal} parts`
-              : "Saving your game…"}
+          <Text className="font-sans-semibold shrink text-center text-[20px]">
+            {savingText(session)}
           </Text>
           <DotsLoader color={colors.foreground} size={20} />
         </View>

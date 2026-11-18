@@ -81,6 +81,74 @@ const decidePartCameras = async (db, session) => {
   return boxes.length > 0 && boxes.every(capable) ? 2 : 1;
 };
 
+/**
+ * CR-004: how much of a game is saved, for "Saving your game… 25 of 30
+ * minutes saved". A part counts once it is settled (made, or given up), and
+ * per camera on a two-camera game. Needs `settledPartSeconds` from
+ * SETTLED_PART_SECONDS_SQL (with the session as `s`).
+ * @returns {{ savedSeconds: number, totalSeconds: number }}
+ */
+export const SETTLED_PART_SECONDS_SQL = `(
+  SELECT COALESCE(SUM(sp.durationSeconds), 0) FROM clips sp
+  WHERE sp.sessionId = s.sessionId AND sp.status IN ('Ready', 'Failed', 'Expired')
+) AS settledPartSeconds`;
+
+export const savingProgress = (row) => {
+  const totalSeconds = Math.max(0, parseLocal(row.endAt).diff(parseLocal(row.startAt), "seconds"));
+  const cameras = Number(row.partCameras) === 2 ? 2 : 1;
+  const savedSeconds = Math.min(
+    totalSeconds,
+    Math.round(Number(row.settledPartSeconds || 0) / cameras)
+  );
+  return { savedSeconds, totalSeconds };
+};
+
+const clockOf = (local) => parseLocal(local).format("h:mm");
+const meridiemOf = (local) => parseLocal(local).format("A");
+
+/**
+ * CR-004: the note for footage a game is missing, in minutes and times —
+ * "8 minutes weren't recorded (11:23 – 11:31 AM)", per camera on a
+ * two-camera game ("Cam 2: …"). Null when nothing is missing.
+ * @param {Array} parts - the game's parts: camera, status, windowStartAt, windowEndAt
+ */
+export const missingFootageNote = (parts) => {
+  const byCamera = new Map();
+  for (const part of [...parts].sort((a, b) => (a.windowStartAt < b.windowStartAt ? -1 : 1))) {
+    if (["Ready", "Expired"].includes(part.status)) continue;
+    const gaps = byCamera.get(part.camera) || [];
+    const last = gaps[gaps.length - 1];
+    if (last && last.endAt >= part.windowStartAt) {
+      if (part.windowEndAt > last.endAt) last.endAt = part.windowEndAt;
+    } else {
+      gaps.push({ startAt: part.windowStartAt, endAt: part.windowEndAt });
+    }
+    byCamera.set(part.camera, gaps);
+  }
+  const notes = [...byCamera.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([camera, gaps]) => {
+      const seconds = gaps.reduce(
+        (sum, gap) => sum + parseLocal(gap.endAt).diff(parseLocal(gap.startAt), "seconds"),
+        0
+      );
+      const minutes = Math.max(1, Math.round(seconds / 60));
+      const times = gaps
+        .map((gap) => {
+          const sameHalf = meridiemOf(gap.startAt) === meridiemOf(gap.endAt);
+          const start = sameHalf
+            ? clockOf(gap.startAt)
+            : `${clockOf(gap.startAt)} ${meridiemOf(gap.startAt)}`;
+          return `${start} – ${clockOf(gap.endAt)} ${meridiemOf(gap.endAt)}`;
+        })
+        .join(", ");
+      const what =
+        minutes === 1 ? "1 minute wasn't recorded" : `${minutes} minutes weren't recorded`;
+      return `${camera ? `Cam ${camera}: ` : ""}${what} (${times})`;
+    });
+  return notes.length > 0 ? notes.join("; ") : null;
+};
+
 /** Number of parts a session window splits into. */
 export const partCount = (startAt, endAt) =>
   Math.max(
@@ -223,12 +291,18 @@ export const settleSessions = async (db, sessionId) => {
     if (Number(row.parts) < expected || Number(row.open) > 0) continue;
     const ready = Number(row.ready);
     const status = ready > 0 ? "Ready" : "Failed";
-    const reason =
-      ready === 0
-        ? "None of the session's parts could be saved"
-        : ready < expected
-          ? `${expected - ready} of ${expected} parts could not be saved`
-          : null;
+    let reason = null;
+    if (ready === 0) {
+      reason = "None of the game could be recorded";
+    } else if (ready < expected) {
+      // CR-004: in minutes and times, never "parts"
+      const parts = await db.query(
+        `SELECT camera, status, windowStartAt, windowEndAt FROM clips
+         WHERE sessionId = ? AND status != 'Deleted'`,
+        [row.sessionId]
+      );
+      reason = missingFootageNote(parts);
+    }
     await db.query(
       `UPDATE recording_sessions SET status = ?, failureReason = ?, dateUpdated = ?
        WHERE sessionId = ? AND status = 'Processing'`,

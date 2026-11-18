@@ -209,9 +209,12 @@ describe("recording sessions", () => {
       const page = await ctx.api("GET", `/public/sessions/${token}`);
       assert.equal(page.status, 200);
       assert.equal(page.data.session.status, "Ready");
-      assert.equal(page.data.session.parts.length, 3);
       assert.equal(page.data.session.sessionId, undefined, "no IDs on the public page");
-      assert.ok(page.data.session.parts[0].videoUrl);
+      // CR-004: players never see parts — the game is saved, its whole video is next
+      assert.deepEqual(page.data.session.parts, []);
+      assert.equal(page.data.session.totalSeconds, 12 * 60);
+      assert.equal(page.data.session.savedSeconds, 12 * 60);
+      assert.equal(page.data.session.savingWholeVideo, true);
     });
 
     it("is Ready with a note when only some parts could be saved", async () => {
@@ -225,7 +228,11 @@ describe("recording sessions", () => {
       });
       const one = await call("GET", `/admin/sessions/${partial.sessionId}`);
       assert.equal(one.data.session.status, "Ready");
-      assert.equal(one.data.session.failureReason, "1 of 3 parts could not be saved");
+      // CR-004: in minutes and times, never "parts" (the last part was 1 minute)
+      assert.match(
+        one.data.session.failureReason,
+        /^1 minute wasn't recorded \(\d{1,2}:\d{2}( [AP]M)? – \d{1,2}:\d{2} [AP]M\)$/
+      );
     });
 
     it("only cuts the parts that are due while a session is still recording, and can end early", async () => {
@@ -276,7 +283,7 @@ describe("recording sessions", () => {
       await runClipMaintenance(ctx.db);
       const one = await call("GET", `/admin/sessions/${lost.sessionId}`);
       assert.equal(one.data.session.status, "Failed");
-      assert.equal(one.data.session.failureReason, "None of the session's parts could be saved");
+      assert.equal(one.data.session.failureReason, "None of the game could be recorded");
     });
   });
 

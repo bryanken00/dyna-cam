@@ -40,8 +40,8 @@ const noticeStyle = {
   color: "var(--color-text-dark)",
 };
 
-/** Status sentence above the parts. */
-const StatusNotice = ({ session, remaining, readyCount }) => {
+/** Status sentence at the top: before, during, or when nothing could be recorded. */
+const StatusNotice = ({ session }) => {
   const { status } = session;
   if (status === "Scheduled") {
     return (
@@ -59,25 +59,13 @@ const StatusNotice = ({ session, remaining, readyCount }) => {
     );
   }
   if (status === "Recording") {
+    // CR-004: nothing to watch until the game ends
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
         <Radio className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-error)" }} />
         <span>
-          <strong className="font-semibold">Recording now.</strong> What&apos;s
-          recorded so far shows below every 5 minutes
-          {remaining > 0 && ` (${remaining} more to come)`}; the whole game
-          arrives as one video after it ends.
-        </span>
-      </div>
-    );
-  }
-  if (status === "Processing") {
-    return (
-      <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
-        <Loader2 className="w-4 h-4 mt-0.5 shrink-0 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
-        <span>
-          <strong className="font-semibold">Recording finished.</strong> Saving
-          the last parts — this page updates on its own.
+          <strong className="font-semibold">Recording now</strong> — your whole game
+          appears here as one video when it ends.
         </span>
       </div>
     );
@@ -87,15 +75,67 @@ const StatusNotice = ({ session, remaining, readyCount }) => {
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
         <CircleAlert className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-error)" }} />
         <span>
-          <strong className="font-semibold">Some of this session couldn&apos;t be saved.</strong>{" "}
-          {readyCount > 0
-            ? "The parts that were saved are below."
-            : "Please ask the front desk."}
+          <strong className="font-semibold">This game couldn&apos;t be recorded.</strong>{" "}
+          Please ask the front desk.
         </span>
       </div>
     );
   }
   return null;
+};
+
+/**
+ * CR-004: after Stop / End — "Saving your game… 25 of 30 minutes saved" with
+ * a bar, then "Putting your video together…" while the parts are joined.
+ */
+const SavingProgress = ({ savedMinutes, totalMinutes, joining }) => {
+  const percent = totalMinutes > 0 ? Math.min(100, Math.round((savedMinutes / totalMinutes) * 100)) : 0;
+  return (
+    <div className="p-4" style={{ ...cardStyle, borderRadius: 10 }} aria-live="polite">
+      <div className="flex items-center gap-2" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
+        <Loader2 className="w-4 h-4 shrink-0 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
+        <span className="font-semibold">
+          {joining
+            ? "Putting your video together…"
+            : `Saving your game… ${savedMinutes} of ${totalMinutes} ${totalMinutes === 1 ? "minute" : "minutes"} saved`}
+        </span>
+      </div>
+      <div
+        className="mt-3 overflow-hidden"
+        role="progressbar"
+        aria-label="Saving your game"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={joining ? 100 : percent}
+        style={{
+          height: 6,
+          borderRadius: 999,
+          background: "var(--color-surface-sunken)",
+          border: "1px solid var(--color-line)",
+        }}
+      >
+        <div
+          className="h-full transition-[width] duration-500 ease-out"
+          style={{
+            width: `${joining ? 100 : percent}%`,
+            borderRadius: 999,
+            background: "var(--color-secondary-color)",
+          }}
+        />
+      </div>
+      <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+        This page updates on its own — keep it open or come back to this link later.
+      </p>
+    </div>
+  );
+};
+
+/** "8 minutes weren't recorded (11:23 – 11:31 AM)" for a whole video's gaps. */
+const gapNote = (gaps) => {
+  const seconds = gaps.reduce((sum, gap) => sum + dayjs(gap.endAt).diff(dayjs(gap.startAt), "second"), 0);
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  const what = minutes === 1 ? "1 minute wasn't recorded" : `${minutes} minutes weren't recorded`;
+  return `${what} (${gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")})`;
 };
 
 /** CR-003: Cam 1 / Cam 2 switch above the whole video (two-camera courts). */
@@ -143,12 +183,6 @@ const WholeVideoCard = ({ video, twoCameras }) => {
               .join(" · ")}
           </span>
         )}
-        {video.status === "Saving" && (
-          <span className="inline-flex items-center gap-1.5 shrink-0" style={muted}>
-            <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
-            Putting it together…
-          </span>
-        )}
       </div>
 
       {video.status === "Ready" && videoSrc && (
@@ -184,23 +218,14 @@ const WholeVideoCard = ({ video, twoCameras }) => {
         </>
       )}
 
-      {video.gaps?.length > 0 && video.status !== "Saving" && (
+      {video.gaps?.length > 0 && video.status === "Ready" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          No footage{" "}
-          {video.gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")} — the
-          camera wasn&apos;t recording then, so the video skips it.
-        </p>
-      )}
-      {video.status === "Saving" && (
-        <p className="m-0 px-4 pb-3" style={muted}>
-          Joining the parts into one video — usually a minute or two. The parts are below
-          until then.
+          {gapNote(video.gaps)} — the camera wasn&apos;t recording then, so the video skips it.
         </p>
       )}
       {video.status === "Failed" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          The whole video couldn&apos;t be made yet. The parts are below — the front desk can
-          try again.
+          We&apos;re still putting your video together — check back soon.
         </p>
       )}
       {video.status === "Expired" && (
@@ -226,7 +251,10 @@ const WholeVideoCard = ({ video, twoCameras }) => {
   );
 };
 
-/** One part: video + Download when Ready, "Saving…" when Pending, a note otherwise. */
+/**
+ * A game recorded before whole videos (it has no whole video): its saved
+ * 5-minute pieces, as they were shown then. New games never show these.
+ */
 const PartCard = ({ part }) => {
   const videoSrc = getImageUrl(part.videoUrl);
   const downloadHref = getImageUrl(part.downloadUrl);
@@ -305,8 +333,9 @@ const PartCard = ({ part }) => {
 };
 
 /**
- * `/session/:shareToken` — a booked court session for the player: status, then
- * each 5-minute part as it is saved. Polls every 10 s while it is live.
+ * `/session/:shareToken` — a recorded game for the player: when it starts, that
+ * it's recording, how much is saved after it ends, then the whole video per
+ * camera (CR-003). Players never see parts (CR-004). Polls while anything changes.
  */
 const SessionPage = () => {
   const {
@@ -316,8 +345,7 @@ const SessionPage = () => {
     activeVideo,
     setCameraTab,
     twoCameras,
-    savingWholeVideo,
-    remaining,
+    saving,
     readyCount,
     expiresAt,
     courtName,
@@ -399,12 +427,20 @@ const SessionPage = () => {
           )}
           {formatDate(session.startAt)} · {formatTimeRange(session.startAt, session.endAt)}
         </div>
-        <StatusDot tone={SESSION_STATUS_TONE[session.status] || "muted"}>
-          {session.status}
+        {/* "Ready" only once the whole video is there (CR-004) */}
+        <StatusDot tone={saving ? "warning" : SESSION_STATUS_TONE[session.status] || "muted"}>
+          {saving ? "Saving" : session.status}
         </StatusDot>
       </div>
 
-      <StatusNotice session={session} remaining={remaining} readyCount={readyCount} />
+      <StatusNotice session={session} />
+      {saving && (
+        <SavingProgress
+          savedMinutes={saving.savedMinutes}
+          totalMinutes={saving.totalMinutes}
+          joining={saving.joining}
+        />
+      )}
 
       {/* CR-001: the whole game's folder in the venue's Google Drive */}
       {session.driveUrl && (
@@ -416,20 +452,15 @@ const SessionPage = () => {
         </Button>
       )}
 
-      {/* CR-003: the whole game, one video per camera */}
-      {videos.length > 1 && (
+      {/* CR-003: the whole game, one video per camera (once it's made) */}
+      {!saving && videos.length > 1 && (
         <CameraTabs videos={videos} active={activeVideo} onSelect={setCameraTab} />
       )}
-      {activeVideo && <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />}
+      {!saving && activeVideo && <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />}
 
-      {/* Parts not joined yet: while recording, or until the whole video is made */}
+      {/* Only a game recorded before whole videos still lists its pieces */}
       {parts.length > 0 && (
         <div className="mt-4 space-y-3">
-          {(videos.length > 0 || savingWholeVideo) && (
-            <div className="font-semibold" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-              So far
-            </div>
-          )}
           {parts.map((part) => (
             <PartCard key={`${part.partIndex}-${part.camera ?? 0}`} part={part} />
           ))}

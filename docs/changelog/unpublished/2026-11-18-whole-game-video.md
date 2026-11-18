@@ -8,9 +8,10 @@ ref: CR-003
 A recorded game now reaches players as **one video for the whole game** instead of a list of
 5-minute parts, and **Download** saves a single file. On a court with two cameras, players get a
 separate full-size video for each camera, with **Cam 1** and **Cam 2** buttons on their page.
-While the game is still going, the page shows what's recorded so far, and the whole video replaces
-it shortly after the game ends. If the camera missed a stretch, the video skips it and the page
-says when. Staff see the whole video, its status and a **Try again** button in Admin → Sessions.
+While the game is recording, the page simply says so; after **Stop** on the session device or
+**End** in Admin it shows "Saving your game… 25 of 30 minutes saved", then the video. Players
+never see pieces of a game. If the camera missed a stretch, the video skips it and the page says
+how many minutes and when ("8 minutes weren't recorded (11:23 – 11:31 AM)"). Staff see the whole video, its status and a **Try again** button in Admin → Sessions.
 With Google Drive connected, the game's folder gets the whole video instead of parts. 60-second
 replays are unchanged.
 
@@ -28,4 +29,8 @@ replays are unchanged.
 - `edge/`: **update every venue's recorder box**. It now cuts whole-game parts per camera on a
   two-camera court and reports the `session-part-camera` capability. Boxes not yet updated keep
   working: their two-camera games are joined as one stacked whole video.
-- `app/`: no change.
+- `app/`: the session device's end screen shows "Saving your game… N of M minutes saved"
+  (CR-004). JavaScript only: an over-the-air update, no new store build.
+- `back/`: the public session response no longer lists parts (only games recorded before
+  migration 016 still do) and adds `savedSeconds` / `totalSeconds`; `/app/session` adds the same.
+  A game's missing-footage note is worded in minutes and times (CR-004).
