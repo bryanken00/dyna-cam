@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
-import PartsProgress from "./components/PartsProgress";
+import VideosProgress from "./components/VideosProgress";
 import DevicesCount from "./components/DevicesCount";
 import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
@@ -276,7 +276,7 @@ export const useSessionHooks = () => {
   const { current, pageSize } = pagination;
 
   // ─── Columns ───────────────────────────────────────────────────────
-  // # · court + venue · when · player · status (+ paired devices) · parts · ⋮
+  // # · court + venue · when · player · status (+ paired devices) · videos · ⋮
   const columns = useMemo(
     () => [
       {
@@ -427,17 +427,15 @@ export const useSessionHooks = () => {
       },
       {
         title: "Footage",
-        key: "parts",
+        key: "videos",
         width: 120,
-        render: (_, record) =>
-          ["Cancelled", "Waiting"].includes(record.status) ? (
-            <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>—</span>
-          ) : (
-            <PartsProgress
-              ready={Number(record.partsReady) || 0}
-              total={Number(record.partsTotal) || 0}
-            />
-          ),
+        render: (_, record) => (
+          <VideosProgress
+            ready={Number(record.videosReady) || 0}
+            total={Number(record.videosTotal) || 0}
+            status={record.status}
+          />
+        ),
       },
       {
         title: "",

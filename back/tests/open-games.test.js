@@ -141,12 +141,8 @@ describe("open games", () => {
       `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
       [await nowManila(-12), await nowManila(1), game.sessionId]
     );
-    const jobs = await jobsFor(game.sessionId); // a box poll makes the parts due
-    assert.deepEqual(
-      jobs.map((job) => job.partIndex),
-      [0, 1],
-      "two full 5-minute pieces so far"
-    );
+    // CR-006: nothing to send while it records — the box only keeps the footage
+    assert.deepEqual(await jobsFor(game.sessionId), [], "no job while recording");
     const stored = await row(game.sessionId);
     assert.equal(stored.status, "Recording");
     assert.ok(stored.endAt > (await nowManila(5 * 60)), "rolled ahead again");
@@ -158,7 +154,6 @@ describe("open games", () => {
     );
 
     const detail = await call("GET", `/admin/sessions/${game.sessionId}`);
-    assert.equal(detail.data.session.partsTotal, 3, "only what has run so far (12 min)");
     assert.ok(
       detail.data.session.durationMinutes >= 11 && detail.data.session.durationMinutes <= 13
     );
@@ -176,15 +171,15 @@ describe("open games", () => {
     const stored = await row(game.sessionId);
     assert.equal(stored.status, "Processing");
     assert.ok(stored.endAt <= (await nowManila(0.1)), "the real end is now");
+    // CR-006: one game job for the whole game, from pairing to End game
     const jobs = await jobsFor(game.sessionId);
-    assert.ok(
-      jobs.some((job) => job.partIndex === 2),
-      "the last piece is cut to the end"
-    );
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].type, "game");
+    assert.ok(jobs[0].windowEndMs - jobs[0].windowStartMs >= 12 * 60_000);
 
     const page = await ctx.api("GET", `/public/sessions/${game.shareUrl.split("/").pop()}`);
     assert.ok(page.data.session.endAt, "a finished game shows its end");
-    assert.ok(page.data.session.totalSeconds >= 12 * 60);
+    assert.equal(page.data.session.uploadPercent, null, "the box is making the file");
   });
 
   it("frees the court: a new game can start", async () => {

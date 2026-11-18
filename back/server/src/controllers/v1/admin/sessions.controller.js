@@ -9,18 +9,17 @@ import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { sessionShareUrl, toEpochMs } from "../../../utils/clips.js";
-import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { createPairingCode, PAIRING_CODE_TTL_MINUTES } from "../../../utils/pairing.js";
 import { createSessionPairingCodeSchema } from "../../../validators/pairing.validator.js";
 import { clearStream, describeStream, FORGET_STREAM_SQL } from "../../../utils/sessionStreams.js";
 import {
   endSessionNow,
-  expectedParts,
   materializeSessionParts,
   openGameEnd,
   SESSION_MAX_DAYS_AHEAD,
   settleSessions,
+  uploadPercent,
 } from "../../../utils/sessions.js";
 import {
   createSessionSchema,
@@ -32,7 +31,7 @@ import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
  * Phase 3). Permission: clips (a session's footage is delivered as clips).
- * See utils/sessions.js for how a session becomes 5-minute parts. Phones/tablets
+ * See utils/sessions.js for how a game becomes one video per camera (CR-006). Phones/tablets
  * are paired to one session here (PLAN-002 Phase E, /:sessionId/pairing-codes)
  * and see it live through /api/v1/app (utils/sessionDevices.js).
  */
@@ -46,8 +45,10 @@ const SESSION_SELECT = `
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
          s.partCameras, s.wholeVideo, s.openEnded, s.dateCreated, s.dateUpdated,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
-         (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
-           AS partsReady,
+         (SELECT COUNT(*) FROM session_videos sv
+          WHERE sv.sessionId = s.sessionId AND sv.status = 'Ready') AS videosReady,
+         (SELECT COUNT(*) FROM session_videos sv
+          WHERE sv.sessionId = s.sessionId AND sv.status != 'Deleted') AS videosTotal,
          (SELECT COUNT(*) FROM paired_apps d WHERE d.sessionId = s.sessionId AND d.status = 'Active')
            AS devicesCount
   FROM recording_sessions s
@@ -75,8 +76,9 @@ const toSession = (row) => {
         ? Math.max(0, nowM.diff(moment.tz(row.startAt, FORMAT, TIMEZONE), "minutes"))
         : 0
       : moment(row.endAt).diff(moment(row.startAt), "minutes"),
-    partsTotal: expectedParts(row),
-    partsReady: Number(row.partsReady || 0),
+    // CR-006: the game's whole videos (one per camera), made after it ends
+    videosReady: Number(row.videosReady || 0),
+    videosTotal: Number(row.videosTotal || 0),
     devicesCount: Number(row.devicesCount || 0),
     shareUrl: sessionShareUrl(shareToken),
   };
@@ -163,15 +165,7 @@ router.get(
       return res.sendError("Session not found", 404);
     }
 
-    const parts = await req.db.query(
-      `SELECT clipId, partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status,
-              failureReason, videoPath, thumbnailPath, expiresAt, joinedAt
-       FROM clips
-       WHERE sessionId = ? AND status != 'Deleted'
-       ORDER BY partIndex ASC, camera ASC`,
-      [req.params.sessionId]
-    );
-    // CR-003: the whole video per camera
+    // CR-003 / CR-006: the whole video per camera
     const videos = await loadSessionVideos(req.db, req.params.sessionId);
 
     const [devices, pairingCodes] = await Promise.all([
@@ -215,16 +209,7 @@ router.get(
           expiresInSeconds: secondsUntil(key.expiresAt),
         })),
         videos: videos.map(toAdminVideo),
-        // A part joined into its whole video has no file of its own any more
-        parts: parts.map(({ videoPath, thumbnailPath, ...part }) => {
-          const ready = part.status === "Ready" && Boolean(videoPath);
-          return {
-            ...part,
-            videoUrl: ready ? signUploadUrl(videoPath) : null,
-            downloadUrl: ready ? signedDownloadUrl(videoPath) : null,
-            thumbnailUrl: ready ? signUploadUrl(thumbnailPath) : null,
-          };
-        }),
+        uploadPercent: uploadPercent(videos),
       },
     });
   })
@@ -566,9 +551,10 @@ router.post(
 );
 
 /**
- * POST /:sessionId/videos/:camera/retry  (CR-003)
- * Join a whole-game video again after it failed (e.g. ffmpeg was missing or
- * the disk was full). The parts are still there until a join works.
+ * POST /:sessionId/videos/:camera/retry  (CR-006)
+ * Ask the recorder box to make and send a failed game video again. Works while
+ * the box still has the game's footage: the game is listed in its /config
+ * again until the video is in.
  */
 router.post(
   "/:sessionId/videos/:camera/retry",
@@ -578,20 +564,24 @@ router.post(
     const result = await req.db.query(
       `UPDATE session_videos sv
        JOIN recording_sessions s ON s.sessionId = sv.sessionId AND s.status != 'Cancelled'
-       SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL,
-           sv.failureReason = NULL, sv.dateUpdated = ?
+       SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL, sv.deviceId = NULL,
+           sv.uploadBytes = NULL, sv.receivedBytes = 0, sv.failureReason = NULL,
+           sv.dateUpdated = ?
        WHERE sv.sessionId = ? AND sv.camera = ? AND sv.status = 'Failed'`,
       [getCurrentTimestampLocal(), req.params.sessionId, req.params.camera]
     );
     if (result.affectedRows === 0) {
       return res.sendError("No failed whole-game video for this camera", 404);
     }
+    // Back to Processing: the box keeps the footage and gets the job again
     await req.db.query(
-      `UPDATE recording_sessions SET wholeVideo = 'Pending'
-       WHERE sessionId = ? AND wholeVideo = 'Done'`,
-      [req.params.sessionId]
+      `UPDATE recording_sessions SET status = 'Processing', wholeVideo = 'Pending', dateUpdated = ?
+       WHERE sessionId = ? AND status IN ('Ready', 'Failed')`,
+      [getCurrentTimestampLocal(), req.params.sessionId]
     );
-    return res.sendSuccess("Joining the whole video again — it's ready in a minute or two");
+    return res.sendSuccess(
+      "Asked the recorder box to send this video again — it works while the box still has the game's footage"
+    );
   })
 );
 

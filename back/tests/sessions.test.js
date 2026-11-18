@@ -5,13 +5,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { JPEG, startTestApp } from "./helpers/testApp.js";
-
-const MP4 = Buffer.concat([
-  Buffer.from([0, 0, 0, 0x18]),
-  Buffer.from("ftypisom"),
-  Buffer.alloc(64, 1),
-]);
+import { gameJobs, sendGame } from "./helpers/gameUpload.js";
+import { startTestApp } from "./helpers/testApp.js";
 
 describe("recording sessions", () => {
   let ctx;
@@ -25,14 +20,6 @@ describe("recording sessions", () => {
     (token) =>
     (method, url, options = {}) =>
       ctx.api(method, url, { ...options, headers: { Authorization: `Device ${token}` } });
-  const upload = (device, clipId) =>
-    device("POST", `/device/clips/${clipId}/upload`, {
-      form: [
-        ["video", MP4, "video/mp4", "part.mp4"],
-        ["thumbnail", JPEG, "image/jpeg", "part.jpg"],
-      ],
-    });
-
   /** "YYYY-MM-DD HH:mm:ss" in Manila, `minutes` from now (negative = ago). */
   const manila = async (minutes) => {
     const [[row]] = await ctx.sql.query(
@@ -59,11 +46,6 @@ describe("recording sessions", () => {
     return created.data;
   };
 
-  const sessionJobs = async (target, sessionId) =>
-    (await target.device("GET", "/device/jobs?wait=0")).data.jobs
-      .filter((j) => j.sessionId === sessionId)
-      .sort((a, b) => a.partIndex - b.partIndex);
-
   const setupVenue = async (target, name) => {
     target.venueId = (await call("POST", "/admin/venues", { name })).data.venueId;
     const court = await call("POST", "/admin/courts", {
@@ -74,6 +56,7 @@ describe("recording sessions", () => {
     target.courtId = court.data.courtId;
     const box = await ctx.pairBox(admin.token, target.venueId, "Box");
     target.device = asDevice(box.data.token);
+    target.token = box.data.token;
   };
 
   before(async () => {
@@ -107,7 +90,6 @@ describe("recording sessions", () => {
 
       const one = await call("GET", `/admin/sessions/${created.data.sessionId}`);
       assert.equal(one.data.session.status, "Scheduled");
-      assert.equal(one.data.session.partsTotal, 18);
       assert.equal(one.data.session.phone, "0912 3456 789");
 
       // Not started: can be cancelled; the slot is then free again
@@ -170,21 +152,22 @@ describe("recording sessions", () => {
     });
   });
 
-  describe("parts", () => {
+  // CR-006: a game travels as one file per camera, uploaded after it ends
+  describe("game videos", () => {
     let finished;
 
-    it("creates one job per 5-minute part once the window has ended, for the home box only", async () => {
-      finished = await bookAt(home, -14, -2); // 12 minutes → parts of 5, 5, 2
-      const jobs = await sessionJobs(home, finished.sessionId);
-      assert.deepEqual(
-        jobs.map((j) => [j.partIndex, j.durationSeconds, j.windowEndMs - j.windowStartMs]),
-        [
-          [0, 300, 300_000],
-          [1, 300, 300_000],
-          [2, 120, 120_000],
-        ]
-      );
-      assert.equal((await sessionJobs(other, finished.sessionId)).length, 0);
+    it("makes one game job per camera once the game has ended, for the home box only", async () => {
+      finished = await bookAt(home, -14, -2);
+      const jobs = await gameJobs(ctx, home.token, finished.sessionId);
+      assert.equal(jobs.length, 1, "a one-camera court: one video");
+      assert.equal(jobs[0].camera, 0);
+      assert.equal(jobs[0].windowEndMs - jobs[0].windowStartMs, 12 * 60_000);
+      assert.equal((await gameJobs(ctx, other.token, finished.sessionId)).length, 0);
+
+      const [clips] = await ctx.sql.query(`SELECT COUNT(*) AS n FROM clips WHERE sessionId = ?`, [
+        finished.sessionId,
+      ]);
+      assert.equal(clips[0].n, 0, "no 5-minute pieces at all");
 
       const config = await home.device("GET", "/device/config");
       assert.ok(config.data.sessions.some((s) => s.sessionId === finished.sessionId));
@@ -193,55 +176,54 @@ describe("recording sessions", () => {
 
       const one = await call("GET", `/admin/sessions/${finished.sessionId}`);
       assert.equal(one.data.session.status, "Processing");
+      assert.equal(one.data.session.videosTotal, 1);
+      assert.equal(one.data.session.uploadPercent, null, "the box hasn't started sending");
       finished.jobs = jobs;
     });
 
-    it("settles Ready once every part is in, and the player's page lists the parts", async () => {
-      for (const job of finished.jobs) {
-        assert.equal((await upload(home.device, job.clipId)).status, 200);
-      }
+    it("settles Ready once the file is in; the player's page shows the video, never parts", async () => {
+      const done = await sendGame(ctx, home.token, finished.jobs[0].sessionVideoId);
+      assert.equal(done.status, 200, JSON.stringify(done.body));
       const one = await call("GET", `/admin/sessions/${finished.sessionId}`);
       assert.equal(one.data.session.status, "Ready");
-      assert.equal(one.data.session.partsReady, 3);
-      assert.ok(one.data.session.parts.every((p) => p.videoUrl && p.downloadUrl));
+      assert.equal(one.data.session.failureReason, null);
+      assert.equal(one.data.session.videosReady, 1);
+      assert.equal(one.data.session.videos[0].status, "Ready");
 
       const token = finished.shareUrl.split("/").pop();
       const page = await ctx.api("GET", `/public/sessions/${token}`);
       assert.equal(page.status, 200);
       assert.equal(page.data.session.status, "Ready");
       assert.equal(page.data.session.sessionId, undefined, "no IDs on the public page");
-      // CR-004: players never see parts — the game is saved, its whole video is next
       assert.deepEqual(page.data.session.parts, []);
-      assert.equal(page.data.session.totalSeconds, 12 * 60);
-      assert.equal(page.data.session.savedSeconds, 12 * 60);
-      assert.equal(page.data.session.savingWholeVideo, true);
+      assert.equal(page.data.session.uploadPercent, 100);
+      assert.ok(page.data.session.videos[0].downloadUrl);
+      assert.equal(
+        (await gameJobs(ctx, home.token, finished.sessionId)).length,
+        0,
+        "no job once it's in"
+      );
     });
 
-    it("is Ready with a note when only some parts could be saved", async () => {
-      const partial = await bookAt(home, -30, -19); // 11 minutes → 3 parts
-      const jobs = await sessionJobs(home, partial.sessionId);
-      assert.equal(jobs.length, 3);
-      await upload(home.device, jobs[0].clipId);
-      await upload(home.device, jobs[1].clipId);
-      await home.device("POST", `/device/clips/${jobs[2].clipId}/fail`, {
-        body: { reason: "Camera was not recording at that time" },
+    it("is Ready with a note in minutes when the camera missed a stretch", async () => {
+      const partial = await bookAt(home, -30, -19);
+      const [job] = await gameJobs(ctx, home.token, partial.sessionId);
+      const end = job.windowEndMs;
+      const done = await sendGame(ctx, home.token, job.sessionVideoId, {
+        gaps: [{ startMs: end - 60_000, endMs: end }],
       });
+      assert.equal(done.status, 200, JSON.stringify(done.body));
       const one = await call("GET", `/admin/sessions/${partial.sessionId}`);
       assert.equal(one.data.session.status, "Ready");
-      // CR-004: in minutes and times, never "parts" (the last part was 1 minute)
       assert.match(
         one.data.session.failureReason,
         /^1 minute wasn't recorded \(\d{1,2}:\d{2}( [AP]M)? – \d{1,2}:\d{2} [AP]M\)$/
       );
     });
 
-    it("only cuts the parts that are due while a session is still recording, and can end early", async () => {
-      const running = await bookAt(home, -7, 20); // 7 min in → only part 0 is due
-      let jobs = await sessionJobs(home, running.sessionId);
-      assert.deepEqual(
-        jobs.map((j) => j.partIndex),
-        [0]
-      );
+    it("has no job while the game is recording, and one as soon as it's ended early", async () => {
+      const running = await bookAt(home, -7, 20);
+      assert.equal((await gameJobs(ctx, home.token, running.sessionId)).length, 0);
       let one = await call("GET", `/admin/sessions/${running.sessionId}`);
       assert.equal(one.data.session.status, "Recording");
       assert.equal(
@@ -251,39 +233,31 @@ describe("recording sessions", () => {
       );
 
       assert.equal((await call("POST", `/admin/sessions/${running.sessionId}/end`)).status, 200);
-      jobs = await sessionJobs(home, running.sessionId);
-      assert.deepEqual(
-        jobs.map((j) => j.partIndex),
-        [0, 1]
-      );
+      const jobs = await gameJobs(ctx, home.token, running.sessionId);
+      assert.equal(jobs.length, 1);
+      assert.ok(jobs[0].windowEndMs <= Date.now() + 2000, "the window ends at End");
       one = await call("GET", `/admin/sessions/${running.sessionId}`);
       assert.equal(one.data.session.status, "Processing");
     });
 
-    it("gives a session part longer than a clip before giving up on it", async () => {
+    it("gives a game whose box never sends it a day before giving up", async () => {
       const { runClipMaintenance } = await import("../server/src/jobs/clipMaintenance.js");
-      const slow = await bookAt(home, -40, -30); // parts ended 30+ min ago, box busy
-      const jobs = await sessionJobs(home, slow.sessionId);
-      assert.equal(jobs.length, 2);
+      const lost = await bookAt(other, -100, -90); // the other box never polls
       await runClipMaintenance(ctx.db);
-      const [rows] = await ctx.sql.query(
-        `SELECT status FROM clips WHERE sessionId = ? ORDER BY partIndex`,
-        [slow.sessionId]
-      );
-      assert.deepEqual(
-        rows.map((r) => r.status),
-        ["Pending", "Pending"],
-        "a part 30 min old is still waiting"
-      );
-    });
+      let one = await call("GET", `/admin/sessions/${lost.sessionId}`);
+      assert.equal(one.data.session.status, "Processing", "still waiting after 90 minutes");
 
-    it("fails a session whose recorder box never picked it up", async () => {
-      const { runClipMaintenance } = await import("../server/src/jobs/clipMaintenance.js");
-      const lost = await bookAt(other, -100, -90); // parts > 60 min old; other box never polls
+      await ctx.sql.query(
+        `UPDATE recording_sessions SET startAt = DATE_SUB(startAt, INTERVAL 1 DAY),
+                endAt = DATE_SUB(endAt, INTERVAL 1 DAY)
+         WHERE sessionId = ?`,
+        [lost.sessionId]
+      );
       await runClipMaintenance(ctx.db);
-      const one = await call("GET", `/admin/sessions/${lost.sessionId}`);
+      one = await call("GET", `/admin/sessions/${lost.sessionId}`);
       assert.equal(one.data.session.status, "Failed");
       assert.equal(one.data.session.failureReason, "None of the game could be recorded");
+      assert.match(one.data.session.videos[0].failureReason, /didn't send this game in time/);
     });
   });
 

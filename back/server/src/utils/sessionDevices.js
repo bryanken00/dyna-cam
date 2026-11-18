@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import { moment } from "./dateUtils.js";
 import { DEVICE_ONLINE_SECONDS, secondsAgoLocal, sessionShareUrl, toEpochMs } from "./clips.js";
 import { decryptSecret } from "./crypto/secretBox.js";
-import { expectedParts, savingProgress, SETTLED_PART_SECONDS_SQL } from "./sessions.js";
 
 /**
  * Session devices (PLAN-002 Phase E): a phone/tablet paired to ONE recording
@@ -30,13 +29,18 @@ const RUNNING = ["Scheduled", "Recording"];
 
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
-  v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken, s.partCameras,
+  v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
   s.openEnded,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
-  (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
-    AS partsReady,
-  ${SETTLED_PART_SECONDS_SQL}`;
+  (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
+               ELSE COALESCE(sv.uploadBytes, 0) END)
+   FROM session_videos sv
+   WHERE sv.sessionId = s.sessionId AND sv.status IN ('Uploading', 'Ready')) AS uploadTotalBytes,
+  (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
+               ELSE LEAST(sv.receivedBytes, COALESCE(sv.uploadBytes, 0)) END)
+   FROM session_videos sv
+   WHERE sv.sessionId = s.sessionId AND sv.status IN ('Uploading', 'Ready')) AS uploadSentBytes`;
 
 export const SESSION_DEVICE_FROM = `FROM recording_sessions s
   JOIN courts c ON c.courtId = s.courtId
@@ -95,11 +99,14 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
     openEnded: Number(row.openEnded) === 1,
     endsInSeconds: recording && Number(row.openEnded) !== 1 ? seconds(endMs - nowMs) : 0,
     durationSeconds: seconds(Math.min(nowMs, endMs) - startMs),
-    // CR-004: "Saving your game… 25 of 30 minutes saved" (savedSeconds / totalSeconds);
-    // partsReady / partsTotal stay for app builds from before it
-    ...savingProgress(row),
-    partsReady: Number(row.partsReady || 0),
-    partsTotal: expectedParts(row),
+    // CR-006: "Saving your game… uploading 45%" — null while the box makes the file
+    uploadPercent:
+      Number(row.uploadTotalBytes) > 0
+        ? Math.min(
+            100,
+            Math.floor((Number(row.uploadSentBytes) / Number(row.uploadTotalBytes)) * 100)
+          )
+        : null,
     shareUrl: sessionShareUrl(row.shareToken),
     failureReason: row.failureReason || null,
   };

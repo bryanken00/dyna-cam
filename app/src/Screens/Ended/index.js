@@ -15,15 +15,13 @@ import { useEndedScreen } from "./useEndedScreen";
 const SIDE_BY_SIDE_MIN_WIDTH = 640;
 
 /**
- * CR-004: "Saving your game… 25 of 30 minutes saved" — never "parts". An API
- * from before CR-004 sends no totalSeconds: then just "Saving your game…".
+ * CR-006: "Saving your game…" while the recorder box makes the game's file,
+ * then "Saving your game… uploading 45%" — never "parts".
  */
-const savingText = (session) => {
-  if (session.totalSeconds == null) return "Saving your game…";
-  const total = Math.max(1, Math.round(session.totalSeconds / 60));
-  const saved = Math.min(total, Math.floor((session.savedSeconds ?? 0) / 60));
-  return `Saving your game… ${saved} of ${total} ${total === 1 ? "minute" : "minutes"} saved`;
-};
+const savingText = (session) =>
+  session.uploadPercent == null
+    ? "Saving your game…"
+    : `Saving your game… uploading ${session.uploadPercent}%`;
 
 /** The saving progress → "Ready — scan to download", or why not. */
 const SavingLine = ({ session }) => {

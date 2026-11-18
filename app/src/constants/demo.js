@@ -36,7 +36,6 @@ const SESSION_LENGTH_MS = 60 * 60000;
 const STREAM_LINK_SECONDS = 15 * 60;
 const DEMO_STREAM_SAVED_MS = 6000; // the "player" pastes their key
 const DEMO_STREAM_LIVE_MS = 5000; // then the box gets it live
-const PART_MS = 5 * 60000;
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
@@ -84,19 +83,14 @@ const demoStream = (ended) => {
 const demoSession = () => {
   const now = Date.now();
   const g = demoGame;
-  // Ended by Stop, or by reaching its end time
   // CR-005: an open game ends only with End game (no end time)
   const endedMs = g.endedMs ?? null;
   const lengthMs = Math.max(10000, (endedMs ?? now) - g.startMs);
-  const partsTotal = Math.max(1, Math.ceil(lengthMs / PART_MS));
 
   let status = "Recording";
-  let partsReady = Math.floor(lengthMs / PART_MS);
   if (endedMs) {
-    const saved = (now - endedMs) / DEMO_SAVE_MS;
-    status = saved >= 1 ? "Ready" : "Processing";
-    partsReady =
-      saved >= 1 ? partsTotal : Math.min(partsTotal - 1, Math.floor(saved * partsTotal));
+    // CR-006: the game's file "uploads" over DEMO_SAVE_MS, then it's Ready
+    status = now - endedMs >= DEMO_SAVE_MS ? "Ready" : "Processing";
   }
 
   return {
@@ -113,11 +107,8 @@ const demoSession = () => {
       elapsedSeconds: Math.floor(lengthMs / 1000),
       endsInSeconds: 0,
       durationSeconds: Math.floor(lengthMs / 1000),
-      partsReady,
-      partsTotal,
-      // CR-004: minutes saved, as the API reports them
-      savedSeconds: Math.round((partsReady / partsTotal) * Math.floor(lengthMs / 1000)),
-      totalSeconds: Math.floor(lengthMs / 1000),
+      // CR-006: the game's file uploads after End game
+      uploadPercent: endedMs ? Math.min(100, Math.floor(((now - endedMs) / DEMO_SAVE_MS) * 100)) : null,
       shareUrl: `${DEMO_APP_URL}/session/demo-share-1`,
       failureReason: null,
     },

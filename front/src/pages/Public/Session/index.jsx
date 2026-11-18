@@ -98,19 +98,17 @@ const StatusNotice = ({ session }) => {
 };
 
 /**
- * CR-004: after Stop / End — "Saving your game… 25 of 30 minutes saved" with
- * a bar, then "Putting your video together…" while the parts are joined.
+ * CR-006: after End game — "Saving your game…" while the recorder box makes
+ * the file, then "Saving your game… uploading 45%" with a bar.
  */
-const SavingProgress = ({ savedMinutes, totalMinutes, joining }) => {
-  const percent = totalMinutes > 0 ? Math.min(100, Math.round((savedMinutes / totalMinutes) * 100)) : 0;
+const SavingProgress = ({ percent }) => {
+  const known = percent != null;
   return (
     <div className="p-4" style={{ ...cardStyle, borderRadius: 10 }} aria-live="polite">
       <div className="flex items-center gap-2" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
         <Loader2 className="w-4 h-4 shrink-0 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
         <span className="font-semibold">
-          {joining
-            ? "Putting your video together…"
-            : `Saving your game… ${savedMinutes} of ${totalMinutes} ${totalMinutes === 1 ? "minute" : "minutes"} saved`}
+          {known ? `Saving your game… uploading ${percent}%` : "Saving your game…"}
         </span>
       </div>
       <div
@@ -119,7 +117,7 @@ const SavingProgress = ({ savedMinutes, totalMinutes, joining }) => {
         aria-label="Saving your game"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={joining ? 100 : percent}
+        aria-valuenow={known ? percent : undefined}
         style={{
           height: 6,
           borderRadius: 999,
@@ -130,14 +128,15 @@ const SavingProgress = ({ savedMinutes, totalMinutes, joining }) => {
         <div
           className="h-full transition-[width] duration-500 ease-out"
           style={{
-            width: `${joining ? 100 : percent}%`,
+            width: `${known ? Math.max(2, percent) : 2}%`,
             borderRadius: 999,
             background: "var(--color-secondary-color)",
           }}
         />
       </div>
       <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-        This page updates on its own — keep it open or come back to this link later.
+        A long game can take a while to upload from the court. This page updates on its own —
+        keep it open or come back to this link later.
       </p>
     </div>
   );
@@ -451,13 +450,7 @@ const SessionPage = () => {
       </div>
 
       <StatusNotice session={session} />
-      {saving && (
-        <SavingProgress
-          savedMinutes={saving.savedMinutes}
-          totalMinutes={saving.totalMinutes}
-          joining={saving.joining}
-        />
-      )}
+      {saving && <SavingProgress percent={saving.percent} />}
 
       {/* CR-001: the whole game's folder in the venue's Google Drive */}
       {session.driveUrl && (

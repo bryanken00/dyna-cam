@@ -5,12 +5,7 @@ import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
-import {
-  materializeSessionParts,
-  savingProgress,
-  SETTLED_PART_SECONDS_SQL,
-  settleSessions,
-} from "../../../utils/sessions.js";
+import { materializeSessionParts, settleSessions, uploadPercent } from "../../../utils/sessions.js";
 import { loadSessionVideos, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
@@ -221,8 +216,7 @@ router.get(
     await materializeSessionParts(req.db, { venueId: rows[0].venueId });
     await settleSessions(req.db, rows[0].sessionId);
     const [session] = await req.db.query(
-      `SELECT s.status, ${SETTLED_PART_SECONDS_SQL}
-       FROM recording_sessions s WHERE s.sessionId = ? LIMIT 1`,
+      `SELECT status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
       [rows[0].sessionId]
     );
 
@@ -248,7 +242,7 @@ router.get(
       venueId: _venueId,
       logoUrl,
       driveUrl,
-      partCameras,
+      partCameras: _partCameras,
       wholeVideo,
       openEnded,
       ...info
@@ -262,17 +256,12 @@ router.get(
         ...info,
         status: session.status,
         venueLogoUrl: signUploadUrl(logoUrl),
-        // CR-004: "Saving your game… 25 of 30 minutes saved"
-        ...savingProgress({
-          startAt: rows[0].startAt,
-          endAt: rows[0].endAt,
-          partCameras,
-          settledPartSeconds: session.settledPartSeconds,
-        }),
+        // CR-006: "Saving your game… uploading 45%" (null while the box makes the file)
+        uploadPercent: uploadPercent(videos),
         openEnded: Number(openEnded) === 1,
         // CR-001: the game's folder in the venue's Google Drive, once a video is in it
         driveUrl: driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
-        // CR-003: one whole video per camera (camera 0 = the court's only / stacked view)
+        // CR-003 / CR-006: one whole video per camera (camera 0 = the court's only camera)
         videos: videos.map(toPublicVideo),
         // True while the whole video is still being made (the page keeps checking)
         savingWholeVideo:

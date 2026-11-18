@@ -27,6 +27,9 @@ router.use("/v1/upload", requireAuth, auditTrail("upload"), uploadRoute);
 // Recorder boxes — authenticated by their device token, not a user JWT
 import deviceRoute from "../controllers/v1/device/device.controller.js";
 import { requireDevice } from "../middlewares/deviceAuth.middleware.js";
+// CR-006: a game's whole video, uploaded by the box in resumable chunks
+import gameVideosRoute from "../controllers/v1/device/game-videos.controller.js";
+router.use("/v1/device/game-videos", requireDevice, gameVideosRoute);
 router.use("/v1/device", requireDevice, deviceRoute);
 
 // Players — no login; the court QR code / clip share link is the credential

@@ -4,10 +4,10 @@
 
 ## Before starting
 
-- [ ] Approved (see request.md → Approval)
+- [x] Approved (see request.md → Approval)
 - [x] Open questions answered
-- [ ] Plan written (`plan-doc`): the box's whole-game job, the resumable upload protocol, removal
-      order (pieces, join job), rollout of the box update
+- [x] Design written (request.md → Design notes): the box's whole-game job, the resumable upload
+      protocol, what is removed
 
 ## Build
 
@@ -22,21 +22,21 @@
 
 ### API (`back/`)
 
-- [ ] Migration: upload progress on `session_videos` (upload id, bytes received)
-- [ ] Device API: game-video jobs after End game; start / chunk / finish upload endpoints
+- [x] Migration: upload progress on `session_videos` (upload id, bytes received)
+- [x] Device API: game-video jobs after End game; start / chunk / finish upload endpoints
       (Content-Range, idempotent chunks, size limit per game, venue-scoped)
-- [ ] Remove 5-minute piece jobs, the join job (`jobs/sessionJoin.js`) and part settling — no
+- [x] Remove 5-minute piece jobs, the join job (`jobs/sessionJoin.js`) and part settling — no
       fallback (nothing deployed yet); ffmpeg no longer needed on the server
-- [ ] Progress (`uploadPercent`) on the public, admin and app session responses
-- [ ] Google Drive: the uploaded file
-- [ ] Tests: upload start/chunks/resume/finish, wrong venue 404, oversize refused, progress,
+- [x] Progress (`uploadPercent`) on the public, admin and app session responses
+- [x] Google Drive: the uploaded file
+- [x] Tests: upload start/chunks/resume/finish, wrong venue 404, oversize refused, progress,
       no pieces for new games, replays unchanged
 
 ### Web (`front/`) and app (`app/`)
 
-- [ ] Player's page: "Saving your game… uploading N%"
-- [ ] Admin game detail: video + upload progress per camera, no pieces
-- [ ] Session device end screen: "Saving your game… uploading N%"
+- [x] Player's page: "Saving your game… uploading N%"
+- [x] Admin game detail: video + upload progress per camera, no pieces
+- [x] Session device end screen: "Saving your game… uploading N%"
 
 ## Acceptance
 
@@ -50,10 +50,10 @@
 ## Wrap-up
 
 - [ ] `cd edge && npm run lint && npm test && npm run smoke` passes
-- [ ] `cd back && npm run lint && npm test` passes
-- [ ] `cd front && npm run lint && npm run build` passes
-- [ ] `cd app && npx expo export --platform android --clear` passes
-- [ ] Migration and box update noted for deploy
-- [ ] Changelog: CR-003 is unreleased, so update its entry
+- [x] `cd back && npm run lint && npm test` passes
+- [x] `cd front && npm run lint && npm run build` passes
+- [x] `cd app && npx expo export --platform android --clear` passes
+- [x] Migration and box update noted for deploy (changelog Dev notes)
+- [x] Changelog: CR-003 is unreleased, so update its entry
 - [ ] Requester shown the result and signed off
 - [ ] `request.md` status set to `Done`

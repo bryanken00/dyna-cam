@@ -1,7 +1,7 @@
 # CR-006 · One file per game — no 5-minute pieces at all
 
-> **Status:** Requested · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
-> **Checklist:** [checklist.md](checklist.md) · **Plan:** — (one before building, size L) · **Related:** [CR-003](../CR-003-whole-game-video-per-camera/request.md) (whole video per camera, joined from pieces), [CR-004](../CR-004-players-never-see-parts/request.md) (players never see pieces), [CR-005](../CR-005-start-stop-from-device/request.md) (pairing starts the game, End game stops it)
+> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
+> **Checklist:** [checklist.md](checklist.md) · **Plan:** — (design notes below) · **Related:** [CR-003](../CR-003-whole-game-video-per-camera/request.md) (whole video per camera, joined from pieces), [CR-004](../CR-004-players-never-see-parts/request.md) (players never see pieces), [CR-005](../CR-005-start-stop-from-device/request.md) (pairing starts the game, End game stops it)
 
 ## Requested change
 
@@ -115,6 +115,28 @@ view isn't possible; a box that can't do per-camera files is the fallback case (
       yet, so the 5-minute pieces and the join are removed outright (bryanken00, 2026-11-18)
 - [x] The longer wait after End game for long games is **OK** (bryanken00, 2026-11-18)
 
+## Design notes (as built)
+
+- **When a game ends** (End game, End in Admin, or a booked end time), the API makes a
+  `session_videos` row per camera (one-camera court: camera 0; two cameras: 1 and 2) and the
+  box's `GET /device/jobs` returns a `type: "game"` job for each, with the game's window. No
+  5-minute pieces are made; the join job and ffmpeg on the server are gone.
+- **Upload protocol** (`controllers/v1/device/game-videos.controller.js`, under
+  `/api/v1/device/game-videos/:sessionVideoId`): `start` `{ sizeBytes, durationSeconds, gaps }` →
+  `{ receivedBytes, chunkBytes: 8 MiB }` (same size resumes, a new size starts over);
+  `PUT chunk?offset=N` raw bytes → `{ receivedBytes }`, or 409 `OFFSET_MISMATCH` with where to
+  continue; `finish` (multipart, optional JPEG thumbnail) checks every byte is in and that it's an
+  mp4, or 409 `INCOMPLETE_UPLOAD`; `fail { reason }`. The bytes on disk (`upload.part`) are the
+  truth for resuming. Only the venue's boxes see a video (else 404); once one box started it,
+  another is refused (409).
+- **Footage on the box:** `/config` keeps listing a finished game while any of its videos is
+  still `Pending`/`Uploading`, and the box keeps the footage for every listed game.
+- **Giving up:** a video not in 24 h after the game ended (`GAME_UPLOAD_GIVE_UP_HOURS`) is Failed
+  by the hourly maintenance, so the game settles. **Try again** in Admin puts it back to Pending
+  and the game back to Processing (works while the box still has the footage).
+- **Progress:** `uploadPercent` (0–100, null while the box makes the file) on the public, admin
+  and app session responses; the missing-footage note comes from the gaps the box reports.
+
 ## Revisions
 
 - 2026-11-18: Open questions answered — copy, no fallback (nothing deployed yet), longer wait OK.
@@ -123,4 +145,4 @@ view isn't possible; a box that can't do per-camera files is the fallback case (
 
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
-| Pending | — | — | Open questions first |
+| Approved | bryanken00 | 2026-11-18 | "now implement this" |
