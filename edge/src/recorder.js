@@ -38,6 +38,18 @@ import {
 
 const RESTART_BASE_MS = 2_000;
 const RESTART_MAX_MS = 30_000; // Wi-Fi cameras drop out; never wait longer than this
+const MINUTE_MS = 60_000;
+/**
+ * BUG-002: a camera that rejects the sign-in is retried slowly. Every attempt
+ * is another sign-in: quick retries with a wrong password are what make a Tapo
+ * camera lock itself ("400 Server is locked"), and a locked camera counts every
+ * retry, so it never unlocks. A changed camera address still restarts at once
+ * (RecorderManager), so fixing the password doesn't wait for these.
+ */
+const REFUSED_DELAYS_MS = {
+  auth: [2 * MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS],
+  locked: [5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS],
+};
 const STABLE_RUN_MS = 60_000; // a run this long resets the backoff
 const STALL_MS = 20_000; // no new video for this long → kill and reconnect
 const CONNECT_GRACE_MS = 30_000;
@@ -94,23 +106,75 @@ export function buildRecordArgs({
   ];
 }
 
-/** Turn ffmpeg's last stderr line into something staff can act on (heartbeat message). */
-export function describeFailure(line) {
-  const text = maskCredentials(String(line || "")).trim();
-  if (/\b401\b|unauthori[sz]ed/i.test(text)) {
-    return "Camera rejected the username/password — check the camera account in the RTSP URL";
+/**
+ * What kind of failure ffmpeg's last stderr line shows:
+ * "auth" (wrong username/password), "locked" (the camera refuses everyone —
+ * a Tapo answers "400 Server is locked", which ffmpeg prints as "Server
+ * returned 400 Bad Request"), "notFound", "unreachable" or "other".
+ */
+export function failureKind(line) {
+  const text = String(line || "");
+  if (/\b401\b|unauthori[sz]ed/i.test(text)) return "auth";
+  if (/\b400\b|server is locked|\blocked\b/i.test(text) && !/\b404\b/.test(text)) {
+    return "locked";
   }
   if (
     /\b404\b|not found|method describe failed/i.test(text) &&
     /rtsp|describe|stream/i.test(text)
   ) {
-    return "Camera stream not found — check the RTSP path (Tapo: /stream1)";
+    return "notFound";
   }
   if (
     /timed out|timeout|connection refused|no route to host|network is unreachable|host is down|connection reset|end of file|i\/o error|broken pipe/i.test(
       text
     )
   ) {
+    return "unreachable";
+  }
+  return "other";
+}
+
+/**
+ * How long to wait before reconnecting after the `attempt`-th failure in a
+ * row. A refused sign-in waits minutes (BUG-002); anything else is a camera
+ * that dropped out and comes back after 2 s, doubling, at most 30 s.
+ */
+export function restartDelayMs(kind, attempt) {
+  const steps = REFUSED_DELAYS_MS[kind];
+  if (steps) return steps[Math.min(Math.max(1, attempt), steps.length) - 1];
+  return backoffMs(attempt, RESTART_BASE_MS, RESTART_MAX_MS);
+}
+
+const inMinutes = (ms) => {
+  const minutes = Math.round(ms / MINUTE_MS);
+  return minutes === 1 ? "1 min" : `${minutes} min`;
+};
+
+/**
+ * Turn ffmpeg's last stderr line into something staff can act on (heartbeat
+ * message). `retryInMs`, when given, says when the box tries again.
+ */
+export function describeFailure(line, retryInMs = null) {
+  const text = maskCredentials(String(line || "")).trim();
+  const kind = failureKind(text);
+  const again = retryInMs ? ` The box tries again in ${inMinutes(retryInMs)}.` : "";
+  if (kind === "auth") {
+    return truncate(
+      "Camera rejected the username/password — check the camera account in the RTSP URL " +
+        `(saving the court's camera retries at once).${again}`
+    );
+  }
+  if (kind === "locked") {
+    return truncate(
+      "The camera is locked: it refuses everyone after too many failed sign-ins. Restart the " +
+        "camera (unplug it for 10 s, or Tapo app → Restart), then restart the recorder box to " +
+        `connect at once.${again}`
+    );
+  }
+  if (kind === "notFound") {
+    return "Camera stream not found — check the RTSP path (Tapo: /stream1)";
+  }
+  if (kind === "unreachable") {
     return truncate(`Camera not reachable — check Wi-Fi/power (${text})`);
   }
   return truncate(text ? `Recorder stopped: ${text}` : "Recorder stopped unexpectedly");
@@ -229,9 +293,16 @@ export class CourtRecorder {
 
     const ranMs = Date.now() - this.startedAt;
     this.failures = ranMs >= STABLE_RUN_MS ? 1 : this.failures + 1;
-    const delay = backoffMs(this.failures, RESTART_BASE_MS, RESTART_MAX_MS);
+    // A stall (no video) is a drop-out, whatever the last line said
+    const kind = this.stallMessage ? "unreachable" : failureKind(this.lastStderr);
+    // Refused sign-ins count on their own, so a drop-out in between doesn't reset them
+    this.refusals = kind === "auth" || kind === "locked" ? (this.refusals || 0) + 1 : 0;
+    const delay = restartDelayMs(kind, this.refusals || this.failures);
+    this.nextRestartDelayMs = delay;
     this.state = "error";
-    if (!this.stallMessage) this.message = describeFailure(this.lastStderr);
+    if (!this.stallMessage) {
+      this.message = describeFailure(this.lastStderr, this.refusals ? delay : null);
+    }
     this.stallMessage = null;
     this.log.warn(
       `recorder for ${this.who} exited (${signal || `code ${code}`}): ${this.message}; restarting in ${Math.round(delay / 1000)}s`
@@ -256,6 +327,7 @@ export class CourtRecorder {
       if (this.state !== "ok") this.log.info(`recording ${this.who}`);
       this.state = "ok";
       this.message = "Recording";
+      this.refusals = 0; // signed in fine: a later refusal starts the slow retries over
       this.failures = now - this.startedAt >= STABLE_RUN_MS ? 0 : this.failures;
       return;
     }

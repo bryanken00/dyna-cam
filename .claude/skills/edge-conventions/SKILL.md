@@ -85,7 +85,10 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   `-map 0:v:0 -map 0:a? -c:v copy -c:a aac -b:a 64k`. Tapo cameras send G.711 A-law, which
   `-c copy` into MPEG-TS silently stores as unplayable `bin_data`. Never use a blanket `-c copy`.
 - RTSP: `-rtsp_transport tcp -timeout 10000000` (µs, ffmpeg ≥ 5; `-stimeout` on 4.x). No new
-  video for 20 s → kill; restart backoff 2 s → 30 s.
+  video for 20 s → kill; restart backoff 2 s → 30 s — **except a refused sign-in** (BUG-002,
+  `failureKind` + `restartDelayMs`): 401 → 2/5/10/15 min, 400 / "locked" → 5/10/15 min, counted
+  separately and reset by a good run. Every try is a camera sign-in: quick retries lock a Tapo
+  and keep it locked. A changed camera address still restarts at once.
 - **Never `-use_wallclock_as_timestamps`**: it clumps frames that arrive together and the clip
   encoder drops them (half the frame rate). Keep the camera's timestamps.
 - **Mask credentials** (`maskCredentials`) in every log line and heartbeat message — RTSP passwords

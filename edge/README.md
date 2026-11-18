@@ -627,7 +627,8 @@ clip from the court's QR page.
 | *DEVICE_TOKEN / PAIRING_CODE in .env is no longer used* | Harmless — delete the line. Boxes enrol with `ENROLL_KEY` and `VENUE_ID` now. |
 | 403 `BOT_BLOCKED` | Something stripped the `User-Agent` (a proxy?). The box sends `DynaCamRecorder/<version>`. |
 | Court shows *Camera not reachable — check Wi-Fi/power* | Camera powered? Same network? `ping <camera-ip>`. Weak 2.4 GHz signal at the court? |
-| *Camera rejected the username/password* | Use the Tapo **Camera Account**, not the cloud login |
+| *Camera rejected the username/password* | Use the Tapo **Camera Account**, not the cloud login. The box tries again only every 2 → 15 min (each try is a sign-in, and too many lock the camera); saving the court's camera address in Admin retries at once. |
+| *The camera is locked* | The camera refuses everyone after too many failed sign-ins (a Tapo answers `400 Server is locked`). Restart the camera (unplug 10 s, or Tapo app → Restart), then `pm2 restart dyna-cam-edge` to connect at once. Otherwise the box waits 5 → 15 min between tries, so the lock can clear (BUG-002). |
 | *Camera stream not found* | The path must be `/stream1` |
 | Clips fail with *Camera was not recording at that time* | The court was in error at that moment. Check the camera and the heartbeat history. |
 | Clips fail with *…too late — already overwritten* | The box was busy or offline for minutes. Raise `BUFFER_SECONDS` or check the network. |

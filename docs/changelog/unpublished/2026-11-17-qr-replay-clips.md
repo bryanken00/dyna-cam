@@ -27,3 +27,7 @@ print each court's QR sign, and browse, play and delete saved clips.
 - `back/`: the audit trail never stores a camera address's password or a stream key — they are
   masked before the row is written (BUG-001); run `npm run db:migrate` (migration
   `012_redact_audit_trail_secrets` removes any already stored).
+- `edge/`: a camera that rejects the sign-in is retried every 2 → 15 min, and a camera that
+  locked itself (Tapo `400 Server is locked`) every 5 → 15 min, instead of every ≤ 30 s, so the
+  box can't lock a camera or keep it locked; the court page says the camera is locked and to
+  restart it (BUG-002).
