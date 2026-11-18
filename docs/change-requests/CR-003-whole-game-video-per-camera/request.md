@@ -130,6 +130,8 @@ The whole video only exists after the game ends plus the last part's processing 
 
 - 2026-11-18: Suggestion 1 accepted; the must-have is one whole-game file on Download.
 - 2026-11-18: The rest accepted as recommended; approved and started.
+- 2026-11-18: First real game (Court 1): once a camera's whole video is made, its failed parts no
+  longer show under "So far" — the video's "No footage …" note already covers them.
 
 ## Approval
 

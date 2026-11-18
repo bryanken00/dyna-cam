@@ -220,7 +220,7 @@ router.get(
       [rows[0].sessionId]
     );
 
-    const parts = await req.db.query(
+    let parts = await req.db.query(
       `SELECT partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status, videoPath,
               thumbnailPath, expiresAt, driveStatus, driveUrl
        FROM clips
@@ -230,6 +230,12 @@ router.get(
     );
     // CR-003: the whole game, one video per camera, once its parts are joined
     const videos = await loadSessionVideos(req.db, rows[0].sessionId);
+    // A camera whose whole video is made needs no parts on the page: its missing
+    // stretches are the video's gaps. (A failed join keeps showing its parts.)
+    const done = new Set(
+      videos.filter((v) => ["Ready", "Expired"].includes(v.status)).map((v) => v.camera)
+    );
+    parts = parts.filter((part) => !done.has(part.camera));
 
     const {
       sessionId: _sessionId,

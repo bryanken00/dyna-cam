@@ -253,6 +253,7 @@ describe("Google Drive per court", () => {
         GOOGLE_DRIVE_API_URL: `${base}/drive`,
         GOOGLE_DRIVE_UPLOAD_URL: `${base}/upload`,
         APP_URL: "http://web.test",
+        FFMPEG_PATH: "", // the system ffmpeg, whatever back/.env says
       },
     });
     ({ runDriveUploads } = await ctx.importFromBack("server/src/jobs/driveUploads.js"));

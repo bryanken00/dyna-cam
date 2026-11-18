@@ -93,7 +93,8 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
   const page = async (token) => (await ctx.api("GET", `/public/sessions/${token}`)).data.session;
 
   before(async () => {
-    ctx = await startTestApp();
+    // The system ffmpeg, whatever back/.env's FFMPEG_PATH says
+    ctx = await startTestApp({ env: { FFMPEG_PATH: "" } });
     ({ runSessionJoins } = await ctx.importFromBack("server/src/jobs/sessionJoin.js"));
     ({ runClipMaintenance } = await ctx.importFromBack("server/src/jobs/clipMaintenance.js"));
     ({ resetFfmpegCheck } = await ctx.importFromBack("server/src/utils/sessionVideos.js"));
@@ -198,7 +199,9 @@ describe("whole-game videos", { skip: FFMPEG ? false : "ffmpeg is not installed"
       await upload(home, gappy.jobs[2].clipId);
 
       assert.deepEqual(await runSessionJoins(ctx.db, { limit: 10 }), { joined: 1 });
-      const video = (await page(gappy.token)).videos[0];
+      const shown = await page(gappy.token);
+      assert.deepEqual(shown.parts, [], "the failed part is the video's gap, not a card");
+      const video = shown.videos[0];
       assert.equal(video.status, "Ready");
       assert.equal(video.partsMissing, 1);
       const [[part]] = await ctx.sql.query(
