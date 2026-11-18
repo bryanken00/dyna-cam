@@ -89,7 +89,8 @@ export const createPairingCode = async (
 
 /**
  * Find a live key of this kind and lock it (inside the caller's transaction).
- * An APP key is live only while its session is still to come or recording.
+ * An APP key is live only while its session is still to come or recording
+ * (CR-005: or an open game waiting for its first device — pairing starts it).
  * @returns {Promise<Object|null>} the pairing_codes row, or null
  */
 export const findLivePairingCode = async (conn, { code, kind }) => {
@@ -98,7 +99,7 @@ export const findLivePairingCode = async (conn, { code, kind }) => {
     kind === "APP"
       ? `AND EXISTS (
            SELECT 1 FROM recording_sessions s
-           WHERE s.sessionId = pc.sessionId AND s.status IN ('Scheduled', 'Recording')
+           WHERE s.sessionId = pc.sessionId AND s.status IN ('Waiting', 'Scheduled', 'Recording')
              AND s.endAt > ?)`
       : "";
   const [rows] = await conn.execute(

@@ -18,6 +18,7 @@ import {
   endSessionNow,
   expectedParts,
   materializeSessionParts,
+  openGameEnd,
   SESSION_MAX_DAYS_AHEAD,
   settleSessions,
 } from "../../../utils/sessions.js";
@@ -43,7 +44,7 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
-         s.partCameras, s.wholeVideo, s.dateCreated, s.dateUpdated,
+         s.partCameras, s.wholeVideo, s.openEnded, s.dateCreated, s.dateUpdated,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
            AS partsReady,
@@ -55,11 +56,25 @@ const SESSION_SELECT = `
   LEFT JOIN users u ON u.accountId = s.createdByAccountId
   LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId`;
 
+/** CR-005: an open game still waiting or recording has no real end time yet. */
+const isOpen = (row) =>
+  Number(row.openEnded) === 1 && ["Waiting", "Recording"].includes(row.status);
+
 const toSession = (row) => {
-  const { shareToken, ...session } = row;
+  const { shareToken, openEnded, ...session } = row;
+  const open = isOpen(row);
+  const nowM = moment().tz(TIMEZONE);
   return {
     ...session,
-    durationMinutes: moment(row.endAt).diff(moment(row.startAt), "minutes"),
+    openEnded: Number(openEnded) === 1,
+    // While open: no end, and its length so far (0 while waiting for a device)
+    startAt: row.status === "Waiting" ? null : row.startAt,
+    endAt: open ? null : row.endAt,
+    durationMinutes: open
+      ? row.status === "Recording"
+        ? Math.max(0, nowM.diff(moment.tz(row.startAt, FORMAT, TIMEZONE), "minutes"))
+        : 0
+      : moment(row.endAt).diff(moment(row.startAt), "minutes"),
     partsTotal: expectedParts(row),
     partsReady: Number(row.partsReady || 0),
     devicesCount: Number(row.devicesCount || 0),
@@ -216,6 +231,80 @@ router.get(
 );
 
 /**
+ * CR-005: a new open game on a court — no times. It waits for a session
+ * device; the first one to pair starts the recording (pairing.controller.js),
+ * and only End game / End stops it. One open game per court.
+ */
+const createOpenGame = async (req, res) => {
+  const { courtId, playerName, phone } = req.body;
+  const now = getCurrentTimestampLocal();
+  let conn;
+  try {
+    conn = await req.db.beginTransaction();
+    const [courts] = await conn.execute(
+      `SELECT c.courtId, c.venueId, c.cameraRtspUrl IS NOT NULL AS hasCamera
+       FROM courts c JOIN venues v ON v.venueId = c.venueId
+       WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
+       LIMIT 1 FOR UPDATE`,
+      [courtId]
+    );
+    if (courts.length === 0) {
+      await req.db.rollback(conn);
+      return res.sendError("Court not found or not active", 404);
+    }
+    if (!courts[0].hasCamera) {
+      await req.db.rollback(conn);
+      return res.sendError("This court has no camera configured", 400);
+    }
+    // The court row is locked, so two New games on one court can't both pass
+    const [busy] = await conn.execute(
+      `SELECT sessionId FROM recording_sessions
+       WHERE courtId = ? AND endAt > ?
+         AND (status IN ('Waiting', 'Recording') OR (status = 'Scheduled' AND startAt <= ?))
+       LIMIT 1`,
+      [courtId, now, now]
+    );
+    if (busy.length > 0) {
+      await req.db.rollback(conn);
+      return res.sendError("This court already has a game — end it before starting a new one", 409);
+    }
+
+    const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
+    const sessionId = uuidRow[0].id;
+    const shareToken = randomToken();
+    // startAt is a placeholder until a device pairs; endAt rolls (utils/sessions.js)
+    await conn.execute(
+      `INSERT INTO recording_sessions
+         (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
+          createdByAccountId, openEnded, status, dateCreated, dateUpdated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Waiting', ?, ?)`,
+      [
+        sessionId,
+        courts[0].venueId,
+        courtId,
+        now,
+        openGameEnd(),
+        playerName || null,
+        phone || null,
+        shareToken,
+        req.user.accountId,
+        now,
+        now,
+      ]
+    );
+    await req.db.commit(conn);
+    return res.sendSuccess(
+      "Game created — pair the court's device to start recording",
+      { sessionId, status: "Waiting", shareUrl: sessionShareUrl(shareToken) },
+      201
+    );
+  } catch (err) {
+    await req.db.rollback(conn);
+    throw err;
+  }
+};
+
+/**
  * POST /
  * Book a court. The window may start now (up to a minute ago) or up to
  * SESSION_MAX_DAYS_AHEAD days ahead; sessions on one court never overlap.
@@ -226,6 +315,7 @@ router.post(
   validateBody(createSessionSchema),
   catchAsync(async (req, res) => {
     const { courtId, startNow, startAt, durationMinutes, playerName, phone } = req.body;
+    if (!startNow && !startAt) return createOpenGame(req, res);
     const start = startNow ? moment().tz(TIMEZONE) : moment.tz(startAt, FORMAT, TIMEZONE);
     if (!start.isValid()) {
       return res.sendError("Invalid start date and time", 400);
@@ -316,7 +406,8 @@ router.post(
 );
 
 /**
- * POST /:sessionId/cancel — only before it starts
+ * POST /:sessionId/cancel — only before it starts: a booked session before its
+ * start time, or an open game still waiting for a device (CR-005)
  */
 router.post(
   "/:sessionId/cancel",
@@ -325,7 +416,7 @@ router.post(
     const now = getCurrentTimestampLocal();
     const result = await req.db.query(
       `UPDATE recording_sessions SET status = 'Cancelled', dateUpdated = ?, ${FORGET_STREAM_SQL}
-       WHERE sessionId = ? AND status = 'Scheduled' AND startAt > ?`,
+       WHERE sessionId = ? AND (status = 'Waiting' OR (status = 'Scheduled' AND startAt > ?))`,
       [now, req.params.sessionId, now]
     );
     if (result.affectedRows === 0) {
@@ -375,8 +466,8 @@ router.post(
   })
 );
 
-/** Sessions a device can still be paired to. */
-const SESSION_PAIRABLE = ["Scheduled", "Recording"];
+/** Sessions a device can still be paired to (CR-005: a waiting game too — pairing starts it). */
+const SESSION_PAIRABLE = ["Waiting", "Scheduled", "Recording"];
 
 /**
  * POST /:sessionId/pairing-codes — a 6-digit key that pairs a phone/tablet to

@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
+import dayjs from "dayjs";
 import {
   Ban,
   Copy,
@@ -18,6 +19,7 @@ import { decodeHTML } from "../../../../utils/decode-html";
 import { copyText } from "../../../../utils/clipboard";
 import { formatPhoneDisplay } from "../../../../utils/phoneFormat";
 import {
+  LONG_GAME_MINUTES,
   SESSION_STATUS_TONE,
   formatDate,
   formatMinutes,
@@ -33,8 +35,11 @@ import {
 
 const EMPTY_FILTERS = { search: "", venueId: "", courtId: "", status: "" };
 
-/** A device can be paired to a session until it ends. */
-const PAIRABLE_STATUSES = ["Scheduled", "Recording"];
+/** A device can be paired to a session until it ends (CR-005: a waiting game too — it starts it). */
+const PAIRABLE_STATUSES = ["Waiting", "Scheduled", "Recording"];
+
+/** Can it still be cancelled? Before it records: a waiting game, or a booking not yet started. */
+const CANCELLABLE_STATUSES = ["Waiting", "Scheduled"];
 
 export const useSessionHooks = () => {
   const { hasPermission } = usePermissions();
@@ -162,12 +167,16 @@ export const useSessionHooks = () => {
 
   const handleCancelRequest = useCallback(
     async (record) => {
+      const when =
+        record.startAt && record.endAt
+          ? ` (${formatDate(record.startAt)}, ${formatTimeRange(record.startAt, record.endAt)})`
+          : "";
       const ok = await confirm({
-        title: "Cancel session",
-        description: `Cancel the session on ${decodeHTML(record.courtName)} (${formatDate(
-          record.startAt,
-        )}, ${formatTimeRange(record.startAt, record.endAt)})? Nothing will be recorded and its player link stops working.`,
-        confirmText: "Cancel session",
+        title: record.status === "Waiting" ? "Cancel game" : "Cancel session",
+        description: `Cancel the ${record.status === "Waiting" ? "game" : "session"} on ${decodeHTML(
+          record.courtName,
+        )}${when}? Nothing will be recorded and its player link stops working.`,
+        confirmText: record.status === "Waiting" ? "Cancel game" : "Cancel session",
         cancelText: "Keep it",
         danger: true,
       });
@@ -179,11 +188,11 @@ export const useSessionHooks = () => {
   const handleEndRequest = useCallback(
     async (record) => {
       const ok = await confirm({
-        title: "End session now",
+        title: "End game",
         description: `Stop recording ${decodeHTML(
           record.courtName,
-        )} now? The footage so far is still saved and sent to the player link.`,
-        confirmText: "End now",
+        )} now? The game so far is saved and sent to the player link.`,
+        confirmText: "End game",
         cancelText: "Keep recording",
         danger: true,
       });
@@ -232,19 +241,19 @@ export const useSessionHooks = () => {
           { type: "divider" },
           {
             key: "end",
-            label: "End now",
+            label: "End game",
             icon: <Square className="w-4 h-4" />,
             danger: true,
             onClick: () => handleEndRequest(record),
           },
         );
       }
-      if (canWrite && record.status === "Scheduled") {
+      if (canWrite && CANCELLABLE_STATUSES.includes(record.status)) {
         items.push(
           { type: "divider" },
           {
             key: "cancel",
-            label: "Cancel session",
+            label: record.status === "Waiting" ? "Cancel game" : "Cancel session",
             icon: <Ban className="w-4 h-4" />,
             danger: true,
             onClick: () => handleCancelRequest(record),
@@ -313,17 +322,48 @@ export const useSessionHooks = () => {
         dataIndex: "startAt",
         key: "startAt",
         width: 200,
-        render: (startAt, record) => (
-          <div>
-            <div style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
-              {formatDate(startAt)}
+        render: (startAt, record) => {
+          // CR-005: a game waits for its device, then records with no end time
+          if (record.status === "Waiting") {
+            return (
+              <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+                Waiting for a device
+              </span>
+            );
+          }
+          if (!record.endAt) {
+            const long = record.durationMinutes >= LONG_GAME_MINUTES;
+            return (
+              <div>
+                <div style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+                  {formatDate(startAt)}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: long ? "var(--color-warning)" : "var(--color-text-muted)",
+                    fontWeight: long ? 600 : undefined,
+                  }}
+                  title={long ? "Recording a long time — did they forget End game?" : undefined}
+                >
+                  Since {dayjs(startAt).format("h:mm A")} ·{" "}
+                  {formatMinutes(record.durationMinutes)} so far
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div>
+              <div style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+                {formatDate(startAt)}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                {formatTimeRange(startAt, record.endAt)} ·{" "}
+                {formatMinutes(record.durationMinutes)}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-              {formatTimeRange(startAt, record.endAt)} ·{" "}
-              {formatMinutes(record.durationMinutes)}
-            </div>
-          </div>
-        ),
+          );
+        },
       },
       {
         title: "Player",
@@ -390,7 +430,7 @@ export const useSessionHooks = () => {
         key: "parts",
         width: 120,
         render: (_, record) =>
-          record.status === "Cancelled" ? (
+          ["Cancelled", "Waiting"].includes(record.status) ? (
             <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>—</span>
           ) : (
             <PartsProgress

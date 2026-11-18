@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   CalendarClock,
-  CalendarPlus,
+  Plus,
   CircleAlert,
   Clapperboard,
   Filter,
@@ -32,6 +32,7 @@ import FilterField from "../../../../components/FilterField";
 
 const ALL = "all";
 const STATUSES = [
+  "Waiting",
   "Scheduled",
   "Recording",
   "Processing",
@@ -75,7 +76,9 @@ const SessionsPage = () => {
 
   const totalSessions = pagination?.total || 0;
   const recording = data?.filter((s) => s.status === "Recording").length || 0;
-  const upcoming = data?.filter((s) => s.status === "Scheduled").length || 0;
+  // CR-005: games waiting for their device (and any old bookings still to come)
+  const upcoming =
+    data?.filter((s) => ["Waiting", "Scheduled"].includes(s.status)).length || 0;
 
   const hasPanelFilters = Boolean(
     filters.venueId || filters.courtId || filters.status,
@@ -102,12 +105,12 @@ const SessionsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Sessions"
-        subtitle="Book a court to record a whole game, then pair the phone or tablet at the court. Footage arrives in 5-minute parts on the player's link."
+        subtitle="Start a game on a court, then pair the phone or tablet there — recording starts when it pairs and stops with End game. The player gets the whole game on one link."
         actions={
           canWrite && (
             <Button onClick={handleCreate}>
-              <CalendarPlus />
-              Book session
+              <Plus />
+              New game
             </Button>
           )
         }
@@ -128,7 +131,7 @@ const SessionsPage = () => {
           icon={<Radio className="w-4.25 h-4.25" strokeWidth={1.8} />}
         />
         <StatCard
-          title="Upcoming"
+          title="Waiting for a device"
           value={upcoming}
           change="on this page"
           icon={<CalendarClock className="w-4.25 h-4.25" strokeWidth={1.8} />}
@@ -230,12 +233,12 @@ const SessionsPage = () => {
             <p style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
               {hasActiveFilters
                 ? "No sessions match these filters"
-                : "No sessions booked yet"}
+                : "No games yet"}
             </p>
             {canWrite && !hasActiveFilters && (
               <Button onClick={handleCreate}>
-                <CalendarPlus />
-                Book session
+                <Plus />
+                New game
               </Button>
             )}
           </div>

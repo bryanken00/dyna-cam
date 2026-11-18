@@ -1,5 +1,6 @@
 import { Ban, Cloud, Copy, Download, Film, RotateCcw, Square, X } from "lucide-react";
 import { toast } from "sonner";
+import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -214,10 +215,10 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
   // While it can take a device, or while one is still paired (the device
   // keeps the download QR for a few minutes after the end)
   const showDevices =
-    ["Scheduled", "Recording"].includes(session?.status) ||
+    ["Waiting", "Scheduled", "Recording"].includes(session?.status) ||
     (session?.devices || []).some((d) => d.status === "Active");
   const showStream =
-    !!session?.stream || ["Scheduled", "Recording"].includes(session?.status);
+    !!session?.stream || ["Waiting", "Scheduled", "Recording"].includes(session?.status);
   const remaining = Math.max(0, (Number(session?.partsTotal) || 0) - parts.length);
 
   const cancelMutation = useCancelSession();
@@ -231,10 +232,10 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
 
   const handleEnd = async () => {
     const ok = await confirm({
-      title: "End session now",
+      title: "End game",
       description:
         "Stop recording now? The footage so far is still saved and sent to the player link.",
-      confirmText: "End now",
+      confirmText: "End game",
       cancelText: "Keep recording",
       danger: true,
     });
@@ -285,11 +286,15 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                     className="m-0 mt-0.5 truncate"
                     style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
                   >
-                    {session
-                      ? `${decodeHTML(session.venueName)} · ${formatDate(
-                          session.startAt,
-                        )}, ${formatTimeRange(session.startAt, session.endAt)}`
-                      : "Loading…"}
+                    {!session
+                      ? "Loading…"
+                      : session.status === "Waiting"
+                        ? `${decodeHTML(session.venueName)} · waiting for a device`
+                        : !session.endAt
+                          ? `${decodeHTML(session.venueName)} · ${formatDate(session.startAt)}, recording since ${dayjs(session.startAt).format("h:mm A")}`
+                          : `${decodeHTML(session.venueName)} · ${formatDate(
+                              session.startAt,
+                            )}, ${formatTimeRange(session.startAt, session.endAt)}`}
                   </SheetDescription>
                 </div>
               </div>
@@ -336,7 +341,15 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                         </div>
                       ),
                     },
-                    { label: "Length", value: formatMinutes(session.durationMinutes) },
+                    {
+                      label: "Length",
+                      value:
+                        session.status === "Waiting"
+                          ? "Starts when a device pairs"
+                          : !session.endAt
+                            ? `${formatMinutes(session.durationMinutes)} so far — until End game`
+                            : formatMinutes(session.durationMinutes),
+                    },
                     {
                       label: "Footage",
                       value: `${session.partsReady}/${session.partsTotal} parts ready`,
@@ -448,7 +461,7 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                         borderTop: "1px solid var(--color-line)",
                       }}
                     >
-                      {session.status === "Scheduled"
+                      {["Waiting", "Scheduled"].includes(session.status)
                         ? "Parts appear here once recording starts."
                         : session.status === "Cancelled"
                           ? "This session was cancelled — nothing was recorded."
@@ -494,10 +507,10 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                   onClick={handleEnd}
                 >
                   <Square />
-                  End now
+                  End game
                 </Button>
               )}
-              {canWrite && session.status === "Scheduled" && (
+              {canWrite && ["Waiting", "Scheduled"].includes(session.status) && (
                 <Button
                   type="button"
                   variant="destructive"

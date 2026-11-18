@@ -30,9 +30,10 @@ const StatusPill = ({ m }) => {
         <TickingTimer
           seconds={s.elapsedSeconds}
           since={m.since}
-          limit={(s.elapsedSeconds ?? 0) + (s.endsInSeconds ?? 0)}
+          // An open game (CR-005) has no end time: the timer just counts up
+          limit={s.openEnded ? null : (s.elapsedSeconds ?? 0) + (s.endsInSeconds ?? 0)}
           // Reached its end time — re-read, the Ended screen follows
-          onLimit={m.refresh}
+          onLimit={s.openEnded ? undefined : m.refresh}
           accessibilityLabel="Recording for"
           className="text-destructive-foreground text-[16px]"
         />
@@ -70,7 +71,8 @@ const QrCard = ({ url, size, className }) => (
 /**
  * The session device's main screen (PLAN-002 Phase E): which court, the live
  * video from the venue's recorder box, the session's download QR, a REC
- * timer, and Stop recording.
+ * timer, and End game (CR-005: the game started when this device paired, and
+ * only End game — or staff on the web — stops it).
  *
  * A landscape tablet puts video and QR side by side; a portrait phone stacks
  * them — video, QR, then Stop. The screen stays awake. Before a booked
@@ -80,7 +82,7 @@ const QrCard = ({ url, size, className }) => (
  * (Phase G): a secondary button under Stop opens a QR for their phone; while
  * a stream is set up, a one-line strip under the header shows its state and
  * the buttons become Change stream / Stop streaming. It is deliberately
- * quieter than Stop recording.
+ * quieter than End game.
  *
  * When the session ends (Stop, its end time, or staff on the web) the
  * navigator swaps to the Ended screen on the next answer.
@@ -98,9 +100,9 @@ const SessionScreen = () => {
     : Math.min(width - 72, 300);
 
   const confirmStop = () =>
-    Alert.alert("Stop recording?", "The game so far is saved.", [
+    Alert.alert("End the game?", "Recording stops and the whole game is saved for the players.", [
       { text: "Keep recording", style: "cancel" },
-      { text: "Stop recording", style: "destructive", onPress: m.stop },
+      { text: "End game", style: "destructive", onPress: m.stop },
     ]);
 
   const confirmStopStream = () =>
@@ -109,7 +111,7 @@ const SessionScreen = () => {
       { text: "Stop streaming", style: "destructive", onPress: m.stopStream },
     ]);
 
-  // The player's own stream — secondary, below Stop recording
+  // The player's own stream — secondary, below End game
   const streamBlock = m.canStream ? (
     <View>
       {m.stream ? (
@@ -162,7 +164,7 @@ const SessionScreen = () => {
         onPress={confirmStop}
         disabled={!m.isRecording || m.stopping}
         accessibilityRole="button"
-        accessibilityLabel="Stop recording. The game so far is saved."
+        accessibilityLabel="End game. Recording stops and the game is saved."
         accessibilityState={{ disabled: !m.isRecording, busy: m.stopping }}
         className={cn(
           "min-h-[72px] flex-row items-center justify-center gap-3 rounded-[18px] px-6",
@@ -184,7 +186,7 @@ const SessionScreen = () => {
                 m.isRecording ? "text-destructive-foreground" : "text-muted-foreground",
               )}
             >
-              Stop recording
+              End game
             </Text>
           </>
         )}
@@ -199,7 +201,9 @@ const SessionScreen = () => {
         {m.stopError ??
           (m.isScheduled
             ? `Recording starts at ${formatTime(s.startAt)}`
-            : `Stops by itself at ${formatTime(s.endAt)}`)}
+            : s.openEnded
+              ? "Recording until you press End game"
+              : `Stops by itself at ${formatTime(s.endAt)}`)}
       </Text>
     </View>
   ) : null;

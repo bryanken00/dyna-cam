@@ -31,6 +31,7 @@ const RUNNING = ["Scheduled", "Recording"];
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken, s.partCameras,
+  s.openEnded,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT COUNT(*) FROM clips p WHERE p.sessionId = s.sessionId AND p.status = 'Ready')
@@ -90,7 +91,9 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
     status: row.status,
     startsInSeconds: !ended && startMs > nowMs ? seconds(startMs - nowMs) : 0,
     elapsedSeconds: recording || ended ? seconds(Math.min(nowMs, endMs) - startMs) : 0,
-    endsInSeconds: recording ? seconds(endMs - nowMs) : 0,
+    // CR-005: an open game has no end time — only End game ends it
+    openEnded: Number(row.openEnded) === 1,
+    endsInSeconds: recording && Number(row.openEnded) !== 1 ? seconds(endMs - nowMs) : 0,
     durationSeconds: seconds(Math.min(nowMs, endMs) - startMs),
     // CR-004: "Saving your game… 25 of 30 minutes saved" (savedSeconds / totalSeconds);
     // partsReady / partsTotal stay for app builds from before it

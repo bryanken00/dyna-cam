@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
+import { openGameEnd } from "../../../utils/sessions.js";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
@@ -112,6 +113,14 @@ router.post(
           ]
         );
         await markPairingCodeUsed(conn, key.pairingCodeId, pairedAppId);
+        // CR-005: the first device on a waiting game starts the recording now.
+        // Later devices find it Recording and change nothing.
+        await conn.execute(
+          `UPDATE recording_sessions
+           SET status = 'Recording', startAt = ?, endAt = ?, dateUpdated = ?
+           WHERE sessionId = ? AND status = 'Waiting'`,
+          [now, openGameEnd(), now, key.sessionId]
+        );
         await req.db.commit(conn);
         result = { token, key, pairedAppId };
       }

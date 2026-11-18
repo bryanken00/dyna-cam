@@ -17,7 +17,7 @@ const actionError = (error, what) => {
 
 /**
  * State for the Session screen: the session (polled every 5 s), its live
- * link, Stop recording, and the player's own stream (Phase G: the setup
+ * link, End game, and the player's own stream (Phase G: the setup
  * sheet, Stop streaming).
  *
  * `since` is when the last answer arrived — every running number on screen
@@ -43,7 +43,7 @@ export const useSessionScreen = () => {
     isRecording: session?.status === "Recording",
     isScheduled: session?.status === "Scheduled",
     stopping: stop.isPending,
-    stopError: actionError(stop.error, "press Stop"),
+    stopError: actionError(stop.error, "end the game"),
     stop: () => {
       if (stop.isPending) return;
       stop.reset();

@@ -28,6 +28,35 @@ export const SESSION_MAX_DAYS_AHEAD = 14;
  */
 export const SESSION_MIN_END_SECONDS = 1;
 
+/**
+ * CR-005: an open game (created without times, ended only by End game / End)
+ * keeps its endAt this far ahead of now. It's rolled forward whenever parts are
+ * made (box polls, pages, the hourly maintenance), long before it's reached.
+ */
+export const OPEN_GAME_AHEAD_HOURS = 6;
+const OPEN_GAME_ROLL_BELOW_HOURS = 5;
+
+/** The rolling end for an open game, from now. */
+export const openGameEnd = () =>
+  moment()
+    .tz(process.env.TIMEZONE || "Asia/Manila")
+    .add(OPEN_GAME_AHEAD_HOURS, "hours")
+    .format("YYYY-MM-DD HH:mm:ss");
+
+/** Keep every open game's end ahead of now, so the clock never ends it. */
+export const rollOpenGames = async (db) => {
+  const soon = moment()
+    .tz(process.env.TIMEZONE || "Asia/Manila")
+    .add(OPEN_GAME_ROLL_BELOW_HOURS, "hours")
+    .format("YYYY-MM-DD HH:mm:ss");
+  // A live window, not an edit: dateUpdated is left alone
+  await db.query(
+    `UPDATE recording_sessions SET endAt = ?
+     WHERE openEnded = 1 AND status IN ('Waiting', 'Recording') AND endAt < ?`,
+    [openGameEnd(), soon]
+  );
+};
+
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
 
@@ -48,8 +77,15 @@ const CAPABILITY_RECENT_MINUTES = 10;
  * Parts a session should end up with: its windows × its part cameras (1 set,
  * or one set per camera on a two-camera court).
  */
-export const expectedParts = (session) =>
-  partCount(session.startAt, session.endAt) * (Number(session.partCameras) === 2 ? 2 : 1);
+export const expectedParts = (session) => {
+  // CR-005: an open game still recording has only as many parts as it has run
+  const open = Number(session.openEnded) === 1 && ["Waiting", "Recording"].includes(session.status);
+  const end = open ? moment.min(parseLocal(session.endAt), moment().tz(TIMEZONE)) : null;
+  return (
+    partCount(session.startAt, end ? formatLocal(end) : session.endAt) *
+    (Number(session.partCameras) === 2 ? 2 : 1)
+  );
+};
 
 /**
  * How a session's parts are cut, decided once when its first part is made:
@@ -178,6 +214,7 @@ export const partWindow = (startAt, endAt, index) => {
  * @returns {Promise<number>} parts created
  */
 export const materializeSessionParts = async (db, { venueId } = {}) => {
+  await rollOpenGames(db); // CR-005: open games never end by the clock
   const now = getCurrentTimestampLocal();
   const params = [now];
   let where = "s.status IN ('Scheduled', 'Recording') AND s.startAt <= ?";
@@ -335,8 +372,9 @@ export const endSessionNow = async (db, sessionId) => {
   const minEnd = parseLocal(session.startAt).add(SESSION_MIN_END_SECONDS, "seconds");
   const endAt = formatLocal(moment.max(nowM, minEnd));
 
+  // CR-005: an open game gets its real end here and stops rolling (openEnded = 0)
   await db.query(
-    `UPDATE recording_sessions SET endAt = ?, dateUpdated = ?
+    `UPDATE recording_sessions SET endAt = ?, openEnded = 0, dateUpdated = ?
      WHERE sessionId = ? AND status IN ('Scheduled', 'Recording') AND endAt > ?`,
     [endAt, now, sessionId, endAt]
   );

@@ -24,21 +24,31 @@ const localDateTime = z
   });
 
 // POST /
-// startNow: true starts it now (PLAN-002 Phase E) — then startAt isn't needed
+// CR-005: just a court (+ player) is an open game — it waits for a device,
+// starts when the first one pairs, and ends only by End game / End.
+// Older clients may still book a time window: startNow or startAt, with
+// durationMinutes (PLAN-001/002).
 export const createSessionSchema = z
   .object({
     courtId: z.string().min(1, "Court is required").max(50),
     startNow: z.boolean().optional(),
     startAt: emptyToUndefined(localDateTime.optional()),
-    durationMinutes: z.coerce
-      .number()
-      .int("Use whole minutes")
-      .min(5, "A session is at least 5 minutes")
-      .max(180, "A session is at most 3 hours"),
+    durationMinutes: emptyToUndefined(
+      z.coerce
+        .number()
+        .int("Use whole minutes")
+        .min(5, "A session is at least 5 minutes")
+        .max(180, "A session is at most 3 hours")
+        .optional()
+    ),
     playerName: optionalString(100),
     phone: optionalPhone(),
   })
-  .refine((body) => body.startNow || body.startAt, {
+  .refine((body) => !(body.startNow || body.startAt) || body.durationMinutes, {
+    message: "Pick how long the session is",
+    path: ["durationMinutes"],
+  })
+  .refine((body) => !body.durationMinutes || body.startNow || body.startAt, {
     message: "Pick a start date and time, or start now",
     path: ["startAt"],
   });
@@ -55,7 +65,15 @@ export const listSessionsQuerySchema = z.object({
   pageSize: queryInt(20, { max: 100 }),
   venueId: emptyToUndefined(z.string().max(50).optional()),
   courtId: emptyToUndefined(z.string().max(50).optional()),
-  status: queryEnum(["Scheduled", "Recording", "Processing", "Ready", "Failed", "Cancelled"]),
+  status: queryEnum([
+    "Waiting",
+    "Scheduled",
+    "Recording",
+    "Processing",
+    "Ready",
+    "Failed",
+    "Cancelled",
+  ]),
   search: z.string().max(100).optional().default(""),
   sortOrder: queryEnumDefault(["ASC", "DESC"], "DESC"),
 });

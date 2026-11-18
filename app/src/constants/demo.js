@@ -50,7 +50,8 @@ const stampAt = (ms) => {
 let demoGame = null;
 
 const startDemoGame = () => {
-  const startMs = Date.now() - 3 * 60000;
+  // CR-005: pairing starts the game — the demo starts at 0:00 like a real one
+  const startMs = Date.now();
   demoGame = {
     startMs,
     stopMs: startMs + SESSION_LENGTH_MS,
@@ -84,7 +85,8 @@ const demoSession = () => {
   const now = Date.now();
   const g = demoGame;
   // Ended by Stop, or by reaching its end time
-  const endedMs = g.endedMs ?? (now >= g.stopMs ? g.stopMs : null);
+  // CR-005: an open game ends only with End game (no end time)
+  const endedMs = g.endedMs ?? null;
   const lengthMs = Math.max(10000, (endedMs ?? now) - g.startMs);
   const partsTotal = Math.max(1, Math.ceil(lengthMs / PART_MS));
 
@@ -104,11 +106,12 @@ const demoSession = () => {
       courtName: "Court 1",
       venueName: "Dink City Pickleball",
       startAt: stampAt(g.startMs),
-      endAt: stampAt(endedMs ?? g.stopMs),
+      endAt: stampAt(endedMs ?? g.stopMs), // a placeholder while open, as the API's
+      openEnded: !endedMs,
       status,
       startsInSeconds: 0,
       elapsedSeconds: Math.floor(lengthMs / 1000),
-      endsInSeconds: endedMs ? 0 : Math.floor((g.stopMs - now) / 1000),
+      endsInSeconds: 0,
       durationSeconds: Math.floor(lengthMs / 1000),
       partsReady,
       partsTotal,

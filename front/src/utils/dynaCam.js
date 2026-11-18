@@ -102,6 +102,7 @@ export const suggestButtonCode = (venueName, courtName) => {
 
 /** Session status → StatusDot tone. Recording gets the live (glowing) dot. */
 export const SESSION_STATUS_TONE = {
+  Waiting: "muted", // CR-005: a game waiting for its device
   Scheduled: "muted",
   Recording: "success",
   Processing: "warning",
@@ -109,6 +110,9 @@ export const SESSION_STATUS_TONE = {
   Failed: "error",
   Cancelled: "muted",
 };
+
+/** CR-005: a game recording this long is highlighted in Admin (someone forgot End game?). */
+export const LONG_GAME_MINUTES = 180;
 
 /** The length choices in the booking drawer, in minutes. */
 export const SESSION_DURATIONS = [30, 60, 90, 120, 180];

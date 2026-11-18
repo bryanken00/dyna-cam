@@ -204,7 +204,7 @@ router.get(
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
       `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName, s.driveUrl, s.partCameras,
-              s.wholeVideo,
+              s.wholeVideo, s.openEnded,
               c.name AS courtName, v.name AS venueName, v.logoUrl, s.venueId
        FROM recording_sessions s
        JOIN courts c ON c.courtId = s.courtId
@@ -250,15 +250,26 @@ router.get(
       driveUrl,
       partCameras,
       wholeVideo,
+      openEnded,
       ...info
     } = rows[0];
+    // CR-005: an open game shows no end (and no start while it waits for a device)
+    const open = Number(openEnded) === 1 && ["Waiting", "Recording"].includes(session.status);
+    if (open) info.endAt = null;
+    if (session.status === "Waiting") info.startAt = null;
     return res.sendSuccess("Session", {
       session: {
         ...info,
         status: session.status,
         venueLogoUrl: signUploadUrl(logoUrl),
         // CR-004: "Saving your game… 25 of 30 minutes saved"
-        ...savingProgress({ ...info, partCameras, settledPartSeconds: session.settledPartSeconds }),
+        ...savingProgress({
+          startAt: rows[0].startAt,
+          endAt: rows[0].endAt,
+          partCameras,
+          settledPartSeconds: session.settledPartSeconds,
+        }),
+        openEnded: Number(openEnded) === 1,
         // CR-001: the game's folder in the venue's Google Drive, once a video is in it
         driveUrl: driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
         // CR-003: one whole video per camera (camera 0 = the court's only / stacked view)

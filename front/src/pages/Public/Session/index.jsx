@@ -43,6 +43,19 @@ const noticeStyle = {
 /** Status sentence at the top: before, during, or when nothing could be recorded. */
 const StatusNotice = ({ session }) => {
   const { status } = session;
+  if (status === "Waiting") {
+    // CR-005: the game starts when the court's device is set up
+    return (
+      <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
+        <CalendarClock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+        <span>
+          <strong className="font-semibold">Not started yet</strong> — recording starts when
+          the court&apos;s device is set up. Keep this link: your whole game appears here as
+          one video after it ends.
+        </span>
+      </div>
+    );
+  }
   if (status === "Scheduled") {
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
@@ -425,7 +438,11 @@ const SessionPage = () => {
               {playerName}
             </div>
           )}
-          {formatDate(session.startAt)} · {formatTimeRange(session.startAt, session.endAt)}
+          {session.status === "Waiting"
+            ? "Waiting for the court's device"
+            : !session.endAt
+              ? `${formatDate(session.startAt)} · recording since ${dayjs(session.startAt).format("h:mm A")}`
+              : `${formatDate(session.startAt)} · ${formatTimeRange(session.startAt, session.endAt)}`}
         </div>
         {/* "Ready" only once the whole video is there (CR-004) */}
         <StatusDot tone={saving ? "warning" : SESSION_STATUS_TONE[session.status] || "muted"}>
