@@ -171,16 +171,20 @@ describe("session retention", () => {
     { sessionId: "s3", courtId: "court-2", startMs: now - 3_600_000, endMs: now },
   ];
 
-  it("keeps windows of the court's sessions until 30 min after they end, ±10 s", () => {
-    assert.deepEqual(retentionWindows(sessions, "court-1", now), [
+  it("keeps every listed session of the court, ±10 s, with no time limit after it ends", () => {
+    assert.deepEqual(retentionWindows(sessions, "court-1"), [
       { fromMs: now - 3_600_000 - 10_000, toMs: now - 600_000 + 10_000 },
+      { fromMs: now - 9_000_000 - 10_000, toMs: now - 7_200_000 + 10_000 },
     ]);
-    assert.deepEqual(retentionWindows(sessions, "court-1", now + 21 * 60_000), []);
-    assert.deepEqual(retentionWindows(undefined, "court-1", now), []);
+    // CR-006: no "end + 30 min" cut-off — a game ended 2 h ago (not uploaded yet) is still kept
+    assert.equal(retentionWindows(sessions, "court-1", now + 24 * 3_600_000).length, 2);
+    assert.deepEqual(retentionWindows(undefined, "court-1"), []);
+    // Kept only while the API lists it: gone from /config → nothing kept
+    assert.deepEqual(retentionWindows(sessions.slice(2), "court-1"), []);
   });
 
   it("keeps segments overlapping a session window and still prunes the others", () => {
-    const keep = retentionWindows(sessions, "court-1", now);
+    const keep = retentionWindows(sessions.slice(0, 1), "court-1");
     const seg = (startMs, lenMs = 2000) => ({
       name: `${Math.floor(startMs / 1000)}.ts`,
       mtimeMs: startMs + lenMs,

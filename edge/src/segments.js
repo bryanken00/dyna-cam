@@ -64,18 +64,17 @@ export async function readSegmentEntries(dir) {
 
 /** Footage around a session window is kept this much wider on each side. */
 export const SESSION_MARGIN_MS = 10_000;
-/** …and until this long after the session ends (the last part's job comes in by then). */
-export const SESSION_KEEP_AFTER_MS = 30 * 60_000;
 
 /**
  * Windows of a court's footage that must outlive the rolling buffer: every
- * session of `courtId` (± margin) that ended less than 30 min ago.
+ * session of `courtId` that /config lists (± margin). The API keeps a finished
+ * game listed until its game videos are uploaded (CR-006), so there is no
+ * time limit here — a session's footage goes when the API stops listing it.
  * → [{ fromMs, toMs }]
  */
-export const retentionWindows = (sessions, courtId, nowMs) =>
+export const retentionWindows = (sessions, courtId) =>
   (sessions || [])
     .filter((s) => s.courtId === courtId && Number.isFinite(s.startMs) && Number.isFinite(s.endMs))
-    .filter((s) => nowMs < s.endMs + SESSION_KEEP_AFTER_MS)
     .map((s) => ({ fromMs: s.startMs - SESSION_MARGIN_MS, toMs: s.endMs + SESSION_MARGIN_MS }));
 
 /**

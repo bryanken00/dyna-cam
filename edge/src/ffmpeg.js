@@ -1,6 +1,16 @@
 import { spawn } from "node:child_process";
 import { maskCredentials } from "./util.js";
 
+/**
+ * BUG-003: for every H.264 stream copy out of MPEG-TS into a length-prefixed
+ * container (mp4, flv). Some cameras (Android RTSP camera apps) send an empty
+ * NAL unit (a doubled start code) on every keyframe; TS readers skip it, but
+ * copied into mp4/flv it becomes a zero-length NAL that decoders reject, so
+ * every keyframe — the whole picture — is lost. This drops the empty units
+ * (NAL type 0, "unspecified") without re-encoding; other streams pass as is.
+ */
+export const H264_COPY_CLEANUP = Object.freeze(["-bsf:v", "filter_units=remove_types=0"]);
+
 /** ffmpeg/ffprobe exited badly. `message` carries the last stderr lines (masked). */
 export class FfmpegError extends Error {
   constructor(message, { code = null, stderr = "" } = {}) {

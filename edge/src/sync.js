@@ -162,7 +162,7 @@ export class DeviceSync {
   async heartbeat() {
     await this.api.heartbeat({
       agentVersion: this.agentVersion,
-      // What this box understands, e.g. per-camera session parts (CR-003)
+      // What this box understands, e.g. whole-game files with resumable upload (CR-006)
       capabilities: [...DEVICE_CAPABILITIES],
       // One entry per camera (`camera: 1 | 2`); the venue's court stream status
       // (streamStatus/streamMessage) rides on camera 1's entry, as before

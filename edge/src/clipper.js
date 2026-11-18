@@ -14,18 +14,8 @@ const MAX_HEIGHT = 1080;
 const LOGO_WIDTH_RATIO = 0.12;
 const LOGO_MARGIN_RATIO = 0.02;
 
-/** A session part carries its exact window; an ordinary clip has none. */
-export const isSessionPart = (entry) =>
-  Number.isFinite(entry?.windowStartMs) &&
-  Number.isFinite(entry?.windowEndMs) &&
-  entry.windowEndMs > entry.windowStartMs;
-
-/**
- * The window to cut in epoch ms: a session part's [windowStart, windowEnd]
- * exactly, otherwise [requestedAt − pre, requestedAt + post].
- */
+/** The window to cut in epoch ms: [requestedAt − pre, requestedAt + post]. */
 export function clipWindow(entry) {
-  if (isSessionPart(entry)) return { startMs: entry.windowStartMs, endMs: entry.windowEndMs };
   const { requestedAtMs, preSeconds = 60, postSeconds = 5 } = entry;
   return { startMs: requestedAtMs - preSeconds * 1000, endMs: requestedAtMs + postSeconds * 1000 };
 }
@@ -76,57 +66,11 @@ export function coverageReason(selection, { windowStartMs, nowMs, bufferMs }) {
   return "Camera was not recording at that time";
 }
 
-/** Share of a session part that must be on disk for the part to be made. */
-export const PART_MIN_COVERAGE = 0.8;
-
 /**
- * Segments for a session part. Unlike a 65 s clip, a 5-min part is still
- * worth having with holes in it: it is made when at least 80% of the window
- * was recorded. Holes inside become held frames (wall-clock concat), and
- * footage that starts late or stops early just makes the part shorter.
- * → { ok: true, segments, offsetMs, durationMs, coverage } | { ok: false, reason, coverage }
- */
-export function selectPartSegments(
-  timeline,
-  startMs,
-  endMs,
-  { minCoverage = PART_MIN_COVERAGE } = {}
-) {
-  const chosen = timeline.filter((s) => s.startMs < endMs && s.endMs > startMs);
-  const covered = chosen.reduce(
-    (sum, s) => sum + Math.max(0, Math.min(s.endMs, endMs) - Math.max(s.startMs, startMs)),
-    0
-  );
-  const coverage = covered / (endMs - startMs);
-  if (chosen.length === 0) return { ok: false, reason: "NO_FOOTAGE", coverage: 0 };
-  if (coverage < minCoverage) return { ok: false, reason: "LOW_COVERAGE", coverage };
-  const cutStart = Math.max(startMs, chosen[0].startMs);
-  const cutEnd = Math.min(endMs, chosen[chosen.length - 1].endMs);
-  return {
-    ok: true,
-    segments: chosen,
-    offsetMs: cutStart - chosen[0].startMs,
-    durationMs: cutEnd - cutStart,
-    coverage,
-  };
-}
-
-/**
- * The fail reason for a session part the buffer does not cover. A per-camera
- * part (CR-003) names its camera: "Camera 2 was not recording …".
- */
-export const partFailureReason = (selection, camera = 0) => {
-  const who = camera ? `Camera ${camera}` : "Camera";
-  return selection.reason === "NO_FOOTAGE"
-    ? `${who} was not recording during this part of the session`
-    : `${who} recorded only ${Math.round(selection.coverage * 100)}% of this part of the session`;
-};
-
-/**
- * Which camera a job asks for (CR-003): 0 = the box chooses (stacked on a
- * two-camera court, else the camera with footage), 1 or 2 = that camera only.
- * Absent/null — an older API, or a job persisted by an older box — is 0.
- * Anything else is -1 (the job is failed).
+ * Which camera a game job asks for (CR-006): 0 = the court's only camera
+ * (camera 1's buffer), 1 or 2 = that camera only. Absent/null is 0. Anything
+ * else is -1 (the job is failed). 60-second clips always use every camera
+ * the court has (stacked on a two-camera court).
  */
 export function jobCamera(entry) {
   const value = entry?.camera;
@@ -149,16 +93,13 @@ export const logoLayout = (videoWidth) => ({
 });
 
 /**
- * Bitrate caps per kind of output. A 65 s clip stays ≲ 20 MB and a 5-min
- * session part ~40–50 MB (the C200 gave 13–24 MB per 65 s uncapped).
+ * Bitrate caps per kind of output. A 65 s clip stays ≲ 20 MB (the C200 gave
+ * 13–24 MB per 65 s uncapped). Whole-game videos are never encoded (game.js).
  */
 export const QUALITY = {
   clip: { crf: "23", bitrate: "2000k", maxrate: "2300k", bufsize: "4600k", audio: "96k" },
-  session: { crf: "26", bitrate: "1000k", maxrate: "1200k", bufsize: "2400k", audio: "64k" },
-  // Two cameras stacked (1280×1440): about twice the pixels. A 5-min part stays
-  // ≲ 75 MB, under the API's 100 MB upload limit
+  // Two cameras stacked (1280×1440): about twice the pixels
   clipStacked: { crf: "23", bitrate: "3800k", maxrate: "4200k", bufsize: "8400k", audio: "96k" },
-  sessionStacked: { crf: "26", bitrate: "1700k", maxrate: "1900k", bufsize: "3800k", audio: "64k" },
   // A stacked live stream: constant ~3 Mbit/s (no crf — streaming services want a steady rate)
   stream: { crf: null, bitrate: "3000k", maxrate: "3000k", bufsize: "6000k", audio: "96k" },
 };
@@ -395,7 +336,7 @@ export async function detectEncoder({ ffmpegPath, preferred = "auto", vaapiDevic
 }
 
 /** Hard-link the segments into the job folder (copy when links are not possible), so pruning cannot pull them away mid-cut. */
-async function pinSegments(segments, partsDir) {
+export async function pinSegments(segments, partsDir) {
   await fsp.mkdir(partsDir, { recursive: true });
   const pinned = [];
   for (const segment of segments) {
@@ -427,7 +368,7 @@ async function prepareSources(sources, workDir) {
 }
 
 /** The ffmpeg arguments for one or two cameras (stacked), per encoder. */
-async function clipArgsFor(prepared, { durationMs, logoPath, quality, settings, videoPath }) {
+async function clipArgsFor(prepared, { durationMs, logoPath, settings, videoPath }) {
   if (prepared.length === 1) {
     const source = await probeVideo(settings.ffprobePath, prepared[0].first);
     const { width, height } = outputSize(source.width, source.height);
@@ -441,7 +382,6 @@ async function clipArgsFor(prepared, { durationMs, logoPath, quality, settings, 
         height,
         encoder,
         vaapiDevice: settings.vaapiDevice,
-        quality,
         outPath: videoPath,
       });
   }
@@ -462,7 +402,6 @@ async function clipArgsFor(prepared, { durationMs, logoPath, quality, settings, 
       audioInput,
       encoder,
       vaapiDevice: settings.vaapiDevice,
-      quality: quality === "session" ? "sessionStacked" : "clipStacked",
       outPath: videoPath,
     });
 }
@@ -482,7 +421,6 @@ export async function cutClip({
   workDir,
   logoPath,
   encoder,
-  quality = "clip",
   settings,
   signal,
   log,
@@ -494,7 +432,6 @@ export async function cutClip({
     const argsFor = await clipArgsFor(prepared, {
       durationMs,
       logoPath,
-      quality,
       settings,
       videoPath,
     });
@@ -546,124 +483,60 @@ export async function cutClip({
 
 /**
  * Which cameras to cut and how: both stacked when both cover the window, else
- * the one that does. `selections` = one per camera (selectSegments or
- * selectPartSegments), `null` for a camera without a buffer.
- * → { sources: [{ segments, offsetMs }], durationMs, cameras: [1] | [2] | [1, 2], coverage? }
+ * the one that does. `selections` = one per camera (selectSegments), `null`
+ * for a camera without a buffer.
+ * → { sources: [{ segments, offsetMs }], durationMs, cameras: [1] | [2] | [1, 2] }
  *   or { fail: selection } (camera 1's reason, else camera 2's)
  */
-export function chooseSources(selections, window, { part = false } = {}) {
+export function chooseSources(selections, window) {
   const ok = selections.map((sel, i) => (sel?.ok ? i : -1)).filter((i) => i >= 0);
   if (!ok.length) return { fail: selections[0] ?? selections.find(Boolean) };
-  if (!part) {
-    return {
-      sources: ok.map((i) => ({
-        segments: selections[i].segments,
-        offsetMs: selections[i].offsetMs,
-      })),
-      durationMs: window.endMs - window.startMs,
-      cameras: ok.map((i) => i + 1),
-    };
-  }
-  // Session part: the stretch both cameras recorded; one camera if that is < 80 %
-  const span = (sel) => {
-    const start = sel.segments[0].startMs + sel.offsetMs;
-    return { start, end: start + sel.durationMs };
-  };
-  if (ok.length === 2) {
-    const [a, b] = ok.map((i) => span(selections[i]));
-    const start = Math.max(a.start, b.start);
-    const end = Math.min(a.end, b.end);
-    if (end - start >= (window.endMs - window.startMs) * PART_MIN_COVERAGE) {
-      return {
-        sources: ok.map((i) => ({
-          segments: selections[i].segments,
-          offsetMs: start - selections[i].segments[0].startMs,
-        })),
-        durationMs: end - start,
-        cameras: [1, 2],
-        coverage: Math.min(...ok.map((i) => selections[i].coverage)),
-      };
-    }
-  }
-  const i = ok[0];
   return {
-    sources: [{ segments: selections[i].segments, offsetMs: selections[i].offsetMs }],
-    durationMs: selections[i].durationMs,
-    cameras: [i + 1],
-    coverage: selections[i].coverage,
+    sources: ok.map((i) => ({
+      segments: selections[i].segments,
+      offsetMs: selections[i].offsetMs,
+    })),
+    durationMs: window.endMs - window.startMs,
+    cameras: ok.map((i) => i + 1),
   };
 }
 
-const overlaps = (timeline, window) =>
-  timeline.some((s) => s.startMs < window.endMs && s.endMs > window.startMs);
-
 /**
- * What to do with a queued job, from the court's camera time lines
+ * What to do with a queued clip, from the court's camera time lines
  * ([cam 1, cam 2]; an empty one is a camera without footage):
  *   { status: "wait" }                       the post-window is not on disk yet
  *   { status: "fail", reason, detail? }      the buffer does not cover the window
- *   { status: "cut", sources, durationMs, cameras, quality, coverage? }
- * Camera 0 (every 60 s clip, and parts from an older API): both cameras
- * stacked when both cover the window, else the one that does. Camera 1 or 2
- * (whole-game parts per camera, CR-003): that camera alone, never the other.
- * `courtCameras` = the cameras /config lists for the court ([1] or [1, 2]).
+ *   { status: "cut", sources, durationMs, cameras, fallback }
+ * Both cameras stacked when both cover the window, else the one that does.
  */
-export function planClip(entry, timelines, { courtKnown, courtCameras = [], now, settings }) {
+export function planClip(entry, timelines, { courtKnown, now, settings }) {
   const window = clipWindow(entry);
-  const camera = jobCamera(entry);
-  const part = isSessionPart(entry);
-  const quality = part ? "session" : "clip";
-  if (camera < 0) {
-    return { status: "fail", reason: `This court has no camera ${String(entry.camera)}` };
-  }
-  const own = camera ? [timelines[camera - 1] ?? []] : timelines;
-  // Camera 2 taken off the court: fail at once, unless it recorded this window before
-  if (camera === 2 && !courtCameras.includes(2) && !overlaps(own[0], window)) {
-    return { status: "fail", reason: "This court has no camera 2" };
-  }
   // Keyframes can be 6 s apart and a reconnect takes ~10 s: give up waiting after 30 s
   const waitLimit = window.endMs + Math.max(30_000, settings.segmentSeconds * 4000);
-  // Wait for every camera (of this job) that is recording around the window
-  const active = own.filter((t) => t.some((s) => s.endMs > window.startMs));
+  // Wait for every camera that is recording around the window
+  const active = timelines.filter((t) => t.some((s) => s.endMs > window.startMs));
   const ready = active.length > 0 && active.every((t) => isWindowClosed(t, window.endMs));
   if (!ready && now < waitLimit) return { status: "wait" };
 
   if (!courtKnown && timelines.every((t) => t.length === 0)) {
     return { status: "fail", reason: "This court's camera is not set up on the recorder box" };
   }
-  const select = (t) =>
-    part
-      ? selectPartSegments(t, window.startMs, window.endMs)
-      : selectSegments(t, window.startMs, window.endMs);
-  const failure = (sel) =>
-    part
-      ? partFailureReason(sel, camera)
-      : coverageReason(sel, {
-          windowStartMs: window.startMs,
-          nowMs: now,
-          bufferMs: settings.bufferSeconds * 1000,
-        });
-
-  if (camera) {
-    const sel = select(own[0]);
-    if (!sel.ok) return { status: "fail", reason: failure(sel), detail: sel };
-    return {
-      status: "cut",
-      sources: [{ segments: sel.segments, offsetMs: sel.offsetMs }],
-      durationMs: part ? sel.durationMs : window.endMs - window.startMs,
-      cameras: [camera],
-      quality,
-      ...(part ? { coverage: sel.coverage } : {}),
-    };
-  }
   // no second camera → null
-  const selections = timelines.map((t, i) => (i > 0 && t.length === 0 ? null : select(t)));
-  const choice = chooseSources(selections, window, { part });
-  if (choice.fail) return { status: "fail", reason: failure(choice.fail), detail: choice.fail };
+  const selections = timelines.map((t, i) =>
+    i > 0 && t.length === 0 ? null : selectSegments(t, window.startMs, window.endMs)
+  );
+  const choice = chooseSources(selections, window);
+  if (choice.fail) {
+    const reason = coverageReason(choice.fail, {
+      windowStartMs: window.startMs,
+      nowMs: now,
+      bufferMs: settings.bufferSeconds * 1000,
+    });
+    return { status: "fail", reason, detail: choice.fail };
+  }
   return {
     status: "cut",
     ...choice,
-    quality,
     fallback: selections.filter(Boolean).length > 1 && choice.cameras.length === 1,
   };
 }
@@ -682,12 +555,7 @@ export async function makeClip(entry, ctx) {
   const dirs = ctx.segmentsDirs ?? [ctx.segmentsDir];
   const now = ctx.now ?? Date.now();
   const timelines = await Promise.all(dirs.map((dir) => loadTimeline(dir)));
-  const plan = planClip(entry, timelines, {
-    courtKnown: ctx.courtKnown,
-    courtCameras: ctx.courtCameras,
-    now,
-    settings,
-  });
+  const plan = planClip(entry, timelines, { courtKnown: ctx.courtKnown, now, settings });
   if (plan.status !== "cut") return plan;
   if (plan.fallback) {
     const other = plan.cameras[0] === 1 ? 2 : 1;
@@ -702,14 +570,9 @@ export async function makeClip(entry, ctx) {
     workDir,
     logoPath,
     encoder,
-    quality: plan.quality,
     settings,
     signal,
     log,
   });
-  return {
-    status: "done",
-    ...(isSessionPart(entry) ? { coverage: plan.coverage } : {}),
-    ...result,
-  };
+  return { status: "done", ...result };
 }

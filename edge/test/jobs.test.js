@@ -260,7 +260,7 @@ describe("button presses", () => {
   });
 });
 
-describe("session parts", () => {
+describe("session parts are gone (CR-006)", () => {
   const partJob = (clipId, endMs) => ({
     ...job(clipId, endMs),
     source: "SESSION",
@@ -268,31 +268,52 @@ describe("session parts", () => {
     partIndex: 2,
     windowStartMs: endMs - 300_000,
     windowEndMs: endMs,
-    durationSeconds: 300,
   });
 
-  it("keeps the part window on the queued job (and null for ordinary clips)", async () => {
-    const { runner, queue } = await makeRunner();
+  it("ignores a session-part clip job; an ordinary clip is queued as before", async () => {
+    const { runner, queue, api } = await makeRunner();
     await runner.enqueue(partJob("part-1", NOW - 2000));
-    await runner.enqueue({ ...job("clip-1"), windowStartMs: null, windowEndMs: null });
+    await runner.enqueue(job("clip-1"));
+    assert.equal(queue.has("part-1"), false);
+    assert.deepEqual(Object.keys(queue.get("clip-1")).sort(), [
+      "attempts",
+      "claimed",
+      "clipId",
+      "courtId",
+      "nextAttemptAt",
+      "postSeconds",
+      "preSeconds",
+      "receivedAt",
+      "requestedAtMs",
+      "source",
+      "state",
+    ]);
     assert.deepEqual(
-      ["sessionId", "partIndex", "windowStartMs", "windowEndMs"].map((k) => queue.get("part-1")[k]),
-      ["sess-1", 2, NOW - 302_000, NOW - 2000]
+      api.calls.map((c) => c.slice(0, 2)),
+      [["claim", "clip-1"]]
     );
-    assert.equal(queue.get("clip-1").windowStartMs, null);
   });
 
-  it("cuts players' clips before session parts", async () => {
-    const order = [];
-    const clip = async (entry) => {
-      order.push(entry.clipId);
-      return { status: "wait" };
-    };
-    const { runner } = await makeRunner({ clip });
-    await runner.enqueue(partJob("part-1", NOW - 60_000)); // older request
-    await runner.enqueue(job("clip-1", NOW - 10_000));
-    runner.dispatch();
-    await Promise.all(runner.active.values());
-    assert.deepEqual(order, ["clip-1"]);
+  it("drops a session part left in an older box's queue.json at start-up, with a log line", async () => {
+    const old = { ...partJob("part-1", NOW - 60_000), state: "ready", videoPath: "/x/p.mp4" };
+    const clip = { ...job("clip-1"), state: "waiting", claimed: true };
+    await fs.writeFile(
+      path.join(dir, "queue.json"),
+      JSON.stringify({ version: 1, jobs: [old, clip] })
+    );
+    await fs.mkdir(path.join(dir, "jobs", "part-1"), { recursive: true });
+    const lines = [];
+    const { runner, queue } = await makeRunner();
+    runner.log = { ...silent, info: (line) => lines.push(line) };
+    await runner.recover();
+    assert.equal(queue.has("part-1"), false);
+    assert.equal(queue.get("clip-1").state, "waiting");
+    assert.ok(lines.some((l) => /dropping session part part-1/.test(l)));
+    await assert.rejects(fs.access(path.join(dir, "jobs", "part-1")));
+    const saved = JSON.parse(await fs.readFile(path.join(dir, "queue.json"), "utf8"));
+    assert.deepEqual(
+      saved.jobs.map((j) => j.clipId),
+      ["clip-1"]
+    );
   });
 });

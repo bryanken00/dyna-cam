@@ -13,12 +13,12 @@ export const USER_AGENT = `DynaCamRecorder/${pkg.version}`;
 
 /**
  * Heartbeat `capabilities`: what this box understands beyond the base device
- * contract. "session-part-camera" (CR-003): session-part jobs may carry
- * `camera: 1 | 2` and are cut from that camera alone — the API only sends
- * per-camera parts to a box that reports it.
+ * contract. "game-file" (CR-006): after End game the box takes one game job
+ * per camera, copies the whole game into one mp4 and uploads it in resumable
+ * chunks (/game-videos/:id/start, /chunk, /finish, /fail).
  */
-export const CAPABILITY_SESSION_PART_CAMERA = "session-part-camera";
-export const DEVICE_CAPABILITIES = Object.freeze([CAPABILITY_SESSION_PART_CAMERA]);
+export const CAPABILITY_GAME_FILE = "game-file";
+export const DEVICE_CAPABILITIES = Object.freeze([CAPABILITY_GAME_FILE]);
 
 export const ENCODERS = ["auto", "libx264", "h264_qsv", "h264_vaapi", "h264_videotoolbox"];
 
@@ -180,7 +180,7 @@ export function loadConfig(env = process.env) {
     uploadConcurrency: int(env, "UPLOAD_CONCURRENCY", 1, 1, 4),
     heartbeatSeconds: int(env, "HEARTBEAT_SECONDS", 30, 5, 600),
     configRefreshSeconds: int(env, "CONFIG_REFRESH_SECONDS", 60, 10, 3600),
-    // Free space in DATA_DIR: warn below, stop keeping session footage below critical
+    // Free space in DATA_DIR: warn below, stop keeping game footage below critical
     diskWarnGb: int(env, "DISK_WARN_GB", 2, 0, 10_000),
     diskCriticalMb: int(env, "DISK_CRITICAL_MB", 500, 0, 1_000_000),
     // Court buttons on the LAN: unset → 8089; set to "" or 0 → off

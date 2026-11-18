@@ -104,6 +104,8 @@ describe("buildRestreamArgs + the box's own signed input", () => {
     const after = (flag) => args[args.indexOf(flag) + 1];
     assert.equal(after("-i"), "http://in");
     assert.equal(after("-c:v"), "copy");
+    // BUG-003: empty NAL units (Android RTSP camera apps) dropped, no re-encode
+    assert.equal(after("-bsf:v"), "filter_units=remove_types=0");
     assert.equal(after("-c:a"), "aac");
     assert.equal(after("-ar"), "44100");
     assert.equal(after("-f"), "flv");

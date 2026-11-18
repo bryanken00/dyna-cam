@@ -202,7 +202,7 @@ export const disconnectCourtDrive = async (db, courtId) => {
  * Queue a clip that just became Ready for its court's Drive, when the court
  * has a Google account (also one that needs reconnecting: it uploads once
  * reconnected). Whole-game parts are not queued: the game goes to Drive as
- * its joined whole video per camera (CR-003, jobs/sessionJoin.js).
+ * its whole video per camera, uploaded by the box after End game (CR-006).
  */
 export const queueClipForDrive = (db, clipId) =>
   db.query(

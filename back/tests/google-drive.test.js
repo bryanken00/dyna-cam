@@ -10,7 +10,7 @@ import http from "node:http";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { hasFfmpeg, makeMp4 } from "./helpers/media.js";
+import { gameJobs, sendGame } from "./helpers/gameUpload.js";
 import { JPEG, startTestApp } from "./helpers/testApp.js";
 
 const MP4 = Buffer.concat([
@@ -253,7 +253,6 @@ describe("Google Drive per court", () => {
         GOOGLE_DRIVE_API_URL: `${base}/drive`,
         GOOGLE_DRIVE_UPLOAD_URL: `${base}/upload`,
         APP_URL: "http://web.test",
-        FFMPEG_PATH: "", // the system ffmpeg, whatever back/.env says
       },
     });
     ({ runDriveUploads } = await ctx.importFromBack("server/src/jobs/driveUploads.js"));
@@ -275,7 +274,8 @@ describe("Google Drive per court", () => {
       cameraRtspUrl: "rtsp://u:p@10.0.0.8:554/stream1",
     });
     home.court2Id = second.data.courtId;
-    home.device = asDevice((await ctx.pairBox(admin.token, home.venueId, "Box")).data.token);
+    home.token = (await ctx.pairBox(admin.token, home.venueId, "Box")).data.token;
+    home.device = asDevice(home.token);
   });
   after(async () => {
     await ctx?.stop();
@@ -491,67 +491,54 @@ describe("Google Drive per court", () => {
       assert.equal(row.driveError, null);
     });
 
-    it(
-      "puts a whole game in its own shared folder, as one video (CR-003)",
-      { skip: hasFfmpeg() ? false : "ffmpeg is not installed" },
-      async () => {
-        const { runSessionJoins } = await ctx.importFromBack("server/src/jobs/sessionJoin.js");
-        const created = await call("POST", "/admin/sessions", {
-          courtId: home.courtId,
-          startAt: (
-            await ctx.sql.query(
-              `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+    it("puts a whole game in its own shared folder, as one video (CR-006)", async () => {
+      const created = await call("POST", "/admin/sessions", {
+        courtId: home.courtId,
+        startAt: (
+          await ctx.sql.query(
+            `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
                  INTERVAL 1 MINUTE), '%Y-%m-%d %H:%i:%s') AS t`
-            )
-          )[0][0].t,
-          durationMinutes: 5,
-          playerName: "Drive Player",
-        });
-        assert.equal(created.status, 201, JSON.stringify(created.body));
-        const { sessionId, shareUrl } = created.data;
-        await ctx.sql.query(
-          `UPDATE recording_sessions
+          )
+        )[0][0].t,
+        durationMinutes: 5,
+        playerName: "Drive Player",
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const { sessionId, shareUrl } = created.data;
+      await ctx.sql.query(
+        `UPDATE recording_sessions
            SET startAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 12 MINUTE),
                endAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 2 MINUTE)
            WHERE sessionId = ?`,
-          [sessionId]
-        );
-        const jobs = (await home.device("GET", "/device/jobs?wait=0")).data.jobs.filter(
-          (j) => j.sessionId === sessionId
-        );
-        assert.equal(jobs.length, 2);
-        for (const job of jobs) {
-          const up = await home.device("POST", `/device/clips/${job.clipId}/upload`, {
-            form: [["video", makeMp4(1), "video/mp4", "part.mp4"]],
-          });
-          assert.equal(up.status, 200);
-        }
-        assert.deepEqual(await runDriveUploads(db), {}, "parts don't go to Drive one by one");
+        [sessionId]
+      );
+      const jobs = await gameJobs(ctx, home.token, sessionId);
+      assert.equal(jobs.length, 1, "one file for the whole game");
+      assert.deepEqual(await runDriveUploads(db), {}, "nothing in until the box sends it");
+      const sent = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
 
-        assert.deepEqual(await runSessionJoins(db, { limit: 10 }), { joined: 1 });
-        assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
+      const [[session]] = await ctx.sql.query(
+        `SELECT driveFolderId, driveUrl FROM recording_sessions WHERE sessionId = ?`,
+        [sessionId]
+      );
+      const folder = google.state.files.get(session.driveFolderId);
+      assert.match(folder.name, / game$/);
+      assert.equal(folder.shared, true, "players open the game's folder");
+      const files = [...google.state.files.values()].filter(
+        (f) => f.parents?.[0] === session.driveFolderId
+      );
+      assert.deepEqual(
+        files.map((f) => [f.name, f.shared]),
+        [["Whole game.mp4", true]]
+      );
 
-        const [[session]] = await ctx.sql.query(
-          `SELECT driveFolderId, driveUrl FROM recording_sessions WHERE sessionId = ?`,
-          [sessionId]
-        );
-        const folder = google.state.files.get(session.driveFolderId);
-        assert.match(folder.name, / game$/);
-        assert.equal(folder.shared, true, "players open the game's folder");
-        const files = [...google.state.files.values()].filter(
-          (f) => f.parents?.[0] === session.driveFolderId
-        );
-        assert.deepEqual(
-          files.map((f) => [f.name, f.shared]),
-          [["Whole game.mp4", true]]
-        );
-
-        const page = await ctx.api("GET", `/public/sessions/${shareUrl.split("/").pop()}`);
-        assert.equal(page.data.session.driveUrl, session.driveUrl);
-        assert.ok(page.data.session.videos[0].driveUrl);
-        assert.equal((await court()).googleDrive.queue.waiting, 0);
-      }
-    );
+      const page = await ctx.api("GET", `/public/sessions/${shareUrl.split("/").pop()}`);
+      assert.equal(page.data.session.driveUrl, session.driveUrl);
+      assert.ok(page.data.session.videos[0].driveUrl);
+      assert.equal((await court()).googleDrive.queue.waiting, 0);
+    });
   });
 
   describe("large files", () => {

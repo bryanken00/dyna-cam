@@ -9,9 +9,9 @@
  * AppSession = { sessionId, courtId, courtName, venueName, startAt, endAt,
  *   status (Scheduled | Recording | Processing | Ready | Failed | Cancelled),
  *   startsInSeconds (> 0 only while Scheduled before its start),
- *   elapsedSeconds, endsInSeconds, durationSeconds, savedSeconds, totalSeconds
- *   (CR-004: how much of the game is saved, for "25 of 30 minutes saved"),
- *   partsReady, partsTotal (older APIs only), shareUrl, failureReason }. Times are Manila wall-clock strings; the
+ *   elapsedSeconds, endsInSeconds, durationSeconds, openEnded (CR-005),
+ *   uploadPercent (CR-006: 0–100 while the game's file uploads, null before),
+ *   shareUrl, failureReason }. Times are Manila wall-clock strings; the
  *   "…Seconds" values are as of the response.
  */
 import { createDeviceAxiosInstance } from "./axios";

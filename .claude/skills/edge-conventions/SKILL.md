@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and session parts, two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and whole-game files (stream copy + resumable chunked upload), two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -19,8 +19,9 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court **camera** (`CourtRecorder`; camera 2 in `buffer/<safeId>~cam2`), restart/backoff, stall watchdog, pruning, heartbeat status with `camera` (`RecorderManager`) |
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
-| `clipper.js` | Pure window and selection math, `jobCamera` + `planClip` (which camera(s), wait/fail/cut), ffmpeg argument builders, encoder detection, `cutClip`, `makeClip` |
-| `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`) |
+| `clipper.js` | Pure window and selection math, `planClip` (stacked or one camera, wait/fail/cut), `jobCamera`, ffmpeg argument builders, encoder detection, `pinSegments`, `cutClip`, `makeClip` |
+| `game.js` | Whole-game videos (CR-006): `planGame` / `selectGameSegments` (gaps, duration), concat-copy args, `makeGameFile`, and `uploadGameFile` (start → chunks → finish state machine) |
+| `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`); game jobs in their own lane (copy → resumable upload) |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
 | `restream.js` | Every live stream (`Restreams`): venue court streams + players' own, one ffmpeg each reading the box's live HLS on 127.0.0.1; CAM1/CAM2 copied, STACKED encoded; backoff, status, caps, heartbeat `sessionStreams` + camera 1's `streamStatus` |
@@ -40,7 +41,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   `User-Agent: DynaCamRecorder/<version>`. The API returns 403 for a missing UA or one containing
   bot, crawler, spider or scraper.
 - Envelope → `data`; failures throw `ApiError` (`status` 0 = no answer).
-- Errors: **404/409** clip gone or done → drop. **401**: the box was revoked — stop all work, delete
+- Errors: **404/409** clip gone or done → drop (game uploads: see below — a 409 may be a resume). **401**: the box was revoked — stop all work, delete
   device.json + config cache, write `revoked.json` (`{ revokedAt, deviceId, name }`, 0600), log "This box was
   revoked — delete …/revoked.json (and check .env) to enrol it again", wait 1 min, exit 1. **429** →
   `Retry-After`. **0/5xx** → exponential backoff. Other 4xx on upload → `POST /fail` with `Upload rejected: <detail>`.
@@ -55,17 +56,41 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   origin); re-download only when its path (without the query) changes.
 - Use `requestedAtMs`, never parse `requestedAt`; a clip job > 15 min old is failed server-side →
   drop. Claim is best-effort but exclusive (another box's claim → 409 → drop).
-- Session parts = clip jobs with `sessionId`, `partIndex`, `windowStartMs/EndMs` (null for clips):
-  cut exactly that window, ≥ 80 % covered (holes → held frames) or fail with the coverage; clips
-  go first. Jobs may carry `camera: 0 | 1 | 2` (absent/null = 0, also for old `queue.json` entries;
-  `jobCamera`): 0 = stacked/fallback as below (every 60 s clip); 1/2 = that camera's buffer ONLY
-  (CR-003 whole-game video per camera — the API joins the parts): single-camera output, `session`
-  caps, logo + thumbnail, never stacked, never the other camera; its 80 % rule and reason name it
-  ("Camera 2 was not recording during this part of the session"). Camera 2 not in `/config` and no
-  camera-2 footage for the window → fail at once "This court has no camera 2". `planClip` decides.
-- Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today
-  `["session-part-camera"]`): the API sends per-camera parts only to a box reporting it. `/config` `sessions` keep their segments (± 10 s) until end + 30 min
-  (`retentionWindows`), dropped below `DISK_CRITICAL_MB` so recording never stops.
+- **No session parts** (CR-006): clip jobs never carry `sessionId`/`partIndex`; a clip job that does
+  is ignored, and one left in an older box's `queue.json` is dropped at start-up with a log line.
+  60 s clips are always "the box chooses": both cameras stacked on a two-camera court, else the one
+  with footage (`planClip`); a clip's `camera` field is ignored.
+- **Game jobs** (CR-006): `GET /jobs` also returns `{ type: "game", sessionVideoId, sessionId, courtId,
+  camera, windowStartMs, windowEndMs }`, repeated on later polls until finished — dedupe by
+  `sessionVideoId` (queue key `game:<id>`). `camera` 0 = the court's only camera (camera 1's buffer),
+  1/2 = that camera only (`jobCamera`), never stacked, never the other camera. Wait until `windowEndMs`
+  is in a closed segment (or ≥ 60 s past it), then **stream-copy** (see ffmpeg rules) into
+  `jobs/<safeId(sessionVideoId)>/game.mp4` + `thumb.jpg` (~1 s in; a failed thumbnail is only logged).
+  Holes ≤ 7 s are held frames; longer ones are left out and reported as `gaps: [{ startMs, endMs }]`;
+  `durationSeconds` = window − gaps (integer). No footage → `POST /game-videos/:id/fail` "Camera N was
+  not recording during this game" (camera 1/2) / "The camera was not recording during this game" (0);
+  a camera-2 job on a court without camera 2 in `/config` and no camera-2 footage → at once "This
+  court has no camera 2". `planGame` decides.
+- **Resumable upload** (`uploadGameFile`): `POST /game-videos/:id/start { sizeBytes, durationSeconds,
+  gaps }` → `{ receivedBytes, chunkBytes }` (8 MiB; same size resumes, a different one restarts at 0) →
+  `PUT /game-videos/:id/chunk?offset=N` (`application/octet-stream`, bytes `[N, N+len)` read with a
+  file handle at the offset — never the whole file in memory) → `{ receivedBytes }`; 409
+  `OFFSET_MISMATCH` + `data.receivedBytes` → continue from there → `POST /game-videos/:id/finish`
+  (multipart, optional `thumbnail` `image/jpeg` `thumb.jpg`) → `{ status: "Ready" }`; a 409 with
+  `data.receivedBytes` < size → send chunks from there. 404 or any other 409 → drop job + folder.
+  0/5xx/timeout → backoff 5 s → 5 min and resume via `/start` (never from zero); 429 → `Retry-After`;
+  401 → the revoked flow; other 4xx → `/fail` "Upload rejected: <detail>". `ApiError.data` carries the
+  error envelope's `data`.
+- **Game lane:** one game job at a time (`limits.game = 1`), sorted after clips; before every chunk it
+  waits while a clip is uploading or ready to upload (`clipsFirst`). `UPLOAD_CONCURRENCY` is clips only;
+  game jobs don't make the box "busy" for previews. Phase persisted in `queue.json`: `waiting` →
+  `copying` → `uploading` → `finishing` (+ `failing`). Restart: `copying` → `waiting`; `uploading`/
+  `finishing` with the file → resume via `/start`; without it → `waiting` (copied again). The folder
+  goes after `/finish` or a drop.
+- Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today `["game-file"]`).
+  `/config` `sessions` keep their segments (± 10 s) **for as long as they are listed** — the API keeps a
+  finished game listed until its videos are uploaded, so there is no box-side cut-off
+  (`retentionWindows`); dropped below `DISK_CRITICAL_MB` so recording never stops.
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
   retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
 - Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
@@ -76,7 +101,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Two cameras (PLAN-002 §7): `/config` courts `camera2RtspUrl` + `camera2Version` (null = none),
   `stream: { rtmpUrl, layout } | null`; sessions `stream: { url, layout } | null`. `layout` ∈
   CAM1/CAM2/STACKED; missing/unknown → CAM1; CAM2/STACKED without camera 2 → CAM1.
-- Upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
+- Clip upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
 
 ## ffmpeg rules
 
@@ -103,14 +128,17 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   - **Stacked** (2-camera court, both cover the window — else the camera that does, logged): one
     concat per camera, each `trim`med to the window in the filter (own offset) → 1280×720 (keep
     aspect, pad) at the slower fps → `vstack` → logo (`logoLayout(1280)`) → 1280×1440 (no 1080 cap),
-    audio `atrim` from Cam 1 (Cam 2's if Cam 1 has none). Parts (`camera` 0 only): the stretch both
-    recorded, if ≥ 80 %. A `camera: 1 | 2` part is one camera, not stacked.
-    `QUALITY.clipStacked` (max 4200k) / `sessionStacked` (max 1900k: a 5-min part < 75 MB, API cap 100 MB).
+    audio `atrim` from Cam 1 (Cam 2's if Cam 1 has none). `QUALITY.clipStacked` (max 4200k).
   - Scale to ≤ 1920×1080, end the filter with `format=yuv420p` (`nv12`/`hwupload` for QSV/VAAPI); `-c:a aac`, `+faststart`.
-  - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s), session parts crf 26
-    / max 1200k with 64k audio (≈ 45 MB per 5 min). Hardware encoders use `-b:v` with the same
-    maxrate.
+  - Bitrate caps (`QUALITY`): clips crf 23 / max 2300k (≤ 20 MB per 65 s). Hardware encoders use
+    `-b:v` with the same maxrate. There is no session quality any more.
   - A failing hardware encoder → `libx264` once. `ENCODER=auto` test-encodes (listed ≠ working).
+- **Game videos are never encoded** (CR-006): concat demuxer over the pinned segments →
+  `-map 0:v:0 -map 0:a? -c:v copy -c:a copy -bsf:a aac_adtstoasc [-t <game end in the file>]
+  -movflags +faststart -f mp4` (the buffer's audio is already AAC). No filter, no logo, no scaling, no
+  cap. The list keeps `duration` = wall-clock spacing across holes ≤ 7 s and has **no** `duration`
+  after a gap or on the last file, so gaps are left out. The start is the first segment's keyframe
+  (no input-side trim with copy); `-t` cuts at the game's end.
 
 ## Live view (`live.js`, PLAN-002 §5.4)
 
@@ -167,8 +195,10 @@ written is never used. Clips tolerate holes ≤ 7 s; the window must end in a cl
 
 ## Data and state
 `DATA_DIR` holds `buffer/<courtId>/` and `buffer/<courtId>~cam2/` (segments, csv, index, run, pid; camera 2's
-pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` (segments
-hard-linked in so pruning can't pull them away), `queue.json` (clips and button presses),
+pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` and
+`jobs/<sessionVideoId>/` (segments hard-linked into `parts/` while ffmpeg reads them, so pruning can't
+pull them away; a game folder keeps `game.mp4` + `thumb.jpg` until `/finish`), `queue.json` (clips,
+game jobs with their phase, and button presses),
 `config.json` (mode 600, holds camera passwords), `device.json` (0600, the token), `enroll-refused.json`
 (hashes), `revoked.json` (0600, blocks enrolment until a person deletes it), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
@@ -180,8 +210,9 @@ npm run lint     # eslint (security plugin) + prettier-compatible; must be clean
 npm test         # node:test — no network, no ffmpeg
 npm run smoke    # ~2 min: two real recorders on ONE court (Tapo-like cam 1: pcm_alaw, irregular GOP;
                  # cam 2: 25 fps, no audio): stacked 65 s clip 1280x1440 (h264+aac, all frames,
-                 # faststart, JPEG) + stacked 60 s session part (capped) + the same window as a
-                 # camera-2-only part (1280x720, silent, single-camera cap) + the live view played by
+                 # faststart, JPEG) + whole-game copies of one window (camera 0 and camera 2: h264,
+                 # faststart, ≈ window, codec params = the recording, JPEG) uploaded to a local
+                 # stand-in (forced OFFSET_MISMATCH + a dropped connection, bytes equal) + the live view played by
                  # ffprobe (clock never goes back, bad sig 403, /cam2/) + restreams to local RTMP:
                  # venue STACKED → CAM2 and a player CAM1, recorders never restarted
 ```

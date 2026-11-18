@@ -105,16 +105,24 @@ router.get(
         [getCurrentTimestampLocal(), venueId]
       ),
       // Sessions whose footage the box must keep beyond its rolling buffer:
-      // starting within a day, or ended in the last 30 minutes (parts may
-      // still be waiting to be cut)
+      // starting within a day, or — CR-006 — ended but with a game video the
+      // box still has to make and upload (it keeps the footage while listed)
       req.db.query(
         `SELECT s.sessionId, s.courtId, s.startAt, s.endAt, s.status, s.streamUrl,
                 s.streamLayout, c.camera2RtspUrl IS NOT NULL AS hasCamera2
          FROM recording_sessions s
          JOIN courts c ON c.courtId = s.courtId
-         WHERE s.venueId = ? AND s.status IN ('Scheduled', 'Recording', 'Processing')
-           AND s.startAt <= DATE_ADD(?, INTERVAL 1 DAY)
-           AND s.endAt >= DATE_SUB(?, INTERVAL 30 MINUTE)`,
+         WHERE s.venueId = ?
+           AND (
+             (s.status IN ('Scheduled', 'Recording') AND s.startAt <= DATE_ADD(?, INTERVAL 1 DAY))
+             OR (s.status = 'Processing' AND (
+               s.endAt >= DATE_SUB(?, INTERVAL 30 MINUTE)
+               OR EXISTS (
+                 SELECT 1 FROM session_videos sv
+                 WHERE sv.sessionId = s.sessionId AND sv.status IN ('Pending', 'Uploading')
+               )
+             ))
+           )`,
         [venueId, getCurrentTimestampLocal(), getCurrentTimestampLocal()]
       ),
     ]);
@@ -271,17 +279,37 @@ router.get(
       closed = true;
     });
 
-    const findJobs = () =>
+    const findClips = () =>
       req.db.query(
-        `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source,
-                cl.sessionId, cl.partIndex, cl.camera, cl.windowStartAt, cl.windowEndAt
+        `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source
          FROM clips cl
          JOIN courts c ON c.courtId = cl.courtId AND c.status != 'Deleted'
-         WHERE cl.venueId = ? AND cl.status = 'Pending'
+         WHERE cl.venueId = ? AND cl.status = 'Pending' AND cl.sessionId IS NULL
          ORDER BY cl.requestedAt ASC
          LIMIT 10`,
         [venueId]
       );
+    // CR-006: a finished game's whole video per camera, still to be sent —
+    // waiting, or being sent by this box (it resumes after a restart)
+    const findGames = () =>
+      req.db.query(
+        `SELECT sv.sessionVideoId, sv.sessionId, sv.camera, s.courtId, s.startAt, s.endAt
+         FROM session_videos sv
+         JOIN recording_sessions s ON s.sessionId = sv.sessionId
+         JOIN courts c ON c.courtId = s.courtId AND c.status != 'Deleted'
+         WHERE sv.venueId = ? AND sv.status IN ('Pending', 'Uploading')
+           AND (sv.deviceId IS NULL OR sv.deviceId = ?)
+         ORDER BY s.endAt ASC
+         LIMIT 10`,
+        [venueId, req.device.deviceId]
+      );
+    const findJobs = async () => {
+      const [clips, games] = await Promise.all([findClips(), findGames()]);
+      return [
+        ...clips.map((row) => ({ type: "clip", ...row })),
+        ...games.map((row) => ({ type: "game", ...row })),
+      ];
+    };
 
     // Session parts become jobs when their window ends (utils/sessions.js);
     // check for due parts now and every few seconds while waiting
@@ -299,26 +327,32 @@ router.get(
     if (closed) return undefined;
 
     return res.sendSuccess("Jobs", {
-      jobs: rows.map((row) => ({
-        type: "clip",
-        clipId: row.clipId,
-        courtId: row.courtId,
-        source: row.source,
-        requestedAt: row.requestedAt,
-        requestedAtMs: toEpochMs(row.requestedAt),
-        durationSeconds: row.durationSeconds,
-        preSeconds: CLIP_PRE_SECONDS,
-        postSeconds: CLIP_POST_SECONDS,
-        // Session parts: cut exactly this window instead of the pre/post
-        // seconds around requestedAt
-        sessionId: row.sessionId || null,
-        partIndex: row.partIndex ?? null,
-        // CR-003: 0 = the box's usual output (one camera, or both stacked);
-        // 1 / 2 = that camera only (whole-game parts on a two-camera court)
-        camera: row.camera ?? 0,
-        windowStartMs: toEpochMs(row.windowStartAt),
-        windowEndMs: toEpochMs(row.windowEndAt),
-      })),
+      jobs: rows.map((row) =>
+        row.type === "game"
+          ? {
+              // CR-006: copy the game into one file for this camera and upload
+              // it in chunks (/device/game-videos/:sessionVideoId/…).
+              // camera 0 = the court's only camera; 1 / 2 = that camera
+              type: "game",
+              sessionVideoId: row.sessionVideoId,
+              sessionId: row.sessionId,
+              courtId: row.courtId,
+              camera: row.camera,
+              windowStartMs: toEpochMs(row.startAt),
+              windowEndMs: toEpochMs(row.endAt),
+            }
+          : {
+              type: "clip",
+              clipId: row.clipId,
+              courtId: row.courtId,
+              source: row.source,
+              requestedAt: row.requestedAt,
+              requestedAtMs: toEpochMs(row.requestedAt),
+              durationSeconds: row.durationSeconds,
+              preSeconds: CLIP_PRE_SECONDS,
+              postSeconds: CLIP_POST_SECONDS,
+            }
+      ),
     });
   })
 );

@@ -10,7 +10,6 @@ import {
   chooseSources,
   logoLayout,
   QUALITY,
-  selectPartSegments,
   selectSegments,
 } from "../src/clipper.js";
 import { LiveView } from "../src/live.js";
@@ -527,7 +526,7 @@ const footage = (cam, fromSec, toSec) =>
     endMs: T + (fromSec + 2 * i + 2) * 1000,
   }));
 
-describe("stacked clips and session parts", () => {
+describe("stacked clips", () => {
   const clipWin = { startMs: T + 30_000, endMs: T + 95_000 };
 
   it("stacks both cameras when both cover the window, each with its own offset", () => {
@@ -556,29 +555,6 @@ describe("stacked clips and session parts", () => {
     assert.deepEqual(chooseSources(oneCamera, clipWin).cameras, [1]);
     const none = [[], []].map((t) => selectSegments(t, clipWin.startMs, clipWin.endMs));
     assert.equal(chooseSources(none, clipWin).fail.reason, "NO_FOOTAGE");
-  });
-
-  it("stacks a session part over the stretch both cameras recorded, else one camera", () => {
-    const win = { startMs: T, endMs: T + 300_000 };
-    const both = [footage(1, 0, 300), footage(2, 20, 300)].map((t) =>
-      selectPartSegments(t, win.startMs, win.endMs)
-    );
-    const choice = chooseSources(both, win, { part: true });
-    assert.deepEqual(choice.cameras, [1, 2]);
-    assert.equal(choice.durationMs, 280_000);
-    assert.deepEqual(
-      choice.sources.map((s) => s.offsetMs),
-      [20_000, 0]
-    );
-    const short = [footage(1, 0, 300), footage(2, 0, 250)].map((t) =>
-      selectPartSegments(t, win.startMs, win.endMs)
-    );
-    // Camera 2 has 83 % (enough on its own) but together only 250 s of 300 → still ≥ 80 %
-    assert.deepEqual(chooseSources(short, win, { part: true }).cameras, [1, 2]);
-    const apart = [footage(1, 0, 250), footage(2, 50, 300)].map((t) =>
-      selectPartSegments(t, win.startMs, win.endMs)
-    );
-    assert.deepEqual(chooseSources(apart, win, { part: true }).cameras, [1], "overlap only 200 s");
   });
 
   it("builds one ffmpeg: trim each, 1280×720 each, vstack, watermark, H.264 1280×1440 + Cam 1's AAC", () => {
@@ -631,11 +607,5 @@ describe("stacked clips and session parts", () => {
     const silentClip = buildStackedClipArgs({ ...base, audioInput: null });
     assert.ok(!silentClip.includes("[a]"));
     assert.doesNotMatch(silentClip[silentClip.indexOf("-filter_complex") + 1], /atrim/);
-  });
-
-  it("keeps a stacked 5-min session part under the API's 100 MB upload limit", () => {
-    const kbps =
-      parseInt(QUALITY.sessionStacked.maxrate, 10) + parseInt(QUALITY.sessionStacked.audio, 10);
-    assert.ok((kbps * 1000 * 300) / 8 / 1024 / 1024 < 90);
   });
 });

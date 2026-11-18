@@ -1,8 +1,16 @@
 import { logger } from "../../config/logger.js";
 import { CLIP_STALE_MINUTES, secondsAgoLocal, SESSION_PART_STALE_MINUTES } from "../utils/clips.js";
 import { getCurrentTimestampLocal } from "../utils/dateUtils.js";
-import { removeClipFiles } from "../utils/file/clipFiles.js";
+import fs from "node:fs";
+import path from "node:path";
+import { clipUploadFolder, removeClipFiles } from "../utils/file/clipFiles.js";
 import { materializeSessionParts, settleSessions } from "../utils/sessions.js";
+
+/** CR-006: hours after a game ends before an unsent game video is given up. */
+export const GAME_UPLOAD_GIVE_UP_HOURS = Math.max(
+  1,
+  parseInt(process.env.GAME_UPLOAD_GIVE_UP_HOURS || "24", 10) || 24
+);
 
 /**
  * Clip housekeeping (PLAN-001), run at startup and then every hour:
@@ -80,9 +88,36 @@ export const runClipMaintenance = async (db) => {
     ]
   );
 
+  let failed = stale.affectedRows || 0;
+
+  // CR-006: a game video the box never finished sending — give up, so the game
+  // settles (Ready with what came in, or Failed) and its footage can go
+  const giveUpBefore = secondsAgoLocal(GAME_UPLOAD_GIVE_UP_HOURS * 3600);
+  const abandoned = await db.query(
+    `SELECT sv.sessionVideoId, sv.venueId FROM session_videos sv
+     JOIN recording_sessions s ON s.sessionId = sv.sessionId
+     WHERE sv.status IN ('Pending', 'Uploading') AND s.endAt < ?
+     LIMIT 200`,
+    [giveUpBefore]
+  );
+  for (const video of abandoned) {
+    const result = await db.query(
+      `UPDATE session_videos
+       SET status = 'Failed', failureReason = 'The recorder box didn''t send this game in time',
+           dateUpdated = ?
+       WHERE sessionVideoId = ? AND status IN ('Pending', 'Uploading')`,
+      [now, video.sessionVideoId]
+    );
+    if (result.affectedRows > 0) {
+      const folder = path.resolve("public", clipUploadFolder(video.venueId, video.sessionVideoId));
+      await fs.promises.rm(folder, { recursive: true, force: true }).catch(() => {});
+      failed += 1;
+    }
+  }
+
   await settleSessions(db);
 
-  return { expired, failed: stale.affectedRows || 0 };
+  return { expired, failed };
 };
 
 const HOUR_MS = 60 * 60 * 1000;

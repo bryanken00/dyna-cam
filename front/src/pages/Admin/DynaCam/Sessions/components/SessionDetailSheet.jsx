@@ -25,7 +25,6 @@ import {
   formatDate,
   formatMinutes,
   formatTimeRange,
-  partLabel,
 } from "../../../../../utils/dynaCam";
 import {
   useCancelSession,
@@ -34,9 +33,10 @@ import {
   useRetrySessionVideo,
 } from "../../../../../services/requests/admin/sessions";
 
-/** CR-003: whole-video status → StatusDot tone. */
+/** CR-003 / CR-006: whole-video status → StatusDot tone. */
 const VIDEO_STATUS_TONE = {
   Pending: "warning",
+  Uploading: "warning",
   Joining: "warning",
   Ready: "success",
   Failed: "error",
@@ -65,13 +65,17 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
               {" · "}
               {formatMinutes(Math.round((video.durationSeconds || 0) / 60))}
               {video.sizeBytes ? ` · ${formatBytes(video.sizeBytes)}` : ""}
-              {` · ${video.partsJoined} ${video.partsJoined === 1 ? "part" : "parts"}`}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           <StatusDot tone={VIDEO_STATUS_TONE[video.status] || "muted"} title={video.failureReason || undefined}>
-            {video.status === "Joining" ? "Joining" : video.status}
+            {/* CR-006: the recorder box makes the file, then uploads it */}
+            {video.status === "Pending"
+              ? "Being made on the box"
+              : video.status === "Uploading"
+                ? `Uploading ${video.uploadPercent ?? 0}%`
+                : video.status}
           </StatusDot>
           {ready && downloadHref && (
             <Button asChild variant="outline" size="sm">
@@ -103,7 +107,8 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
       </div>
       {video.status === "Failed" && video.failureReason && (
         <p className="m-0 mt-1" style={muted}>
-          {video.failureReason}. The parts are kept until it works.
+          {video.failureReason}. Try again asks the recorder box to send it again — it works while
+          the box still has the game&apos;s footage.
         </p>
       )}
       {video.gaps?.length > 0 && (
@@ -134,75 +139,8 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
   );
 };
 
-/** One 5-minute part: label, window, status, and the player + download when Ready. */
-const PartRow = ({ part }) => {
-  const ready = part.status === "Ready";
-  const videoSrc = getImageUrl(part.videoUrl);
-  const downloadHref = getImageUrl(part.downloadUrl);
-  return (
-    <div
-      className="p-3.5"
-      style={{ borderTop: "1px solid var(--color-line)" }}
-    >
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <span
-            className="font-semibold"
-            style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
-          >
-            {partLabel(part.partIndex)}
-            {part.camera > 0 && ` · Cam ${part.camera}`}
-          </span>
-          <span style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-            {" · "}
-            {formatTimeRange(part.windowStartAt, part.windowEndAt)}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusDot
-            tone={part.joinedAt ? "muted" : CLIP_STATUS_TONE[part.status] || "muted"}
-            title={part.failureReason || undefined}
-          >
-            {part.joinedAt ? "In whole video" : part.status}
-          </StatusDot>
-          {ready && downloadHref && (
-            <Button asChild variant="outline" size="sm">
-              <a href={downloadHref} download>
-                <Download />
-                Download
-              </a>
-            </Button>
-          )}
-        </div>
-      </div>
-      {part.status === "Failed" && part.failureReason && (
-        <p className="m-0 mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          {part.failureReason}
-        </p>
-      )}
-      {ready && videoSrc && (
-        <video
-          key={videoSrc}
-          src={videoSrc}
-          poster={getImageUrl(part.thumbnailUrl) || undefined}
-          controls
-          playsInline
-          preload="none"
-          className="w-full block mt-3"
-          style={{
-            aspectRatio: "16 / 9",
-            borderRadius: 10,
-            border: "1px solid var(--color-line)",
-            background: "var(--color-surface-sunken)",
-          }}
-        />
-      )}
-    </div>
-  );
-};
-
 /**
- * Session detail: its devices (pair / unpair, live keys) and its parts —
+ * Session detail: its devices (pair / unpair, live keys) and its whole video per camera —
  * refreshes while the session is live. Not a form — takes the session id,
  * the write flag, and `onPairDevice(session)` (the page owns the pairing
  * dialogs so a booking can open them too).
@@ -210,7 +148,6 @@ const PartRow = ({ part }) => {
 const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }) => {
   const { data, isLoading, error } = useGetSessionById(open ? sessionId : null);
   const session = data?.data?.session || null;
-  const parts = session?.parts || [];
   const videos = session?.videos || [];
   // While it can take a device, or while one is still paired (the device
   // keeps the download QR for a few minutes after the end)
@@ -219,7 +156,6 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
     (session?.devices || []).some((d) => d.status === "Active");
   const showStream =
     !!session?.stream || ["Waiting", "Scheduled", "Recording"].includes(session?.status);
-  const remaining = Math.max(0, (Number(session?.partsTotal) || 0) - parts.length);
 
   const cancelMutation = useCancelSession();
   const endMutation = useEndSession();
@@ -352,7 +288,17 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                     },
                     {
                       label: "Footage",
-                      value: `${session.partsReady}/${session.partsTotal} parts ready`,
+                      // CR-006: one video per camera, made after the game ends
+                      value:
+                        session.videosTotal > 0
+                          ? session.status === "Processing"
+                            ? session.uploadPercent != null
+                              ? `Uploading ${session.uploadPercent}%`
+                              : "Being made on the recorder box"
+                            : `${session.videosReady}/${session.videosTotal} ${session.videosTotal === 1 ? "video" : "videos"} ready`
+                          : session.status === "Cancelled"
+                            ? "—"
+                            : "One video per camera, after the game ends",
                     },
                     { label: "Player", value: decodeHTML(session.playerName) || "—" },
                     { label: "Phone", value: formatPhoneDisplay(session.phone) || "—" },
@@ -400,7 +346,7 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                   />
                 )}
 
-                {/* CR-003: the whole game, one video per camera */}
+                {/* CR-003 / CR-006: the whole game, one video per camera */}
                 {videos.length > 0 && (
                   <div
                     className="mt-6 overflow-hidden"
@@ -429,61 +375,16 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                   </div>
                 )}
 
-                {/* Parts */}
-                <div
-                  className="mt-6 overflow-hidden"
-                  style={{
-                    border: "1px solid var(--color-line)",
-                    borderRadius: 10,
-                  }}
-                >
-                  <div
-                    className="px-3.5 py-2.5 uppercase"
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      letterSpacing: "0.08em",
-                      color: "var(--color-text-muted)",
-                      background: "var(--color-surface-sunken)",
-                    }}
+                {videos.length === 0 && (
+                  <p
+                    className="m-0 mt-6"
+                    style={{ fontSize: 13, color: "var(--color-text-muted)" }}
                   >
-                    Parts
-                  </div>
-                  {parts.map((part) => (
-                    <PartRow key={part.clipId} part={part} />
-                  ))}
-                  {parts.length === 0 && (
-                    <p
-                      className="m-0 p-3.5"
-                      style={{
-                        fontSize: 13,
-                        color: "var(--color-text-muted)",
-                        borderTop: "1px solid var(--color-line)",
-                      }}
-                    >
-                      {["Waiting", "Scheduled"].includes(session.status)
-                        ? "Parts appear here once recording starts."
-                        : session.status === "Cancelled"
-                          ? "This session was cancelled — nothing was recorded."
-                          : "No parts yet."}
-                    </p>
-                  )}
-                  {remaining > 0 &&
-                    ["Scheduled", "Recording"].includes(session.status) &&
-                    parts.length > 0 && (
-                      <p
-                        className="m-0 p-3.5"
-                        style={{
-                          fontSize: 13,
-                          color: "var(--color-text-muted)",
-                          borderTop: "1px solid var(--color-line)",
-                        }}
-                      >
-                        {remaining} more {remaining === 1 ? "part" : "parts"} to
-                        come — one every 5 minutes.
-                      </p>
-                    )}
-                </div>
+                    {session.status === "Cancelled"
+                      ? "This game was cancelled — nothing was recorded."
+                      : "The game's video (one per camera) is made by the recorder box after the game ends."}
+                  </p>
+                )}
               </>
             )}
           </div>

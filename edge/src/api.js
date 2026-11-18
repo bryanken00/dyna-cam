@@ -10,7 +10,7 @@ import { truncate } from "./util.js";
 export class ApiError extends Error {
   constructor(
     message,
-    { status = 0, code = null, retryAfterMs = null, detail = null, cause } = {}
+    { status = 0, code = null, retryAfterMs = null, detail = null, data = null, cause } = {}
   ) {
     super(message, { cause });
     /** The API's own message, without the method/path prefix. */
@@ -19,6 +19,8 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
     this.retryAfterMs = retryAfterMs;
+    /** The envelope's `data` on an error answer (e.g. `receivedBytes` with a 409). */
+    this.data = data;
   }
 
   get isNetwork() {
@@ -100,8 +102,50 @@ function envelopeError(method, pathname, res, envelope) {
     status: res.ok ? 502 : res.status,
     code: envelope?.code ?? null,
     detail: message,
+    data: envelope?.data ?? null,
     retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
   });
+}
+
+/**
+ * Whole-game videos (CR-006): the resumable, chunked upload under
+ * /game-videos/:sessionVideoId. `request` is createApi's.
+ */
+function gameVideoCalls(request) {
+  const gamePath = (id, action) => `/game-videos/${encodeURIComponent(id)}/${action}`;
+  return {
+    /**
+     * Start or resume a game video's upload. The same `sizeBytes` again resumes;
+     * a different one makes the server start over. → { receivedBytes, chunkBytes }
+     */
+    startGameUpload: (id, { sizeBytes, durationSeconds, gaps }, signal) =>
+      request("POST", gamePath(id, "start"), {
+        json: { sizeBytes, durationSeconds, gaps },
+        timeoutMs: 30_000,
+        signal,
+      }),
+
+    /**
+     * Bytes [offset, offset + length) of the file. → { receivedBytes }. A 409
+     * `OFFSET_MISMATCH` carries the server's `data.receivedBytes`.
+     */
+    putGameChunk: (id, offset, bytes, signal) =>
+      request("PUT", gamePath(id, "chunk"), {
+        query: { offset: String(offset) },
+        raw: bytes,
+        timeoutMs: uploadTimeoutMs(bytes.length),
+        signal,
+      }),
+
+    /** All bytes are in: multipart with the optional `thumbnail` (image/jpeg). → { status: "Ready" } */
+    async finishGameUpload(id, thumbnailPath, signal) {
+      const { form } = await multipart([["thumbnail", thumbnailPath, "image/jpeg", "thumb.jpg"]]);
+      return request("POST", gamePath(id, "finish"), { form, timeoutMs: 300_000, signal });
+    },
+
+    failGameVideo: (id, reason) =>
+      request("POST", gamePath(id, "fail"), { json: { reason: truncate(reason, 255) } }),
+  };
 }
 
 /**
@@ -131,7 +175,7 @@ export function createApi({
   async function request(
     method,
     pathname,
-    { query, json, form, timeoutMs = 15_000, signal, root = base, auth = true } = {}
+    { query, json, form, raw, timeoutMs = 15_000, signal, root = base, auth = true } = {}
   ) {
     const url = new URL(root + pathname);
     for (const [key, value] of Object.entries(query || {})) url.searchParams.set(key, value);
@@ -142,6 +186,9 @@ export function createApi({
       body = JSON.stringify(json);
     } else if (form) {
       body = form; // fetch sets the multipart boundary
+    } else if (raw) {
+      headers["Content-Type"] = "application/octet-stream";
+      body = raw;
     }
 
     const { res, body: text } = await call(
@@ -222,6 +269,8 @@ export function createApi({
         signal,
       });
     },
+
+    ...gameVideoCalls(request),
 
     /**
      * Download a file the API linked to (the signed logo path is RELATIVE to

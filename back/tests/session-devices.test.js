@@ -8,13 +8,9 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { after, before, describe, it } from "node:test";
 
-import { JPEG, startTestApp } from "./helpers/testApp.js";
+import { startTestApp } from "./helpers/testApp.js";
+import { gameJobs, sendGame } from "./helpers/gameUpload.js";
 
-const MP4 = Buffer.concat([
-  Buffer.from([0, 0, 0, 0x18]),
-  Buffer.from("ftypisom"),
-  Buffer.alloc(64, 1),
-]);
 const LIVE_KEY = "ab".repeat(32);
 
 describe("session devices", () => {
@@ -97,6 +93,7 @@ describe("session devices", () => {
       target.courtId = court.data.courtId;
       const box = await ctx.pairBox(admin.token, target.venueId, "Box");
       target.device = asDevice(box.data.token);
+      target.token = box.data.token;
       target.deviceId = box.data.deviceId;
     }
   });
@@ -185,28 +182,19 @@ describe("session devices", () => {
       const stopped = await device.app("POST", "/app/session/stop");
       assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
       assert.equal(stopped.data.session.status, "Processing");
-      assert.equal(stopped.data.session.partsTotal, 2);
+      assert.equal(stopped.data.session.uploadPercent, null, "the box is making the file (CR-006)");
       assert.equal(stopped.data.live, null);
       assert.ok(stopped.data.unpairInSeconds > 590 && stopped.data.unpairInSeconds <= 600);
       assert.equal((await device.app("POST", "/app/session/stop")).status, 409);
 
-      // The box saves both parts → Ready, still visible to the device
-      const jobs = (await home.device("GET", "/device/jobs?wait=0")).data.jobs.filter(
-        (j) => j.sessionId === sessionId
-      );
-      assert.equal(jobs.length, 2);
-      for (const job of jobs) {
-        const res = await home.device("POST", `/device/clips/${job.clipId}/upload`, {
-          form: [
-            ["video", MP4, "video/mp4", "part.mp4"],
-            ["thumbnail", JPEG, "image/jpeg", "part.jpg"],
-          ],
-        });
-        assert.equal(res.status, 200, JSON.stringify(res.body));
-      }
+      // CR-006: the box sends the game's one file → Ready, still visible to the device
+      const jobs = await gameJobs(ctx, home.token, sessionId);
+      assert.equal(jobs.length, 1);
+      const res = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
       const ready = await device.app("GET", "/app/session");
       assert.equal(ready.data.session.status, "Ready");
-      assert.equal(ready.data.session.partsReady, 2);
+      assert.equal(ready.data.session.uploadPercent, 100);
 
       // 11 minutes later the grace is over
       await ctx.sql.query(`UPDATE recording_sessions SET endAt = ? WHERE sessionId = ?`, [

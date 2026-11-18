@@ -1,4 +1,3 @@
-
 import debugLib from "debug";
 import fs from "fs";
 import http from "http";
@@ -10,7 +9,6 @@ import { logger } from "../config/logger.js";
 import { scheduleIdempotencyCleanup } from "../src/middlewares/idempotency.middleware.js";
 import { scheduleClipMaintenance } from "../src/jobs/clipMaintenance.js";
 import { scheduleDriveUploads } from "../src/jobs/driveUploads.js";
-import { scheduleSessionJoins } from "../src/jobs/sessionJoin.js";
 import { close as closeRateLimiter } from "../src/utils/rateLimiterService.js";
 
 const debug = debugLib("wb:server");
@@ -108,7 +106,6 @@ let server;
 let stopIdempotencyCleanup = () => {};
 let stopClipMaintenance = () => {};
 let stopDriveUploads = () => {};
-let stopSessionJoins = () => {};
 
 /**
  * Create HTTPS server.
@@ -147,7 +144,6 @@ async function gracefulShutdown(signal) {
   stopIdempotencyCleanup();
   stopClipMaintenance();
   stopDriveUploads();
-  stopSessionJoins();
 
   // Stop accepting new connections
   server.close(() => {
@@ -301,9 +297,6 @@ function onListening() {
 
     // CR-001: copy Ready clips of courts with a Google account to its Drive — every 30 s
     stopDriveUploads = scheduleDriveUploads(db);
-
-    // CR-003: join each finished game's 5-minute parts into one video per camera — every 20 s
-    stopSessionJoins = scheduleSessionJoins(db);
 
     // Start listening only after health checks pass
     server.listen(port);

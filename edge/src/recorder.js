@@ -460,7 +460,7 @@ export class RecorderManager {
     const ids = (l) => l.map((s) => `${s.sessionId}:${s.startMs}:${s.endMs}`).join(",");
     if (ids(list) !== ids(this.sessions) && list.length) {
       this.log.info(
-        `${list.length} session(s) booked — their footage is kept until 30 min after each ends`
+        `${list.length} session(s) listed — their footage is kept until the API stops listing them (game videos uploaded)`
       );
     }
     this.sessions = list;
@@ -470,18 +470,18 @@ export class RecorderManager {
    * Kept windows for a buffer folder (either camera's); none while disk space
    * is critical (live recording first).
    */
-  keepFor(dirName, now) {
+  keepFor(dirName) {
     if (this.disk.critical) return [];
     const court = courtDirName(dirName);
     const courtIds = [...new Set(this.sessions.map((s) => s.courtId))].filter(
       (id) => safeId(id) === court
     );
-    return courtIds.flatMap((id) => retentionWindows(this.sessions, id, now));
+    return courtIds.flatMap((id) => retentionWindows(this.sessions, id));
   }
 
   /**
    * Free space in DATA_DIR: warn under DISK_WARN_GB; under DISK_CRITICAL_MB
-   * session footage stops being kept, so recording can go on.
+   * game footage stops being kept, so recording can go on.
    */
   async checkDisk(now = Date.now()) {
     let free;
@@ -496,9 +496,9 @@ export class RecorderManager {
     if (critical !== this.disk.critical) {
       if (critical)
         this.log.error(
-          `only ${gb} GB free in DATA_DIR — session footage is no longer kept beyond the rolling buffer`
+          `only ${gb} GB free in DATA_DIR — game footage is no longer kept beyond the rolling buffer`
         );
-      else this.log.info(`${gb} GB free again — keeping session footage`);
+      else this.log.info(`${gb} GB free again — keeping game footage`);
     }
     this.disk.critical = critical;
     if (
@@ -609,7 +609,7 @@ export class RecorderManager {
       }
       for (const recorder of this.recorders.values()) {
         await recorder
-          .tick(now, this.keepFor(path.basename(recorder.dir), now))
+          .tick(now, this.keepFor(path.basename(recorder.dir)))
           .catch((err) => this.log.warn(`tick failed for ${recorder.who}`, err));
       }
       await this.pruneOrphans().catch((err) => this.log.warn("prune failed", err));
@@ -627,13 +627,7 @@ export class RecorderManager {
       if (active.has(name)) continue;
       const dir = path.join(this.root, name);
       const entries = await readSegmentEntries(dir);
-      await pruneEntries(
-        dir,
-        entries,
-        now,
-        this.settings.bufferSeconds * 1000,
-        this.keepFor(name, now)
-      );
+      await pruneEntries(dir, entries, now, this.settings.bufferSeconds * 1000, this.keepFor(name));
       const left = await fsp.readdir(dir).catch(() => null);
       if (left && !left.some((f) => f.endsWith(".ts")))
         await fsp.rm(dir, { recursive: true, force: true });
