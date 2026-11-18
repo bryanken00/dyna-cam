@@ -110,15 +110,19 @@ const loadVideo = catchAsync(async (req, res, next) => {
   next();
 });
 
+// Times come from the box's segment timeline and may carry fractions of a
+// millisecond — rounded here rather than refused
+const wholeNumber = (max) => z.number().min(0).max(max).transform(Math.round);
 const startSchema = z.object({
   sizeBytes: z.number().int().min(1),
-  durationSeconds: z
-    .number()
-    .int()
-    .min(0)
-    .max(7 * 24 * 3600),
+  durationSeconds: wholeNumber(7 * 24 * 3600),
   gaps: z
-    .array(z.object({ startMs: z.number().int().min(0), endMs: z.number().int().min(0) }))
+    .array(
+      z.object({
+        startMs: wholeNumber(Number.MAX_SAFE_INTEGER),
+        endMs: wholeNumber(Number.MAX_SAFE_INTEGER),
+      })
+    )
     .max(500)
     .optional()
     .default([]),

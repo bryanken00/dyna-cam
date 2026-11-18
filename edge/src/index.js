@@ -14,6 +14,7 @@ import {
 } from "./config.js";
 import { CredentialsError, markRevoked, resolveCredentials } from "./credentials.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
+import { makeGameFile } from "./game.js";
 import { JobRunner } from "./jobs.js";
 import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
@@ -85,6 +86,7 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
     streams,
   });
   const clipLog = createLogger("clip");
+  const gameLog = createLogger("game");
   jobs = new JobRunner({
     api,
     queue: new JobQueue(path.join(settings.dataDir, "queue.json")),
@@ -96,14 +98,24 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
         // Both cameras' folders: stacked when both have the window
         segmentsDirs: recorders.courtDirs(entry.courtId),
         courtKnown: sync.courtKnown(entry.courtId),
-        // A camera-2 job (CR-003) on a court without camera 2 fails at once
-        courtCameras: sync.courtCameras(entry.courtId),
         workDir,
         logoPath: sync.logoPath,
         encoder,
         settings,
         signal,
         log: clipLog,
+      }),
+    // CR-006: one camera's whole game, copied (no logo, no re-encode)
+    game: (entry, { workDir, signal, onCopy }) =>
+      makeGameFile(entry, {
+        segmentsDirs: recorders.courtDirs(entry.courtId),
+        // A camera-2 job on a court without camera 2 fails at once
+        courtCameras: sync.courtCameras(entry.courtId),
+        workDir,
+        settings,
+        signal,
+        onCopy,
+        log: gameLog,
       }),
   });
 

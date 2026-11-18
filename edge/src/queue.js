@@ -1,21 +1,31 @@
 import { readJson, writeJsonAtomic } from "./util.js";
 
 /**
- * The box's clip jobs, persisted to DATA_DIR/queue.json after every change so
- * a reboot neither loses a cut-but-not-uploaded clip nor a job still waiting
- * to be cut (the buffer segments survive a reboot too).
+ * The box's jobs, persisted to DATA_DIR/queue.json after every change so a
+ * reboot neither loses a cut-but-not-uploaded clip, a job still waiting to be
+ * cut, nor a game video half uploaded (the buffer segments survive a reboot too).
  *
- * Clip entry:  { key, courtId, source, requestedAtMs, preSeconds, postSeconds,
- *               sessionId, partIndex, windowStartMs, windowEndMs, camera (0 | 1 | 2;
- *               missing in entries from older boxes = 0),
+ * Clip entry:  { clipId, courtId, source, requestedAtMs, preSeconds, postSeconds,
  *               state: "waiting" | "ready" | "failing", claimed, attempts,
  *               nextAttemptAt, videoPath?, thumbnailPath?, failReason?, receivedAt }
+ * Game entry:  { type: "game", sessionVideoId, sessionId, courtId, camera (0 | 1 | 2),
+ *               windowStartMs, windowEndMs, requestedAtMs (= windowEndMs),
+ *               phase: "waiting" | "copying" | "uploading" | "finishing" | "failing",
+ *               videoPath?, thumbnailPath?, sizeBytes?, durationSeconds?, gaps?,
+ *               failReason?, attempts, nextAttemptAt, receivedAt } — one camera's
+ *               whole-game video (CR-006).
  * Press entry: { pressId, buttonCode, requestedAtMs (= pressedAtMs), state: "press",
  *               attempts, nextAttemptAt } — a court button press not yet relayed.
  */
 
-/** Queue key: a press's own id, else the clip id. */
-export const queueKey = (entry) => entry?.pressId ?? entry?.clipId;
+/** Queue key of a game video: its id, prefixed so it never meets a clip id. */
+export const gameKey = (sessionVideoId) => `game:${sessionVideoId}`;
+
+/** Queue key: a press's own id, a clip's id, or a game video's gameKey. */
+export const queueKey = (entry) =>
+  entry?.pressId ??
+  entry?.clipId ??
+  (entry?.type === "game" && entry.sessionVideoId ? gameKey(entry.sessionVideoId) : undefined);
 
 export class JobQueue {
   constructor(file) {

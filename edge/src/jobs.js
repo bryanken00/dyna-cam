@@ -1,7 +1,8 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { isSessionPart, jobCamera } from "./clipper.js";
-import { queueKey } from "./queue.js";
+import { ApiError } from "./api.js";
+import { isGameGone, isGameJob, uploadGameFile } from "./game.js";
+import { gameKey, queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
 
 /** The server fails a clip nobody finished within 15 min — don't start one older than that. */
@@ -12,6 +13,18 @@ export const UPLOAD_GIVE_UP_MS = 60 * 60_000;
 export const PRESS_RELAY_MAX_AGE_MS = 100_000;
 const LONG_POLL_SECONDS = 25;
 const MAX_CUT_ATTEMPTS = 2;
+/** Copying a game is retried this often before the game video is reported as failed. */
+const MAX_GAME_ATTEMPTS = 3;
+
+/** A clip job persisted by a box from before CR-006: a 5-minute session part. */
+export const isOldSessionPart = (entry) =>
+  Boolean(entry?.clipId) &&
+  (Boolean(entry.sessionId) ||
+    (entry.partIndex !== null && entry.partIndex !== undefined) ||
+    Number.isFinite(entry.windowStartMs));
+
+/** The queue key a job from GET /jobs would get. */
+const jobKey = (job) => (job?.type === "game" ? gameKey(job.sessionVideoId) : job?.clipId);
 
 /**
  * Job loop: long-poll GET /jobs → persist → claim → cut (when the window is
@@ -19,14 +32,20 @@ const MAX_CUT_ATTEMPTS = 2;
  * reported with POST /fail. 404/409 from the API mean the clip is gone or
  * already finished: the job is dropped.
  *
- * `clip(entry, { workDir, signal })` is clipper.makeClip with the venue
+ * Game jobs (CR-006, one camera's whole game after End game) run in their own
+ * lane, one at a time: copy the game into one mp4 (`game`), then a resumable
+ * chunked upload that pauses between chunks while a clip is waiting to upload.
+ *
+ * `clip(entry, { workDir, signal })` is clipper.makeClip and
+ * `game(entry, { workDir, signal, onCopy })` game.makeGameFile, with the venue
  * context bound (see index.js) — injected so the loop is testable.
  */
 export class JobRunner {
-  constructor({ api, queue, clip, jobsDir, settings, log, now = () => Date.now() }) {
+  constructor({ api, queue, clip, game, jobsDir, settings, log, now = () => Date.now() }) {
     this.api = api;
     this.queue = queue;
     this.clip = clip;
+    this.game = game;
     this.jobsDir = jobsDir;
     this.log = log;
     this.now = now;
@@ -35,8 +54,10 @@ export class JobRunner {
       upload: settings.uploadConcurrency ?? 1,
       report: 2,
       press: 4,
+      // Whole-game videos: one at a time, beside the clips (never instead of them)
+      game: 1,
     };
-    this.busy = { cut: 0, upload: 0, report: 0, press: 0 };
+    this.busy = { cut: 0, upload: 0, report: 0, press: 0, game: 0 };
     this.active = new Map();
     this.abort = new AbortController();
     this.stopped = false;
@@ -44,7 +65,7 @@ export class JobRunner {
   }
 
   workDir(entry) {
-    return path.join(this.jobsDir, safeId(entry.clipId));
+    return path.join(this.jobsDir, safeId(entry.clipId ?? entry.sessionVideoId));
   }
 
   async start() {
@@ -55,11 +76,22 @@ export class JobRunner {
     this.workDone = this.workLoop();
   }
 
-  /** After a restart: a "ready" clip whose file is gone is cut again; stray work folders go. */
+  /**
+   * After a restart: a "ready" clip whose file is gone is cut again; a game
+   * video resumes its upload (its file is there) or is made again; session
+   * parts from an older box are dropped; stray work folders go.
+   */
   async recover() {
     for (const entry of this.queue.list()) {
       entry.nextAttemptAt = 0;
-      if (entry.state === "ready" && !(await exists(entry.videoPath))) {
+      if (isOldSessionPart(entry)) {
+        this.log.info(
+          `dropping session part ${entry.clipId} from an older box — games are uploaded as one file per camera now`
+        );
+        await this.drop(entry);
+      } else if (isGameJob(entry)) {
+        await this.recoverGame(entry);
+      } else if (entry.state === "ready" && !(await exists(entry.videoPath))) {
         await this.queue.update(queueKey(entry), {
           state: "waiting",
           videoPath: null,
@@ -70,8 +102,8 @@ export class JobRunner {
     const keep = new Set(
       this.queue
         .list()
-        .filter((e) => e.clipId)
-        .map((e) => safeId(e.clipId))
+        .filter((e) => e.clipId || isGameJob(e))
+        .map((e) => safeId(e.clipId ?? e.sessionVideoId))
     );
     for (const name of await fsp.readdir(this.jobsDir).catch(() => [])) {
       if (!keep.has(name))
@@ -103,7 +135,7 @@ export class JobRunner {
         const jobs = Array.isArray(data.jobs) ? data.jobs : [];
         let fresh = 0;
         for (const job of jobs) {
-          if (!this.queue.has(job?.clipId)) fresh += 1;
+          if (!this.queue.has(jobKey(job))) fresh += 1;
           await this.enqueue(job);
         }
         // An answer with nothing new must not turn into a tight loop
@@ -136,21 +168,29 @@ export class JobRunner {
   }
 
   async enqueue(job) {
-    if (!job?.clipId || (job.type && job.type !== "clip")) return;
+    if (job?.type === "game") return this.enqueueGame(job);
+    if (!job?.clipId || (job.type && job.type !== "clip")) return undefined;
+    // CR-006: games are no longer sent as 5-minute parts
+    if (isOldSessionPart(job)) {
+      this.log.warn(
+        `job ${job.clipId} is a session part — this box makes whole-game files; ignored`
+      );
+      return undefined;
+    }
     const known = this.queue.get(job.clipId);
     if (known) {
       if (!known.claimed) await this.claim(known);
-      return;
+      return undefined;
     }
     const now = this.now();
     const requestedAtMs = Number(job.requestedAtMs);
     if (!Number.isFinite(requestedAtMs)) {
       this.log.warn(`job ${job.clipId} has no requestedAtMs — ignored`);
-      return;
+      return undefined;
     }
     if (now - requestedAtMs > STALE_MS) {
       this.log.info(`job ${job.clipId} is older than 15 min — the server fails it; dropped`);
-      return;
+      return undefined;
     }
     const entry = {
       clipId: job.clipId,
@@ -159,14 +199,6 @@ export class JobRunner {
       requestedAtMs,
       preSeconds: Number(job.preSeconds) || 60,
       postSeconds: Number(job.postSeconds) || 5,
-      // Session parts: cut exactly this window (null for ordinary clips)
-      sessionId: job.sessionId ?? null,
-      partIndex: job.partIndex ?? null,
-      windowStartMs: Number.isFinite(job.windowStartMs) ? job.windowStartMs : null,
-      windowEndMs: Number.isFinite(job.windowEndMs) ? job.windowEndMs : null,
-      // 0 = the box chooses (stacked on a two-camera court); 1 | 2 = that camera
-      // only (CR-003). A job persisted without it by an older box runs as 0.
-      camera: job.camera ?? 0,
       state: "waiting",
       claimed: false,
       attempts: 0,
@@ -174,13 +206,12 @@ export class JobRunner {
       receivedAt: now,
     };
     await this.queue.put(entry);
-    const camera = jobCamera(entry) ? `, camera ${entry.camera}` : "";
-    const what = isSessionPart(entry)
-      ? `session ${entry.sessionId} part ${entry.partIndex}${camera}, ${new Date(entry.windowStartMs).toISOString()} → ${new Date(entry.windowEndMs).toISOString()}`
-      : `${entry.source || "?"}${camera}, requested ${new Date(requestedAtMs).toISOString()}`;
-    this.log.info(`job ${entry.clipId}: court ${entry.courtId}, ${what}`);
+    this.log.info(
+      `job ${entry.clipId}: court ${entry.courtId}, ${entry.source || "?"}, requested ${new Date(requestedAtMs).toISOString()}`
+    );
     await this.claim(entry);
     this.wake();
+    return undefined;
   }
 
   /** Claim is best-effort: the upload is accepted for a Pending clip too. */
@@ -215,15 +246,15 @@ export class JobRunner {
 
   dispatch() {
     const now = this.now();
-    // Players' clips before session parts: a part's footage is kept until the
-    // session ends + 30 min, a clip's only for BUFFER_SECONDS
-    const ordered = this.queue
-      .list()
-      .sort((a, b) => Number(isSessionPart(a)) - Number(isSessionPart(b)));
+    // Players' clips before game videos: a game's footage is kept until it is
+    // uploaded, a clip's only for BUFFER_SECONDS
+    const ordered = this.queue.list().sort((a, b) => Number(isGameJob(a)) - Number(isGameJob(b)));
     for (const entry of ordered) {
       if (this.stopped) return;
       if (this.active.has(queueKey(entry)) || (entry.nextAttemptAt || 0) > now) continue;
-      const kind = { ready: "upload", failing: "report", press: "press" }[entry.state] || "cut";
+      const kind = isGameJob(entry)
+        ? "game"
+        : { ready: "upload", failing: "report", press: "press" }[entry.state] || "cut";
       if (this.busy[kind] >= this.limits[kind]) continue;
       this.busy[kind] += 1;
       const run = this.step(entry)
@@ -240,6 +271,7 @@ export class JobRunner {
   /** Do the next thing for one entry (always returns a promise). Exposed for tests. */
   step(entry) {
     if (entry.state === "press") return this.relayPress(entry);
+    if (isGameJob(entry)) return this.gameStep(entry);
     const age = this.now() - entry.requestedAtMs;
     const limit = entry.state === "waiting" ? STALE_MS : UPLOAD_GIVE_UP_MS;
     if (age > limit) {
@@ -360,7 +392,9 @@ export class JobRunner {
 
   async drop(entry) {
     await this.queue.remove(queueKey(entry));
-    if (entry.clipId) await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+    if (entry.clipId || isGameJob(entry)) {
+      await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+    }
   }
 
   /** Clips are being cut/uploaded or waiting — lower-priority work (previews) should wait. */
@@ -370,6 +404,230 @@ export class JobRunner {
       this.busy.upload > 0 ||
       this.queue.list().some((e) => e.clipId && e.state === "waiting")
     );
+  }
+
+  // ─── Whole-game videos (CR-006) ────────────────────────────────────────────
+
+  /** A game job from GET /jobs: persisted once (the same job comes back until it is finished). */
+  async enqueueGame(job) {
+    const id = job.sessionVideoId;
+    if (!id) {
+      this.log.warn("game job without a sessionVideoId — ignored");
+      return;
+    }
+    if (this.queue.has(gameKey(id))) return;
+    const windowStartMs = Number(job.windowStartMs);
+    const windowEndMs = Number(job.windowEndMs);
+    const entry = {
+      type: "game",
+      sessionVideoId: id,
+      sessionId: job.sessionId ?? null,
+      courtId: job.courtId,
+      camera: job.camera ?? 0,
+      windowStartMs,
+      windowEndMs,
+      // Sorts the queue (oldest first) and keeps the entry valid in queue.json
+      requestedAtMs: Number.isFinite(windowEndMs) ? windowEndMs : this.now(),
+      phase: "waiting",
+      attempts: 0,
+      nextAttemptAt: 0,
+      receivedAt: this.now(),
+    };
+    await this.queue.put(entry);
+    const from = Number.isFinite(windowStartMs) ? new Date(windowStartMs).toISOString() : "?";
+    const to = Number.isFinite(windowEndMs) ? new Date(windowEndMs).toISOString() : "?";
+    this.log.info(
+      `game video ${id}: session ${entry.sessionId}, court ${entry.courtId}, camera ${entry.camera}, ${from} → ${to}`
+    );
+    this.wake();
+  }
+
+  /** After a restart: an upload whose file is still there resumes (via /start); else the file is made again. */
+  async recoverGame(entry) {
+    const key = queueKey(entry);
+    if (entry.phase === "copying") {
+      await this.queue.update(key, { phase: "waiting" });
+    } else if (
+      ["uploading", "finishing"].includes(entry.phase) &&
+      !(await exists(entry.videoPath))
+    ) {
+      this.log.info(`game video ${entry.sessionVideoId}: its file is gone — making it again`);
+      await this.queue.update(key, { phase: "waiting", videoPath: null, thumbnailPath: null });
+    }
+  }
+
+  gameStep(entry) {
+    if (entry.phase === "failing") return this.reportGame(entry);
+    if (entry.phase === "uploading" || entry.phase === "finishing") return this.uploadGame(entry);
+    return this.makeGame(entry);
+  }
+
+  async makeGame(entry) {
+    const key = queueKey(entry);
+    let result;
+    try {
+      result = await this.game(entry, {
+        workDir: this.workDir(entry),
+        signal: this.abort.signal,
+        onCopy: () => this.queue.update(key, { phase: "copying" }),
+      });
+    } catch (err) {
+      if (this.stopped) return undefined;
+      const attempts = (entry.attempts || 0) + 1;
+      if (attempts >= MAX_GAME_ATTEMPTS) {
+        this.log.error(`could not make game video ${entry.sessionVideoId}`, err);
+        return this.toGameFailing(entry, "Could not make the game video on the recorder box");
+      }
+      this.log.warn(`making game video ${entry.sessionVideoId} failed, trying again`, err);
+      await this.queue.update(key, {
+        phase: "waiting",
+        attempts,
+        nextAttemptAt: this.now() + 30_000,
+      });
+      return undefined;
+    }
+    if (!this.queue.has(key)) {
+      await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+      return undefined;
+    }
+    if (result.status === "wait") {
+      entry.nextAttemptAt = this.now() + 5000;
+      return undefined;
+    }
+    if (result.status === "fail") {
+      this.log.warn(`game video ${entry.sessionVideoId}: ${result.reason}`);
+      return this.toGameFailing(entry, result.reason);
+    }
+    const mb = (result.sizeBytes / 1024 ** 2).toFixed(1);
+    this.log.info(
+      `game video ${entry.sessionVideoId}: ${mb} MB, ${result.durationSeconds}s recorded` +
+        (result.gaps.length ? `, ${result.gaps.length} gap(s)` : "")
+    );
+    await this.queue.update(key, {
+      phase: "uploading",
+      videoPath: result.videoPath,
+      thumbnailPath: result.thumbnailPath,
+      sizeBytes: result.sizeBytes,
+      durationSeconds: result.durationSeconds,
+      gaps: result.gaps,
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
+    this.wake();
+    return undefined;
+  }
+
+  async uploadGame(entry) {
+    const key = queueKey(entry);
+    const id = entry.sessionVideoId;
+    let logged = -1;
+    try {
+      await uploadGameFile({
+        api: this.api,
+        id,
+        file: entry,
+        signal: this.abort.signal,
+        beforeChunk: () => this.clipsFirst(),
+        onPhase: (phase) => this.queue.update(key, { phase }),
+        onProgress: (bytes) => {
+          const tenth = Math.floor((bytes / Math.max(entry.sizeBytes, 1)) * 10);
+          if (tenth !== logged) {
+            logged = tenth;
+            this.log.info(`game video ${id}: ${tenth * 10}% uploaded`);
+          }
+        },
+      });
+      this.log.info(`uploaded game video ${id}`);
+      return this.drop(entry);
+    } catch (err) {
+      if (this.stopped) return undefined;
+      if (!(err instanceof ApiError)) {
+        // The file itself is the problem (gone, shorter than recorded): make it again
+        const attempts = (entry.attempts || 0) + 1;
+        if (attempts >= MAX_GAME_ATTEMPTS) {
+          this.log.error(`game video ${id}: could not read its file`, err);
+          return this.toGameFailing(entry, "Could not read the game video on the recorder box");
+        }
+        this.log.warn(`game video ${id}: could not read its file — making it again`, err);
+        await this.queue.update(key, {
+          phase: "waiting",
+          attempts,
+          nextAttemptAt: this.now() + 5000,
+        });
+        return undefined;
+      }
+      if (isGameGone(err, entry.sizeBytes)) {
+        this.log.info(`game video ${id} is no longer waiting (${err.status}) — dropped`);
+        return this.drop(entry);
+      }
+      // A 409 that isn't "gone" is a resume answer (offset / missing bytes): try again later
+      if (!err.isRetryable && err.status !== 409) {
+        this.log.error(`upload of game video ${id} was rejected`, err);
+        return this.toGameFailing(entry, `Upload rejected: ${err.detail}`);
+      }
+      // Network, timeout, 429, 5xx, 401: try again later — the server keeps what it has
+      const attempts = (entry.attempts || 0) + 1;
+      const delay = this.retryDelay(err, attempts, 5000, 300_000);
+      if (err.status !== 401) {
+        this.log.warn(
+          `upload of game video ${id} stopped, resuming in ${Math.round(delay / 1000)}s`,
+          err
+        );
+      }
+      await this.queue.update(key, {
+        phase: "uploading",
+        attempts,
+        nextAttemptAt: this.now() + delay,
+      });
+      return undefined;
+    }
+  }
+
+  /** Waits while a cut clip is waiting to upload, so a long game upload never holds a replay back. */
+  async clipsFirst() {
+    while (!this.stopped && this.clipUploadPending()) await sleep(500, this.abort.signal);
+  }
+
+  clipUploadPending() {
+    const now = this.now();
+    return (
+      this.busy.upload > 0 ||
+      this.queue
+        .list()
+        .some((e) => e.clipId && e.state === "ready" && (e.nextAttemptAt || 0) <= now)
+    );
+  }
+
+  async reportGame(entry) {
+    const reason = entry.failReason || "Recorder box could not make this game video";
+    try {
+      await this.api.failGameVideo(entry.sessionVideoId, reason);
+      this.log.info(`reported game video ${entry.sessionVideoId} as failed: ${reason}`);
+    } catch (err) {
+      if (this.stopped) return undefined;
+      if (!isGameGone(err) && err.isRetryable) {
+        const attempts = (entry.attempts || 0) + 1;
+        await this.queue.update(queueKey(entry), {
+          attempts,
+          nextAttemptAt: this.now() + this.retryDelay(err, attempts, 5000, 300_000),
+        });
+        return undefined;
+      }
+    }
+    return this.drop(entry);
+  }
+
+  async toGameFailing(entry, reason) {
+    await fsp.rm(this.workDir(entry), { recursive: true, force: true });
+    await this.queue.update(queueKey(entry), {
+      phase: "failing",
+      failReason: truncate(reason, 255),
+      videoPath: null,
+      thumbnailPath: null,
+      attempts: 0,
+      nextAttemptAt: 0,
+    });
+    this.wake();
   }
 
   // ─── Court buttons ─────────────────────────────────────────────────────────

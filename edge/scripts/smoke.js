@@ -18,9 +18,14 @@
  *    (faststart), JPEG thumbnail.
  * 4. Camera setup: reads camera 1's details and a preview JPEG from the
  *    latest closed segment (no camera connection).
- * 5. Cuts a 60 s session part (exact window, stacked, capped bitrate), then
- *    the same window per camera (CR-003, `camera: 2`): camera 2 alone,
- *    1280x720 (not stacked), single-camera session cap, logo + thumbnail.
+ * 5. Whole-game videos (CR-006): the window [20 s, 80 s] copied into one mp4
+ *    per camera with makeGameFile() — a one-camera job (`camera: 0`, camera
+ *    1's buffer) and a `camera: 2` job: h264, faststart, duration ≈ the
+ *    window, codec parameters equal to the recorded segments (no re-encode),
+ *    JPEG thumbnail. Then uploadGameFile() sends each to a tiny local HTTP
+ *    stand-in for /game-videos/:id/start|chunk|finish (1 MiB chunks there),
+ *    which forces one OFFSET_MISMATCH and drops one connection mid-chunk; the
+ *    reassembled bytes must equal the file.
  * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
  *    HLS; ffprobe plays the signed playlist URL and the video clock must run
  *    on across segments (each file restarts at 0 on disk), a bad signature
@@ -31,12 +36,16 @@
  *    goes live again (1280x720) — and neither recorder is ever restarted.
  */
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { MediaProbe, PreviewSender } from "../src/camera.js";
+import { createApi } from "../src/api.js";
 import { detectEncoder, makeClip } from "../src/clipper.js";
 import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
+import { makeGameFile, uploadGameFile } from "../src/game.js";
 import { createLiveServer, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
@@ -459,87 +468,226 @@ async function cameraSetupPhase({ dir, bufferDir, settings }) {
     fail("no JPEG preview");
 }
 
-/** A session part: exactly [20 s, 80 s] of the recording, with the capped session bitrate. */
-async function cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, settings }) {
-  const part = await makeClip(
-    {
-      clipId: "smoke-part",
-      courtId: "court-smoke",
-      requestedAtMs: startedAt + 80_000,
-      windowStartMs: startedAt + 20_000,
-      windowEndMs: startedAt + 80_000,
-    },
-    {
-      segmentsDirs: bufferDirs,
-      courtKnown: true,
-      workDir: path.join(dir, "jobs", "smoke-part"),
-      logoPath: logo,
-      encoder,
-      settings,
-      log: createLogger("clip"),
-    }
-  );
-  if (part.status !== "done") fail(`session part not made: ${JSON.stringify(part)}`);
-  const partInfo = await probeFile(FFPROBE, part.videoPath);
-  const { size } = await fs.stat(part.videoPath);
-  const kbps = Math.round((size * 8) / partInfo.duration / 1000);
-  console.log(
-    `\nsession part: ${partInfo.duration.toFixed(3)}s, ${partInfo.streams.map((s) => s.codec).join("+")}, ` +
-      `${size} bytes (${kbps} kb/s), coverage ${(part.coverage * 100).toFixed(1)}%\n`
-  );
-  if (Math.abs(partInfo.duration - 60) > 1)
-    fail(`part duration ${partInfo.duration}s, expected 60s`);
-  if (!partInfo.streams.some((s) => s.codec === "aac")) fail("part has no AAC audio");
-  if (partInfo.streams.find((s) => s.type === "video")?.height !== 1440)
-    fail("the session part is not stacked");
-  // Stacked session parts: maxrate 1900k + 64k audio
-  if (kbps > 2100) fail(`part bitrate ${kbps} kb/s is over the stacked session cap`);
-  return { ...partInfo, kbps };
+/** Codec parameters of every stream (what a re-encode would change). */
+async function streamParams(file) {
+  const { stdout } = await runFfmpeg(FFPROBE, [
+    "-v",
+    "error",
+    "-show_entries",
+    "stream=codec_type,codec_name,profile,level,width,height,pix_fmt,sample_rate,channels",
+    "-of",
+    "json",
+    file,
+  ]);
+  return JSON.parse(stdout).streams.map((st) => JSON.stringify(st));
 }
 
-/** CR-003: the same window as a per-camera part — camera 2 alone, never stacked. */
-async function cutCameraPart({ dir, bufferDirs, startedAt, logo, encoder, settings }) {
-  const part = await makeClip(
-    {
-      clipId: "smoke-part-cam2",
-      courtId: "court-smoke",
-      requestedAtMs: startedAt + 80_000,
-      windowStartMs: startedAt + 20_000,
-      windowEndMs: startedAt + 80_000,
-      camera: 2,
-    },
-    {
-      segmentsDirs: bufferDirs,
-      courtKnown: true,
-      courtCameras: [1, 2],
-      workDir: path.join(dir, "jobs", "smoke-part-cam2"),
-      logoPath: logo,
-      encoder,
-      settings,
-      log: createLogger("clip"),
-    }
-  );
-  if (part.status !== "done") fail(`camera 2 part not made: ${JSON.stringify(part)}`);
-  const info = await probeFile(FFPROBE, part.videoPath);
-  const { size } = await fs.stat(part.videoPath);
-  const kbps = Math.round((size * 8) / info.duration / 1000);
-  const video = info.streams.find((s) => s.type === "video");
-  console.log(
-    `\ncamera 2 part: ${info.duration.toFixed(3)}s, ${info.streams.map((s) => s.codec).join("+")}, ` +
-      `${video?.width}x${video?.height}, ${size} bytes (${kbps} kb/s), coverage ${(part.coverage * 100).toFixed(1)}%\n`
-  );
-  if (part.cameras !== 1) fail(`camera 2 part used ${part.cameras} cameras`);
-  if (Math.abs(info.duration - 60) > 1) fail(`camera 2 part duration ${info.duration}s`);
-  if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 720)
-    fail(
-      `camera 2 part is ${video?.codec} ${video?.width}x${video?.height}, expected h264 1280x720`
+/**
+ * A tiny stand-in for the API's resumable upload (/game-videos/:id/start,
+ * /chunk, /finish): 1 MiB chunks, one forced 409 OFFSET_MISMATCH (it "loses"
+ * the chunk it just took) and one connection dropped in the middle of a chunk.
+ */
+function uploadStandIn() {
+  const games = new Map();
+  const events = [];
+  let chunks = 0;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    const match = /^\/api\/v1\/device\/game-videos\/([^/]+)\/(start|chunk|finish|fail)$/.exec(
+      url.pathname
     );
-  // Camera 2 has no sound: the part is silent, never camera 1's audio
-  if (info.streams.some((s) => s.type === "audio")) fail("camera 2 part took camera 1's sound");
-  // Single-camera session parts: maxrate 1200k (+ 64k audio)
-  if (kbps > 1400) fail(`camera 2 part bitrate ${kbps} kb/s is over the session cap`);
-  if (!part.thumbnailPath) fail("camera 2 part has no thumbnail");
-  return { ...info, kbps };
+    const send = (status, body) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (!match || !req.headers["user-agent"]?.startsWith("DynaCamRecorder/")) {
+      req.resume();
+      return send(404, { success: false, message: "Not found" });
+    }
+    const [, id, action] = match;
+    const parts = [];
+    let seen = 0;
+    if (action === "chunk") chunks += 1;
+    const dropThis = action === "chunk" && chunks === 4;
+    req.on("data", (c) => {
+      parts.push(c);
+      seen += c.length;
+      // A dropped connection: half a chunk arrives, then the line goes dead
+      if (dropThis && seen > 300_000 && !req.socket.destroyed) {
+        events.push(`dropped connection during chunk ${chunks}`);
+        req.socket.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (dropThis) return;
+      const body = Buffer.concat(parts);
+      const game = games.get(id) ?? { size: -1, bytes: [], received: 0, finished: false };
+      games.set(id, game);
+      if (action === "start") {
+        const { sizeBytes } = JSON.parse(body.toString());
+        if (sizeBytes !== game.size)
+          Object.assign(game, { size: sizeBytes, bytes: [], received: 0 });
+        events.push(`start ${id} → has ${game.received}`);
+        return send(200, {
+          success: true,
+          message: "Upload started",
+          data: { receivedBytes: game.received, chunkBytes: 1024 * 1024 },
+        });
+      }
+      if (action === "chunk") {
+        const offset = Number(url.searchParams.get("offset"));
+        if (offset !== game.received) {
+          events.push(`chunk @${offset} refused, has ${game.received}`);
+          return send(409, {
+            success: false,
+            message: "Wrong offset",
+            code: "OFFSET_MISMATCH",
+            data: { receivedBytes: game.received },
+          });
+        }
+        game.bytes.push(body);
+        game.received += body.length;
+        if (chunks === 2) {
+          // Forced OFFSET_MISMATCH: the server "lost" the chunk it just took
+          game.bytes.pop();
+          game.received -= body.length;
+          events.push(`forced OFFSET_MISMATCH at ${offset}`);
+          return send(409, {
+            success: false,
+            message: "Wrong offset",
+            code: "OFFSET_MISMATCH",
+            data: { receivedBytes: game.received },
+          });
+        }
+        return send(200, { success: true, message: "ok", data: { receivedBytes: game.received } });
+      }
+      if (action === "finish") {
+        if (game.received < game.size) {
+          return send(409, {
+            success: false,
+            message: "Chunks are missing",
+            data: { receivedBytes: game.received },
+          });
+        }
+        game.finished = true;
+        game.thumbnail = body.includes(Buffer.from('filename="thumb.jpg"'));
+        return send(200, { success: true, message: "Game video ready", data: { status: "Ready" } });
+      }
+      return send(200, { success: true, message: "ok", data: {} });
+    });
+  });
+  return { server, games, events };
+}
+
+/** Upload like the job loop does: a network error (status 0) is retried, resuming via /start. */
+async function uploadThroughStandIn(standIn, id, made) {
+  const api = createApi({
+    apiUrl: `http://127.0.0.1:${standIn.server.address().port}`,
+    deviceToken: "dcb_smoke_token_123456",
+    userAgent: "DynaCamRecorder/smoke",
+  });
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await uploadGameFile({ api, id, file: made });
+      return attempt;
+    } catch (err) {
+      if (!err.isRetryable || attempt >= 5) throw err;
+      log.info(`game upload ${id}: ${err.message} — resuming (attempt ${attempt + 1})`);
+    }
+  }
+}
+
+/** The pass/fail rules for a copied game video. */
+function checkGameFile({ camera, info, video, made, boxes, got, want, thumb, result }) {
+  if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 720)
+    fail(`not the camera's h264 1280x720 — ${result}`);
+  // The start is the first segment's keyframe (≤ one segment early), the end the game's end
+  if (info.duration < 59 || info.duration > 67.5)
+    fail(`duration is not ≈ the 60 s window — ${result}`);
+  if (made.durationSeconds < 58 || made.durationSeconds > 60) fail(`durationSeconds — ${result}`);
+  if (made.gaps.length) fail(`unexpected gaps — ${result}`);
+  if (boxes.indexOf("moov") === -1 || boxes.indexOf("moov") > boxes.indexOf("mdat"))
+    fail(`moov is not before mdat (no faststart) — ${result}`);
+  if (got.join("|") !== want.join("|"))
+    fail(
+      `re-encoded? codec parameters differ from the recording:\n${got.join("\n")}\nvs\n${want.join("\n")}`
+    );
+  // Camera 1 keeps its AAC; camera 2 (no microphone) stays silent, never camera 1's sound
+  const hasAudio = info.streams.some((st) => st.type === "audio");
+  if (camera === 2 ? hasAudio : !hasAudio) fail(`wrong audio for camera ${camera} — ${result}`);
+  if (!thumb || thumb[0] !== 0xff || thumb[1] !== 0xd8 || thumb[2] !== 0xff)
+    fail(`thumbnail is not a JPEG — ${result}`);
+}
+
+/** CR-006: one camera's game window copied into one mp4, checked, then uploaded in chunks. */
+async function gameVideo({ dir, bufferDirs, startedAt, settings, camera, standIn }) {
+  const id = `smoke-game-cam${camera}`;
+  const entry = {
+    type: "game",
+    sessionVideoId: id,
+    courtId: "court-smoke",
+    camera,
+    windowStartMs: startedAt + 20_000,
+    windowEndMs: startedAt + 80_000,
+  };
+  const t0 = Date.now();
+  const made = await makeGameFile(entry, {
+    segmentsDirs: bufferDirs,
+    courtCameras: [1, 2],
+    workDir: path.join(dir, "jobs", id),
+    settings,
+    log: createLogger("game"),
+  });
+  const copySeconds = (Date.now() - t0) / 1000;
+  if (made.status !== "done")
+    fail(`game video (camera ${camera}) not made: ${JSON.stringify(made)}`);
+  const info = await probeFile(FFPROBE, made.videoPath);
+  const video = info.streams.find((st) => st.type === "video");
+  const boxes = await topLevelBoxes(made.videoPath);
+  const source = (await loadTimeline(bufferDirs[camera === 2 ? 1 : 0]))[0].path;
+  const [got, want] = await Promise.all([streamParams(made.videoPath), streamParams(source)]);
+  const thumb = made.thumbnailPath ? await fs.readFile(made.thumbnailPath) : null;
+  const result =
+    `game video camera ${camera}: ${info.duration.toFixed(2)}s (${made.durationSeconds}s recorded, ` +
+    `${made.gaps.length} gaps), ${info.streams.map((st) => st.codec).join("+")} ${video?.width}x${video?.height}, ` +
+    `${made.sizeBytes} bytes, copied in ${copySeconds.toFixed(1)}s, boxes ${boxes.join(" → ")}`;
+  console.log(`\n${result}`);
+  checkGameFile({ camera, info, video, made, boxes, got, want, thumb, result });
+
+  const attempts = await uploadThroughStandIn(standIn, id, made);
+  const stored = standIn.games.get(id);
+  const uploaded = Buffer.concat(stored?.bytes ?? []);
+  const file = await fs.readFile(made.videoPath);
+  const sha = (b) => crypto.createHash("sha256").update(b).digest("hex").slice(0, 16);
+  console.log(
+    `upload: ${attempts} attempt(s), ${uploaded.length} of ${file.length} bytes, sha256 ${sha(uploaded)} vs ${sha(file)}, ` +
+      `thumbnail ${stored?.thumbnail ? "sent" : "missing"}`
+  );
+  if (!stored?.finished || !uploaded.equals(file)) fail("the uploaded bytes differ from the file");
+  if (!stored.thumbnail) fail("the thumbnail was not sent with finish");
+  return { info, made, attempts };
+}
+
+/** Phase 5: both game videos, uploaded through the stand-in (with a mismatch and a drop). */
+async function gamePhase({ dir, bufferDirs, startedAt, settings }) {
+  const standIn = uploadStandIn();
+  await new Promise((resolve) => standIn.server.listen(0, "127.0.0.1", resolve));
+  try {
+    const cam1 = await gameVideo({ dir, bufferDirs, startedAt, settings, camera: 0, standIn });
+    const cam2 = await gameVideo({ dir, bufferDirs, startedAt, settings, camera: 2, standIn });
+    console.log(`stand-in log: ${standIn.events.join("; ")}\n`);
+    if (!standIn.events.some((e) => e.startsWith("forced OFFSET_MISMATCH")))
+      fail("the OFFSET_MISMATCH was never forced");
+    if (!standIn.events.some((e) => e.startsWith("dropped connection")))
+      fail("no connection was dropped — the files are too small for 4 chunks");
+    if (cam1.attempts + cam2.attempts < 3) fail("the dropped connection was not resumed");
+    // The resume after the drop must not have started over at 0
+    if (!standIn.events.some((e) => /^start \S+ → has [1-9]/.test(e)))
+      fail(`the upload restarted from 0 after the drop — ${standIn.events.join("; ")}`);
+    return { cam1, cam2 };
+  } finally {
+    standIn.server.close();
+  }
 }
 
 /** One camera of the smoke court, fed in real time from its fake camera file. */
@@ -668,12 +816,11 @@ async function main() {
     );
 
     await cameraSetupPhase({ dir, bufferDir, settings });
-    const partInfo = await cutSessionPart({ dir, bufferDirs, startedAt, logo, encoder, settings });
-    const { kbps } = partInfo;
-    const cam2Part = await cutCameraPart({ dir, bufferDirs, startedAt, logo, encoder, settings });
+    const { cam1, cam2 } = await gamePhase({ dir, bufferDirs, startedAt, settings });
     log.info(
-      `SMOKE OK — clip ${info.duration.toFixed(2)}s, session part ${partInfo.duration.toFixed(2)}s at ${kbps} kb/s, ` +
-        `camera 2 part ${cam2Part.duration.toFixed(2)}s at ${cam2Part.kbps} kb/s`
+      `SMOKE OK — clip ${info.duration.toFixed(2)}s; game videos copied: camera 1 ${cam1.info.duration.toFixed(2)}s ` +
+        `(${cam1.made.sizeBytes} bytes), camera 2 ${cam2.info.duration.toFixed(2)}s (${cam2.made.sizeBytes} bytes), ` +
+        `both uploaded through the resumable stand-in`
     );
   } finally {
     await recorder?.stop();

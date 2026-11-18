@@ -17,6 +17,8 @@ Conventions live in the [`edge-conventions`](../.claude/skills/edge-conventions/
 IP camera ──RTSP──▶ ffmpeg (-c:v copy) ──▶ data/buffer/<courtId>/<epoch>.ts   (rolling, ~180 s)
                                                          │
 API ──GET /jobs (long-poll)──▶ job ──▶ cut + logo + H.264 ──▶ POST /clips/:id/upload
+                                 └──▶ game job (after End game) ──▶ copy the game into one mp4
+                                        ──▶ /game-videos/:id/start, /chunk ×N, /finish
 ```
 
 ---
@@ -125,11 +127,11 @@ they can enrol again after a reset.
 | `ENCODER` | `auto` | `auto`, `libx264`, `h264_qsv`, `h264_vaapi` or `h264_videotoolbox` |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Only for `h264_vaapi` |
 | `RECORD_AUDIO` | `true` | Keep camera audio (transcoded to AAC while recording) |
-| `CLIP_CONCURRENCY` / `UPLOAD_CONCURRENCY` | `1` / `1` | Clips cut / uploaded at the same time |
+| `CLIP_CONCURRENCY` / `UPLOAD_CONCURRENCY` | `1` / `1` | Clips cut / uploaded at the same time (game videos always run one at a time beside them) |
 | `HEARTBEAT_SECONDS` | `30` | Heartbeat interval (the portal shows a box offline after 90 s) |
 | `CONFIG_REFRESH_SECONDS` | `60` | How often courts, camera URLs and the logo are re-read |
 | `DISK_WARN_GB` | `2` | Log a warning when free space in `DATA_DIR` drops below this |
-| `DISK_CRITICAL_MB` | `500` | Below this, session footage is no longer kept beyond the rolling buffer, so live recording goes on |
+| `DISK_CRITICAL_MB` | `500` | Below this, game footage is no longer kept beyond the rolling buffer, so live recording goes on |
 | `BUTTON_PORT` | `8089` | LAN port for court buttons. Set it empty or `0` to turn buttons off. |
 | `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
 | `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
@@ -225,62 +227,68 @@ contains:
 
 ## Sessions (full-session recording)
 
-Staff can book a court for a window of 5 min to 3 h (Admin portal → Sessions). The API splits the
-booking into **5-minute parts**. Each part becomes an ordinary clip job when its window ends. The
-box cuts and uploads the parts one by one (safe on a weak venue line); the API then **joins each
-camera's parts into one whole-game video** (CR-003), so players download one file, not parts.
+A game ("session") is recorded from when the session device is paired until **End game**
+(CR-005). Each camera's whole game travels to the server as **one file** (CR-006) — there are
+no 5-minute pieces anywhere.
 
 What the box does:
 
-1. **Keeps the footage.** `/config` lists the sessions that start within a day or ended less than
-   30 min ago. Every segment that overlaps a session window of its court, ±10 s, is kept until
-   30 min after the session ends instead of being pruned after `BUFFER_SECONDS`. A cached config
-   keeps this working across a reboot.
-2. **Cuts each part exactly.** A part covers `[windowStart, windowEnd]`, with no 60 s before or
-   5 s after. The box waits until the window end is in a closed segment, like an ordinary clip.
-3. **Caps the size.** Session parts use libx264 `-crf 26 -maxrate 1200k` (hardware encoders:
-   `-b:v 1000k -maxrate 1200k`) with 64k audio, so a 5-min part is at most about 47 MB. Ordinary
-   clips are capped at 2.3 Mbit/s, so a 65 s clip is at most about 20 MB.
-4. **Copes with camera drop-outs.**
-   - A part is made if **at least 80 %** of its window was recorded. Holes show as a held frame,
-     and footage that starts late or stops early makes the part shorter.
-   - Below 80 % the part is failed with "Camera recorded only N% of this part of the session".
-   - With no footage at all it fails with "Camera was not recording during this part of the
-     session".
-5. **Puts players first.** A player's clip is always cut before a session part, because a part's
-   footage is kept and a clip's isn't.
-6. **Cuts one camera per part when asked (CR-003).** A part job may carry `camera`:
-   - `0` or absent: as before — stacked on a two-camera court (see below), else the one camera.
-   - `1` or `2`: **that camera only**, never stacked and never the other camera: a normal
-     single-camera video (up to 1080p, 720p for a C200) with the session caps above, the logo and a
-     thumbnail. On a two-camera court the API sends one job per camera for each 5-minute window
-     (separate clip ids, cut in any order) and joins them into "Cam 1 – whole game" and
-     "Cam 2 – whole game".
-   - The 80 % rule applies to that camera alone, and the reason names it: "Camera 2 was not
-     recording during this part of the session", "Camera 2 recorded only N% of this part of the
-     session".
-   - A camera-2 job for a court that has no camera 2 (in `/config`) and no camera-2 footage for the
-     window fails at once with "This court has no camera 2". Footage camera 2 recorded before it was
-     removed is still cut.
-   - The box tells the API it understands this with `capabilities: ["session-part-camera"]` in every
-     heartbeat; an older box never gets per-camera jobs. Jobs saved in `data/queue.json` by an older
-     box (no `camera`) still run, as `0`.
+1. **Keeps the footage while the game is on.** `/config` lists the court's sessions, and every
+   segment that overlaps a listed session window, ±10 s, is kept instead of being pruned after
+   `BUFFER_SECONDS`. There is no time limit on the box's side: the API keeps a finished game
+   listed until its videos are uploaded, then stops listing it and the footage ages out. A cached
+   config keeps this working across a reboot.
+2. **Makes one file per camera after End game.** The API sends one **game job** per camera
+   (`type: "game"`, `sessionVideoId`, `camera`, `windowStartMs`/`windowEndMs`; it may come back on
+   every poll until it's finished — the box keeps one). The box waits until the end of the game
+   is in a closed segment (or a minute has passed), then **joins that camera's segments by stream
+   copy** into one mp4 (`data/jobs/<sessionVideoId>/game.mp4`, faststart). No re-encode: it takes
+   seconds even for a 3 h game and keeps the camera's full quality.
+   - **No venue logo** on game videos, no scaling, no size cap (60-second replays keep their logo).
+   - It starts on the keyframe at (or just before) the game's start and ends at the game's end.
+   - `camera: 0` is the court's only camera, `1` camera 1, `2` camera 2 — never stacked, never the
+     other camera. On a two-camera court that's "Cam 1" and "Cam 2", each its own file.
+   - A JPEG thumbnail from about 1 s in (a failed thumbnail doesn't stop the upload).
+3. **Skips camera drop-outs.** A hole of up to 7 s shows as a held frame. A longer one is left out
+   of the file and reported as a gap (`gaps: [{ startMs, endMs }]`), so the server can name the
+   missing stretch; `durationSeconds` is the game minus its gaps.
+   - No footage at all for that camera: the job fails with "Camera 2 was not recording during this
+     game" ("The camera was not recording during this game" on a one-camera court).
+   - A camera-2 job for a court with no camera 2 in `/config` and no camera-2 footage fails at once
+     with "This court has no camera 2". Footage camera 2 recorded before it was removed is still used.
+4. **Uploads it in resumable chunks.** `POST /game-videos/:id/start` (size, duration, gaps) answers
+   how much the server already has and the chunk size (8 MB); the box `PUT`s each chunk from that
+   offset (read straight from disk, so memory stays flat) and then `POST`s `/finish` with the
+   thumbnail.
+   - **A dropped connection or a restart continues where it stopped**, never from zero: the job,
+     its file and its phase (`waiting` / `copying` / `uploading` / `finishing`) are saved in
+     `data/queue.json`. After a restart the upload resumes through `/start`; a job whose file is
+     gone is copied again (the footage is still kept).
+   - Network errors and 5xx back off 5 s → 5 min; 429 waits for `Retry-After`. If the server is at
+     another offset (409 `OFFSET_MISMATCH`) the box carries on from there.
+   - The game was deleted or is already finished (404 / 409): the job and its files are dropped.
+   - The folder is deleted once `/finish` succeeds.
+5. **Puts players first.** Game videos run one at a time in their own lane. A player's clip is
+   always cut first, and a game upload pauses between chunks while a clip is waiting to upload.
+6. The box tells the API it does all this with `capabilities: ["game-file"]` in every heartbeat.
+   Session-part jobs left in `data/queue.json` by an older box are dropped with a log line.
 
-**Disk sizing.** A C200 `stream1` records at about 1–2 Mbit/s, which is about 0.45–0.9 GB per
-court-hour, so a 3 h session keeps up to about 2.7 GB until 30 min after it ends. Plan for:
+**How long it takes.** The copy takes seconds; the upload is the camera's own bitrate × the game:
+about 0.45–0.9 GB per camera per hour for a C200 `stream1`. A 2 h game on a two-camera court is
+about 2–3.5 GB, so at 10 Mbit/s upload it is ready 30–50 minutes after End game.
 
-> free space ≥ (courts booked at the same time) × (longest session in hours) × 0.9 GB + 2 GB margin
+**Disk sizing.** The game's footage is kept until its videos are uploaded, and the copied file
+needs about as much again while it uploads. Plan for:
 
-For example, 6 courts with 3 h sessions at once is about 16 GB, so use a 128 GB SSD or larger.
-The box checks free space every minute:
+> free space ≥ (courts in games at the same time) × (cameras per court) × (longest game in hours) × 0.9 GB × 2 + 2 GB margin
+
+For example, 6 one-camera courts with 3 h games at once is about 34 GB, so use a 128 GB SSD or
+larger (256 GB with two cameras per court). A box that is offline after End game keeps the
+footage until it can upload. The box checks free space every minute:
 
 - Below `DISK_WARN_GB` (2 GB) it logs a warning every 10 min.
-- Below `DISK_CRITICAL_MB` (500 MB) it logs an error and stops keeping session footage, so
+- Below `DISK_CRITICAL_MB` (500 MB) it logs an error and stops keeping game footage, so
   recording never stops.
-
-**Throughput.** At every 5-minute boundary each court in a session produces a part to encode. The
-API fails a part that isn't finished within 15 min, so with several courts in sessions use a
-hardware encoder (QSV/VAAPI). Measuring this is in the load test below.
 
 ## Live streaming
 
@@ -303,7 +311,7 @@ How it works, and the rules:
   ingest URL, the same way as a [player's own stream](#players-own-live-stream). It never opens
   the camera (a Tapo C200 serves one RTSP client) and never touches the recorder: turning the
   stream on or off, or changing its key or layout, **never restarts the recording** and leaves no
-  gap in clips or session parts. It runs about 10 s behind the court.
+  gap in clips or game videos. It runs about 10 s behind the court.
 - **It needs the live view** (`LIVE_PORT`, on by default). With `LIVE_PORT=0` the court shows
   *"Live view is off on this box (LIVE_PORT=0)"*.
 - **Recording comes first.** If the streaming service is unreachable or refuses the key,
@@ -332,10 +340,8 @@ A court can have a second camera (PLAN-002 §7), for example one behind each bas
 - **60-second clips** are **stacked**: Cam 1 above Cam 2, each scaled to 1280×720, one
   1280×1440 video with the venue logo bottom-right. If one camera has no footage for that window,
   the clip is the other camera alone (the log says so).
-- **Session parts** (whole-game recording) are cut **per camera** when the API asks for it
-  (`camera: 1 | 2` on the job, CR-003): each part is one camera, full size, and the API joins each
-  camera's parts into its own whole-game video ("Cam 1 – whole game", "Cam 2 – whole game"). A
-  part job without a camera (an older API) is stacked like a clip. See
+- **Game videos** (whole-game recording) are **one file per camera** ("Cam 1", "Cam 2"), copied
+  from that camera's buffer at full size, never stacked (CR-006). See
   [Sessions](#sessions-full-session-recording).
 - **Live streams** (the venue's court stream and a player's own stream) can be *Cam 1*, *Cam 2*
   or *Both (stacked)*:
@@ -352,11 +358,10 @@ A court can have a second camera (PLAN-002 §7), for example one behind each bas
     Cam 2"*.
 - **Sync:** the two cameras have their own clocks, so the halves can be up to about 1 s apart.
 - **Sound** comes from Cam 1 (Cam 2's if Cam 1 has none).
-- **Storage:** a second camera doubles that court's buffer and session footage (about
-  0.5–1 GB per camera per hour at 720p). Stacked clips and parts are about twice the size of
-  one camera's (a 5-min part stays under ~75 MB).
-- **Upload:** stacked clips and parts upload about twice the bytes; per-camera session parts are
-  two single-camera parts (≤ ~47 MB each) per window. A stacked live stream sends ~3 Mbit/s.
+- **Storage:** a second camera doubles that court's buffer and game footage (about
+  0.5–1 GB per camera per hour at 720p). Stacked clips are about twice the size of one camera's.
+- **Upload:** stacked clips upload about twice the bytes, and a game has two files to upload, one
+  per camera. A stacked live stream sends ~3 Mbit/s.
 - **The session device's live view** stays Cam 1 (`/live/<courtId>/index.m3u8`); camera 2's is
   `/live/<courtId>/cam2/index.m3u8`, with the same signature.
 
@@ -432,7 +437,7 @@ How the box does it:
   is copied (only the audio is re-encoded to 44.1 kHz); *Both* is stacked and encoded (see
   [two cameras](#two-cameras-on-one-court)). **No second camera connection and no recorder
   restart**, so turning a player's stream on or off, or changing its layout, never leaves a gap
-  in the recording, a clip or a session part.
+  in the recording, a clip or a game video.
 - It starts when the session starts (or when the player adds the stream), stops when the session
   ends or the player stops it, and restarts on a new address or layout. If ffmpeg fails it retries after
   5 s, 10 s, … up to 60 s. A failure only affects that player's stream.
@@ -536,7 +541,7 @@ Keep the board on wired USB power. Reconnect Wi-Fi in `loop()` if `WiFi.status()
 
 ```bash
 npm run lint
-npm test          # node:test, no internet: window math, segment selection, ffmpeg args, masking, queue, job loop, buttons, API client
+npm test          # node:test, no internet: window math, segment selection, game files + resumable upload, ffmpeg args, masking, queue, job loop, buttons, API client
 npm run smoke     # ~2 min, ffmpeg only, no API, no camera (includes camera details + preview, and a local RTMP streaming test)
 ```
 
@@ -549,6 +554,12 @@ swapped for a pipe), cuts a 65 s clip with a logo, and checks:
 - every frame is kept;
 - `moov` comes before `mdat` (faststart);
 - the thumbnail is a JPEG.
+
+It then copies the window 20–80 s into a **game video** for camera 1 and one for camera 2 and
+checks each is a faststart H.264 mp4 of about 60 s with the recording's own codec parameters (no
+re-encode) and a JPEG thumbnail. Each is uploaded to a tiny local stand-in for the resumable
+upload endpoints, which forces one `OFFSET_MISMATCH` and drops one connection mid-chunk; the
+bytes it reassembles must equal the file.
 
 In parallel, a second recorder records **and** streams to a local ffmpeg RTMP server. The smoke
 checks that segments keep coming, the receiver gets video, killing the receiver leaves recording
@@ -592,9 +603,13 @@ clip from the court's QR page.
   6. Make the thumbnail from the middle frame.
 - **Camera setup** (`src/camera.js`): camera details and preview JPEGs read from the buffer, never
   from the camera.
-- **Sessions:** session windows from `/config` protect their segments from pruning
-  (`segments.js` `retentionWindows`); part jobs cut their exact window (`clipper.js`
-  `selectPartSegments`), from the camera the job names (`planClip`, CR-003).
+- **Sessions:** session windows from `/config` protect their segments from pruning for as long as
+  the API lists them (`segments.js` `retentionWindows`).
+- **Game videos** (`src/game.js`, CR-006): a game job picks one camera's segments for the game
+  window (`planGame`: gaps over 7 s left out and reported), copies them into one mp4 with the
+  concat demuxer and `-c:v copy -c:a copy` (no re-encode, no logo), and uploads it with the
+  resumable chunked upload (`uploadGameFile`: start → chunks → finish, resume on 409
+  `OFFSET_MISMATCH` and after errors or restarts).
 - **Stream keys** (`src/stream.js`): stream-key masking and reading ffmpeg's log lines.
 - **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
   segments into a signed HLS live playlist and streams the files with their timestamps shifted.
@@ -611,6 +626,8 @@ clip from the court's QR page.
      recording at that time").
   5. 404 or 409 means the clip is gone or already done, so the job is dropped.
   6. A cut clip that wasn't uploaded yet is re-uploaded after a reboot.
+  7. Game jobs run in their own lane, one at a time, after clips; their phase is persisted so a
+     reboot resumes the upload.
 
 ## Troubleshooting
 
@@ -640,10 +657,11 @@ clip from the court's QR page.
 | Player stream *refused the stream key* | The player pasted an old or wrong key, or ended the live video in their Facebook/YouTube app. They paste a new key on their phone. |
 | Player stream *Can't reach facebook.com / youtube.com* | Venue internet up? Some networks block outgoing RTMP (port 1935) or RTMPS (443 to `live-api-s.facebook.com`). |
 | Player stream *No video from the camera yet* | The court isn't recording (camera offline) — fix that first. The stream retries on its own. |
-| Session part failed "Camera recorded only N%…" | The camera dropped out for over a minute in that part. Check Wi-Fi and the heartbeat history. |
-| Session part failed "Camera 2 was not recording…" / "Camera 2 recorded only N%…" | Same, for that camera of a two-camera court; the other camera's part is made on its own. |
-| Session part failed "This court has no camera 2" | Camera 2 was removed from the court while a game was booked. Cam 1's video is unaffected. |
-| `low disk` / `session footage is no longer kept` | Free space: `df -h`, then `du -sh data/*`. See [disk sizing](#sessions-full-session-recording). |
+| Game video failed "Camera 2 was not recording during this game" (or "The camera …") | That camera recorded nothing during the game. Check its Wi-Fi/power and the heartbeat history; the other camera's video is made on its own. |
+| Game video failed "This court has no camera 2" | Camera 2 was removed from the court before the game. Cam 1's video is unaffected. |
+| Game video shows a missing stretch | The camera dropped out for more than 7 s; the box left that stretch out and reported it. Check the camera's Wi-Fi. |
+| Game video stuck at "uploading N%" | `pm2 logs` shows `upload of game video … stopped, resuming in …`: the venue internet is down or slow. It resumes on its own, from where it stopped. |
+| `low disk` / `game footage is no longer kept` | Free space: `df -h`, then `du -sh data/*` (`data/jobs/*` holds game files waiting to upload). See [disk sizing](#sessions-full-session-recording). |
 | Setup page shows no preview / details | The court must be **Recording** first. Previews wait while clips are being made, and the page updates every 15–30 s. |
 | Court stream *Can't reach youtube.com / facebook.com* | Venue internet up? Is the ingest URL right (`rtmp://` vs `rtmps://`, port)? The box keeps retrying (5 s → 60 s). |
 | Court stream *refused the stream key* | The key was reset or the live event ended. Paste the new ingest URL in Admin → Courts. |
@@ -652,7 +670,7 @@ clip from the court's QR page.
 | Stacked stream shows one camera | The other camera has no video (check its status in the court setup page). It stacks again once both are up. |
 | Stacked clip shows one camera | That camera had no footage for the window (log: *camera 2 has no footage for that window*). |
 | Stream on, but the camera shows *not reachable* | Something else is connected to the camera (NVR, VLC, Tapo's own NVR mode). The C200 allows one RTSP client. |
-| Disk filling | `du -sh data/*`. The buffer prunes itself. Leftover `data/jobs/*` are cleared on restart. |
+| Disk filling | `du -sh data/*`. The buffer prunes itself, except footage of games the API still lists (until their videos are uploaded). Leftover `data/jobs/*` are cleared on restart. |
 
 Test a camera by hand (the password stays out of the box's logs, but not your shell history):
 
@@ -676,7 +694,8 @@ before the first venue goes live.
 | Clip size (65 s, 720p / 1080p) | ≤ 20 MB | TODO |
 | Upload time on the venue's uplink | < 60 s | TODO |
 | Recording gaps during a clip burst | none | TODO |
-| 6 courts in sessions: 6 × 5-min parts encoded per 5 min | < 5 min total | TODO |
-| 5-min session part size (720p / 1080p) | ≈ 40–50 MB | TODO |
+| Copy one camera's 3 h game into one mp4 | < 2 min | TODO |
+| 6 game videos uploading: clips still Ready within | < 2 min | TODO |
+| Game video size per hour (720p / 1080p) | ≈ 0.45–0.9 GB | TODO |
 | 6 courts recording, 2 streaming: CPU, upload use | < 20%, ≈ 2 × camera bitrate | TODO |
 | 24 h soak: memory growth, restarts | flat, 0 | TODO |

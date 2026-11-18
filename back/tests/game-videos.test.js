@@ -122,6 +122,24 @@ describe("game videos", () => {
       assert.ok(shown.uploadPercent > 0);
     });
 
+    it("accepts gap times with fractions of a millisecond, as the box's timeline has them", async () => {
+      const other = await gameAt(home, -95, -85);
+      const otherId = other.jobs[0].sessionVideoId;
+      const end = other.jobs[0].windowEndMs;
+      const res = await start(home.token, otherId, {
+        sizeBytes: 10,
+        durationSeconds: 539.6,
+        gaps: [{ startMs: end - 60_000.4, endMs: end - 0.7 }],
+      });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      const [[row]] = await ctx.sql.query(
+        `SELECT durationSeconds, gaps FROM session_videos WHERE sessionVideoId = ?`,
+        [otherId]
+      );
+      assert.equal(row.durationSeconds, 540);
+      assert.equal(row.gaps.length, 1);
+    });
+
     it("answers OFFSET_MISMATCH with where to continue", async () => {
       const wrong = await putChunk(ctx, home.token, id, 0, GAME_MP4.subarray(0, 50));
       assert.equal(wrong.status, 409);

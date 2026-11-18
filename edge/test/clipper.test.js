@@ -7,12 +7,10 @@ import {
   clipWindow,
   coverageReason,
   encoderSettings,
-  isSessionPart,
   isWindowClosed,
   logoLayout,
   outputSize,
-  partFailureReason,
-  selectPartSegments,
+  QUALITY,
   selectSegments,
 } from "../src/clipper.js";
 
@@ -43,72 +41,6 @@ describe("clipWindow", () => {
       startMs: T0 + 40_000,
       endMs: T0 + 105_000,
     });
-  });
-});
-
-describe("session part window", () => {
-  it("cuts exactly [windowStart, windowEnd] for a part, pre/post for a clip", () => {
-    const part = {
-      requestedAtMs: T0 + 300_000,
-      windowStartMs: T0,
-      windowEndMs: T0 + 300_000,
-      preSeconds: 60,
-      postSeconds: 5,
-    };
-    assert.equal(isSessionPart(part), true);
-    assert.deepEqual(clipWindow(part), { startMs: T0, endMs: T0 + 300_000 });
-    const clip = {
-      requestedAtMs: T0 + 300_000,
-      windowStartMs: null,
-      windowEndMs: null,
-      preSeconds: 60,
-      postSeconds: 5,
-    };
-    assert.equal(isSessionPart(clip), false);
-    assert.deepEqual(clipWindow(clip), { startMs: T0 + 240_000, endMs: T0 + 305_000 });
-  });
-});
-
-describe("selectPartSegments", () => {
-  const segs = timeline(repeat(16), { startSec: -5 }); // ~340 s from T0-5s
-
-  it("covers a full 5-min part with irregular segments, offset from the first one's real start", () => {
-    const pick = selectPartSegments(segs, T0, T0 + 300_000);
-    assert.equal(pick.ok, true);
-    assert.equal(pick.durationMs, 300_000);
-    assert.equal(pick.offsetMs, T0 - pick.segments[0].startMs);
-    assert.ok(pick.coverage > 0.98);
-  });
-
-  it("still makes a part with a 40 s hole (held frame) but not one with less than 80% footage", () => {
-    const holed = timeline(repeat(16), { startSec: -5, gapAfter: { 50: 40 } });
-    const pick = selectPartSegments(holed, T0, T0 + 300_000);
-    assert.equal(pick.ok, true);
-    assert.ok(pick.coverage > 0.8 && pick.coverage < 0.9);
-    const bigHole = timeline(repeat(16), { startSec: -5, gapAfter: { 50: 120 } });
-    const fail = selectPartSegments(bigHole, T0, T0 + 300_000);
-    assert.equal(fail.reason, "LOW_COVERAGE");
-    assert.match(
-      partFailureReason(fail),
-      /^Camera recorded only \d+% of this part of the session$/
-    );
-  });
-
-  it("shortens a part whose footage starts late", () => {
-    const late = timeline(repeat(16), { startSec: 30 });
-    const pick = selectPartSegments(late, T0, T0 + 300_000);
-    assert.equal(pick.ok, true);
-    assert.equal(pick.offsetMs, 0);
-    assert.equal(pick.durationMs, 270_000);
-  });
-
-  it("fails a part with no footage", () => {
-    const pick = selectPartSegments([], T0, T0 + 300_000);
-    assert.equal(pick.reason, "NO_FOOTAGE");
-    assert.equal(
-      partFailureReason(pick),
-      "Camera was not recording during this part of the session"
-    );
   });
 });
 
@@ -236,7 +168,7 @@ describe("buildClipArgs", () => {
     assert.match(joined, /-movflags \+faststart -f mp4 \/job\/clip\.mp4$/);
   });
 
-  it("caps the bitrate: clips ≲ 20 MB per 65 s, session parts ~40–50 MB per 5 min", () => {
+  it("caps the bitrate: clips ≲ 20 MB per 65 s", () => {
     const flags = (args) =>
       Object.fromEntries(
         ["-crf", "-b:v", "-maxrate", "-bufsize", "-b:a"].map((f) => [
@@ -252,37 +184,23 @@ describe("buildClipArgs", () => {
       "-bufsize": "4600k",
       "-b:a": "96k",
     });
-    const partX264 = flags(
-      buildClipArgs({ ...common, logoPath: null, encoder: "libx264", quality: "session" })
-    );
-    assert.deepEqual(partX264, {
-      "-crf": "26",
-      "-b:v": undefined,
-      "-maxrate": "1200k",
-      "-bufsize": "2400k",
-      "-b:a": "64k",
-    });
     for (const encoder of ["h264_qsv", "h264_vaapi", "h264_videotoolbox"]) {
-      const part = flags(buildClipArgs({ ...common, logoPath: null, encoder, quality: "session" }));
       assert.deepEqual(
-        part,
+        flags(buildClipArgs({ ...common, logoPath: null, encoder })),
         {
           "-crf": undefined,
-          "-b:v": "1000k",
-          "-maxrate": "1200k",
-          "-bufsize": "2400k",
-          "-b:a": "64k",
+          "-b:v": "2000k",
+          "-maxrate": "2300k",
+          "-bufsize": "4600k",
+          "-b:a": "96k",
         },
         encoder
       );
-      assert.equal(
-        flags(buildClipArgs({ ...common, logoPath: null, encoder }))["-maxrate"],
-        "2300k"
-      );
     }
-    // worst case sizes at the cap (video + audio)
+    // worst case size at the cap (video + audio)
     assert.ok(((2300 + 96) * 65) / 8 / 1000 <= 20);
-    assert.ok(((1200 + 64) * 300) / 8 / 1000 <= 48);
+    // Game videos are copied, never encoded: no session quality any more
+    assert.deepEqual(Object.keys(QUALITY).sort(), ["clip", "clipStacked", "stream"]);
   });
 
   it("skips the overlay when the venue has no logo", () => {

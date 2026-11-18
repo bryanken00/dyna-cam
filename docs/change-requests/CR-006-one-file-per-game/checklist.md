@@ -13,12 +13,12 @@
 
 ### Recorder box (`edge/`)
 
-- [ ] Game job after End game: one file per camera for the game window by **copying** the
+- [x] Game job after End game: one file per camera for the game window by **copying** the
       recorded segments (no re-encode, no logo); gaps found from the segment timeline and reported
-- [ ] Footage kept until the game's files are uploaded (not until end + 30 min)
-- [ ] Resumable chunked upload (8 MB), progress persisted in the job queue; resumes after a
+- [x] Footage kept until the game's files are uploaded (not until end + 30 min)
+- [x] Resumable chunked upload (8 MB), progress persisted in the job queue; resumes after a
       network drop or a restart
-- [ ] Capability reported in the heartbeat; tests; `npm run smoke` with a whole-game file
+- [x] Capability reported in the heartbeat; tests; `npm run smoke` with a whole-game file
 
 ### API (`back/`)
 
@@ -49,7 +49,8 @@
 
 ## Wrap-up
 
-- [ ] `cd edge && npm run lint && npm test && npm run smoke` passes
+- [x] `cd edge && npm run lint && npm test && npm run smoke` passes (247 tests; SMOKE OK with a
+      forced resume and a dropped connection)
 - [x] `cd back && npm run lint && npm test` passes
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] `cd app && npx expo export --platform android --clear` passes
