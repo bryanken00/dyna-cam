@@ -292,16 +292,22 @@ router.get(
         [venueId]
       );
     // CR-006: a finished game's whole video per camera, still to be sent —
-    // waiting, or being sent by this box (it resumes after a restart)
+    // waiting, or being sent by this box (it resumes after a restart).
+    // CR-013: a save from the courtside device is the same job over its own
+    // window (the capture's start and end, not the game's)
     const findGames = () =>
       req.db.query(
-        `SELECT sv.sessionVideoId, sv.sessionId, sv.camera, s.courtId, s.startAt, s.endAt
+        `SELECT sv.sessionVideoId, sv.sessionId, sv.camera, s.courtId,
+                COALESCE(sc.startAt, s.startAt) AS startAt,
+                COALESCE(sc.endAt, s.endAt) AS endAt
          FROM session_videos sv
          JOIN recording_sessions s ON s.sessionId = sv.sessionId
          JOIN courts c ON c.courtId = s.courtId AND c.status != 'Deleted'
+         LEFT JOIN session_captures sc ON sc.captureId = sv.captureId
          WHERE sv.venueId = ? AND sv.status IN ('Pending', 'Uploading')
            AND (sv.deviceId IS NULL OR sv.deviceId = ?)
-         ORDER BY s.endAt ASC
+           AND (sv.captureId IS NULL OR sc.status = 'Active')
+         ORDER BY endAt ASC
          LIMIT 10`,
         [venueId, req.device.deviceId]
       );

@@ -15,6 +15,8 @@ export const useSessionPageHooks = () => {
   const parts = useMemo(() => session?.parts || [], [session]);
   // CR-003: the whole game, one video per camera (Cam 1 / Cam 2 tabs)
   const videos = useMemo(() => session?.videos || [], [session]);
+  // CR-013: stretches saved from the courtside device ("Save 1 · 8:00 – 10:00")
+  const captures = useMemo(() => session?.captures || [], [session]);
   const [cameraTab, setCameraTab] = useState(null);
   const activeVideo =
     videos.find((video) => video.camera === cameraTab) || videos[0] || null;
@@ -68,6 +70,7 @@ export const useSessionPageHooks = () => {
     session,
     parts,
     videos,
+    captures,
     activeVideo,
     setCameraTab,
     twoCameras,

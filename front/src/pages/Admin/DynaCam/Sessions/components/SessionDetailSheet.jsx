@@ -47,6 +47,10 @@ const VIDEO_STATUS_TONE = {
  * CR-003: one camera's whole-game video — what the player downloads — with
  * its status, the stretches it skips, and Try again when joining failed.
  */
+/** 125 → "2:05" — a point in the game (CR-013 saves). */
+const clockOf = (seconds) =>
+  `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
+
 const WholeVideoRow = ({ video, sessionId, canWrite }) => {
   const retryMutation = useRetrySessionVideo();
   const ready = video.status === "Ready";
@@ -149,6 +153,8 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
   const { data, isLoading, error } = useGetSessionById(open ? sessionId : null);
   const session = data?.data?.session || null;
   const videos = session?.videos || [];
+  // CR-013: stretches saved from the courtside device
+  const captures = session?.captures || [];
   // While it can take a device, or while one is still paired (the device
   // keeps the download QR for a few minutes after the end)
   const showDevices =
@@ -371,6 +377,41 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                         sessionId={session.sessionId}
                         canWrite={canWrite}
                       />
+                    ))}
+                  </div>
+                )}
+
+                {captures.length > 0 && (
+                  <div className="mt-6 overflow-hidden" style={{ border: "1px solid var(--color-line)", borderRadius: "var(--radius-card)" }}>
+                    <div
+                      className="px-3.5 py-2.5 uppercase"
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "var(--color-text-muted)",
+                        background: "var(--color-surface-sunken)",
+                      }}
+                    >
+                      Saved from the court ({captures.length})
+                    </div>
+                    {captures.map((capture) => (
+                      <div key={capture.captureId}>
+                        <div
+                          className="px-3.5 pt-3 font-semibold"
+                          style={{ fontSize: 13, color: "var(--color-text-dark)", borderTop: "1px solid var(--color-line)" }}
+                        >
+                          Save {capture.number} · {clockOf(capture.fromSeconds)} – {clockOf(capture.toSeconds)}
+                        </div>
+                        {capture.videos.map((video) => (
+                          <WholeVideoRow
+                            key={`${capture.captureId}-${video.camera}`}
+                            video={video}
+                            sessionId={session.sessionId}
+                            canWrite={false}
+                          />
+                        ))}
+                      </div>
                     ))}
                   </div>
                 )}

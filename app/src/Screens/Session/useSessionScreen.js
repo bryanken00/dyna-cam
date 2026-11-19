@@ -1,5 +1,7 @@
 import {
   useGetDeviceSession,
+  useDeleteCapture,
+  useSaveCapture,
   useStopSession,
   useStopStream,
 } from "@/services/requests/session";
@@ -27,6 +29,8 @@ export const useSessionScreen = () => {
   const query = useGetDeviceSession();
   const stop = useStopSession();
   const stopStream = useStopStream();
+  const save = useSaveCapture();
+  const removeCapture = useDeleteCapture();
   const data = query.data?.data ?? null;
   const session = data?.session ?? null;
   const stream = data?.stream ?? null;
@@ -41,6 +45,11 @@ export const useSessionScreen = () => {
     errorMessage: query.error?.response?.data?.message,
     refresh: query.refetch,
     isRecording: session?.status === "Recording",
+    // CR-013: "Save the last N min" — the mutation, whether it's possible, the saves
+    save,
+    removeCapture,
+    capture: data?.capture ?? null,
+    captures: data?.captures ?? [],
     isScheduled: session?.status === "Scheduled",
     stopping: stop.isPending,
     stopError: actionError(stop.error, "end the game"),

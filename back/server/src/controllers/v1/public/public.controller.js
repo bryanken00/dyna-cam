@@ -7,6 +7,7 @@ import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
 import { materializeSessionParts, settleSessions, uploadPercent } from "../../../utils/sessions.js";
 import { loadSessionVideos, toPublicVideo } from "../../../utils/sessionVideos.js";
+import { loadCaptures } from "../../../utils/sessionCaptures.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
   clipTokenParamsSchema,
@@ -222,6 +223,8 @@ router.get(
 
     // CR-003: the whole game, one video per camera
     const videos = await loadSessionVideos(req.db, rows[0].sessionId);
+    // CR-013: stretches saved from the courtside device (no business IDs here)
+    const captures = await loadCaptures(req.db, rows[0].sessionId, toPublicVideo);
 
     // CR-004: players never see parts. Only a game from before whole videos
     // (wholeVideo 'Skipped' with saved parts) still lists its parts.
@@ -263,6 +266,8 @@ router.get(
         driveUrl: driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
         // CR-003 / CR-006: one whole video per camera (camera 0 = the court's only camera)
         videos: videos.map(toPublicVideo),
+        // CR-013: saved stretches, oldest first ("Save 1 · 8:00 – 10:00")
+        captures,
         // True while the whole video is still being made (the page keeps checking)
         savingWholeVideo:
           ["Processing", "Ready"].includes(session.status) &&

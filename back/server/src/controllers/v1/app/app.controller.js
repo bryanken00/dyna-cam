@@ -1,5 +1,5 @@
 import express from "express";
-import { catchAsync } from "../../../utils/catchAsync.js";
+import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { endSessionNow, materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
@@ -12,6 +12,16 @@ import {
   unpairInSeconds,
 } from "../../../utils/sessionDevices.js";
 import { clearStream, createStreamSetup, describeStream } from "../../../utils/sessionStreams.js";
+import {
+  CAPTURE_MIN_SECONDS,
+  CAPTURE_REFUSALS,
+  captureLimits,
+  createCapture,
+  deleteCapture,
+  loadCaptures,
+} from "../../../utils/sessionCaptures.js";
+import { toPublicVideo } from "../../../utils/sessionVideos.js";
+import { captureParamsSchema, captureSchema } from "../../../validators/app.validator.js";
 
 /**
  * Session device API (PLAN-002 Phase E) — mounted at /api/v1/app behind
@@ -23,6 +33,8 @@ import { clearStream, createStreamSetup, describeStream } from "../../../utils/s
  *   POST /unpair         Done — the device revokes itself
  *   POST /session/stream-link   a QR code for the player's own live stream (Phase G)
  *   POST /session/stream/stop   stop the player's stream
+ *   POST /session/captures      CR-013: save the last N minutes as its own video
+ *   DELETE /session/captures/:captureId   CR-013: delete one of this game's saves
  */
 const router = express.Router();
 
@@ -35,13 +47,23 @@ const refreshSession = async (req) => {
 
 const deviceBody = async (req, row) => {
   const now = Date.now();
-  return {
+  const body = {
     session: toDeviceSession(row, now),
     live: await liveLink(req.db, row, now),
     stream: await describeStream(req.db, row, now),
     unpairInSeconds: unpairInSeconds(row, now),
     device: { pairedAppId: req.pairedApp.pairedAppId, name: req.pairedApp.name },
   };
+  // CR-013: "Save the last …" — while recording, after the first minute, up to
+  // `maxPerGame` saves at once (deleting one frees a slot)
+  body.captures = await loadCaptures(req.db, row.sessionId, toPublicVideo, { withIds: true });
+  body.capture = {
+    minSeconds: CAPTURE_MIN_SECONDS,
+    available: sessionRecording(row, now),
+    maxPerGame: captureLimits().maxPerGame,
+    used: body.captures.length,
+  };
+  return body;
 };
 
 /**
@@ -92,6 +114,55 @@ router.post(
     const link = await createStreamSetup(req.db, row.sessionId);
     noIdempotencyCache(res); // the code is a credential
     return res.sendSuccess("Scan with your phone to add your live stream", link, 201);
+  })
+);
+
+/**
+ * POST /session/captures — CR-013: save the last `seconds` of the game (capped
+ * at the time played) as its own video, one per camera, made by the recorder
+ * box like the whole game. Free.
+ */
+router.post(
+  "/session/captures",
+  validateBody(captureSchema),
+  catchAsync(async (req, res) => {
+    await refreshSession(req);
+    const result = await createCapture(req.db, {
+      sessionId: req.pairedApp.sessionId,
+      pairedAppId: req.pairedApp.pairedAppId,
+      seconds: req.body.seconds,
+    });
+    if (!result.ok) {
+      const refusal = CAPTURE_REFUSALS[result.reason];
+      return res.sendError(refusal.message, null, refusal.status, result.reason);
+    }
+    const row = await loadDeviceSession(req.db, req.pairedApp.sessionId);
+    const body = await deviceBody(req, row);
+    // A double tap answers with the save already made (200, not a second one)
+    return res.sendSuccess(
+      "Saving — it'll be on your game's page in a few minutes",
+      { ...body, captureId: result.captureId },
+      result.repeated ? 200 : 201
+    );
+  })
+);
+
+/**
+ * DELETE /session/captures/:captureId — CR-013: delete one of this game's
+ * saves (its videos and files go; the box stops making it). Another game's
+ * save, or one already deleted, is a 404.
+ */
+router.delete(
+  "/session/captures/:captureId",
+  validateParams(captureParamsSchema),
+  catchAsync(async (req, res) => {
+    const deleted = await deleteCapture(req.db, {
+      sessionId: req.pairedApp.sessionId,
+      captureId: req.params.captureId,
+    });
+    if (!deleted) return res.sendError("Save not found", 404);
+    const row = await loadDeviceSession(req.db, req.pairedApp.sessionId);
+    return res.sendSuccess("Save deleted", await deviceBody(req, row));
   })
 );
 

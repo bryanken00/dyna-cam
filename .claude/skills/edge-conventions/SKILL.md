@@ -62,7 +62,9 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   60 s clips are always "the box chooses": both cameras stacked on a two-camera court, else the one
   with footage (`planClip`); a clip's `camera` field is ignored.
 - **Game jobs** (CR-006): `GET /jobs` also returns `{ type: "game", sessionVideoId, sessionId, courtId,
-  camera, windowStartMs, windowEndMs }`, repeated on later polls until finished — dedupe by
+  camera, windowStartMs, windowEndMs }` — the window is the whole game, or (CR-013) a "save the last N
+  minutes" from the courtside device, which ends at the moment of Save, often while the game is still
+  recording; nothing on the box treats them differently, repeated on later polls until finished — dedupe by
   `sessionVideoId` (queue key `game:<id>`). `camera` 0 = the court's only camera (camera 1's buffer),
   1/2 = that camera only (`jobCamera`), never stacked, never the other camera. Wait until `windowEndMs`
   is in a closed segment (or ≥ 60 s past it), then **stream-copy** (see ffmpeg rules) into

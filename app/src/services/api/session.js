@@ -74,6 +74,44 @@ export const createStreamLinkApi = async () => {
   return response.data;
 };
 
+// ── CR-013: save the last N minutes ─────────────────────────────────────────
+
+/**
+ * Save the last `seconds` of the game (≥ 60; the API caps it at the time
+ * played) as its own video, one per camera, made by the recorder box like
+ * the whole game. Free.
+ *
+ * 201 data: the same body as GET /session (with the new save in `captures`)
+ *   + `captureId`.
+ * 200 instead of 201 when the same length was saved seconds ago (a double tap:
+ * the save already made). A save while another is being made waits its turn
+ * (status "Queued"). 409 NOT_RECORDING / TOO_EARLY (before the first minute) /
+ * TOO_MANY (the game's `capture.maxPerGame` saves are used — delete one) ·
+ * 400 under a minute.
+ *
+ * Capture = { captureId, number, fromSeconds, toSeconds (where in the game),
+ *   seconds, savedAt, status: "Queued" | "Saving" | "Ready" | "Failed" |
+ *   "Expired", uploadPercent (0–99 while saving, 100 once Ready, null before
+ *   the box sends), videos: [{ camera, label, status, videoUrl, downloadUrl, … }] }
+ *   — GET /session's `captures`, oldest first, and
+ *   `capture: { minSeconds, available, maxPerGame, used }`.
+ */
+export const saveCaptureApi = async (seconds) => {
+  const response = await axiosDevice.post(`${BASE}/session/captures`, { seconds });
+  return response.data;
+};
+
+/**
+ * Delete one of this game's saves (its video goes; the box stops making it).
+ * 200 data: the same body as GET /session · 404 not this game's, or already deleted.
+ */
+export const deleteCaptureApi = async (captureId) => {
+  const response = await axiosDevice.delete(
+    `${BASE}/session/captures/${encodeURIComponent(captureId)}`,
+  );
+  return response.data;
+};
+
 /** Stop the player's stream (the recording goes on). 200 data: { stream: null } */
 export const stopStreamApi = async () => {
   const response = await axiosDevice.post(`${BASE}/session/stream/stop`);
