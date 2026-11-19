@@ -1,13 +1,14 @@
-import { Check, Minus, Plus, Scissors, Trash2 } from "lucide-react-native";
+import { Check, Minus, Play, Plus, Scissors, Trash2 } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { Alert, PanResponder, Pressable, View } from "react-native";
+import { Alert, Image, PanResponder, Pressable, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import useNow from "@/hooks/useNow";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import { formatElapsed, secondsSince } from "@/utils/dynaCam";
+import { formatElapsed, mediaUrl, secondsSince } from "@/utils/dynaCam";
+import CapturePreviewSheet from "./CapturePreviewSheet";
 
 /** Steps of 15 seconds, from 1 minute (the API's minimum) up to the time played. */
 const STEP_SECONDS = 15;
@@ -112,11 +113,14 @@ const captureStateText = (capture) => {
   return capture.status;
 };
 
-/** One save in the list: "Save 2  8:00 – 10:00 · Saving 45%  🗑". */
-const CaptureRow = ({ capture, onDelete, deleting }) => {
+/** One save in the list: [▶ picture] "Save 2  8:00 – 10:00 · Ready" [🗑] — the picture plays it. */
+const CaptureRow = ({ capture, onDelete, deleting, onPreview }) => {
   const colors = useThemeColors();
   const ready = capture.status === "Ready";
   const waiting = ["Queued", "Saving"].includes(capture.status);
+  // CR-013 preview: a finished save with a video can be played on the device
+  const playable = ready && capture.videos?.some((video) => video.videoUrl);
+  const thumbnail = mediaUrl(capture.videos?.find((video) => video.thumbnailUrl)?.thumbnailUrl);
 
   const confirmDelete = () =>
     Alert.alert(
@@ -132,6 +136,26 @@ const CaptureRow = ({ capture, onDelete, deleting }) => {
 
   return (
     <View className="border-line-soft flex-row items-center justify-between gap-3 border-t py-2">
+      {playable ? (
+        <Pressable
+          onPress={() => onPreview(capture)}
+          accessibilityRole="button"
+          accessibilityLabel={`Play Save ${capture.number}`}
+          className="h-[36px] w-[64px] items-center justify-center overflow-hidden rounded-md bg-black active:opacity-80"
+        >
+          {thumbnail ? (
+            <Image
+              source={{ uri: thumbnail }}
+              style={{ position: "absolute", width: "100%", height: "100%" }}
+              resizeMode="cover"
+              accessible={false}
+            />
+          ) : null}
+          <View className="h-6 w-6 items-center justify-center rounded-full bg-black/55">
+            <Play size={12} color="#fff" fill="#fff" />
+          </View>
+        </Pressable>
+      ) : null}
       <Text className="flex-1 text-[14px]" numberOfLines={1}>
         <Text className="font-sans-semibold text-[14px]">Save {capture.number}</Text>
         {"  "}
@@ -152,6 +176,7 @@ const CaptureRow = ({ capture, onDelete, deleting }) => {
           {captureStateText(capture)}
         </Text>
       </View>
+
       {capture.captureId ? (
         <Pressable
           onPress={confirmDelete}
@@ -198,6 +223,9 @@ const SaveMinutes = ({ session, since, capture, captures, save, removeCapture })
   const from = Math.max(0, played - seconds);
   const error = saveErrorText(save.error) ?? saveErrorText(removeCapture.error);
   const deletingId = removeCapture.isPending ? removeCapture.variables : null;
+  // The save being previewed — a snapshot taken when it opens, so the video
+  // doesn't restart when the next poll re-signs its link
+  const [previewing, setPreviewing] = useState(null);
 
   const step = (delta) =>
     setChosen(Math.min(maxSeconds, Math.max(MIN_SECONDS, seconds + delta)));
@@ -317,6 +345,7 @@ const SaveMinutes = ({ session, since, capture, captures, save, removeCapture })
                 key={item.captureId ?? item.number}
                 capture={item}
                 deleting={deletingId === item.captureId}
+                onPreview={setPreviewing}
                 onDelete={(captureId) => {
                   removeCapture.reset();
                   removeCapture.mutate(captureId);
@@ -325,6 +354,8 @@ const SaveMinutes = ({ session, since, capture, captures, save, removeCapture })
             ))}
         </View>
       ) : null}
+
+      <CapturePreviewSheet capture={previewing} onClose={() => setPreviewing(null)} />
     </View>
   );
 };

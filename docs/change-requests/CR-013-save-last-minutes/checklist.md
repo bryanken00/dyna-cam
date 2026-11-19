@@ -32,6 +32,8 @@
 - [x] Revision: queue instead of a cooldown ("Queued" / "In queue", double tap = same save), max 5
       saves (`CAPTURE_MAX_PER_GAME`), `DELETE /app/session/captures/:captureId` + delete button with
       a confirm, "Finishing…" at 99%; tests for queue, limit, delete and its 404s
+- [x] Revision: preview on the device — picture in the list, tap to play (`CapturePreviewSheet`,
+      expo-video, Cam 1 / Cam 2), `mediaUrl()` turns the API's signed links into full addresses
 
 ## Acceptance
 
@@ -42,6 +44,7 @@
 - [x] Refused before 1 min, after the game, and at 5 saves; queued, not refused, while another is
       made *(API tests)*
 - [ ] Delete on a device removes it from the game's page
+- [ ] Preview plays a finished save on a device (both cameras on a two-camera court)
 
 ## Wrap-up
 

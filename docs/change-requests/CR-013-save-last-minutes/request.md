@@ -29,7 +29,8 @@ for and scrubbing through the whole game.
 - Each save makes a separate video of that stretch, one per camera on a two-camera court, made
   like the whole-game video (a copy of the camera footage: full quality, no logo, ready fast).
 - Free, part of the game (decided 2026-11-19).
-- The device lists the saves with their progress; the game's page (the QR link) lists them under
+- The device lists the saves with their progress, and plays a finished save right there
+  (preview, Cam 1 / Cam 2 on a two-camera court); the game's page (the QR link) lists them under
   the whole game, ready to watch and download. They go to the court's Google Drive like the
   game, and expire with the venue's retention period.
 - Admin → Sessions shows them on the game.
@@ -84,3 +85,7 @@ for and scrubbing through the whole game.
   double tap returns the save already made; **at most 5 saves** per game; a **delete button** on
   each save (soft delete: its videos and files go, the box stops making it, a pending Drive copy is
   skipped). "Saving 100%" while the box finishes the file now reads "Finishing…" (99%).
+- 2026-11-19: **Preview on the device** (requester: "add preview on app what they save"): a
+  finished save shows its picture in the list; tapping it opens a player on the device with the
+  saved video (native controls, Cam 1 / Cam 2 on a two-camera court). No API change — the device
+  already receives each save's signed video and picture links.
