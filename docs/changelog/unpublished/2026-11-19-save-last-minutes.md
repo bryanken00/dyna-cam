@@ -9,8 +9,8 @@ Players can now save the last few minutes of their game from the courtside devic
 how much — in 15-second steps from 1 minute up to the time played so far — and tap Save. Each save becomes its own
 video — one per camera on two-camera courts — on the game's page, ready in a few minutes. It's
 free with the game, up to 5 saves per game. Saves are made one at a time — a new one shows "In
-queue" until its turn — players can watch each finished save on the device, and each can be
-deleted. The whole-game video still arrives after End game.
+queue" until its turn — players can watch each finished save on the device, moving through it
+by game time in 15-second jumps, and each can be deleted. The whole-game video still arrives after End game.
 
 ## Dev notes
 

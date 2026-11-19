@@ -34,6 +34,8 @@
       a confirm, "Finishing…" at 99%; tests for queue, limit, delete and its 404s
 - [x] Revision: preview on the device — picture in the list, tap to play (`CapturePreviewSheet`,
       expo-video, Cam 1 / Cam 2), `mediaUrl()` turns the API's signed links into full addresses
+- [x] Revision: under the preview, a game-time scrubber (8:00 … 10:00, "now at 9:12") with −15 s /
+      play-pause / +15 s; the player's own controls off
 
 ## Acceptance
 
@@ -44,7 +46,8 @@
 - [x] Refused before 1 min, after the game, and at 5 saves; queued, not refused, while another is
       made *(API tests)*
 - [ ] Delete on a device removes it from the game's page
-- [ ] Preview plays a finished save on a device (both cameras on a two-camera court)
+- [ ] Preview plays a finished save on a device (both cameras on a two-camera court); the scrubber
+      and ±15 s move through it
 
 ## Wrap-up
 

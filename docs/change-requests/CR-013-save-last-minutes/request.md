@@ -89,3 +89,7 @@ for and scrubbing through the whole game.
   finished save shows its picture in the list; tapping it opens a player on the device with the
   saved video (native controls, Cam 1 / Cam 2 on a two-camera court). No API change — the device
   already receives each save's signed video and picture links.
+- 2026-11-19: **Game minutes under the preview** (requester: "add minute on below that can adjust on
+  preview"; chosen: jump within the video, viewing only). Below the video: a scrubber labelled in
+  game time (8:00 … 10:00, "now at 9:12 of the game"), −15 s / play-pause / +15 s; drag or tap the
+  scrubber to jump. The save itself doesn't change.
