@@ -18,8 +18,8 @@ import { KEY_LENGTH, usePairScreen } from "./usePairScreen";
  *
  * There is no sign-in: staff work happens on the web.
  *
- * Centred card, LogoMark, max-w-[440px], keyboard avoidance. App.js
- * provides the safe area and the status bar.
+ * Centred card with a navy brand panel (LogoMark, CR-012) on top, max-w-[440px],
+ * keyboard avoidance. App.js provides the safe area and the status bar.
  */
 const PairScreen = () => {
   const colors = useThemeColors();
@@ -33,15 +33,19 @@ const PairScreen = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View className="border-border bg-card w-full max-w-[440px] rounded-3xl border p-5 sm:p-7">
-            <View className="mb-6 items-center">
+          <View className="border-border bg-card w-full max-w-[440px] overflow-hidden rounded-3xl border">
+            {/* Navy brand panel (CR-012), like the website's sign-in */}
+            <View className="bg-brand items-center px-5 pb-7 pt-8 sm:px-7">
               <LogoMark />
-              <Text className="font-sans-bold mt-[18px] text-[26px] tracking-tight">
+              <Text className="mt-[18px] font-sans-semibold text-[11.5px] uppercase tracking-[1.6px] text-brand-ball">
+                Dyna Cam
+              </Text>
+              <Text className="font-sans-bold mt-1.5 text-[26px] tracking-tight text-white">
                 Pair this device
               </Text>
-              <Text className="text-muted-foreground mt-1.5 text-center text-sm">
-                Enter the 6-digit key from the session in the Admin portal:{"\n"}
-                Sessions → the session → Pair a device.
+              <Text className="mt-1.5 text-center text-sm text-white/75">
+                Enter the 6-digit key for your game.{"\n"}
+                Staff find it in the Admin: Sessions → the game → Pair a device.
               </Text>
 
               {IS_DEMO ? (
@@ -53,6 +57,8 @@ const PairScreen = () => {
                 </View>
               ) : null}
             </View>
+
+            <View className="p-5 sm:p-7">
 
             {m.notice ? (
               <View className="border-border bg-secondary mb-5 flex-row items-start gap-3 rounded-xl border p-3.5">
@@ -107,6 +113,7 @@ const PairScreen = () => {
                 </>
               )}
             </Button>
+            </View>
           </View>
 
         </ScrollView>

@@ -242,6 +242,36 @@ describe("venue health and alerts", () => {
       assert.equal(typeof venues.recordingNow, "number");
     });
 
+    it("shows each court on the court board: cameras, the game on court, replays", async () => {
+      const empty = (await call("GET", "/admin/dashboard/venues")).data.venues.courts;
+      assert.deepEqual(empty, [
+        {
+          courtId,
+          name: "Court 1",
+          venueId,
+          venueName: "Alert Courts",
+          cameras: [{ camera: 1, status: "error" }],
+          game: null,
+          replaysToday: 0,
+        },
+      ]);
+
+      const game = await call("POST", "/admin/sessions", { courtId, playerName: "Juan Cruz" });
+      assert.equal(game.status, 201, JSON.stringify(game.body));
+      const res = await call("GET", "/admin/dashboard/venues", undefined, viewer.token);
+      const [court] = res.data.venues.courts;
+      assert.deepEqual(court.game, { state: "waiting" });
+      assert.ok(!JSON.stringify(res.body).includes("Juan Cruz"), "no player names on the board");
+      assert.ok(!JSON.stringify(res.body).includes("Pass%40One1"));
+
+      await ctx.sql.query(`UPDATE devices SET lastSeenAt = '2000-01-01 00:00:00' WHERE deviceId = ?`, [
+        deviceId,
+      ]);
+      const offline = await call("GET", "/admin/dashboard/venues");
+      assert.equal(offline.data.venues.courts[0].cameras[0].status, "offline");
+      await beat({ cameras: [{ courtId, status: "error", message: "x" }], system: HEALTHY });
+    });
+
     it("lists open problems and box health only with Venue alerts", async () => {
       const denied = await call("GET", "/admin/dashboard/alerts", undefined, viewer.token);
       assert.equal(denied.status, 403);

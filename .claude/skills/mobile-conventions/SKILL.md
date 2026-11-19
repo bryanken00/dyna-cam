@@ -49,9 +49,11 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **APIs that take a colour string** (lucide `color`, svg fills, `StatusBar`,
   tab-view styles) use `useThemeColors()`. A colour changed in `global.css`
   must be changed in `src/lib/theme.js` too.
-- **The primary button is inverted monochrome** — the default `<Button>`. Never
-  pass it a background, never make a button green. Green is for ticks, dots,
-  focus rings and chips.
+- **The primary button is navy with white text** (white with navy text in dark)
+  — the default `<Button>` (pickleball brand, CR-012, same palette as the
+  website). Never pass it a background, never make a button lime. The soft
+  lime accent is for ticks, dots, focus rings and chips, never text on a light
+  surface. Brand panels use `bg-brand` (navy) with `text-white`.
 - **Pick the font family, not the weight.** `font-sans-semibold`, never
   `font-semibold` — React Native has no synthetic weights.
 - **`transition-*` / `animate-*` only inside `Platform.select({ web: … })`.**

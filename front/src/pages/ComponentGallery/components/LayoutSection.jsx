@@ -15,7 +15,7 @@ const STRUCTURAL = [
   },
   {
     label: "AuthLayout",
-    value: "Centered card the login / forgot-password screens sit in.",
+    value: "Sign-in screens: the blue court band beside the form (stacked on a phone).",
   },
   {
     label: "ProtectedRoute",

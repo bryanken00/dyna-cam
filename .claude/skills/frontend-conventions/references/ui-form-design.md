@@ -281,7 +281,7 @@ The footer lives **inside** the `<form>`, so the primary button is `type="submit
 </div>
 ```
 
-The default `<Button>` variant **is** the inverted monochrome primary — never add an inline
+The default `<Button>` variant **is** the navy primary — never add an inline
 `background`. `variant="outline"` is the secondary (Cancel). React Query v5 mutations expose
 **`isPending`**, not `isLoading`.
 

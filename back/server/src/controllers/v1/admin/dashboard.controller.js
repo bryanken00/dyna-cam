@@ -1,7 +1,7 @@
 import express from "express";
 import { catchAsync } from "../../../utils/catchAsync.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { ALERT_LABELS, boxHealth } from "../../../utils/venueHealth.js";
 
 const router = express.Router();
@@ -108,16 +108,116 @@ const cameraCounts = (boxes) => {
   return { ok, total };
 };
 
+/** Seconds from `from` to `to` (stored Manila timestamps); null without both. */
+const secondsBetween = (from, to) =>
+  from && to
+    ? moment.tz(to, "YYYY-MM-DD HH:mm:ss", TZ).diff(moment.tz(from, "YYYY-MM-DD HH:mm:ss", TZ), "seconds")
+    : null;
+
+/**
+ * Every court in use, venue by venue, as the Dashboard's court board shows it:
+ * each configured camera's state (from its recorder box's heartbeat), the game
+ * on court now (or waiting for its device, or the next one today) and today's
+ * replays. No player names — the Sessions page has those.
+ */
+const courtBoard = async (db, boxes, { now, dayStart, dayEnd }) => {
+  const [courts, games, replays] = await Promise.all([
+    db.query(
+      `SELECT c.courtId, c.name, c.venueId, v.name AS venueName,
+              c.cameraRtspUrl IS NOT NULL AS hasCamera1,
+              c.camera2RtspUrl IS NOT NULL AS hasCamera2
+       FROM courts c
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       WHERE c.status = 'Active'`
+    ),
+    db.query(
+      `SELECT courtId, status, startAt, endAt, openEnded
+       FROM recording_sessions
+       WHERE status IN ('Recording', 'Waiting')
+          OR (status = 'Scheduled' AND startAt BETWEEN ? AND ?)
+       ORDER BY startAt`,
+      [now, dayEnd]
+    ),
+    db.query(
+      `SELECT courtId, COUNT(*) AS total FROM clips
+       WHERE sessionId IS NULL AND status != 'Deleted' AND dateCreated BETWEEN ? AND ?
+       GROUP BY courtId`,
+      [dayStart, dayEnd]
+    ),
+  ]);
+
+  const cameraState = new Map();
+  for (const box of boxes) {
+    for (const entry of Array.isArray(box.status.cameras) ? box.status.cameras : []) {
+      const key = `${entry?.courtId}:${entry?.camera === 2 ? 2 : 1}`;
+      // An online box's report wins over an offline one's
+      if (box.online || !cameraState.has(key)) {
+        cameraState.set(key, box.online ? entry.status : "offline");
+      }
+    }
+  }
+  const replayCount = new Map(replays.map((row) => [row.courtId, Number(row.total)]));
+  const gamesByCourt = new Map();
+  for (const game of games) {
+    if (!gamesByCourt.has(game.courtId)) gamesByCourt.set(game.courtId, []);
+    gamesByCourt.get(game.courtId).push(game);
+  }
+
+  return courts
+    .map((court) => {
+      const courtGames = gamesByCourt.get(court.courtId) || [];
+      const playing = courtGames.find((game) => game.status === "Recording");
+      const waiting = courtGames.find((game) => game.status === "Waiting");
+      const next = courtGames.find((game) => game.status === "Scheduled");
+      let game = null;
+      if (playing) {
+        game = {
+          state: "playing",
+          openEnded: Boolean(playing.openEnded),
+          elapsedSeconds: Math.max(0, secondsBetween(playing.startAt, now) ?? 0),
+          remainingSeconds: playing.openEnded
+            ? null
+            : Math.max(0, secondsBetween(now, playing.endAt) ?? 0),
+        };
+      } else if (waiting) {
+        game = { state: "waiting" };
+      } else if (next) {
+        game = { state: "next", startAt: next.startAt, startsInSeconds: secondsBetween(now, next.startAt) };
+      }
+      const cameras = [];
+      if (court.hasCamera1) cameras.push(1);
+      if (court.hasCamera2) cameras.push(2);
+      return {
+        courtId: court.courtId,
+        name: court.name,
+        venueId: court.venueId,
+        venueName: court.venueName,
+        cameras: cameras.map((camera) => ({
+          camera,
+          status: cameraState.get(`${court.courtId}:${camera}`) || "unknown",
+        })),
+        game,
+        replaysToday: replayCount.get(court.courtId) || 0,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.venueName.localeCompare(b.venueName) ||
+        a.name.localeCompare(b.name, undefined, { numeric: true })
+    );
+};
+
 /**
  * GET /venues
  * CR-008: today at the venues — games recording now and today, replay clips,
- * cash taken, and how many recorder boxes and cameras are up.
+ * cash taken, how many recorder boxes and cameras are up, and the court board.
  */
 router.get(
   "/venues",
   checkPermission("dashboard", null, "read"),
   catchAsync(async (req, res) => {
     const today = getTodayDateLocal();
+    const now = getCurrentTimestampLocal();
     const dayStart = `${today} 00:00:00`;
     const dayEnd = `${today} 23:59:59`;
 
@@ -145,6 +245,8 @@ router.get(
       boxHealth(req.db),
     ]);
 
+    const courts = await courtBoard(req.db, boxes, { now, dayStart, dayEnd });
+
     return res.sendSuccess("Venue figures retrieved successfully", {
       venues: {
         date: today,
@@ -156,6 +258,7 @@ router.get(
         paymentsToday: Number(cash[0]?.count || 0),
         boxes: { online: boxes.filter((box) => box.online).length, total: boxes.length },
         cameras: cameraCounts(boxes),
+        courts,
       },
     });
   })

@@ -8,8 +8,9 @@ ref: CR-008
 Staff now hear about trouble at a venue before players do. If a recorder box goes offline, a
 camera stops recording, or a box runs low on disk space, has the wrong time, or can't send its
 clips, a message goes to the staff Discord channel within about five minutes, and another when
-it's fixed. The Dashboard now shows today's games, clips and cash, which boxes and cameras are
-working, and every open problem.
+it's fixed. The Dashboard is now **Today on court**: today's games, replays and cash, every
+court drawn as a pickleball court showing whether a game is on, how long is left and whether its
+cameras are recording, and anything that needs attention at the top.
 
 ## Dev notes
 
@@ -24,7 +25,8 @@ working, and every open problem.
   set (`ALERT_EMAIL=false` keeps them off even then).
 - back/: new `GET /api/v1/admin/dashboard/venues` (dashboard) and `/dashboard/alerts` (alerts);
   the heartbeat accepts an optional `system` field. Job `jobs/venueAlerts.js` runs every minute.
-- front/: Dashboard rebuilt. The user, role and audit-count cards and the two charts are gone;
-  recent activity stays.
+- front/: Dashboard rebuilt as "Today on court" (court board, figures, problems). The user, role
+  and audit-count cards and the two charts are gone; recent activity stays. Browser tab title is
+  now "Dyna Cam".
 - edge/: update the recorder box at every venue to report disk, memory, clock and upload backlog.
   Boxes not yet updated keep working; only their offline and camera alerts work.

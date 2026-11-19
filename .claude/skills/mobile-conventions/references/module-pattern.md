@@ -1,7 +1,7 @@
 # Modern Module Pattern — React Native
 
 How to build an admin-style **list screen** and its **create/edit sheet**:
-Onest + monochrome surfaces + green accent, hairline borders, no shadows.
+Onest + cool off-white surfaces, navy buttons, a soft lime accent, hairline borders, no shadows.
 
 Ported from a web design system built on Ant Design; §1 records what had to
 change for a phone and why. This document is self-contained — you do not need

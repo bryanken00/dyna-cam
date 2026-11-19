@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
-import { Banknote, Camera, Film, Server, Video, CalendarDays } from "lucide-react";
+import dayjs from "dayjs";
+import { Banknote, Camera, Film, Video } from "lucide-react";
 
 import { usePermissions } from "../../../hooks/usePermissions";
 import {
@@ -77,6 +78,74 @@ const boxFacts = (system) => {
   return facts;
 };
 
+const CAMERA_WORDS = {
+  ok: "recording",
+  starting: "connecting",
+  error: "not recording",
+  offline: "box offline",
+  unknown: "no report yet",
+};
+
+/** What's happening on a court, in a line: "Game on · 23 min left", "Court open", … */
+const courtStatus = (game) => {
+  if (game?.state === "playing") {
+    if (game.openEnded) {
+      return game.elapsedSeconds < 60
+        ? "Game on · just started"
+        : `Game on · ${durationText(game.elapsedSeconds)} played`;
+    }
+    return game.remainingSeconds < 60
+      ? "Game on · ending now"
+      : `Game on · ${durationText(game.remainingSeconds)} left`;
+  }
+  if (game?.state === "waiting") return "Game set up · waiting for a device";
+  if (game?.state === "next") return `Next game at ${dayjs(game.startAt).format("h:mm A")}`;
+  return "Court open";
+};
+
+/** A court from the API → what its card shows. */
+const toCourtCard = (court) => {
+  const state =
+    court.game?.state === "playing" ? "playing" : court.game?.state === "waiting" ? "waiting" : "idle";
+  const cameraDown = court.cameras.some((cam) => ["error", "offline"].includes(cam.status));
+  const tone = cameraDown
+    ? "error"
+    : state === "playing"
+      ? "success"
+      : state === "waiting"
+        ? "warning"
+        : "muted";
+  const cameraText =
+    court.cameras.length === 0
+      ? "No camera set up"
+      : court.cameras
+          .map((cam) => `Cam ${cam.camera} ${CAMERA_WORDS[cam.status] || cam.status}`)
+          .join(" · ");
+  return { ...court, state, tone, statusText: courtStatus(court.game), cameraText };
+};
+
+/** Courts grouped by venue, in the API's order (venue, then court number). */
+const groupByVenue = (courts) => {
+  const venues = [];
+  const byId = new Map();
+  for (const court of courts) {
+    if (!byId.has(court.venueId)) {
+      const venue = { venueId: court.venueId, venueName: court.venueName, courts: [] };
+      byId.set(court.venueId, venue);
+      venues.push(venue);
+    }
+    byId.get(court.venueId).courts.push(toCourtCard(court));
+  }
+  return venues.map((venue) => {
+    const inPlay = venue.courts.filter((court) => court.state === "playing").length;
+    const total = venue.courts.length;
+    return {
+      ...venue,
+      summary: `${inPlay} of ${total} court${total === 1 ? "" : "s"} in play`,
+    };
+  });
+};
+
 export const useDashboardHooks = () => {
   const { hasPermission } = usePermissions();
   const canSeeAlerts = hasPermission("alerts", null, "read");
@@ -90,44 +159,35 @@ export const useDashboardHooks = () => {
   const statCards = useMemo(
     () => [
       {
-        title: "Recording now",
+        title: "Games on court",
         value: venues?.recordingNow ?? 0,
-        change: `of ${venues?.gamesToday ?? 0} games today`,
+        change: `of ${venues?.gamesToday ?? 0} today`,
         icon: <Video {...ICON} />,
       },
       {
-        title: "Replay clips today",
+        title: "Replays saved",
         value: venues?.clipsToday ?? 0,
-        change: `${venues?.clipsReadyToday ?? 0} ready`,
+        change: `today · ${venues?.clipsReadyToday ?? 0} ready`,
         icon: <Film {...ICON} />,
       },
       {
         title: "Cash today",
         value: formatPeso(venues?.cashToday ?? 0),
-        change: `${venues?.paymentsToday ?? 0} payments`,
+        change: `${venues?.paymentsToday ?? 0} paid`,
         icon: <Banknote {...ICON} />,
       },
       {
-        title: "Recorder boxes online",
-        value: `${venues?.boxes?.online ?? 0}/${venues?.boxes?.total ?? 0}`,
-        change: "boxes",
-        icon: <Server {...ICON} />,
-      },
-      {
-        title: "Cameras recording",
+        title: "Cameras rolling",
         value: `${venues?.cameras?.ok ?? 0}/${venues?.cameras?.total ?? 0}`,
-        change: "cameras",
+        change: `${venues?.boxes?.online ?? 0}/${venues?.boxes?.total ?? 0} boxes online`,
         icon: <Camera {...ICON} />,
-      },
-      {
-        title: "Games today",
-        value: venues?.gamesToday ?? 0,
-        change: "booked or played",
-        icon: <CalendarDays {...ICON} />,
       },
     ],
     [venues]
   );
+
+  const courtVenues = useMemo(() => groupByVenue(venues?.courts ?? []), [venues]);
+  const dateText = venues?.date ? dayjs(venues.date).format("dddd, MMMM D") : "";
 
   const problems = useMemo(
     () => alertsQuery.data?.data?.problems ?? [],
@@ -150,6 +210,9 @@ export const useDashboardHooks = () => {
 
   return {
     statCards,
+    courtVenues,
+    dateText,
+    boxSummary: `${venues?.boxes?.online ?? 0} of ${venues?.boxes?.total ?? 0} online`,
     canSeeAlerts,
     problems,
     boxes,

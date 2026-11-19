@@ -7,7 +7,7 @@ import { memo } from "react";
  * @param {string} title  - the de-emphasized label
  * @param {string|number} value
  * @param {string} [change] - the unit / caption sitting next to the value
- * @param {ReactNode} [icon] - a lucide icon; rendered dim
+ * @param {ReactNode} [icon] - a lucide icon; court blue on a soft blue tile
  */
 const StatCard = ({ title, value, change, icon }) => (
   <div
@@ -27,7 +27,17 @@ const StatCard = ({ title, value, change, icon }) => (
         {title}
       </span>
       {icon && (
-        <span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>
+        <span
+          className="shrink-0 inline-flex items-center justify-center"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            // Court blue on a tint of itself (CR-011) — `--color-link` lifts in dark
+            color: "var(--color-link)",
+            background: "color-mix(in srgb, var(--color-link) 12%, transparent)",
+          }}
+        >
           {icon}
         </span>
       )}

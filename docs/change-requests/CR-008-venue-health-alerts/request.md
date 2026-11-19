@@ -102,3 +102,10 @@ hardware are the next best thing.
 - 2026-11-19: Alerts go to a **Discord webhook**. Email stays in, but only sends once SMTP is set
   up (requester: "not email … add discord webhook", then "continue with email, but not functional
   yet, also implement discord webhook").
+- 2026-11-19: The Dashboard is redesigned for pickleball (requester: "update the UI UX … like use
+  for the pickleball", "also the title"). It's now **Today on court**: four figures (games on
+  court, replays saved, cash today, cameras rolling), a **court board** with every court drawn
+  from above (kitchen, net, a camera at each baseline in its status colour, the outline lit while
+  a game is on), what's happening on each court ("Game on · 23 min left", "Next game at 4:30 PM",
+  "Court open") and today's replays, then "Needs attention" first when anything is wrong. No
+  player names on the board. The browser tab now reads "Dyna Cam".

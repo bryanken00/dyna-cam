@@ -39,6 +39,10 @@
 - [x] Dashboard rebuilt: stat cards (recording now, clips today, cash today, boxes online,
       cameras recording, games today) + open problems + recorder boxes with health, refreshing
       every 30 s; recent activity kept
+- [x] Pickleball redesign (revision 2026-11-19): title "Today on court", tab title "Dyna Cam",
+      four figures, court board by venue (`components/CourtBoard.jsx`, `CourtDiagram.jsx`, to
+      scale), problems shown first; API `venues.courts` (cameras, game on court / next, replays
+      today; no player names) + test
 
 ### Docs
 
@@ -51,13 +55,13 @@
 - [ ] Stopped box → offline message within ~5 min; started → "fixed" message
 - [ ] Once SMTP is set: the same by email
 - [x] Disk under 10% → "disk almost full" problem *(API test)*
-- [ ] Dashboard shows today's games, clips, cash, boxes/cameras up, open problems
+- [ ] Dashboard shows today's games, clips, cash, boxes/cameras up, each court, open problems
 - [x] No Venue alerts permission → no emails, no problem list *(API test)*
 - [x] An old box keeps working *(API test: heartbeat without `system`)*
 
 ## Wrap-up
 
-- [x] `cd back && npm run lint && npm test` passes (242/242; lint 0 errors, only older warnings)
+- [x] `cd back && npm run lint && npm test` passes (243/243; lint 0 errors, only older warnings)
 - [x] `cd front && npm run lint && npm run build` passes (only older warnings)
 - [x] `cd edge && npm run lint && npm test` passes
 - [ ] Migration applied, or noted as pending for deploy *(pending: `npm run db:migrate` → `019`)*

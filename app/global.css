@@ -3,8 +3,9 @@
 @tailwind utilities;
 
 /*
- * Design tokens — "Modern" system: monochrome surfaces, a single green accent,
- * hairline borders, no shadows.
+ * Design tokens — the pickleball brand (CR-012, same palette as the website's
+ * CR-011): cool off-white surfaces, navy text and buttons, a brand blue for
+ * links, a soft lime accent, hairline borders, no shadows. Dark mode is navy.
  *
  * Each token is an unwrapped "H S% L%" triplet because Tailwind composes it as
  * hsl(var(--token) / <alpha-value>) to support opacity modifiers.
@@ -14,90 +15,98 @@
  * src/lib/theme.js — see the note in that file.
  *
  * ── Note on `primary` ───────────────────────────────────────────────────────
- * Primary is INVERTED by design: near-black button with light text in light
- * mode, near-white with dark text in dark mode. It is the neutral, high-contrast
- * action colour. The green accent is NOT a button colour — it is reserved for
- * bars, ticks, focus rings, status dots and chips.
+ * Primary is the navy button with white text in light mode, and a white button
+ * with navy text in dark mode (like the website). The lime accent is NOT a
+ * button colour — it is for bars, ticks, focus rings and chips, never text on
+ * a light surface.
  */
 @layer base {
   :root {
     /* canvas */
-    --background: 0 0% 98%;
-    --foreground: 240 5.9% 10%;
+    --background: 210 40% 98%;
+    --foreground: 220.5 58.9% 14.3%;
 
     /* surface — cards, list rows, sheets */
     --card: 0 0% 100%;
-    --card-foreground: 240 5.9% 10%;
+    --card-foreground: 220.5 58.9% 14.3%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 240 5.9% 10%;
+    --popover-foreground: 220.5 58.9% 14.3%;
 
-    /* inverted action */
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    /* action — navy button, white text */
+    --primary: 215.3 73.9% 22.5%;
+    --primary-foreground: 0 0% 100%;
 
     /* sunken — wells, segmented track, pressed states */
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 220.5 58.9% 14.3%;
 
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 218.9 16.9% 42.9%;
 
-    /* accent — the green, used sparingly */
-    --accent: 141.9 69.2% 58%;
-    --accent-foreground: 142.4 71.8% 29.2%;
+    /* accent — the soft lime, used sparingly */
+    --accent: 76.5 59% 54.1%;
+    --accent-foreground: 78.9 71.2% 24.5%;
 
     --destructive: 0 72.2% 50.6%;
     --destructive-foreground: 0 0% 98%;
 
     /* hairlines */
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 141.9 69.2% 58%;
+    --border: 216.7 33.3% 89.4%;
+    --input: 216.7 33.3% 89.4%;
+    --ring: 76.5 59% 54.1%;
 
     /* text ramp — mid tone between foreground and muted */
-    --text-2: 240 3.7% 15.9%;
+    --text-2: 220.5 41% 20.6%;
     /* softer divider for rows inside a card */
-    --line-soft: 240 4.8% 95.9%;
-    /* link green — darker than the accent so it passes contrast on white */
-    --link: 142.1 76.2% 36.3%;
+    --line-soft: 213.3 36% 95.1%;
+    /* link — brand blue, 6.5:1 on white */
+    --link: 218.2 56.3% 42.2%;
+
+    /* brand (CR-012, the website's CR-011 palette) — the same in both themes:
+       navy panels, a lighter navy for cards on them, a court's surface, the
+       soft lime */
+    --brand: 215.3 73.9% 22.5%;
+    --brand-raised: 215.3 54.8% 28.6%;
+    --brand-court: 216.7 64.9% 25.7%;
+    --brand-ball: 76.5 59% 54.1%;
 
     /* radius-card 14 · radius-control 9 */
     --radius: 0.875rem;
   }
 
   .dark:root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
+    --background: 221.1 65.5% 11.4%;
+    --foreground: 216.9 61.9% 95.9%;
 
-    --card: 240 7.3% 8%;
-    --card-foreground: 0 0% 98%;
+    --card: 218.8 63% 15.9%;
+    --card-foreground: 216.9 61.9% 95.9%;
 
-    --popover: 240 7.3% 8%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 218.8 63% 15.9%;
+    --popover-foreground: 216.9 61.9% 95.9%;
 
-    /* inverted the other way in dark */
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
+    /* white button, navy text in dark */
+    --primary: 0 0% 100%;
+    --primary-foreground: 215.3 73.9% 22.5%;
 
-    --secondary: 240 6.1% 12.9%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 219.3 55.6% 19.4%;
+    --secondary-foreground: 216.9 61.9% 95.9%;
 
-    --muted: 240 6.1% 12.9%;
-    --muted-foreground: 240 5% 64.9%;
+    --muted: 219.3 55.6% 19.4%;
+    --muted-foreground: 218.5 28.9% 73.5%;
 
-    --accent: 141.9 69.2% 58%;
-    --accent-foreground: 141.9 69.2% 58%;
+    --accent: 76.5 59% 54.1%;
+    --accent-foreground: 76.5 59% 54.1%;
 
     --destructive: 0 90.6% 70.8%;
-    --destructive-foreground: 240 5.9% 10%;
+    --destructive-foreground: 215.3 73.9% 22.5%;
 
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 141.9 69.2% 58%;
+    --border: 218.8 50% 26.7%;
+    --input: 218.8 50% 26.7%;
+    --ring: 76.5 59% 54.1%;
 
-    --text-2: 240 5% 64.9%;
-    --line-soft: 240 3.7% 15.9%;
-    --link: 141.9 69.2% 58%;
+    --text-2: 218.7 34.8% 82.5%;
+    --line-soft: 219.3 55.6% 19.4%;
+    --link: 217.8 65.9% 73.5%;
   }
 }
