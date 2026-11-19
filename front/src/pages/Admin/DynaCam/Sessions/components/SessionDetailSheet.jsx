@@ -407,6 +407,11 @@ const SessionDetailSheet = ({
                             : "One video per camera, after the game ends",
                     },
                     {
+                      // CR-013: saves from the courtside device, of the most allowed
+                      label: "Saves",
+                      value: `${captures.length} of ${session.maxCaptures ?? 5}`,
+                    },
+                    {
                       label: "Player",
                       value: decodeHTML(session.playerName) || "—",
                     },

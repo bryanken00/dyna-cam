@@ -93,3 +93,7 @@ for and scrubbing through the whole game.
   preview"; chosen: jump within the video, viewing only). Below the video: a scrubber labelled in
   game time (8:00 … 10:00, "now at 9:12 of the game"), −15 s / play-pause / +15 s; drag or tap the
   scrubber to jump. The save itself doesn't change.
+- 2026-11-19: **Maximum saves per game on New game** (requester: "add here maximum clip. by default
+  5"): staff choose 1–20 when creating a game (default 5); the device's "N of M saves" and the
+  limit follow it. Games created without it (older ones, booked ones) keep `CAPTURE_MAX_PER_GAME`.
+  Migration `022`.

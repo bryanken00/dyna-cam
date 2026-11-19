@@ -31,7 +31,7 @@ const RUNNING = ["Scheduled", "Recording"];
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
-  s.openEnded, s.paymentStatus, s.payCode,
+  s.openEnded, s.maxCaptures, s.paymentStatus, s.payCode,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)

@@ -28,7 +28,7 @@ import {
   sessionVideoParamsSchema,
 } from "../../../validators/sessions.validator.js";
 import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
-import { loadCaptures } from "../../../utils/sessionCaptures.js";
+import { captureLimits, loadCaptures } from "../../../utils/sessionCaptures.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -45,7 +45,7 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
-         s.partCameras, s.wholeVideo, s.openEnded, s.paymentStatus, s.payCode,
+         s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.paymentStatus, s.payCode,
          s.dateCreated, s.dateUpdated,
          (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
            AS paidAmount,
@@ -89,6 +89,8 @@ const toSession = (row) => {
     devicesCount: Number(row.devicesCount || 0),
     // CR-015: Unpaid until staff record the payment (Free = a game from before)
     paidAmount: row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount),
+    // CR-013: saves the courtside device may hold at once (chosen on New game)
+    maxCaptures: captureLimits(row).maxPerGame,
     shareUrl: sessionShareUrl(shareToken),
   };
 };
@@ -255,7 +257,7 @@ router.get(
  * and only End game / End stops it. One open game per court.
  */
 const createOpenGame = async (req, res) => {
-  const { courtId, playerName, phone } = req.body;
+  const { courtId, playerName, phone, maxCaptures } = req.body;
   const now = getCurrentTimestampLocal();
   let conn;
   try {
@@ -298,8 +300,9 @@ const createOpenGame = async (req, res) => {
       conn.execute(
         `INSERT INTO recording_sessions
            (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
-            createdByAccountId, openEnded, status, paymentStatus, payCode, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Waiting', ?, ?, ?, ?)`,
+            createdByAccountId, openEnded, maxCaptures, status, paymentStatus, payCode,
+            dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'Waiting', ?, ?, ?, ?)`,
         [
           sessionId,
           courts[0].venueId,
@@ -310,6 +313,7 @@ const createOpenGame = async (req, res) => {
           phone || null,
           shareToken,
           req.user.accountId,
+          maxCaptures ?? null,
           code ? "Unpaid" : "Free",
           code,
           now,
@@ -340,7 +344,8 @@ router.post(
   checkPermission("clips", null, "write"),
   validateBody(createSessionSchema),
   catchAsync(async (req, res) => {
-    const { courtId, startNow, startAt, durationMinutes, playerName, phone } = req.body;
+    const { courtId, startNow, startAt, durationMinutes, playerName, phone, maxCaptures } =
+      req.body;
     if (!startNow && !startAt) return createOpenGame(req, res);
     const start = startNow ? moment().tz(TIMEZONE) : moment.tz(startAt, FORMAT, TIMEZONE);
     if (!start.isValid()) {
@@ -402,8 +407,9 @@ router.post(
         conn.execute(
           `INSERT INTO recording_sessions
              (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
-              createdByAccountId, status, paymentStatus, payCode, dateCreated, dateUpdated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?, ?, ?, ?)`,
+              createdByAccountId, maxCaptures, status, paymentStatus, payCode, dateCreated,
+              dateUpdated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?, ?, ?, ?)`,
           [
             sessionId,
             courts[0].venueId,
@@ -414,6 +420,7 @@ router.post(
             phone || null,
             shareToken,
             req.user.accountId,
+            maxCaptures ?? null,
             code ? "Unpaid" : "Free",
             code,
             now,

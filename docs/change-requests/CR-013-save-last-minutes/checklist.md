@@ -37,6 +37,10 @@
 - [x] Revision: under the preview, a game-time scrubber (8:00 … 10:00, "now at 9:12") with −15 s /
       play-pause / +15 s; the player's own controls off
 
+- [x] Revision: Maximum saves per game on New game (1–20, default 5) — migration `022`
+      (`recording_sessions.maxCaptures`), `POST /admin/sessions { maxCaptures }`, the limit and
+      `capture.maxPerGame` per game, "Saves N of M" in the game's detail; test
+
 ## Acceptance
 
 - [ ] 10 min in, 2 min → a video of 8:00–10:00 (on a device, real box)

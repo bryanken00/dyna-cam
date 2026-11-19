@@ -37,8 +37,12 @@ export const CAPTURE_MAX_SECONDS = 4 * 3600;
  * just waits its turn ("Queued"). The same length asked again within
  * CAPTURE_REPEAT_SECONDS (a double tap) returns the save already made.
  */
-export const captureLimits = () => ({
-  maxPerGame: envInt("CAPTURE_MAX_PER_GAME", 5, 1),
+export const captureLimits = (session = null) => ({
+  // Revision: chosen per game on New game; else CAPTURE_MAX_PER_GAME
+  maxPerGame:
+    Number(session?.maxCaptures) > 0
+      ? Number(session.maxCaptures)
+      : envInt("CAPTURE_MAX_PER_GAME", 5, 1),
 });
 const CAPTURE_REPEAT_SECONDS = 3;
 
@@ -61,14 +65,13 @@ export const CAPTURE_REFUSALS = {
  *   | { ok: false, reason: keyof CAPTURE_REFUSALS }>}
  */
 export const createCapture = async (db, { sessionId, pairedAppId, seconds }) => {
-  const { maxPerGame } = captureLimits();
   let conn;
   try {
     conn = await db.beginTransaction();
     // Lock the game: concurrent saves are serialised, so the per-game limit
     // and the double-tap check can't be raced
     const [sessions] = await conn.execute(
-      `SELECT sessionId, venueId, courtId, startAt, status FROM recording_sessions
+      `SELECT sessionId, venueId, courtId, startAt, status, maxCaptures FROM recording_sessions
        WHERE sessionId = ? FOR UPDATE`,
       [sessionId]
     );
@@ -108,7 +111,7 @@ export const createCapture = async (db, { sessionId, pairedAppId, seconds }) => 
       `SELECT COUNT(*) AS total FROM session_captures WHERE sessionId = ? AND status = 'Active'`,
       [sessionId]
     );
-    if (Number(counts[0].total) >= maxPerGame) return refuse("TOO_MANY");
+    if (Number(counts[0].total) >= captureLimits(session).maxPerGame) return refuse("TOO_MANY");
 
     const length = Math.min(Math.max(seconds, CAPTURE_MIN_SECONDS), played);
     const startAt = nowM.clone().subtract(length, "seconds").format(FORMAT);

@@ -45,6 +45,15 @@ export const createSessionSchema = z
     phone: optionalPhone(),
     // CR-015: a free game — no payment at the desk, the player gets the videos at once
     free: z.boolean().optional(),
+    // CR-013 revision: saves the courtside device may hold at once (default 5)
+    maxCaptures: emptyToUndefined(
+      z.coerce
+        .number()
+        .int("Use a whole number")
+        .min(1, "Allow at least 1 save")
+        .max(20, "At most 20 saves per game")
+        .optional()
+    ),
   })
   .refine((body) => !(body.startNow || body.startAt) || body.durationMinutes, {
     message: "Pick how long the session is",
