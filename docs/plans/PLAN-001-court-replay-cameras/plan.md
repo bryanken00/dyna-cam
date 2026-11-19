@@ -566,5 +566,4 @@ The checklist follows these phases. Each phase is shippable on its own.
   run: the device sign-in, the staff app's QR scan and the phone test (the staff app was replaced
   by PLAN-002's session device), the 6-court load test (CR-008's box health report covers CPU,
   memory and disk on the real box), `expo-doctor`'s 11 out-of-date packages, and the C200 1080p
-  install note (a venue setting). Follow-ups: CR-008 (venue health and alerts), CR-009 (remote box
-  updates), CR-010 (clip and video storage).
+  install note (a venue setting). Follow-up: CR-008 (venue health and alerts).
