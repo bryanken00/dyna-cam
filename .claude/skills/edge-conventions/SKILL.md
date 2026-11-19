@@ -28,7 +28,8 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `live.js` | LAN live view (HTTP, or HTTPS with `CERT_PATH`) `GET\|HEAD /live/:courtId/[cam2/]{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
 | `stream.js` | Stream-key masking (`maskStreamKey`, `maskStreamUrl`) and `parseLogLine` |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
-| `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning |
+| `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning, heartbeat `system` |
+| `health.js` | The box's own health for the heartbeat (CR-008): disk, memory, load, uptime, clock offset, upload backlog |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
 | `index.js` | Wiring and graceful shutdown only |
@@ -87,6 +88,11 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   `copying` → `uploading` → `finishing` (+ `failing`). Restart: `copying` → `waiting`; `uploading`/
   `finishing` with the file → resume via `/start`; without it → `waiting` (copied again). The folder
   goes after `/finish` or a drop.
+- Heartbeat `system` (CR-008, `health.js` `sampleHealth`, optional on the API): `diskFreeMb`/`diskTotalMb`
+  (`fs.statfs` of `DATA_DIR`), `memFreeMb`/`memTotalMb`, `load1`, `cpus`, `uptimeSeconds`, `clockOffsetMs`
+  (server − box, from `/config` and the heartbeat reply's `serverTime`), `pendingClips`/`pendingGames`/
+  `oldestPendingSeconds` (presses don't count). Whole non-negative numbers (`load1` and `clockOffsetMs`
+  aside); a value that can't be read is left out, a failed sample sends the heartbeat without `system`.
 - Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today `["game-file"]`).
   `/config` `sessions` keep their segments (± 10 s) **for as long as they are listed** — the API keeps a
   finished game listed until its videos are uploaded, so there is no box-side cut-off

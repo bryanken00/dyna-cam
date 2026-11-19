@@ -14,6 +14,7 @@ The permission used on the frontend `<ProtectedRoute>` is the same one the backe
 | `/admin/roles`       | `users.roles`      | GET (list, single, permissions) | GET + POST, PUT, DELETE, assign permissions |
 | `/admin/user-permissions` | `users.list`  | GET (a user's overrides)        | GET + POST, DELETE, bulk replace            |
 | `/admin/dashboard`   | `dashboard`        | GET                             | — (read-only module)                        |
+| `/admin/dashboard/alerts` | `alerts`      | GET (open problems, box health) | — (read-only; also who gets alert emails)   |
 | `/admin/audit-trail` | `audit_trail`      | GET (list)                      | — (read-only module)                        |
 | `/admin/settings`    | `settings`         | GET                             | GET + PUT                                   |
 

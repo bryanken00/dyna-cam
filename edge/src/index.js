@@ -15,6 +15,7 @@ import {
 import { CredentialsError, markRevoked, resolveCredentials } from "./credentials.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
 import { makeGameFile } from "./game.js";
+import { sampleHealth } from "./health.js";
 import { JobRunner } from "./jobs.js";
 import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
@@ -87,9 +88,13 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
   });
   const clipLog = createLogger("clip");
   const gameLog = createLogger("game");
+  const queue = new JobQueue(path.join(settings.dataDir, "queue.json"));
+  // CR-008: the box's own health in every heartbeat (disk, memory, clock, backlog)
+  sync.health = (clockOffsetMs) =>
+    sampleHealth({ dataDir: settings.dataDir, queueEntries: () => queue.list(), clockOffsetMs });
   jobs = new JobRunner({
     api,
-    queue: new JobQueue(path.join(settings.dataDir, "queue.json")),
+    queue,
     jobsDir,
     settings,
     log: createLogger("jobs"),

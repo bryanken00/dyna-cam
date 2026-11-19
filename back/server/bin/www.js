@@ -9,6 +9,7 @@ import { logger } from "../config/logger.js";
 import { scheduleIdempotencyCleanup } from "../src/middlewares/idempotency.middleware.js";
 import { scheduleClipMaintenance } from "../src/jobs/clipMaintenance.js";
 import { scheduleDriveUploads } from "../src/jobs/driveUploads.js";
+import { scheduleVenueAlerts } from "../src/jobs/venueAlerts.js";
 import { close as closeRateLimiter } from "../src/utils/rateLimiterService.js";
 
 const debug = debugLib("wb:server");
@@ -106,6 +107,7 @@ let server;
 let stopIdempotencyCleanup = () => {};
 let stopClipMaintenance = () => {};
 let stopDriveUploads = () => {};
+let stopVenueAlerts = () => {};
 
 /**
  * Create HTTPS server.
@@ -144,6 +146,7 @@ async function gracefulShutdown(signal) {
   stopIdempotencyCleanup();
   stopClipMaintenance();
   stopDriveUploads();
+  stopVenueAlerts();
 
   // Stop accepting new connections
   server.close(() => {
@@ -297,6 +300,9 @@ function onListening() {
 
     // CR-001: copy Ready clips of courts with a Google account to its Drive — every 30 s
     stopDriveUploads = scheduleDriveUploads(db);
+
+    // CR-008: box offline / camera down / disk / clock / backlog → Discord + email — every minute
+    stopVenueAlerts = scheduleVenueAlerts(db);
 
     // Start listening only after health checks pass
     server.listen(port);

@@ -2,6 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { DEVICE_CAPABILITIES } from "./config.js";
 import { probeVideo } from "./ffmpeg.js";
+import { clockOffset } from "./health.js";
 import { courtCameras } from "./recorder.js";
 import { backoffMs, readJson, sleep, writeJsonAtomic } from "./util.js";
 
@@ -25,8 +26,13 @@ export class DeviceSync {
     preview = null,
     live = null,
     streams = null,
+    health = null,
   }) {
     this.preview = preview;
+    // CR-008: (clockOffsetMs) => the heartbeat's `system` field (health.js sampleHealth)
+    this.health = health;
+    // Server clock minus box clock from the last reply with serverTime; null until known
+    this.clockOffsetMs = null;
     // Every live stream (restream.js): fed with /config courts and sessions, reported in the heartbeat
     this.streams = streams;
     // LAN live view (live.js): its address and signing key go in every heartbeat
@@ -123,8 +129,9 @@ export class DeviceSync {
 
   /** Clips are matched to the camera by wall clock — a drifting box cuts the wrong moment. */
   checkClock(serverTime, sentAt, receivedAt) {
-    if (!Number.isFinite(serverTime)) return;
-    const skew = serverTime - (sentAt + receivedAt) / 2;
+    const skew = clockOffset(serverTime, sentAt, receivedAt);
+    if (skew === null) return;
+    this.clockOffsetMs = skew;
     if (Math.abs(skew) > CLOCK_SKEW_WARN_MS + (receivedAt - sentAt) / 2) {
       this.log.warn(
         `box clock is ${(skew / 1000).toFixed(1)}s ${skew > 0 ? "behind" : "ahead of"} the server — clips will be cut at the wrong moment. Check NTP (chronyc tracking).`
@@ -160,7 +167,18 @@ export class DeviceSync {
   }
 
   async heartbeat() {
-    await this.api.heartbeat({
+    // CR-008: disk, memory, load, clock and upload backlog; a failed sample only
+    // leaves the field out
+    let system;
+    if (this.health) {
+      try {
+        system = await this.health(this.clockOffsetMs);
+      } catch (err) {
+        this.log.warn("could not read the box's health", err);
+      }
+    }
+    const sentAt = Date.now();
+    const reply = await this.api.heartbeat({
       agentVersion: this.agentVersion,
       // What this box understands, e.g. whole-game files with resumable upload (CR-006)
       capabilities: [...DEVICE_CAPABILITIES],
@@ -177,7 +195,12 @@ export class DeviceSync {
       live: this.live?.info() ?? null,
       // [{ sessionId, status, message }] for each player stream due now; [] when none
       sessionStreams: this.streams?.statuses() ?? [],
+      ...(system ? { system } : {}),
     });
+    // The reply's serverTime keeps the clock offset fresh between /config calls
+    const offset = clockOffset(reply?.serverTime, sentAt, Date.now());
+    if (offset !== null) this.clockOffsetMs = offset;
+    return reply;
   }
 
   /**

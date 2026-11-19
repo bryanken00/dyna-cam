@@ -81,3 +81,55 @@ export const inviteEmail = ({ inviterName, inviteUrl, companyName }) => ({
   `
   ),
 });
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]
+  );
+
+/**
+ * CR-008: venue problems that just opened and ones that just cleared, in one
+ * email per run of the venue-alerts job. Sent only when SMTP is set up.
+ *
+ * @param {{ opened: object[], resolved: object[], dashboardUrl: string }} p
+ *   each item: { label, venueName, message, since }
+ */
+export const venueAlertsEmail = ({ opened, resolved, dashboardUrl }) => {
+  const venues = [...new Set([...opened, ...resolved].map((a) => a.venueName))];
+  const where = venues.length === 1 ? ` at ${venues[0]}` : "";
+  const subject =
+    opened.length > 0
+      ? `${opened.length === 1 ? opened[0].label : `${opened.length} problems`}${where}`
+      : `All clear${where}`;
+
+  const rows = (items, colour) =>
+    items
+      .map(
+        (a) => `
+      <li style="margin: 0 0 12px;">
+        <strong style="color: ${colour};">${escapeHtml(a.label)}</strong> · ${escapeHtml(a.venueName)}<br />
+        <span style="font-size: 13px; color: #3f3f46;">${escapeHtml(a.message)}</span><br />
+        <span style="font-size: 12px; color: #71717a;">${escapeHtml(a.since)}</span>
+      </li>`
+      )
+      .join("");
+
+  const section = (title, items, colour) =>
+    items.length === 0
+      ? ""
+      : `<p style="font-size: 14px; font-weight: 600; margin: 0 0 8px;">${title}</p>
+         <ul style="font-size: 14px; line-height: 1.5; margin: 0 0 20px; padding-left: 18px;">${rows(items, colour)}</ul>`;
+
+  return {
+    subject: `${APP_NAME}: ${subject}`,
+    html: layout(
+      opened.length > 0 ? "Something needs attention" : "All clear",
+      `
+      ${section("New problems", opened, "#dc2626")}
+      ${section("Fixed", resolved, "#16a34a")}
+      ${dashboardUrl ? `<p style="margin: 0;">${button(dashboardUrl, "Open the Dashboard")}</p>` : ""}
+      `
+    ),
+  };
+};

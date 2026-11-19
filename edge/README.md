@@ -159,6 +159,24 @@ jobs. Within a minute each court shows **ok** in the Admin portal. If the API ca
 records from the last cached config (`data/config.json`, mode 600, which holds the camera
 passwords).
 
+## Box health and alerts (CR-008)
+
+Every heartbeat (30 s) also carries the box's own health, read without any extra tools:
+
+| Field | What |
+| --- | --- |
+| `diskFreeMb` / `diskTotalMb` | Space on the disk that holds `DATA_DIR` (the buffer) |
+| `memFreeMb` / `memTotalMb`, `load1`, `cpus`, `uptimeSeconds` | Memory, 1-minute load, CPU count, time since boot |
+| `clockOffsetMs` | Server clock minus the box's, from the last `/config` or heartbeat reply |
+| `pendingClips`, `pendingGames`, `oldestPendingSeconds` | Clips and game videos not yet uploaded, and the oldest one's age |
+
+The API turns these into problems: **disk almost full** (under 10% free), **clock off** (more than
+2 s), **uploads piling up** (something unsent for over an hour), plus **box offline** (no
+heartbeat) and **camera not recording**. A problem that lasts about 5 minutes is posted to the
+staff Discord channel (and emailed once SMTP is set up), and again when it's fixed. The web
+Dashboard shows the same per box. Older boxes keep working; only their disk, clock and backlog
+don't show.
+
 ## Tapo C200 setup
 
 The venues use TP-Link **Tapo C200** cameras (Wi-Fi, indoor pan/tilt). On firmware 1.3.17,
