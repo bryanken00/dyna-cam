@@ -19,8 +19,8 @@ shape. UI primitives are **shadcn/ui** (`@/components/ui/*`), with lucide-react 
   `--font-mono` (`index.css`). Body weight **400**, headings **600**.
 - **Accent** — green: `--color-secondary-color` (`#4ade80`) for bars/focus/chips, `--color-link`
   (`#16a34a`) for text links. Used **sparingly** — never on buttons.
-- **Primary buttons are INVERTED** — the default shadcn `<Button>` variant is dark-on-light /
-  light-on-dark (via the token bridge). Just use `<Button>`; never add an inline `background`.
+- **Primary buttons are navy with white text** (white/navy in dark) — the default shadcn `<Button>` variant (via the
+  token bridge, same in both themes). Just use `<Button>`; never add an inline `background`.
   `variant="outline"` = secondary (Cancel), `variant="destructive"` = danger.
 - **Cards/panels** — plain `<div>` with `1px solid var(--color-line)`, `border-radius: 14`,
   **no shadow**. There is no Card component.

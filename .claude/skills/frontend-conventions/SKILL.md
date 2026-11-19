@@ -38,9 +38,10 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
   library.
 - **Never hardcode a hex.** Every colour is a token in `src/index.css`. No `bg-white`,
   `bg-gray-*`, `text-slate-*` — they don't flip in dark mode.
-- **The primary button is inverted monochrome** — the default `<Button>` variant. Never an inline
-  `background`, never the green accent, never a gradient. The accent is for bars, ticks, focus
-  rings and chips only.
+- **The primary button is navy with white text** (white with navy text in dark) — the default
+  `<Button>` variant (pickleball brand, CR-011). Never an inline `background`, never a gradient.
+  Lime is a highlight only, never text on a light surface; links are court blue (`--color-link`). The sidebar and top bar
+  stay light (they follow the theme); don't make them navy.
 - **Structure comes from hairline borders, not shadows.** `shadow-*` belongs only on genuinely
   floating layers (dropdown, dialog, sheet), which the shadcn primitives already handle.
 - **Two `.data` hops.** `apiData?.data?.users` — one for axios, one for the backend envelope.

@@ -7,6 +7,7 @@ import PageHeader from "../../../components/PageHeader";
 import StatCard from "../../../components/StatCard";
 import StatusDot from "../../../components/StatusDot";
 import { decodeHTML } from "../../../utils/decode-html";
+import CourtBoard from "./components/CourtBoard";
 import { durationText, useDashboardHooks } from "./hooks";
 import RefreshButton from "../../../components/RefreshButton";
 
@@ -54,7 +55,7 @@ const OpenProblems = ({ problems, isLoading, error }) => {
     <div className="overflow-hidden" style={PANEL}>
       <PanelHeader
         icon={TriangleAlert}
-        title="Open problems"
+        title="Needs attention"
         aside={problems.length > 0 ? `${open} open · ${problems.length - open} checking` : null}
       />
       {isLoading ? (
@@ -71,7 +72,7 @@ const OpenProblems = ({ problems, isLoading, error }) => {
             style={{ color: "var(--color-success)" }}
           />
           <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-            Every box and camera is working
+            All courts are rolling — every box and camera is working
           </span>
         </div>
       ) : (
@@ -113,9 +114,9 @@ const OpenProblems = ({ problems, isLoading, error }) => {
 const CAMERA_TONE = { ok: "success", starting: "warning", error: "error" };
 
 /** CR-008: each recorder box — online, its cameras and its own health. */
-const RecorderBoxes = ({ boxes, isLoading }) => (
+const RecorderBoxes = ({ boxes, isLoading, summary }) => (
   <div className="overflow-hidden" style={PANEL}>
-    <PanelHeader icon={Server} title="Recorder boxes" aside={`refreshes every 30 s`} />
+    <PanelHeader icon={Server} title="Recorder boxes" aside={summary} />
     {isLoading ? (
       <div className="flex justify-center py-10">
         <Spinner />
@@ -258,6 +259,9 @@ const RecentActivity = ({ items }) => (
 const Dashboard = () => {
   const {
     statCards,
+    courtVenues,
+    dateText,
+    boxSummary,
     canSeeAlerts,
     problems,
     boxes,
@@ -286,8 +290,8 @@ const Dashboard = () => {
     <div className="p-8 space-y-5">
       {/* 1. HEADER */}
       <PageHeader
-        title="Dashboard"
-        subtitle="Today at your venues."
+        title="Today on court"
+        subtitle={`${dateText ? `${dateText} · ` : ""}Every court, camera and replay at your venues. Updates every 30 seconds.`}
         actions={<RefreshButton onRefresh={refetch} isFetching={isFetching} />}
       />
 
@@ -297,22 +301,32 @@ const Dashboard = () => {
         </div>
       ) : (
         <>
-          {/* 2. TODAY */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5">
+          {/* 2. TODAY'S NUMBERS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {statCards.map((card) => (
               <StatCard key={card.title} {...card} />
             ))}
           </div>
 
-          {/* 3. VENUE HEALTH (Venue alerts permission) */}
+          {/* 3. NEEDS ATTENTION (Venue alerts permission) — first, so trouble is seen */}
+          {canSeeAlerts && problems.length > 0 && (
+            <OpenProblems problems={problems} isLoading={alertsLoading} error={alertsError} />
+          )}
+
+          {/* 4. THE COURTS */}
+          <CourtBoard venues={courtVenues} />
+
+          {/* 5. RECORDER BOXES (+ the all-clear) */}
           {canSeeAlerts && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 items-start">
-              <OpenProblems problems={problems} isLoading={alertsLoading} error={alertsError} />
-              <RecorderBoxes boxes={boxes} isLoading={alertsLoading} />
+              {problems.length === 0 && (
+                <OpenProblems problems={problems} isLoading={alertsLoading} error={alertsError} />
+              )}
+              <RecorderBoxes boxes={boxes} isLoading={alertsLoading} summary={boxSummary} />
             </div>
           )}
 
-          {/* 4. RECENT ACTIVITY */}
+          {/* 6. RECENT ACTIVITY */}
           <RecentActivity items={recentActivity} />
         </>
       )}

@@ -10,9 +10,16 @@ When building or editing any page component, follow this system.
 
 ## The idea
 
-Monochrome surfaces + hairline borders + **one green accent used sparingly**. Structure comes
-from **borders, not shadows**. The primary button is **inverted monochrome** — never the accent,
-never a gradient. No pastel tints, no gradient icon chips, no emoji.
+Cool neutral surfaces + hairline borders + the **pickleball brand** (2026-11-19, CR-011): navy
+text, a light sidebar and top bar (court-logo tile, lime bar + court-blue icon on the current
+page — the requester does not want them navy), **navy primary buttons with white text** (white with navy text in dark), court-blue links and charts, and the lime
+accent for bars, ticks and focus rings. The public
+landing page and the staff sign-in screens (`AuthLayout`) are the exceptions: they use the
+navy brand band (`components/brand/HeroCourt`, `CourtMark`), uppercase blue/lime eyebrows above big
+headlines, and the white `.btn-on-navy` button on navy; the landing page closes on a navy footer. Structure comes
+from **borders, not shadows**. The primary button is **navy with white text** (white with navy text in dark; the default
+`<Button>`) — never a gradient, never an inline background. No pastel tints, no gradient icon
+chips, no emoji.
 
 ---
 
@@ -36,8 +43,9 @@ override). To re-theme, change the values there — everything follows.
 | `--color-text2`             | mid text (expanded-parent nav label)             |
 | `--color-text-secondary`    | body / labels                                    |
 | `--color-text-muted`        | captions, icons, `#`, units                      |
-| `--color-secondary-color`   | accent (bars, ticks, focus, chips) — `#4ade80`   |
-| `--color-link`              | text links — `#16a34a`                           |
+| `--color-secondary-color`   | accent (bars, ticks, focus, chips) — soft lime `#a9cf45`; never text on a light surface |
+| `--color-link`              | text links, eyebrows, icon tiles — brand blue `#2f5ba8` (`#8fb0e8` dark) |
+| `--color-brand-*`           | pickleball brand (CR-011 "Improve UI and UX" design), constant in both themes: `court` deep navy `#0f3264` (bands), `court-raised` `#214271` (cards on navy), `court-deep` / `court-light` (a court's surface / kitchens), `blue` `#2f5ba8`, `blue-soft` `#eaf1fe` (icon tiles), `ball` soft lime `#a9cf45`, `ink` navy text on white/lime, `flame` `#f26b1d` (tiny highlights), `on-court` white. Navy bands only on public pages (landing, sign-in) |
 | `--color-success` / `--color-warning` / `--color-error` | status, constant across themes |
 | `--radius-card` 14 · `--radius-control` 9 | radii                              |
 
@@ -76,9 +84,10 @@ surface/text color is a token, dark mode needs no per-page work — **just don't
    `borderRadius: var(--radius-card)` — **no shadow**. Build them as plain `<div>`s with these
    tokens (there is no Card component).
 4. **Never** put an inline `background` on the primary button. The default shadcn `<Button>`
-   variant *is* the inverted monochrome primary (via the token bridge); `variant="outline"` is
+   variant *is* the navy primary (via the token bridge); `variant="outline"` is
    the secondary and `variant="destructive"` is danger.
-5. The accent is for bars, ticks, focus rings and chips — **never a button fill**.
+5. The lime is the primary button's fill (through the token) and the accent for bars, ticks,
+   focus rings and chips — **never text on a light surface** (1.7:1).
 6. The list table's toolbar lives **inside** the card, not in a floating action bar.
 7. `Table pagination={false}` — always use `<PaginationFooter />`.
 8. All icons come from `lucide-react`, as button/label children

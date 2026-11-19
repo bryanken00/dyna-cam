@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { logo } from "../../assets/images/logos";
+import CourtMark from "../brand/CourtMark";
 import { confirm } from "../../store/confirmStore";
 import { useWindowSize } from "../../hooks/useWindowSize";
 
@@ -85,7 +85,7 @@ const flattenLeaves = (navigations) =>
 
 // ── Brand ────────────────────────────────────────────────────────────────────
 const Brand = ({ collapsed }) => {
-  const name = import.meta.env.VITE_APP_NAME || "Workspace";
+  const name = import.meta.env.VITE_APP_NAME || "Dyna Cam";
   return (
     <div
       className={clsx(
@@ -93,24 +93,17 @@ const Brand = ({ collapsed }) => {
         collapsed && "justify-center px-0",
       )}
     >
+      {/* The brand court (CR-011) on a court-blue tile */}
       <span
-        className="inline-flex items-center justify-center shrink-0 overflow-hidden"
+        className="inline-flex items-center justify-center shrink-0"
         style={{
           width: 34,
           height: 34,
           borderRadius: 9,
-          background: "var(--color-surface-sunken)",
-          border: "1px solid var(--color-line)",
+          background: "var(--color-brand-court)",
         }}
       >
-        <img
-          src={logo}
-          alt=""
-          width={22}
-          height={22}
-          decoding="async"
-          style={{ maxWidth: 22, maxHeight: 22, objectFit: "contain" }}
-        />
+        <CourtMark />
       </span>
       {!collapsed && (
         <div className="min-w-0 leading-tight">
@@ -124,7 +117,7 @@ const Brand = ({ collapsed }) => {
             className="truncate"
             style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}
           >
-            Workspace
+            Court replay admin
           </div>
         </div>
       )}

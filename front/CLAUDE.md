@@ -26,10 +26,12 @@ via `@fontsource-variable`.
 
 ## Design system — "Modern"
 
-Monochrome surfaces + hairline borders + **one green accent used sparingly**. Structure comes from
-borders, **not shadows**; the primary button is **inverted monochrome** (never the accent, never a
-gradient) — that's the shadcn `<Button>` default variant, which the token bridge maps to the
-inverted colours. Every color is a token in `src/index.css` — **never hardcode a hex**.
+Cool neutral surfaces + hairline borders in the **pickleball brand** (CR-011): navy text, a light
+sidebar and top bar (court-logo tile, lime bar on the current page), **navy primary buttons with white text** (white with navy text in dark), court-blue links and charts, the lime accent for
+bars, ticks and focus rings. Structure comes from borders, **not shadows**; the primary button is
+the shadcn `<Button>` default variant, which the token bridge maps to navy/white (white/navy in dark) (never a gradient,
+never an inline background). Every color is a token in `src/index.css` — **never hardcode a
+hex**.
 
 shadcn's semantic tokens (`--background`, `--card`, `--primary`, `--border`, `--ring`, …) are
 bridged onto the Modern tokens in `src/index.css` (the `@theme inline` block), so shadcn

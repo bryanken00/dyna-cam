@@ -50,8 +50,8 @@ const Login = () => {
     <AuthLayout>
       <AuthHeading
         icon={Shield}
-        title="Welcome Back"
-        subtitle="Sign in to your admin account to continue"
+        title="Staff sign in"
+        subtitle="Manage your venues' courts, games and replays."
       />
 
       <Form {...form}>
@@ -118,7 +118,7 @@ const Login = () => {
             className="w-full"
             disabled={isPending}
           >
-            {isPending ? "Signing In..." : "Sign In"}
+            {isPending ? "Signing in…" : "Sign in"}
           </Button>
         </form>
       </Form>

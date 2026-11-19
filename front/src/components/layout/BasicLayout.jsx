@@ -141,8 +141,8 @@ const BasicLayout = ({ navigations, store }) => {
                   <Avatar className="size-8 shrink-0">
                     <AvatarFallback
                       style={{
-                        background: "var(--gradient-primary)",
-                        color: "#fff",
+                        background: "var(--color-brand-ball)",
+                        color: "var(--color-brand-ink)",
                       }}
                     >
                       <User className="w-4 h-4" />
@@ -174,7 +174,7 @@ const BasicLayout = ({ navigations, store }) => {
                   {userData?.roleName && (
                     <div
                       className="text-xs mt-0.5 font-medium"
-                      style={{ color: "var(--color-primary-color)" }}
+                      style={{ color: "var(--color-link)" }}
                     >
                       {userData.roleName}
                     </div>
