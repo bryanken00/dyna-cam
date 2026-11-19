@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
-import { Loader2, Phone, Plus, User, X } from "lucide-react";
+import { Film, Loader2, Phone, Plus, User, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,9 +39,24 @@ const gameSchema = z.object({
   phone: zPhone,
   // CR-015: no payment at the desk — the player gets the videos at once
   free: z.boolean(),
+  // CR-013: how many saves the courtside device may hold for this game
+  maxCaptures: z
+    .string()
+    .trim()
+    .refine((v) => /^\d+$/.test(v), "Enter a whole number")
+    .refine((v) => Number(v) >= 1 && Number(v) <= 20, "From 1 to 20 saves"),
 });
 
-const emptyValues = () => ({ courtId: "", playerName: "", phone: "", free: false });
+/** Saves per game unless staff change it (the API's default too). */
+const DEFAULT_MAX_SAVES = "5";
+
+const emptyValues = () => ({
+  courtId: "",
+  playerName: "",
+  phone: "",
+  free: false,
+  maxCaptures: DEFAULT_MAX_SAVES,
+});
 
 const iconPrefix =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
@@ -112,6 +127,7 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
         playerName: values.playerName || null,
         phone: values.phone || null,
         free: values.free,
+        maxCaptures: Number(values.maxCaptures),
       });
       markSaved();
       onSuccess?.({
@@ -279,6 +295,39 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                   Optional — shown on the player&apos;s page so they know the
                   footage is theirs.
                 </p>
+              </div>
+
+              {/* CR-013: saves from the courtside device ("Save the last …") */}
+              <div className="mt-7">
+                <SectionLabel>Saves</SectionLabel>
+                <FormField
+                  control={form.control}
+                  name="maxCaptures"
+                  render={({ field }) => (
+                    <FormItem className="sm:max-w-60">
+                      <FormLabel>Maximum saves</FormLabel>
+                      <div className="relative">
+                        <Film className={iconPrefix} style={mutedIcon} />
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={20}
+                            step={1}
+                            className="h-10 pl-9"
+                            {...field}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormDescription>
+                        How many &ldquo;Save the last …&rdquo; videos players can keep from the
+                        court&apos;s device. 1 to 20.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* CR-015: paid at the desk (default) or free */}

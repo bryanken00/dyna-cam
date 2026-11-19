@@ -60,7 +60,7 @@ const deviceBody = async (req, row) => {
   body.capture = {
     minSeconds: CAPTURE_MIN_SECONDS,
     available: sessionRecording(row, now),
-    maxPerGame: captureLimits().maxPerGame,
+    maxPerGame: captureLimits(row).maxPerGame,
     used: body.captures.length,
   };
   return body;

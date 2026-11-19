@@ -21,8 +21,8 @@ describe("saving the last few minutes (captures)", () => {
     ctx.api(method, url, { body, headers: { Authorization: `App ${token}` } });
 
   /** A new open game on `courtId`, paired to a device (which starts it recording). */
-  const startGame = async (courtId) => {
-    const created = await call("POST", "/admin/sessions", { courtId });
+  const startGame = async (courtId, extra = {}) => {
+    const created = await call("POST", "/admin/sessions", { courtId, ...extra });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const key = await call("POST", `/admin/sessions/${created.data.sessionId}/pairing-codes`, {
       name: "Courtside tablet",
@@ -214,6 +214,30 @@ describe("saving the last few minutes (captures)", () => {
     const again = await g.app("POST", "/app/session/captures", { seconds: 90 });
     assert.equal(again.status, 201, JSON.stringify(again.body));
     await g.app("POST", "/app/session/stop"); // free the court for the next game
+  });
+
+  it("New game can set how many saves it holds (here 2); out of range is refused", async () => {
+    const tooMany = await call("POST", "/admin/sessions", { courtId: home.court1, maxCaptures: 21 });
+    assert.equal(tooMany.status, 400);
+    const none = await call("POST", "/admin/sessions", { courtId: home.court1, maxCaptures: 0 });
+    assert.equal(none.status, 400);
+
+    const g = await startGame(home.court1, { maxCaptures: 2 });
+    await playedFor(g.sessionId, 10);
+    const one = await call("GET", `/admin/sessions/${g.sessionId}`);
+    assert.equal(one.data.session.maxCaptures, 2);
+    const first = await g.app("POST", "/app/session/captures", { seconds: 60 });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    const second = await g.app("POST", "/app/session/captures", { seconds: 120 });
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    assert.deepEqual(
+      { max: second.data.capture.maxPerGame, used: second.data.capture.used },
+      { max: 2, used: 2 }
+    );
+    const third = await g.app("POST", "/app/session/captures", { seconds: 180 });
+    assert.equal(third.status, 409);
+    assert.equal(third.body.code, "TOO_MANY");
+    await g.app("POST", "/app/session/stop");
   });
 
   /** A game whose 5 saves are already used. */
