@@ -263,6 +263,101 @@ const WholeVideoCard = ({ video, twoCameras }) => {
   );
 };
 
+/** 125 → "2:05" — a point in the game. */
+const clockOf = (seconds) =>
+  `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
+
+/**
+ * CR-013: a stretch saved from the courtside device — "Save 1 · 8:00 – 10:00",
+ * then its video (one per camera on a two-camera court) once it's in.
+ */
+const CaptureCard = ({ capture }) => {
+  const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
+  const ready = capture.videos.filter((video) => video.status === "Ready" && video.videoUrl);
+
+  return (
+    <div className="overflow-hidden" style={cardStyle}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
+          Save {capture.number} · {clockOf(capture.fromSeconds)} – {clockOf(capture.toSeconds)}
+        </span>
+        <StatusDot
+          tone={
+            capture.status === "Ready"
+              ? "success"
+              : ["Saving", "Queued"].includes(capture.status)
+                ? "warning"
+                : "muted"
+          }
+        >
+          {capture.status === "Queued"
+            ? "In queue"
+            : capture.status === "Saving" && capture.uploadPercent >= 99
+              ? "Finishing…"
+              : capture.status === "Saving" && capture.uploadPercent != null
+                ? `Saving ${capture.uploadPercent}%`
+                : capture.status}
+        </StatusDot>
+      </div>
+
+      {ready.map((video) => {
+        const src = getImageUrl(video.videoUrl);
+        const download = getImageUrl(video.downloadUrl);
+        return (
+          <div key={video.camera}>
+            {capture.videos.length > 1 && (
+              <p className="m-0 px-4 pb-2" style={muted}>
+                {video.label}
+              </p>
+            )}
+            <video
+              key={src}
+              src={src}
+              poster={getImageUrl(video.thumbnailUrl) || undefined}
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full block"
+              style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+            />
+            {download && (
+              <div className="p-3">
+                <Button asChild variant="outline" size="lg" className="h-11 w-full">
+                  <a href={download} download>
+                    <Download />
+                    {capture.videos.length > 1 ? `Download ${video.label}` : "Download"}
+                  </a>
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {capture.status === "Saving" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          The recorder is copying this part of your game — it&apos;ll play here in a few minutes.
+        </p>
+      )}
+      {capture.status === "Queued" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          Waiting for the save before it to finish — the recorder makes them one at a time.
+        </p>
+      )}
+      {capture.status === "Failed" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          This save couldn&apos;t be made — the camera may not have been recording then.
+        </p>
+      )}
+      {capture.status === "Expired" && (
+        <p className="m-0 px-4 pb-3" style={muted}>
+          This save has expired here.
+        </p>
+      )}
+    </div>
+  );
+};
+
 /**
  * A game recorded before whole videos (it has no whole video): its saved
  * 5-minute pieces, as they were shown then. New games never show these.
@@ -354,6 +449,7 @@ const SessionPage = () => {
     session,
     parts,
     videos,
+    captures,
     activeVideo,
     setCameraTab,
     twoCameras,
@@ -467,6 +563,23 @@ const SessionPage = () => {
         <CameraTabs videos={videos} active={activeVideo} onSelect={setCameraTab} />
       )}
       {!saving && activeVideo && <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />}
+
+      {/* CR-013: the stretches saved from the courtside device */}
+      {captures.length > 0 && (
+        <div className="mt-6">
+          <h2
+            className="m-0 mb-3 font-semibold"
+            style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}
+          >
+            Your saves
+          </h2>
+          <div className="space-y-3">
+            {captures.map((capture) => (
+              <CaptureCard key={capture.number} capture={capture} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Only a game recorded before whole videos still lists its pieces */}
       {parts.length > 0 && (

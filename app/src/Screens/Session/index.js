@@ -12,6 +12,7 @@ import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import { formatTime, isConnectionError, shortLink } from "@/utils/dynaCam";
 import LivePanel from "./LivePanel";
+import SaveMinutes from "./SaveMinutes";
 import StreamChip from "./StreamChip";
 import StreamSetupSheet from "./StreamSetupSheet";
 import { useSessionScreen } from "./useSessionScreen";
@@ -83,6 +84,10 @@ const QrCard = ({ url, size, className }) => (
  * a stream is set up, a one-line strip under the header shows its state and
  * the buttons become Change stream / Stop streaming. It is deliberately
  * quieter than End game.
+ *
+ * While recording, "Save the last …" (CR-013, SaveMinutes) sits above End
+ * game: pick the last N minutes, Save, and it becomes its own video on the
+ * game's page.
  *
  * When the session ends (Stop, its end time, or staff on the web) the
  * navigator swaps to the Ended screen on the next answer.
@@ -157,6 +162,19 @@ const SessionScreen = () => {
       ) : null}
     </View>
   ) : null;
+
+  // CR-013: save the last few minutes as their own video
+  const saveBlock =
+    s && (m.isRecording || m.captures.length > 0) ? (
+      <SaveMinutes
+        session={s}
+        since={m.since}
+        capture={m.capture}
+        captures={m.captures}
+        save={m.save}
+        removeCapture={m.removeCapture}
+      />
+    ) : null;
 
   const stopBlock = s ? (
     <View>
@@ -253,6 +271,7 @@ const SessionScreen = () => {
             <View className="flex-row gap-5">
               <View className="flex-[3] gap-4">
                 <LivePanel live={m.live} scheduled={m.isScheduled} />
+                {saveBlock}
                 {stopBlock}
                 {streamBlock}
               </View>
@@ -262,6 +281,7 @@ const SessionScreen = () => {
             <View className="w-full max-w-[560px] gap-4 self-center">
               <LivePanel live={m.live} scheduled={m.isScheduled} />
               <QrCard url={s.shareUrl} size={qrSize} />
+              {saveBlock}
               {stopBlock}
               {streamBlock}
             </View>

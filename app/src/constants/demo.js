@@ -17,6 +17,10 @@
  * The player's stream: a stream-link "is used" by the player 6 s after it is
  * made — the session then reports a Facebook stream "starting", "live" 5 s
  * later. Stop streaming (or the session ending) clears it.
+ *
+ * CR-013 saves: "Save the last N min" works after the first minute, up to 5
+ * at once; each is made in turn — "Queued", then "Saving" with a rising
+ * percent for DEMO_CAPTURE_MS, then "Ready". Saves can be deleted.
  */
 
 /** Fake latency, so loading states are actually visible while developing. */
@@ -36,6 +40,10 @@ const SESSION_LENGTH_MS = 60 * 60000;
 const STREAM_LINK_SECONDS = 15 * 60;
 const DEMO_STREAM_SAVED_MS = 6000; // the "player" pastes their key
 const DEMO_STREAM_LIVE_MS = 5000; // then the box gets it live
+const DEMO_CAPTURE_MS = 7000; // a save "copies and uploads"
+const CAPTURE_MIN_SECONDS = 60;
+const CAPTURE_MAX_PER_GAME = 5;
+const CAPTURE_REPEAT_MS = 3000; // a double tap returns the save already made
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
@@ -57,6 +65,7 @@ const startDemoGame = () => {
     endedMs: null,
     streamSavedMs: null, // when the "player" saved the current stream
     streamPendingMs: null, // when a new link's "player" will save one
+    captures: [], // CR-013: { id, savedMs, fromSeconds, toSeconds, deleted }
   };
 };
 
@@ -126,6 +135,40 @@ export const makeDemoPairing = () => {
   return { token: DEMO_TOKEN, device: DEMO_DEVICE, session: demoSession().session };
 };
 
+/**
+ * CR-013: the demo game's saves, as GET /app/session's `captures`. Made one
+ * at a time like the real box: each starts when the one before is ready.
+ */
+const demoCaptures = () => {
+  let freeAt = 0; // when the "box" is free for the next save
+  return demoGame.captures
+    .filter((capture) => !capture.deleted)
+    .map((capture, i) => {
+      const startMs = Math.max(capture.savedMs, freeAt);
+      freeAt = startMs + DEMO_CAPTURE_MS;
+      const now = Date.now();
+      const queued = now < startMs;
+      const ready = now >= freeAt;
+      return {
+        captureId: capture.id,
+        number: i + 1,
+        fromSeconds: capture.fromSeconds,
+        toSeconds: capture.toSeconds,
+        seconds: capture.toSeconds - capture.fromSeconds,
+        savedAt: stampAt(capture.savedMs),
+        status: ready ? "Ready" : queued ? "Queued" : "Saving",
+        uploadPercent: ready
+          ? 100
+          : queued
+            ? null
+            : Math.min(99, Math.floor(((now - startMs) / DEMO_CAPTURE_MS) * 100)),
+        videos: [],
+      };
+    });
+};
+
+const demoLiveCaptures = () => demoGame.captures.filter((capture) => !capture.deleted);
+
 /** GET /app/session's `data`. No recorder box in demo, so `live` is null. */
 export const demoDeviceSession = () => {
   if (!demoGame) startDemoGame(); // a demo pairing restored after a restart
@@ -135,7 +178,59 @@ export const demoDeviceSession = () => {
     live: null,
     device: DEMO_DEVICE,
     stream: demoStream(data.unpairInSeconds != null),
+    capture: {
+      minSeconds: CAPTURE_MIN_SECONDS,
+      available: data.session.status === "Recording",
+      maxPerGame: CAPTURE_MAX_PER_GAME,
+      used: demoLiveCaptures().length,
+    },
+    captures: demoCaptures(),
   };
+};
+
+/**
+ * POST /app/session/captures → `{ data }` or `{ error: [status, message, code] }`,
+ * with the API's refusals (not recording, first minute, cooldown).
+ */
+export const demoSaveCapture = (seconds) => {
+  if (!demoGame) startDemoGame();
+  const { session } = demoSession();
+  if (session.status !== "Recording") {
+    return { error: [409, "The game isn't recording, so there's nothing to save.", "NOT_RECORDING"] };
+  }
+  if (session.elapsedSeconds < CAPTURE_MIN_SECONDS) {
+    return { error: [409, "You can save once the first minute has been played.", "TOO_EARLY"] };
+  }
+  const live = demoLiveCaptures();
+  const last = live[live.length - 1];
+  if (last && last.seconds === seconds && Date.now() - last.savedMs < CAPTURE_REPEAT_MS) {
+    return { data: { ...demoDeviceSession(), captureId: last.id } };
+  }
+  if (live.length >= CAPTURE_MAX_PER_GAME) {
+    return {
+      error: [409, "This game already has its saves — delete one to save another.", "TOO_MANY"],
+    };
+  }
+  const toSeconds = session.elapsedSeconds;
+  const id = `demo-capture-${demoGame.captures.length + 1}`;
+  demoGame.captures.push({
+    id,
+    savedMs: Date.now(),
+    seconds,
+    fromSeconds: Math.max(0, toSeconds - seconds),
+    toSeconds,
+    deleted: false,
+  });
+  return { data: { ...demoDeviceSession(), captureId: id } };
+};
+
+/** DELETE /app/session/captures/:id → its `data`, or null when there is no such save. */
+export const demoDeleteCapture = (captureId) => {
+  if (!demoGame) startDemoGame();
+  const capture = demoLiveCaptures().find((item) => item.id === captureId);
+  if (!capture) return null;
+  capture.deleted = true;
+  return demoDeviceSession();
 };
 
 /**

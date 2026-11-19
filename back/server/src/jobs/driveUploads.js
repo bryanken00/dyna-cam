@@ -1,6 +1,7 @@
 import path from "node:path";
 import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal, moment } from "../utils/dateUtils.js";
+import { toEpochMs } from "../utils/clips.js";
 import { decryptSecret } from "../utils/crypto/secretBox.js";
 import {
   accessToken,
@@ -138,11 +139,13 @@ const KINDS = {
              sv.videoPath, sv.driveAttempts,
              c.name AS courtName, c.driveRefreshToken, c.driveFolderId,
              c.status AS courtStatus, v.name AS venueName,
-             s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId
+             s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId,
+             sc.startAt AS captureStartAt, sc.endAt AS captureEndAt
       FROM session_videos sv
       JOIN recording_sessions s ON s.sessionId = sv.sessionId
       JOIN courts c ON c.courtId = s.courtId
       JOIN venues v ON v.venueId = sv.venueId
+      LEFT JOIN session_captures sc ON sc.captureId = sv.captureId
       WHERE sv.sessionVideoId = ? LIMIT 1`,
     due: `
       SELECT sv.sessionVideoId AS id
@@ -153,8 +156,19 @@ const KINDS = {
         AND (sv.driveNextAttemptAt IS NULL OR sv.driveNextAttemptAt <= ?)
         AND (c.driveStatus = 'Connected' OR c.driveRefreshToken IS NULL OR c.status = 'Deleted')
       ORDER BY sv.dateUpdated ASC`,
-    // "Cam 1 – whole game.mp4", or "Whole game.mp4" on a one-camera court
-    fileName: (row) => (row.camera ? `Cam ${row.camera} – whole game.mp4` : "Whole game.mp4"),
+    // "Cam 1 – whole game.mp4", or "Whole game.mp4" on a one-camera court;
+    // CR-013 saves: "Save 8m00s–10m00s – Cam 1.mp4"
+    fileName: (row) => {
+      if (row.captureStartAt) {
+        const at = (stamp) => {
+          const total = Math.max(0, Math.round((toEpochMs(stamp) - toEpochMs(row.sessionStartAt)) / 1000));
+          return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
+        };
+        const span = `${at(row.captureStartAt)}–${at(row.captureEndAt)}`;
+        return row.camera ? `Save ${span} – Cam ${row.camera}.mp4` : `Save ${span}.mp4`;
+      }
+      return row.camera ? `Cam ${row.camera} – whole game.mp4` : "Whole game.mp4";
+    },
   },
 };
 

@@ -61,14 +61,22 @@ export const rollOpenGames = async (db) => {
 /**
  * CR-006: the game's whole video per camera, made when it ends — camera 0 on a
  * one-camera court, cameras 1 and 2 on a two-camera court. Idempotent
- * (UNIQUE (sessionId, camera)).
+ * (UNIQUE (sessionId, captureKey, camera); the whole game's captureKey is '').
  */
-export const createGameVideos = async (db, session) => {
+/**
+ * The cameras a game's videos are made for: camera 0 (the only one) on a
+ * one-camera court, cameras 1 and 2 on a two-camera court.
+ */
+export const gameVideoCameras = async (db, courtId) => {
   const [court] = await db.query(
     `SELECT camera2RtspUrl IS NOT NULL AS hasCamera2 FROM courts WHERE courtId = ? LIMIT 1`,
-    [session.courtId]
+    [courtId]
   );
-  const cameras = court && Number(court.hasCamera2) ? [1, 2] : [0];
+  return court && Number(court.hasCamera2) ? [1, 2] : [0];
+};
+
+export const createGameVideos = async (db, session) => {
+  const cameras = await gameVideoCameras(db, session.courtId);
   const now = getCurrentTimestampLocal();
   for (const camera of cameras) {
     const [{ id }] = await db.query(`SELECT UUID() AS id`);
@@ -200,7 +208,7 @@ export const settleSessions = async (db, sessionId) => {
   for (const session of sessions) {
     let videos = await db.query(
       `SELECT camera, status, gaps FROM session_videos
-       WHERE sessionId = ? AND status != 'Deleted'`,
+       WHERE sessionId = ? AND captureId IS NULL AND status != 'Deleted'`,
       [session.sessionId]
     );
     if (videos.length === 0) {

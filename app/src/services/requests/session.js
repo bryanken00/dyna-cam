@@ -24,6 +24,8 @@ import {
   demoDeviceSession,
   demoEnvelope,
   demoError,
+  demoDeleteCapture,
+  demoSaveCapture,
   demoStopSession,
   demoStopStream,
   demoStreamLink,
@@ -31,7 +33,9 @@ import {
 import { usePairedStore } from "../../store/usePairedStore";
 import {
   createStreamLinkApi,
+  deleteCaptureApi,
   getDeviceSessionApi,
+  saveCaptureApi,
   stopSessionApi,
   stopStreamApi,
   unpairDeviceApi,
@@ -114,6 +118,65 @@ export const useStopSession = () => {
         queryClient.invalidateQueries({ queryKey: SESSION_KEY });
       }
     },
+  });
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useSaveCapture — CR-013: "Save the last N min"
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * `mutate(seconds)`. The answer is GET /session's body with the new save in
+ * it, so it goes straight into the session cache and the list updates at
+ * once. A refusal (409 / 429 / 400) is shown by the screen from `error`.
+ */
+export const useSaveCapture = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (seconds) => {
+      if (IS_DEMO) {
+        await demoDelay();
+        const result = demoSaveCapture(seconds);
+        if (result.error) throw demoError(...result.error);
+        return demoEnvelope("Saving — it'll be on your game's page in a few minutes", result.data);
+      }
+      return saveCaptureApi(seconds);
+    },
+    retry: false,
+    onSuccess: (response) => {
+      const { captureId: _captureId, ...body } = response.data ?? {};
+      queryClient.setQueryData(SESSION_KEY, (old) =>
+        old ? { ...old, data: { ...old.data, ...body } } : old,
+      );
+    },
+  });
+};
+
+/**
+ * `mutate(captureId)` — delete one of the game's saves. The answer is GET
+ * /session's body, so the list updates at once; a 404 (already gone) just
+ * re-reads the session.
+ */
+export const useDeleteCapture = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (captureId) => {
+      if (IS_DEMO) {
+        await demoDelay();
+        const data = demoDeleteCapture(captureId);
+        if (!data) throw demoError(404, "Save not found");
+        return demoEnvelope("Save deleted", data);
+      }
+      return deleteCaptureApi(captureId);
+    },
+    retry: false,
+    onSuccess: (response) => {
+      queryClient.setQueryData(SESSION_KEY, (old) =>
+        old ? { ...old, data: { ...old.data, ...(response.data ?? {}) } } : old,
+      );
+    },
+    onError: () => queryClient.invalidateQueries({ queryKey: SESSION_KEY }),
   });
 };
 

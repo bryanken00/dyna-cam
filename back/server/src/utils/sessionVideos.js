@@ -67,11 +67,11 @@ export const toAdminVideo = (row) => ({
 export const SESSION_VIDEO_COLUMNS = `camera, status, gaps, videoPath, thumbnailPath, sizeBytes,
   uploadBytes, receivedBytes, durationSeconds, failureReason, expiresAt, driveStatus, driveUrl`;
 
-/** A session's whole videos, camera order. */
+/** A session's whole videos, camera order (CR-013 saves are loadCaptures'). */
 export const loadSessionVideos = (db, sessionId) =>
   db.query(
     `SELECT ${SESSION_VIDEO_COLUMNS} FROM session_videos
-     WHERE sessionId = ? AND status != 'Deleted'
+     WHERE sessionId = ? AND captureId IS NULL AND status != 'Deleted'
      ORDER BY camera ASC`,
     [sessionId]
   );

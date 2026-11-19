@@ -36,11 +36,13 @@ export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name
   (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
                ELSE COALESCE(sv.uploadBytes, 0) END)
    FROM session_videos sv
-   WHERE sv.sessionId = s.sessionId AND sv.status IN ('Uploading', 'Ready')) AS uploadTotalBytes,
+   WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL
+     AND sv.status IN ('Uploading', 'Ready')) AS uploadTotalBytes,
   (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
                ELSE LEAST(sv.receivedBytes, COALESCE(sv.uploadBytes, 0)) END)
    FROM session_videos sv
-   WHERE sv.sessionId = s.sessionId AND sv.status IN ('Uploading', 'Ready')) AS uploadSentBytes`;
+   WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL
+     AND sv.status IN ('Uploading', 'Ready')) AS uploadSentBytes`;
 
 export const SESSION_DEVICE_FROM = `FROM recording_sessions s
   JOIN courts c ON c.courtId = s.courtId

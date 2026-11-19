@@ -27,6 +27,7 @@ import {
   sessionVideoParamsSchema,
 } from "../../../validators/sessions.validator.js";
 import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
+import { loadCaptures } from "../../../utils/sessionCaptures.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -46,9 +47,11 @@ const SESSION_SELECT = `
          s.partCameras, s.wholeVideo, s.openEnded, s.dateCreated, s.dateUpdated,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM session_videos sv
-          WHERE sv.sessionId = s.sessionId AND sv.status = 'Ready') AS videosReady,
+          WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL AND sv.status = 'Ready')
+           AS videosReady,
          (SELECT COUNT(*) FROM session_videos sv
-          WHERE sv.sessionId = s.sessionId AND sv.status != 'Deleted') AS videosTotal,
+          WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL AND sv.status != 'Deleted')
+           AS videosTotal,
          (SELECT COUNT(*) FROM paired_apps d WHERE d.sessionId = s.sessionId AND d.status = 'Active')
            AS devicesCount
   FROM recording_sessions s
@@ -167,6 +170,10 @@ router.get(
 
     // CR-003 / CR-006: the whole video per camera
     const videos = await loadSessionVideos(req.db, req.params.sessionId);
+    // CR-013: stretches saved from the courtside device
+    const captures = await loadCaptures(req.db, req.params.sessionId, toAdminVideo, {
+      withIds: true,
+    });
 
     const [devices, pairingCodes] = await Promise.all([
       req.db.query(
@@ -210,6 +217,7 @@ router.get(
         })),
         videos: videos.map(toAdminVideo),
         uploadPercent: uploadPercent(videos),
+        captures,
       },
     });
   })
@@ -567,7 +575,7 @@ router.post(
        SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL, sv.deviceId = NULL,
            sv.uploadBytes = NULL, sv.receivedBytes = 0, sv.failureReason = NULL,
            sv.dateUpdated = ?
-       WHERE sv.sessionId = ? AND sv.camera = ? AND sv.status = 'Failed'`,
+       WHERE sv.sessionId = ? AND sv.captureId IS NULL AND sv.camera = ? AND sv.status = 'Failed'`,
       [getCurrentTimestampLocal(), req.params.sessionId, req.params.camera]
     );
     if (result.affectedRows === 0) {
