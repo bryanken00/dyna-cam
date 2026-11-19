@@ -124,7 +124,12 @@ export const signLiveLink = (liveKey, courtId, exp) =>
  * recorder box that reported a LAN address; null when the session isn't
  * recording or no box can serve it.
  *
- * @returns {Promise<{ hlsUrl: string, expiresAt: string } | null>}
+ * CR-007: on a two-camera court `cameras` lists each camera's link (the box
+ * serves camera 2 at /live/<court>/cam2/, same signature) for the device's
+ * Cam 1 | Cam 2 switch; `hlsUrl` stays camera 1 for apps without the switch.
+ *
+ * @returns {Promise<{ hlsUrl: string, expiresAt: string,
+ *   cameras?: Array<{ camera: 1 | 2, hlsUrl: string }> } | null>}
  */
 export const liveLink = async (db, row, nowMs = Date.now()) => {
   if (!sessionRecording(row, nowMs)) return null;
@@ -150,11 +155,21 @@ export const liveLink = async (db, row, nowMs = Date.now()) => {
 
   const exp = Math.floor(nowMs / 1000) + LIVE_LINK_MINUTES * 60;
   const sig = signLiveLink(liveKey, row.courtId, exp);
-  const base = String(box.liveUrl).replace(/\/+$/, "");
+  const base = `${String(box.liveUrl).replace(/\/+$/, "")}/live/${encodeURIComponent(row.courtId)}`;
+  const query = `exp=${exp}&sig=${sig}`;
+  const hlsUrl = `${base}/index.m3u8?${query}`;
   return {
-    hlsUrl: `${base}/live/${encodeURIComponent(row.courtId)}/index.m3u8?exp=${exp}&sig=${sig}`,
+    hlsUrl,
     expiresAt: moment(exp * 1000)
       .tz(TIMEZONE)
       .format("YYYY-MM-DD HH:mm:ss"),
+    ...(Number(row.hasCamera2)
+      ? {
+          cameras: [
+            { camera: 1, hlsUrl },
+            { camera: 2, hlsUrl: `${base}/cam2/index.m3u8?${query}` },
+          ],
+        }
+      : {}),
   };
 };

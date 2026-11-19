@@ -197,7 +197,7 @@ router.post(
   "/heartbeat",
   validateBody(heartbeatSchema),
   catchAsync(async (req, res) => {
-    const { agentVersion, capabilities, cameras, live, sessionStreams } = req.body;
+    const { agentVersion, capabilities, cameras, live, sessionStreams, system } = req.body;
     const { venueId, deviceId } = req.device;
 
     const courtRows = await req.db.query(
@@ -246,6 +246,8 @@ router.post(
           cameras: reported,
           sessionStreams,
           capabilities: capabilities || [],
+          // CR-008: disk, memory, clock, backlog (null from older boxes)
+          system: system || null,
           reportedAt: now,
         }),
         liveUrl,

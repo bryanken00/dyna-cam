@@ -1,6 +1,6 @@
 # PLAN-001 · Court replay cameras ("Pickle Cam"-style)
 
-> **Status:** In progress · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
+> **Status:** Done · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
 > **Related:** —
 
 ## Goal
@@ -562,4 +562,9 @@ The checklist follows these phases. Each phase is shippable on its own.
   - **Scan court QR:** not built. It needs `expo-camera` (a new dev build) and an admin lookup of
     a court by its QR token.
   - **Video:** plays in the phone's own player, because there's no `expo-video` yet.
-
+- 2026-11-19: Closed as **Done** by owner decision. The items still open were ticked without being
+  run: the device sign-in, the staff app's QR scan and the phone test (the staff app was replaced
+  by PLAN-002's session device), the 6-court load test (CR-008's box health report covers CPU,
+  memory and disk on the real box), `expo-doctor`'s 11 out-of-date packages, and the C200 1080p
+  install note (a venue setting). Follow-ups: CR-008 (venue health and alerts), CR-009 (remote box
+  updates), CR-010 (clip and video storage).

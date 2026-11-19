@@ -64,15 +64,17 @@
       `Toast` import and non-existent `reset()` call
 - [x] Request sequence replayed against the API test harness with CSRF on (csrf-token → login →
       403 `PASSWORD_CHANGE_REQUIRED` → change password → refresh → logout): every step matched
-- [ ] Sign in on a device against the local API (`http://<LAN-IP>:4021`) and log out cleanly
+- [x] Sign in on a device against the local API (`http://<LAN-IP>:4021`) and log out cleanly
+      *(closed 2026-11-19 by owner decision, not run; superseded by PLAN-002: the app no longer has a staff sign-in, it pairs to a session)*
 
 ### Phase 0 wrap-up
 
 - [x] `cd back && npm run lint && npm test` passes
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] `cd app && npx expo export --platform android --clear` bundles (3642 modules)
-- [ ] `cd app && npx expo-doctor@latest` passes — **fails 1 check: 11 Expo packages behind SDK 58's
+- [x] `cd app && npx expo-doctor@latest` passes — **fails 1 check: 11 Expo packages behind SDK 58's
       pinned versions** (pre-existing; fix with `npx expo install --check`, then a new dev build)
+      *(closed 2026-11-19 by owner decision, not run; the package update is left for whenever the next dev build is made)*
 - [x] Changelog entry (`ref: PLAN-001`): `docs/changelog/unpublished/2026-11-17-dyna-cam-foundation.md`
 
 ## Phase 1: Foundation + QR clips + watermark
@@ -140,8 +142,9 @@
       `CLAUDE.md`, `README.md` and the shared product version in `/publish`
 - [x] `npm run lint` clean, `npm test` 58/58, `npm run smoke` (real ffmpeg record → cut → watermark
       with A-law audio and irregular keyframes; also `--encoder libx264` and `--bursty`) OK
-- [ ] Load test: 6 courts recording, 3 simultaneous clip jobs on the target box — record CPU and
+- [x] Load test: 6 courts recording, 3 simultaneous clip jobs on the target box — record CPU and
       job time in `edge/README.md` *(needs the real box hardware; table left as TODO)*
+      *(closed 2026-11-19 by owner decision, not run; CR-008's box health report shows CPU, memory and disk on the real box instead)*
 
 ### Frontend
 
@@ -184,9 +187,9 @@
       box cut → **Ready 9 s later**, 65.0 s, 1280×720 H.264 + AAC, 972 frames (= the camera's
       15 fps), download header `attachment; filename=dyna-cam-replay.mp4`. Camera password found
       in no log.
-- [ ] Install guide: set the C200's video quality to 1080p in the Tapo app if the venue wants it
+- [x] Install guide: set the C200's video quality to 1080p in the Tapo app if the venue wants it
       (it was sending 720p); optionally turn off its date/time OSD *(venue decision — documented in
-      `edge/README.md`, nothing to build)*
+      `edge/README.md`, nothing to build)* *(closed 2026-11-19)*
 
 ### Phase 1 wrap-up
 
@@ -327,16 +330,18 @@
 - [x] Take payment screen (added — Phase 4 exists): pay code → lookup → "Record ₱X cash"
 - [x] Recorder boxes screen (read-only): online, last seen, per-camera status
 - [x] Dashboard tab: clips today, unpaid, sessions recording, boxes offline (permission-aware)
-- [ ] Scan court QR → opens that court *(not built: needs `expo-camera`, a native module → a new
+- [x] Scan court QR → opens that court *(not built: needs `expo-camera`, a native module → a new
       dev build, and an admin lookup of a court by QR token; left for a CR)*
+      *(closed 2026-11-19 by owner decision, not run; superseded by PLAN-002: the app is a session device, staff work is on the web)*
 - [x] Removed the template `Screens/Example/`, example SQLite table/endpoints and the placeholder
       Dashboard; `App.js` QueryClient now has defaults (15 s stale, no retry on 4xx)
 - [x] `npx expo export --platform android --clear` bundles (3697 modules); `npx expo-doctor` 19/20
       (only the pre-existing "11 packages out of date"); every API path the app calls exists
-- [ ] Tried on a physical Android phone against the local API *(needs a phone on the venue LAN)*
+- [x] Tried on a physical Android phone against the local API *(needs a phone on the venue LAN)*
+      *(closed 2026-11-19 by owner decision, not run)*
 - [x] Changelog entry (`ref: PLAN-001`, added: staff app)
 
 ## Final wrap-up
 
-- [ ] Every phase above ticked
-- [ ] `plan.md` status set to `Done`
+- [x] Every phase above ticked
+- [x] `plan.md` status set to `Done`

@@ -4,6 +4,7 @@ import { Volume2, VolumeX, Wifi } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
+import StatusToggle from "@/components/pattern/StatusToggle";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
@@ -25,12 +26,30 @@ const RETRY_MS = 15000;
  * The video surface is black in both themes on purpose (letterboxing), the
  * sanctioned `#000`-on-a-known-surface exception.
  *
+ * CR-007: on a two-camera court (`live.cameras`) a Cam 1 | Cam 2 switch sits
+ * above the video; one camera plays at a time, starting on Cam 1. Switching
+ * only changes what this device plays — recording is never touched.
+ *
  * ⚠️ The link and the player's error can contain the link's `sig` — nothing
  * here logs either.
  */
+const CAMERA_OPTIONS = [
+  // Neutral dots: the switch picks a view, it isn't a status
+  { value: "Cam 1", accent: false },
+  { value: "Cam 2", accent: false },
+];
+
+/** The chosen camera's link, as a `live` object for useLiveSource. */
+const chosenLive = (live, camera) => {
+  const link = live?.cameras?.find((c) => c.camera === camera);
+  return link ? { hlsUrl: link.hlsUrl, expiresAt: live.expiresAt } : live;
+};
+
 const LivePanel = ({ live, scheduled, className }) => {
   const colors = useThemeColors();
-  const source = useLiveSource(live);
+  const twoCameras = (live?.cameras?.length ?? 0) > 1;
+  const [camera, setCamera] = useState(1);
+  const source = useLiveSource(twoCameras ? chosenLive(live, camera) : live);
   const [muted, setMuted] = useState(true);
 
   const player = useVideoPlayer(null, (p) => {
@@ -79,64 +98,75 @@ const LivePanel = ({ live, scheduled, className }) => {
   }, [muted, player]);
 
   const playing = Boolean(source) && status !== "error";
+  const cameraName = twoCameras ? `Cam ${camera}` : null;
 
   return (
-    <View
-      className={cn(
-        "border-border w-full overflow-hidden rounded-[18px] border bg-black",
-        className,
-      )}
-      style={{ aspectRatio: 16 / 9 }}
-    >
-      {playing ? (
-        <>
-          <VideoView
-            player={player}
-            style={{ width: "100%", height: "100%" }}
-            contentFit="contain"
-            nativeControls={false}
-            allowsPictureInPicture={false}
-            accessibilityLabel="Live video of the court"
-          />
-          {status === "loading" || status === "idle" ? (
-            <View className="absolute inset-0 items-center justify-center">
-              <DotsLoader color="#fff" />
+    <View className={cn("w-full gap-2.5", className)}>
+      {twoCameras ? (
+        <StatusToggle
+          value={cameraName}
+          onChange={(value) => setCamera(value === "Cam 2" ? 2 : 1)}
+          options={CAMERA_OPTIONS}
+        />
+      ) : null}
+      <View
+        className="border-border w-full overflow-hidden rounded-[18px] border bg-black"
+        style={{ aspectRatio: 16 / 9 }}
+      >
+        {playing ? (
+          <>
+            <VideoView
+              player={player}
+              style={{ width: "100%", height: "100%" }}
+              contentFit="contain"
+              nativeControls={false}
+              allowsPictureInPicture={false}
+              accessibilityLabel={
+                cameraName ? `Live video of the court, ${cameraName}` : "Live video of the court"
+              }
+            />
+            {status === "loading" || status === "idle" ? (
+              <View className="absolute inset-0 items-center justify-center">
+                <DotsLoader color="#fff" />
+              </View>
+            ) : null}
+            <Pressable
+              onPress={() => setMuted((m) => !m)}
+              accessibilityRole="button"
+              accessibilityLabel={muted ? "Turn sound on" : "Turn sound off"}
+              hitSlop={8}
+              className="absolute bottom-3 right-3 h-11 w-11 items-center justify-center rounded-full bg-black/60"
+            >
+              {muted ? (
+                <VolumeX size={20} color="#fff" />
+              ) : (
+                <Volume2 size={20} color="#fff" />
+              )}
+            </Pressable>
+            <View className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1">
+              <Text className="font-sans-semibold text-[11px] uppercase tracking-[0.08em] text-white">
+                {cameraName ? `Live · ${cameraName}` : "Live"}
+              </Text>
             </View>
-          ) : null}
-          <Pressable
-            onPress={() => setMuted((m) => !m)}
-            accessibilityRole="button"
-            accessibilityLabel={muted ? "Turn sound on" : "Turn sound off"}
-            hitSlop={8}
-            className="absolute bottom-3 right-3 h-11 w-11 items-center justify-center rounded-full bg-black/60"
-          >
-            {muted ? (
-              <VolumeX size={20} color="#fff" />
-            ) : (
-              <Volume2 size={20} color="#fff" />
-            )}
-          </Pressable>
-          <View className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1">
-            <Text className="font-sans-semibold text-[11px] uppercase tracking-[0.08em] text-white">
-              Live
+          </>
+        ) : (
+          <View className="bg-card flex-1 items-center justify-center gap-2 px-6">
+            <Wifi size={26} color={colors.mutedForeground} strokeWidth={1.8} />
+            <Text className="text-center font-sans-medium text-[15px]">
+              {scheduled
+                ? "Live view starts when recording starts"
+                : source && cameraName
+                  ? `No live video from ${cameraName} right now`
+                  : "Live view needs the venue Wi-Fi"}
             </Text>
+            {!scheduled ? (
+              <Text className="text-muted-foreground text-center text-[12.5px]">
+                Recording isn't affected — the game is still being saved.
+              </Text>
+            ) : null}
           </View>
-        </>
-      ) : (
-        <View className="bg-card flex-1 items-center justify-center gap-2 px-6">
-          <Wifi size={26} color={colors.mutedForeground} strokeWidth={1.8} />
-          <Text className="text-center font-sans-medium text-[15px]">
-            {scheduled
-              ? "Live view starts when recording starts"
-              : "Live view needs the venue Wi-Fi"}
-          </Text>
-          {!scheduled ? (
-            <Text className="text-muted-foreground text-center text-[12.5px]">
-              Recording isn't affected — the game is still being saved.
-            </Text>
-          ) : null}
-        </View>
-      )}
+        )}
+      </View>
     </View>
   );
 };

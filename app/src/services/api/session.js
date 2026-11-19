@@ -33,6 +33,8 @@ const BASE = "/api/v1/app";
  * `live` is null unless the session is recording AND the venue's recorder box
  * is online with a LAN address. `hlsUrl` is a plain-HTTP link to the box,
  * signed and expiring (≈15 min) — ⚠️ never log it (its `sig` is a secret).
+ * On a two-camera court `live.cameras` = [{ camera: 1, hlsUrl }, { camera: 2,
+ * hlsUrl }] (CR-007: the Cam 1 | Cam 2 switch); `hlsUrl` is always camera 1.
  * `unpairInSeconds` is set once the session has ended: the 10-minute grace.
  */
 export const getDeviceSessionApi = async () => {

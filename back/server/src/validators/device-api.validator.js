@@ -3,6 +3,9 @@ import { emptyToUndefined, optionalString, queryInt } from "./_helpers.js";
 
 /** Validators for the recorder-box API (controllers/v1/device/). */
 
+/** A whole, non-negative number in the heartbeat's `system` field. */
+const healthNumber = (max) => z.number().int().min(0).max(max).optional();
+
 // POST /heartbeat
 export const heartbeatSchema = z.object({
   agentVersion: optionalString(50),
@@ -67,6 +70,24 @@ export const heartbeatSchema = z.object({
       key: z.string().regex(/^[0-9a-f]{64}$/, "A 64-character hex key"),
     })
     .nullable()
+    .optional(),
+  // CR-008: the box's own health (edge/src/health.js). Every field is optional:
+  // a value the box can't read is left out. Older boxes send no `system`.
+  system: z
+    .object({
+      diskFreeMb: healthNumber(1e9),
+      diskTotalMb: healthNumber(1e9),
+      memFreeMb: healthNumber(1e8),
+      memTotalMb: healthNumber(1e8),
+      load1: z.number().min(0).max(10000).optional(),
+      cpus: healthNumber(1024),
+      uptimeSeconds: healthNumber(1e10),
+      // server − box clock in ms; negative = the box is ahead
+      clockOffsetMs: z.number().int().min(-1e10).max(1e10).optional(),
+      pendingClips: healthNumber(1e6),
+      pendingGames: healthNumber(1e6),
+      oldestPendingSeconds: healthNumber(1e10),
+    })
     .optional(),
 });
 
