@@ -85,7 +85,9 @@ export const usePaymentHooks = () => {
         title: "Refund payment",
         description: `Refund ${formatPeso(record.amount)} for pay code ${formatPayCode(
           record.payCode,
-        )} (${decodeHTML(record.courtName)})? Give the cash back to the player — the clip locks again until it is paid.`,
+        )} (${decodeHTML(record.courtName)})? Give the cash back to the player — the ${
+          record.kind === "Game" ? "game's videos lock" : "clip locks"
+        } again until it is paid.`,
         confirmText: "Refund",
         cancelText: "Cancel",
         danger: true,
@@ -165,6 +167,9 @@ export const usePaymentHooks = () => {
               style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
             >
               {decodeHTML(record.venueName)}
+              {/* CR-015: a whole game, or a single replay */}
+              {" · "}
+              {record.kind === "Game" ? "Game" : "Replay"}
             </div>
           </div>
         ),

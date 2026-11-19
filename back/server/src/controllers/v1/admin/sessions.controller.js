@@ -8,6 +8,7 @@ import {
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
+import { insertWithPayCode } from "../../../utils/payments.js";
 import { sessionShareUrl, toEpochMs } from "../../../utils/clips.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
 import { createPairingCode, PAIRING_CODE_TTL_MINUTES } from "../../../utils/pairing.js";
@@ -44,7 +45,10 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
-         s.partCameras, s.wholeVideo, s.openEnded, s.dateCreated, s.dateUpdated,
+         s.partCameras, s.wholeVideo, s.openEnded, s.paymentStatus, s.payCode,
+         s.dateCreated, s.dateUpdated,
+         (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
+           AS paidAmount,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
          (SELECT COUNT(*) FROM session_videos sv
           WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL AND sv.status = 'Ready')
@@ -83,6 +87,8 @@ const toSession = (row) => {
     videosReady: Number(row.videosReady || 0),
     videosTotal: Number(row.videosTotal || 0),
     devicesCount: Number(row.devicesCount || 0),
+    // CR-015: Unpaid until staff record the payment (Free = a game from before)
+    paidAmount: row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount),
     shareUrl: sessionShareUrl(shareToken),
   };
 };
@@ -99,7 +105,16 @@ router.get(
     await materializeSessionParts(req.db);
     await settleSessions(req.db);
 
-    const { page = 1, pageSize = 20, venueId, courtId, status, search = "", sortOrder } = req.query;
+    const {
+      page = 1,
+      pageSize = 20,
+      venueId,
+      courtId,
+      status,
+      payment,
+      search = "",
+      sortOrder,
+    } = req.query;
     const offset = (page - 1) * pageSize;
     const params = [];
     let whereClause = "WHERE 1 = 1";
@@ -115,9 +130,20 @@ router.get(
       whereClause += " AND s.courtId = ?";
       params.push(courtId);
     }
+    if (payment) {
+      whereClause += " AND s.paymentStatus = ?";
+      params.push(payment);
+    }
     if (search) {
-      whereClause += " AND (s.playerName LIKE ? OR c.name LIKE ? OR v.name LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      // CR-015: or the game code the player shows at the desk ("k7qm 2p" works too)
+      whereClause +=
+        " AND (s.playerName LIKE ? OR c.name LIKE ? OR v.name LIKE ? OR s.payCode = ?)";
+      params.push(
+        `%${search}%`,
+        `%${search}%`,
+        `%${search}%`,
+        search.replace(/\s+/g, "").toUpperCase()
+      );
     }
     const safeSortOrder = sortOrder === "ASC" ? "ASC" : "DESC";
 
@@ -265,30 +291,37 @@ const createOpenGame = async (req, res) => {
     const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
     const sessionId = uuidRow[0].id;
     const shareToken = randomToken();
-    // startAt is a placeholder until a device pairs; endAt rolls (utils/sessions.js)
-    await conn.execute(
-      `INSERT INTO recording_sessions
-         (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
-          createdByAccountId, openEnded, status, dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Waiting', ?, ?)`,
-      [
-        sessionId,
-        courts[0].venueId,
-        courtId,
-        now,
-        openGameEnd(),
-        playerName || null,
-        phone || null,
-        shareToken,
-        req.user.accountId,
-        now,
-        now,
-      ]
+    // startAt is a placeholder until a device pairs; endAt rolls (utils/sessions.js).
+    // CR-015: unpaid, with the code the player shows at the desk — or free
+    // (staff chose "Free game"): no code, open to the player at once
+    const payCode = await insertWithPayCode((code) =>
+      conn.execute(
+        `INSERT INTO recording_sessions
+           (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
+            createdByAccountId, openEnded, status, paymentStatus, payCode, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Waiting', ?, ?, ?, ?)`,
+        [
+          sessionId,
+          courts[0].venueId,
+          courtId,
+          now,
+          openGameEnd(),
+          playerName || null,
+          phone || null,
+          shareToken,
+          req.user.accountId,
+          code ? "Unpaid" : "Free",
+          code,
+          now,
+          now,
+        ]
+      ),
+      { conn, free: Boolean(req.body.free) }
     );
     await req.db.commit(conn);
     return res.sendSuccess(
       "Game created — pair the court's device to start recording",
-      { sessionId, status: "Waiting", shareUrl: sessionShareUrl(shareToken) },
+      { sessionId, status: "Waiting", payCode, shareUrl: sessionShareUrl(shareToken) },
       201
     );
   } catch (err) {
@@ -365,30 +398,41 @@ router.post(
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
       const sessionId = uuidRow[0].id;
       const shareToken = randomToken();
-      await conn.execute(
-        `INSERT INTO recording_sessions
-           (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
-            createdByAccountId, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?, ?)`,
-        [
-          sessionId,
-          courts[0].venueId,
-          courtId,
-          startLocal,
-          endLocal,
-          playerName || null,
-          phone || null,
-          shareToken,
-          req.user.accountId,
-          now,
-          now,
-        ]
+      const payCode = await insertWithPayCode((code) =>
+        conn.execute(
+          `INSERT INTO recording_sessions
+             (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
+              createdByAccountId, status, paymentStatus, payCode, dateCreated, dateUpdated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?, ?, ?, ?)`,
+          [
+            sessionId,
+            courts[0].venueId,
+            courtId,
+            startLocal,
+            endLocal,
+            playerName || null,
+            phone || null,
+            shareToken,
+            req.user.accountId,
+            code ? "Unpaid" : "Free",
+            code,
+            now,
+            now,
+          ]
+        ),
+        { conn, free: Boolean(req.body.free) }
       );
 
       await req.db.commit(conn);
       return res.sendSuccess(
         "Session booked",
-        { sessionId, startAt: startLocal, endAt: endLocal, shareUrl: sessionShareUrl(shareToken) },
+        {
+          sessionId,
+          startAt: startLocal,
+          endAt: endLocal,
+          payCode,
+          shareUrl: sessionShareUrl(shareToken),
+        },
         201
       );
     } catch (err) {

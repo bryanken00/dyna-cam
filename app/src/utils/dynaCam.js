@@ -42,6 +42,15 @@ export const formatTime = (value) => {
   return `${p.h % 12 === 0 ? 12 : p.h % 12}:${pad(p.mi)} ${p.h < 12 ? "AM" : "PM"}`;
 };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** CR-015: a Manila timestamp → "Nov 19" ("-" when it isn't one). */
+export const formatDay = (value) => {
+  const p = parseLocal(value);
+  if (!p) return "-";
+  return `${MONTHS[p.mo - 1]} ${p.d}`;
+};
+
 /** A running timer / countdown: 754 → "12:34", 3754 → "1:02:34". */
 export const formatElapsed = (seconds) => {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -59,6 +68,16 @@ export const secondsSince = (dataUpdatedAt, now = Date.now()) =>
 
 /** "https://dynacam.ph/session/Ab3…" → "dynacam.ph/session/Ab3…" — what's worth reading out. */
 export const shortLink = (url) => String(url ?? "").replace(/^https?:\/\//, "");
+
+/** CR-015: a game's code as typed — no spaces, upper case ("k7q m2p" → "K7QM2P"). */
+export const normalizePayCode = (value) => String(value ?? "").replace(/\s+/g, "").toUpperCase();
+
+/** CR-015: "K7QM2P" → "K7Q M2P" — easier to read out at the desk (as on the web). */
+export const formatPayCode = (code) =>
+  (normalizePayCode(code).match(/.{1,3}/g) || []).join(" ");
+
+/** CR-015: the API's rule for a code, after normalising. */
+export const PAY_CODE_PATTERN = /^[A-Z0-9]{4,12}$/;
 
 /* ── Connection ──────────────────────────────────────────────────────────── */
 

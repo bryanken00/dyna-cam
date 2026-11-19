@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Loader2, Phone, Plus, User, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Form,
   FormControl,
@@ -36,9 +37,11 @@ const gameSchema = z.object({
   courtId: z.string().min(1, "Choose the court to record"),
   playerName: z.string().trim().max(100, "Keep the name under 100 characters"),
   phone: zPhone,
+  // CR-015: no payment at the desk — the player gets the videos at once
+  free: z.boolean(),
 });
 
-const emptyValues = () => ({ courtId: "", playerName: "", phone: "" });
+const emptyValues = () => ({ courtId: "", playerName: "", phone: "", free: false });
 
 const iconPrefix =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
@@ -108,6 +111,7 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
         courtId: values.courtId,
         playerName: values.playerName || null,
         phone: values.phone || null,
+        free: values.free,
       });
       markSaved();
       onSuccess?.({
@@ -275,6 +279,52 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                   Optional — shown on the player&apos;s page so they know the
                   footage is theirs.
                 </p>
+              </div>
+
+              {/* CR-015: paid at the desk (default) or free */}
+              <div className="mt-7">
+                <SectionLabel>Payment</SectionLabel>
+                <FormField
+                  control={form.control}
+                  name="free"
+                  render={({ field }) => (
+                    <FormItem>
+                      <label
+                        htmlFor="game-free"
+                        className="flex items-start gap-3 p-3.5 cursor-pointer"
+                        style={{
+                          border: "1px solid var(--color-line)",
+                          borderRadius: 10,
+                        }}
+                      >
+                        <FormControl>
+                          <Checkbox
+                            id="game-free"
+                            className="mt-0.5"
+                            checked={field.value}
+                            onCheckedChange={(v) => field.onChange(v === true)}
+                          />
+                        </FormControl>
+                        <span className="min-w-0">
+                          <span
+                            className="block font-medium"
+                            style={{ fontSize: 14, color: "var(--color-text-dark)" }}
+                          >
+                            Free game
+                          </span>
+                          <span
+                            className="block mt-0.5"
+                            style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+                          >
+                            {field.value
+                              ? "No payment — the court's device shows the download QR and the player's page opens right away."
+                              : "Off: the player pays at the front desk with the game's code before getting the videos."}
+                          </span>
+                        </span>
+                      </label>
+                    </FormItem>
+                  )}
+                />
               </div>
             </div>
 

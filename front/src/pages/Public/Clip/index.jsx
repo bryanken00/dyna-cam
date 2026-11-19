@@ -14,11 +14,8 @@ import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
 import { getImageUrl } from "../../../utils/upload";
-import {
-  formatDateTime,
-  formatPayCode,
-  formatPeso,
-} from "../../../utils/dynaCam";
+import PayCode from "../../../components/PayCode";
+import { formatDateTime, formatPeso } from "../../../utils/dynaCam";
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -67,21 +64,6 @@ const ClipHeading = ({ clip, courtName, venueName }) => {
     </div>
   );
 };
-
-/** The pay code, large and spaced, as the player shows it at the desk. */
-const PayCode = ({ code, size = 34 }) => (
-  <div
-    className="font-mono font-semibold select-all"
-    aria-label={`Pay code ${String(code || "").split("").join(" ")}`}
-    style={{
-      fontSize: size,
-      letterSpacing: "0.12em",
-      color: "var(--color-text-dark)",
-    }}
-  >
-    {formatPayCode(code)}
-  </div>
-);
 
 /**
  * A Ready clip that isn't paid yet: the thumbnail under a lock, the price and

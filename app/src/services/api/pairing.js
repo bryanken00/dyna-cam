@@ -19,3 +19,17 @@ export const pairDeviceApi = async (payload) => {
   const response = await axiosPair.post("/api/v1/pair/app", payload);
   return response.data;
 };
+
+/**
+ * CR-015 Find a game: look a game up by the code it showed (the one the
+ * player takes to the front desk). No login. Spaces and lower case are fine.
+ * 200 data: { game: { courtName, venueName, startAt, endAt, status,
+ *   paymentStatus, paid, shareUrl } } — shareUrl only once it's paid
+ * 404 no game has that code · 400 not a code · 429 too many tries
+ */
+export const findGameApi = async (payCode) => {
+  const response = await axiosPair.get(
+    `/api/v1/public/games/${encodeURIComponent(payCode)}`,
+  );
+  return response.data;
+};

@@ -14,8 +14,10 @@ export const getPaymentOptionsApi = async () => {
   return response.data;
 };
 
-// { clip: { clipId, venueName, courtName, requestedAt, price, paymentStatus,
-//           payCode, status, thumbnailUrl } } · 404 no clip has that code
+// { kind: "Clip", clip: { clipId, venueName, courtName, requestedAt, price, paymentStatus,
+//           payCode, status, thumbnailUrl } }
+// CR-015: { kind: "Game", game: { sessionId, venueName, courtName, startAt, endAt, status,
+//           paymentStatus, paidAmount, payCode } } · 404 no clip or game has that code
 export const lookupPaymentApi = async (payCode) => {
   const response = await api.get("/api/v1/admin/payments/lookup", {
     params: { payCode },
@@ -23,7 +25,8 @@ export const lookupPaymentApi = async (payCode) => {
   return response.data;
 };
 
-// { payCode, note? } or { clipId, note? } — cash taken at the desk; the clip unlocks
+// { payCode, note? } or { clipId, note? } — cash taken at the desk; the clip unlocks.
+// CR-015: { sessionId, amount, note? } — a game; its videos open.
 export const createPaymentApi = async (paymentData) => {
   const response = await api.post("/api/v1/admin/payments", paymentData);
   return response.data;

@@ -1,4 +1,4 @@
-import { FlaskConical, Info, Link2 } from "lucide-react-native";
+import { FlaskConical, Info, Link2, Search } from "lucide-react-native";
 import { KeyboardAvoidingView, ScrollView, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import LogoMark from "@/components/LogoMark";
@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { IS_DEMO } from "@/constants";
 import { useThemeColors } from "@/hooks/useTheme";
+import FindGameSheet from "./FindGameSheet";
 import PairKeyInput from "./PairKeyInput";
+import { useFindGameSheet } from "./useFindGameSheet";
 import { KEY_LENGTH, usePairScreen } from "./usePairScreen";
 
 /**
@@ -18,12 +20,16 @@ import { KEY_LENGTH, usePairScreen } from "./usePairScreen";
  *
  * There is no sign-in: staff work happens on the web.
  *
+ * CR-015: "Find a game by its code" opens FindGameSheet — a paid game's
+ * download QR, after its device unpaired.
+ *
  * Centred card with a navy brand panel (LogoMark, CR-012) on top, max-w-[440px],
  * keyboard avoidance. App.js provides the safe area and the status bar.
  */
 const PairScreen = () => {
   const colors = useThemeColors();
   const m = usePairScreen();
+  const find = useFindGameSheet();
 
   return (
     <View className="bg-background flex-1">
@@ -113,11 +119,25 @@ const PairScreen = () => {
                 </>
               )}
             </Button>
+
+            {/* CR-015: a player back with their game's code, after this device unpaired */}
+            <View className="border-border mt-5 border-t pt-4">
+              <Button
+                variant="outline"
+                onPress={find.show}
+                className="h-12 flex-row gap-2"
+                accessibilityHint="Shows a paid game's download QR from its code"
+              >
+                <Search size={17} color={colors.foreground} />
+                <Text className="font-sans-semibold text-[15px]">Find a game by its code</Text>
+              </Button>
+            </View>
             </View>
           </View>
 
         </ScrollView>
       </KeyboardAvoidingView>
+      <FindGameSheet f={find} />
     </View>
   );
 };

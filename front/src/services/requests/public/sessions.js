@@ -14,7 +14,8 @@ export const useGetPublicSession = (shareToken) => {
     retry: (count, error) => error?.response?.status !== 404 && count < 2,
     refetchInterval: (query) => {
       const session = query.state.data?.data?.session;
-      if (LIVE.includes(session?.status)) return 10 * 1000;
+      // CR-015: not paid yet — open by itself once staff record the payment
+      if (LIVE.includes(session?.status) || session?.locked) return 10 * 1000;
       // CR-003: the game is in; its whole video is being put together.
       // CR-013: or a save from the courtside device is still being made
       const savingCapture = session?.captures?.some((c) => ["Saving", "Queued"].includes(c.status));

@@ -2,6 +2,7 @@ import {
   CalendarClock,
   CircleAlert,
   Cloud,
+  Lock,
   Download,
   Video,
   Loader2,
@@ -13,6 +14,7 @@ import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
 import { useSessionPageHooks } from "./hooks";
 import PublicLayout from "../../../components/layout/PublicLayout";
+import PayCode from "../../../components/PayCode";
 import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
 import StatusDot from "../../../components/StatusDot";
@@ -47,11 +49,14 @@ const StatusNotice = ({ session }) => {
     // CR-005: the game starts when the court's device is set up
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
-        <CalendarClock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+        <CalendarClock
+          className="w-4 h-4 mt-0.5 shrink-0"
+          style={{ color: "var(--color-text-muted)" }}
+        />
         <span>
-          <strong className="font-semibold">Not started yet</strong> — recording starts when
-          the court&apos;s device is set up. Keep this link: your whole game appears here as
-          one video after it ends.
+          <strong className="font-semibold">Not started yet</strong> — recording
+          starts when the court&apos;s device is set up. Keep this link: your
+          whole game appears here as one video after it ends.
         </span>
       </div>
     );
@@ -59,14 +64,18 @@ const StatusNotice = ({ session }) => {
   if (status === "Scheduled") {
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
-        <CalendarClock className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+        <CalendarClock
+          className="w-4 h-4 mt-0.5 shrink-0"
+          style={{ color: "var(--color-text-muted)" }}
+        />
         <span>
           <strong className="font-semibold">
             Recording starts at {dayjs(session.startAt).format("h:mm A")}
           </strong>
           {!dayjs(session.startAt).isSame(dayjs(), "day") &&
             ` on ${formatDate(session.startAt)}`}
-          . Keep this link — your whole game appears here as one video after it ends.
+          . Keep this link — your whole game appears here as one video after it
+          ends.
         </span>
       </div>
     );
@@ -75,10 +84,13 @@ const StatusNotice = ({ session }) => {
     // CR-004: nothing to watch until the game ends
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
-        <Radio className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-error)" }} />
+        <Radio
+          className="w-4 h-4 mt-0.5 shrink-0"
+          style={{ color: "var(--color-error)" }}
+        />
         <span>
-          <strong className="font-semibold">Recording now</strong> — your whole game
-          appears here as one video when it ends.
+          <strong className="font-semibold">Recording now</strong> — your whole
+          game appears here as one video when it ends.
         </span>
       </div>
     );
@@ -86,9 +98,14 @@ const StatusNotice = ({ session }) => {
   if (status === "Failed") {
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
-        <CircleAlert className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--color-error)" }} />
+        <CircleAlert
+          className="w-4 h-4 mt-0.5 shrink-0"
+          style={{ color: "var(--color-error)" }}
+        />
         <span>
-          <strong className="font-semibold">This game couldn&apos;t be recorded.</strong>{" "}
+          <strong className="font-semibold">
+            This game couldn&apos;t be recorded.
+          </strong>{" "}
           Please ask the front desk.
         </span>
       </div>
@@ -104,11 +121,23 @@ const StatusNotice = ({ session }) => {
 const SavingProgress = ({ percent }) => {
   const known = percent != null;
   return (
-    <div className="p-4" style={{ ...cardStyle, borderRadius: 10 }} aria-live="polite">
-      <div className="flex items-center gap-2" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
-        <Loader2 className="w-4 h-4 shrink-0 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
+    <div
+      className="p-4"
+      style={{ ...cardStyle, borderRadius: 10 }}
+      aria-live="polite"
+    >
+      <div
+        className="flex items-center gap-2"
+        style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}
+      >
+        <Loader2
+          className="w-4 h-4 shrink-0 animate-spin"
+          style={{ color: "var(--color-secondary-color)" }}
+        />
         <span className="font-semibold">
-          {known ? `Saving your game… uploading ${percent}%` : "Saving your game…"}
+          {known
+            ? `Saving your game… uploading ${percent}%`
+            : "Saving your game…"}
         </span>
       </div>
       <div
@@ -134,9 +163,12 @@ const SavingProgress = ({ percent }) => {
           }}
         />
       </div>
-      <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-        A long game can take a while to upload from the court. This page updates on its own —
-        keep it open or come back to this link later.
+      <p
+        className="m-0 mt-2"
+        style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+      >
+        A long game can take a while to upload from the court. This page updates
+        on its own — keep it open or come back to this link later.
       </p>
     </div>
   );
@@ -144,15 +176,25 @@ const SavingProgress = ({ percent }) => {
 
 /** "8 minutes weren't recorded (11:23 – 11:31 AM)" for a whole video's gaps. */
 const gapNote = (gaps) => {
-  const seconds = gaps.reduce((sum, gap) => sum + dayjs(gap.endAt).diff(dayjs(gap.startAt), "second"), 0);
+  const seconds = gaps.reduce(
+    (sum, gap) => sum + dayjs(gap.endAt).diff(dayjs(gap.startAt), "second"),
+    0,
+  );
   const minutes = Math.max(1, Math.round(seconds / 60));
-  const what = minutes === 1 ? "1 minute wasn't recorded" : `${minutes} minutes weren't recorded`;
+  const what =
+    minutes === 1
+      ? "1 minute wasn't recorded"
+      : `${minutes} minutes weren't recorded`;
   return `${what} (${gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")})`;
 };
 
 /** CR-003: Cam 1 / Cam 2 switch above the whole video (two-camera courts). */
 const CameraTabs = ({ videos, active, onSelect }) => (
-  <div className="grid grid-cols-2 gap-2 mt-4" role="tablist" aria-label="Camera">
+  <div
+    className="grid grid-cols-2 gap-2 mt-4"
+    role="tablist"
+    aria-label="Camera"
+  >
     {videos.map((video) => (
       <Button
         key={video.camera}
@@ -182,13 +224,18 @@ const WholeVideoCard = ({ video, twoCameras }) => {
   return (
     <div className="overflow-hidden mt-3" style={cardStyle}>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
+        <span
+          className="font-semibold"
+          style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}
+        >
           {title}
         </span>
         {video.status === "Ready" && (
           <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
             {[
-              video.durationSeconds ? formatMinutes(Math.round(video.durationSeconds / 60)) : null,
+              video.durationSeconds
+                ? formatMinutes(Math.round(video.durationSeconds / 60))
+                : null,
               video.sizeBytes ? formatBytes(video.sizeBytes) : null,
             ]
               .filter(Boolean)
@@ -207,20 +254,34 @@ const WholeVideoCard = ({ video, twoCameras }) => {
             playsInline
             preload="metadata"
             className="w-full block"
-            style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+            style={{
+              aspectRatio: "16 / 9",
+              background: "var(--color-surface-sunken)",
+            }}
           />
           <div className="p-3 space-y-2">
             {downloadHref && (
               <Button asChild size="lg" className="h-11 w-full">
                 <a href={downloadHref} download>
                   <Download />
-                  {twoCameras ? `Download ${video.label}` : "Download whole game"}
+                  {twoCameras
+                    ? `Download ${video.label}`
+                    : "Download whole game"}
                 </a>
               </Button>
             )}
             {video.driveUrl && (
-              <Button asChild variant="outline" size="lg" className="h-11 w-full">
-                <a href={video.driveUrl} target="_blank" rel="noopener noreferrer">
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="h-11 w-full"
+              >
+                <a
+                  href={video.driveUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <Cloud />
                   Open in Google Drive
                 </a>
@@ -232,7 +293,8 @@ const WholeVideoCard = ({ video, twoCameras }) => {
 
       {video.gaps?.length > 0 && video.status === "Ready" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          {gapNote(video.gaps)} — the camera wasn&apos;t recording then, so the video skips it.
+          {gapNote(video.gaps)} — the camera wasn&apos;t recording then, so the
+          video skips it.
         </p>
       )}
       {video.status === "Failed" && (
@@ -273,13 +335,19 @@ const clockOf = (seconds) =>
  */
 const CaptureCard = ({ capture }) => {
   const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
-  const ready = capture.videos.filter((video) => video.status === "Ready" && video.videoUrl);
+  const ready = capture.videos.filter(
+    (video) => video.status === "Ready" && video.videoUrl,
+  );
 
   return (
     <div className="overflow-hidden" style={cardStyle}>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
-          Save {capture.number} · {clockOf(capture.fromSeconds)} – {clockOf(capture.toSeconds)}
+        <span
+          className="font-semibold"
+          style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}
+        >
+          Save {capture.number} · {clockOf(capture.fromSeconds)} –{" "}
+          {clockOf(capture.toSeconds)}
         </span>
         <StatusDot
           tone={
@@ -318,14 +386,24 @@ const CaptureCard = ({ capture }) => {
               playsInline
               preload="metadata"
               className="w-full block"
-              style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+              style={{
+                aspectRatio: "16 / 9",
+                background: "var(--color-surface-sunken)",
+              }}
             />
             {download && (
               <div className="p-3">
-                <Button asChild variant="outline" size="lg" className="h-11 w-full">
+                <Button
+                  asChild
+                  variant="outline"
+                  size="lg"
+                  className="h-11 w-full"
+                >
                   <a href={download} download>
                     <Download />
-                    {capture.videos.length > 1 ? `Download ${video.label}` : "Download"}
+                    {capture.videos.length > 1
+                      ? `Download ${video.label}`
+                      : "Download"}
                   </a>
                 </Button>
               </div>
@@ -336,17 +414,20 @@ const CaptureCard = ({ capture }) => {
 
       {capture.status === "Saving" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          The recorder is copying this part of your game — it&apos;ll play here in a few minutes.
+          The recorder is copying this part of your game — it&apos;ll play here
+          in a few minutes.
         </p>
       )}
       {capture.status === "Queued" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          Waiting for the save before it to finish — the recorder makes them one at a time.
+          Waiting for the save before it to finish — the recorder makes them one
+          at a time.
         </p>
       )}
       {capture.status === "Failed" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          This save couldn&apos;t be made — the camera may not have been recording then.
+          This save couldn&apos;t be made — the camera may not have been
+          recording then.
         </p>
       )}
       {capture.status === "Expired" && (
@@ -369,7 +450,10 @@ const PartCard = ({ part }) => {
     <div className="overflow-hidden" style={cardStyle}>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
-          <span className="font-semibold" style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}>
+          <span
+            className="font-semibold"
+            style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}
+          >
             {partLabel(part.partIndex)}
             {part.camera > 0 && ` · Cam ${part.camera}`}
           </span>
@@ -379,8 +463,14 @@ const PartCard = ({ part }) => {
           </span>
         </div>
         {part.status === "Pending" && (
-          <span className="inline-flex items-center gap-1.5 shrink-0" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-            <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--color-secondary-color)" }} />
+          <span
+            className="inline-flex items-center gap-1.5 shrink-0"
+            style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+          >
+            <Loader2
+              className="w-3.5 h-3.5 animate-spin"
+              style={{ color: "var(--color-secondary-color)" }}
+            />
             Saving…
           </span>
         )}
@@ -396,11 +486,19 @@ const PartCard = ({ part }) => {
             playsInline
             preload="none"
             className="w-full block"
-            style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
+            style={{
+              aspectRatio: "16 / 9",
+              background: "var(--color-surface-sunken)",
+            }}
           />
           {downloadHref && (
             <div className="p-3">
-              <Button asChild variant="outline" size="lg" className="h-11 w-full">
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="h-11 w-full"
+              >
                 <a href={downloadHref} download>
                   <Download />
                   Download {partLabel(part.partIndex).toLowerCase()}
@@ -412,12 +510,18 @@ const PartCard = ({ part }) => {
       )}
 
       {part.status === "Failed" && (
-        <p className="m-0 px-4 pb-3" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+        <p
+          className="m-0 px-4 pb-3"
+          style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+        >
           This part couldn&apos;t be saved.
         </p>
       )}
       {part.status === "Expired" && (
-        <p className="m-0 px-4 pb-3" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+        <p
+          className="m-0 px-4 pb-3"
+          style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+        >
           This part has expired here.
           {part.driveUrl && (
             <>
@@ -444,6 +548,75 @@ const PartCard = ({ part }) => {
  * it's recording, how much is saved after it ends, then the whole video per
  * camera (CR-003). Players never see parts (CR-004). Polls while anything changes.
  */
+/**
+ * CR-015: a game that isn't paid yet — the code to show at the front desk and
+ * what's waiting. Nothing plays until staff record the payment; the page keeps
+ * checking, so it opens by itself.
+ */
+const LockedGame = ({ session, videos, captures }) => {
+  const waiting = [
+    videos.length > 0 || ["Processing", "Ready"].includes(session.status)
+      ? "the whole game"
+      : null,
+    captures.length > 0
+      ? `${captures.length} ${captures.length === 1 ? "save" : "saves"}`
+      : null,
+  ].filter(Boolean);
+  return (
+    <div className="mt-4 p-5 text-center" style={cardStyle} aria-live="polite">
+      <span
+        className="inline-flex items-center justify-center"
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: 999,
+          background: "var(--color-surface-sunken)",
+          border: "1px solid var(--color-line)",
+          color: "var(--color-text-dark)",
+        }}
+      >
+        <Lock className="w-5.5 h-5.5" />
+      </span>
+      <p
+        className="m-0 mt-3 font-semibold"
+        style={{ fontSize: 17, color: "var(--color-text-dark)" }}
+      >
+        Pay at the front desk to get your videos
+      </p>
+      {waiting.length > 0 && (
+        <p
+          className="m-0 mt-1"
+          style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
+        >
+          Waiting for you: {waiting.join(" and ")}
+        </p>
+      )}
+      <div
+        className="mt-4 py-4 px-3"
+        style={{
+          border: "1px dashed var(--color-line)",
+          borderRadius: 12,
+          background: "var(--color-surface-sunken)",
+        }}
+      >
+        <PayCode code={session.payCode} />
+        <p
+          className="m-0 mt-1.5"
+          style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+        >
+          Show this code to the staff
+        </p>
+      </div>
+      <p
+        className="m-0 mt-3"
+        style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+      >
+        This page opens by itself once it&apos;s paid.
+      </p>
+    </div>
+  );
+};
+
 const SessionPage = () => {
   const {
     session,
@@ -512,16 +685,28 @@ const SessionPage = () => {
       {/* Heading */}
       <div className="flex items-center gap-3 mb-1 min-w-0">
         {logo && (
-          <img src={logo} alt="" className="object-contain shrink-0" style={{ maxHeight: 40, maxWidth: 96 }} />
+          <img
+            src={logo}
+            alt=""
+            className="object-contain shrink-0"
+            style={{ maxHeight: 40, maxWidth: 96 }}
+          />
         )}
         <div className="min-w-0">
           <h1
             className="m-0 font-semibold leading-tight truncate"
-            style={{ fontSize: 20, letterSpacing: "-0.3px", color: "var(--color-text-dark)" }}
+            style={{
+              fontSize: 20,
+              letterSpacing: "-0.3px",
+              color: "var(--color-text-dark)",
+            }}
           >
             {courtName}
           </h1>
-          <p className="m-0 truncate" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+          <p
+            className="m-0 truncate"
+            style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+          >
             {venueName}
           </p>
         </div>
@@ -529,7 +714,10 @@ const SessionPage = () => {
       <div className="flex items-center justify-between gap-3 flex-wrap mt-3 mb-4">
         <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
           {playerName && (
-            <div className="font-medium" style={{ color: "var(--color-text-dark)" }}>
+            <div
+              className="font-medium"
+              style={{ color: "var(--color-text-dark)" }}
+            >
               {playerName}
             </div>
           )}
@@ -540,7 +728,11 @@ const SessionPage = () => {
               : `${formatDate(session.startAt)} · ${formatTimeRange(session.startAt, session.endAt)}`}
         </div>
         {/* "Ready" only once the whole video is there (CR-004) */}
-        <StatusDot tone={saving ? "warning" : SESSION_STATUS_TONE[session.status] || "muted"}>
+        <StatusDot
+          tone={
+            saving ? "warning" : SESSION_STATUS_TONE[session.status] || "muted"
+          }
+        >
           {saving ? "Saving" : session.status}
         </StatusDot>
       </div>
@@ -548,60 +740,89 @@ const SessionPage = () => {
       <StatusNotice session={session} />
       {saving && <SavingProgress percent={saving.percent} />}
 
-      {/* CR-001: the whole game's folder in the venue's Google Drive */}
-      {session.driveUrl && (
-        <Button asChild variant="outline" size="lg" className="h-12 w-full mt-4">
-          <a href={session.driveUrl} target="_blank" rel="noopener noreferrer">
-            <Cloud />
-            Open the whole game in Google Drive
-          </a>
-        </Button>
+      {session.locked && (
+        <LockedGame session={session} videos={videos} captures={captures} />
       )}
 
-      {/* CR-003: the whole game, one video per camera (once it's made) */}
-      {!saving && videos.length > 1 && (
-        <CameraTabs videos={videos} active={activeVideo} onSelect={setCameraTab} />
-      )}
-      {!saving && activeVideo && <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />}
-
-      {/* CR-013: the stretches saved from the courtside device */}
-      {captures.length > 0 && (
-        <div className="mt-6">
-          <h2
-            className="m-0 mb-3 font-semibold"
-            style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}
-          >
-            Your saves
-          </h2>
-          <div className="space-y-3">
-            {captures.map((capture) => (
-              <CaptureCard key={capture.number} capture={capture} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Only a game recorded before whole videos still lists its pieces */}
-      {parts.length > 0 && (
-        <div className="mt-4 space-y-3">
-          {parts.map((part) => (
-            <PartCard key={`${part.partIndex}-${part.camera ?? 0}`} part={part} />
-          ))}
-        </div>
-      )}
-
-      {readyCount > 0 && (
-        <div className="mt-4">
-          <Button size="lg" className="h-12 w-full" onClick={handleShare}>
-            <Share2 />
-            Share this session
-          </Button>
-          {expiresAt && (
-            <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-              Available until {formatDateTime(expiresAt)}
-            </p>
+      {!session.locked && (
+        <>
+          {/* CR-001: the whole game's folder in the venue's Google Drive */}
+          {session.driveUrl && (
+            <Button
+              asChild
+              variant="outline"
+              size="lg"
+              className="h-12 w-full mt-4"
+            >
+              <a
+                href={session.driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Cloud />
+                Open the whole game in Google Drive
+              </a>
+            </Button>
           )}
-        </div>
+
+          {/* CR-003: the whole game, one video per camera (once it's made) */}
+          {!saving && videos.length > 1 && (
+            <CameraTabs
+              videos={videos}
+              active={activeVideo}
+              onSelect={setCameraTab}
+            />
+          )}
+          {!saving && activeVideo && (
+            <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />
+          )}
+
+          {/* CR-013: the stretches saved from the courtside device */}
+          {captures.length > 0 && (
+            <div className="mt-6">
+              <h2
+                className="m-0 mb-3 font-semibold"
+                style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}
+              >
+                Your saves
+              </h2>
+              <div className="space-y-3">
+                {captures.map((capture) => (
+                  <CaptureCard key={capture.number} capture={capture} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Only a game recorded before whole videos still lists its pieces */}
+          {parts.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {parts.map((part) => (
+                <PartCard
+                  key={`${part.partIndex}-${part.camera ?? 0}`}
+                  part={part}
+                />
+              ))}
+            </div>
+          )}
+
+          {readyCount > 0 && (
+            <div className="mt-4">
+              <Button size="lg" className="h-12 w-full" onClick={handleShare}>
+                <Share2 />
+                Share this session
+              </Button>
+              {expiresAt && (
+                <p
+                  className="m-0 mt-3 text-center"
+                  style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+                >
+                  Available until {formatDateTime(expiresAt)}
+                </p>
+              )}
+            </div>
+          )}
+        </>
       )}
     </PublicLayout>
   );

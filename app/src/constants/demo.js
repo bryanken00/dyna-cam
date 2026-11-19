@@ -21,6 +21,11 @@
  * CR-013 saves: "Save the last N min" works after the first minute, up to 5
  * at once; each is made in turn — "Queued", then "Saving" with a rising
  * percent for DEMO_CAPTURE_MS, then "Ready". Saves can be deleted.
+ *
+ * CR-015 payment: the game is Unpaid (code DEMO_PAY_CODE, no download link)
+ * until "staff record the payment" DEMO_PAID_MS after End game. Find a game:
+ * DEMO_PAY_CODE finds the demo game (paid once that has happened); any other
+ * code answers "No game has that code".
  */
 
 /** Fake latency, so loading states are actually visible while developing. */
@@ -44,6 +49,8 @@ const DEMO_CAPTURE_MS = 7000; // a save "copies and uploads"
 const CAPTURE_MIN_SECONDS = 60;
 const CAPTURE_MAX_PER_GAME = 5;
 const CAPTURE_REPEAT_MS = 3000; // a double tap returns the save already made
+const DEMO_PAID_MS = 15000; // CR-015: "staff record the payment" after End game
+export const DEMO_PAY_CODE = "K7QM2P";
 
 const pad2 = (n) => String(n).padStart(2, "0");
 
@@ -88,6 +95,32 @@ const demoStream = (ended) => {
   };
 };
 
+/** CR-015: has "staff" recorded the demo game's payment yet? */
+const demoPaid = () =>
+  Boolean(demoGame?.endedMs) && Date.now() - demoGame.endedMs >= DEMO_PAID_MS;
+
+/**
+ * CR-015: GET /public/games/:payCode's `data` (Find a game), or null when no
+ * game has that code.
+ */
+export const demoFindGame = (payCode) => {
+  if (payCode !== DEMO_PAY_CODE) return null;
+  const paid = demoPaid();
+  const startMs = demoGame?.startMs ?? Date.now() - 45 * 60000;
+  return {
+    game: {
+      courtName: "Court 1",
+      venueName: "Dink City Pickleball",
+      startAt: stampAt(startMs),
+      endAt: stampAt(demoGame?.endedMs ?? startMs + 40 * 60000),
+      status: "Ready",
+      paymentStatus: paid ? "Paid" : "Unpaid",
+      paid,
+      shareUrl: paid ? `${DEMO_APP_URL}/session/demo-share-1` : null,
+    },
+  };
+};
+
 /** The demo session as the API's AppSession. */
 const demoSession = () => {
   const now = Date.now();
@@ -118,7 +151,11 @@ const demoSession = () => {
       durationSeconds: Math.floor(lengthMs / 1000),
       // CR-006: the game's file uploads after End game
       uploadPercent: endedMs ? Math.min(100, Math.floor(((now - endedMs) / DEMO_SAVE_MS) * 100)) : null,
-      shareUrl: `${DEMO_APP_URL}/session/demo-share-1`,
+      // CR-015: the download link only once the game is paid at the desk
+      shareUrl: demoPaid() ? `${DEMO_APP_URL}/session/demo-share-1` : null,
+      payment: demoPaid()
+        ? { status: "Paid", payCode: null }
+        : { status: "Unpaid", payCode: DEMO_PAY_CODE },
       failureReason: null,
     },
     unpairInSeconds: endedMs

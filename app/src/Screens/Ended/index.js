@@ -3,12 +3,13 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react-native";
 import { ScrollView, useWindowDimensions, View } from "react-native";
 import ConnectionBanner from "@/components/ConnectionBanner";
 import DotsLoader from "@/components/Loading/DotsLoader";
+import LinkText from "@/components/LinkText";
+import PayCodeCard from "@/components/PayCodeCard";
 import QrCode from "@/components/QrCode";
 import TickingTimer from "@/components/TickingTimer";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
-import { shortLink } from "@/utils/dynaCam";
 import { useEndedScreen } from "./useEndedScreen";
 
 /** Wide enough to put the QR beside the text (landscape tablet / phone). */
@@ -23,7 +24,10 @@ const savingText = (session) =>
     ? "Saving your game…"
     : `Saving your game… uploading ${session.uploadPercent}%`;
 
-/** The saving progress → "Ready — scan to download", or why not. */
+/**
+ * The saving progress → "Ready — scan to download" (CR-015: "Ready — pay at
+ * the front desk" until it's paid), or why not.
+ */
 const SavingLine = ({ session }) => {
   const colors = useThemeColors();
   if (!session) return null;
@@ -33,7 +37,9 @@ const SavingLine = ({ session }) => {
         <View className="items-center gap-1">
           <View className="flex-row items-center gap-2">
             <CheckCircle2 size={24} color={colors.foreground} />
-            <Text className="font-sans-semibold text-[22px]">Ready — scan to download</Text>
+            <Text className="font-sans-semibold shrink text-center text-[22px]">
+              {session.shareUrl ? "Ready — scan to download" : "Your game is saved"}
+            </Text>
           </View>
           {/* Ready can still mean some minutes weren't recorded — the API says which */}
           {session.failureReason ? (
@@ -74,6 +80,8 @@ const SavingLine = ({ session }) => {
  * After the session ends (Stop, its end time, or staff on the web): the
  * game's QR, full screen, so players can still scan it on their way out —
  * with the saving progress, Done, and "This device unpairs in 9:41".
+ * CR-015: until the game is paid, its code to pay with at the front desk in
+ * place of the QR; the QR appears by itself once staff record the payment.
  *
  * The link works before every part is ready; the page fills in as they are.
  * The screen stays awake until the device unpairs.
@@ -140,18 +148,31 @@ const EndedScreen = () => {
             <View className="flex-row items-center gap-8">
               <View className="items-center">
                 <QrCode value={s.shareUrl} size={qrSize} />
-                <Text className="mt-3 font-mono text-[14px]" selectable>
-                  {shortLink(s.shareUrl)}
-                </Text>
+                <LinkText url={s.shareUrl} className="mt-3 text-[14px]" />
               </View>
               <View className="min-w-0 flex-1 items-center">{info}</View>
             </View>
           ) : (
             <>
               <QrCode value={s.shareUrl} size={qrSize} />
-              <Text className="text-center font-mono text-[14px]" numberOfLines={2} selectable>
-                {shortLink(s.shareUrl)}
-              </Text>
+              <LinkText url={s.shareUrl} className="text-[14px]" />
+              {info}
+            </>
+          )
+        ) : s?.payment?.status === "Unpaid" ? (
+          // CR-015: the code to pay with; the QR replaces it once it's paid
+          sideBySide ? (
+            <View className="flex-row items-center gap-8">
+              <View className="w-[46%] max-w-[480px]">
+                <PayCodeCard code={s.payment.payCode} large />
+              </View>
+              <View className="min-w-0 flex-1 items-center">{info}</View>
+            </View>
+          ) : (
+            <>
+              <View className="w-full max-w-[480px]">
+                <PayCodeCard code={s.payment.payCode} large />
+              </View>
               {info}
             </>
           )

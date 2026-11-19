@@ -10,7 +10,8 @@ read for the area you're touching. Read `architecture-and-traps.md` first: the t
 and Reanimated traps there are easy to walk into.
 
 The app is a **session device** (PLAN-002 §5): Pair this device → Session (live video, QR, Stop)
-→ Ended → Pair. There is no sign-in and no staff-account app. A new admin-style list module would
+→ Ended → Pair. Until a game is paid at the desk (CR-015) the QR is its pay code; Pair has Find a
+game (a paid game's QR by its code). There is no sign-in and no staff-account app. A new admin-style list module would
 use the **`new-mobile-module`** skill — read its status note first, since it needs the removed
 staff sign-in back. If it needs a new table or endpoint, the API and web half comes from
 **`new-module`** first.

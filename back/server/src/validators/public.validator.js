@@ -15,6 +15,14 @@ export const clipTokenParamsSchema = z.object({ shareToken: token });
 // /sessions/:shareToken
 export const sessionTokenParamsSchema = z.object({ shareToken: token });
 
+// /games/:payCode — CR-015: a game's code as typed on the device ("k7qm 2p" works)
+export const gameCodeParamsSchema = z.object({
+  payCode: z
+    .string()
+    .transform((value) => value.replace(/\s+/g, "").toUpperCase())
+    .pipe(z.string().regex(/^[A-Z0-9]{4,12}$/, "Enter the game's code")),
+});
+
 // /stream-setup/:code — the player's own live stream (PLAN-002 Phase G)
 export const streamSetupParamsSchema = z.object({ code: token });
 

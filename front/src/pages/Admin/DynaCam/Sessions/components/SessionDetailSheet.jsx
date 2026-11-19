@@ -1,4 +1,15 @@
-import { Ban, Cloud, Copy, Download, Film, RotateCcw, Square, X } from "lucide-react";
+import { useState } from "react";
+import {
+  Ban,
+  Banknote,
+  Cloud,
+  Copy,
+  Download,
+  Film,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
@@ -8,11 +19,14 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import GamePaymentFormModal from "./GamePaymentFormModal";
 import SessionDevices from "./SessionDevices";
 import SessionStreamLine from "./SessionStreamLine";
 import DescriptionList from "../../../../../components/DescriptionList";
+import PaymentStatusChip from "../../../../../components/PaymentStatusChip";
 import Spinner from "../../../../../components/Spinner";
 import StatusDot from "../../../../../components/StatusDot";
+import { usePermissions } from "../../../../../hooks/usePermissions";
 import { confirm } from "../../../../../store/confirmStore";
 import { copyText } from "../../../../../utils/clipboard";
 import { decodeHTML } from "../../../../../utils/decode-html";
@@ -24,6 +38,7 @@ import {
   formatBytes,
   formatDate,
   formatMinutes,
+  formatPayCode,
   formatTimeRange,
 } from "../../../../../utils/dynaCam";
 import {
@@ -61,7 +76,10 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
     <div className="p-3.5" style={{ borderTop: "1px solid var(--color-line)" }}>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <span className="font-semibold" style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
+          <span
+            className="font-semibold"
+            style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
+          >
             {video.label}
           </span>
           {ready && (
@@ -73,7 +91,10 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <StatusDot tone={VIDEO_STATUS_TONE[video.status] || "muted"} title={video.failureReason || undefined}>
+          <StatusDot
+            tone={VIDEO_STATUS_TONE[video.status] || "muted"}
+            title={video.failureReason || undefined}
+          >
             {/* CR-006: the recorder box makes the file, then uploads it */}
             {video.status === "Pending"
               ? "Being made on the box"
@@ -90,8 +111,17 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
             </Button>
           )}
           {video.driveUrl && (
-            <Button asChild variant="ghost" size="sm" title="Open in Google Drive">
-              <a href={video.driveUrl} target="_blank" rel="noopener noreferrer">
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              title="Open in Google Drive"
+            >
+              <a
+                href={video.driveUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <Cloud />
               </a>
             </Button>
@@ -101,7 +131,9 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
               variant="outline"
               size="sm"
               disabled={retryMutation.isPending}
-              onClick={() => retryMutation.mutate({ sessionId, camera: video.camera })}
+              onClick={() =>
+                retryMutation.mutate({ sessionId, camera: video.camera })
+              }
             >
               <RotateCcw />
               Try again
@@ -111,15 +143,17 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
       </div>
       {video.status === "Failed" && video.failureReason && (
         <p className="m-0 mt-1" style={muted}>
-          {video.failureReason}. Try again asks the recorder box to send it again — it works while
-          the box still has the game&apos;s footage.
+          {video.failureReason}. Try again asks the recorder box to send it
+          again — it works while the box still has the game&apos;s footage.
         </p>
       )}
       {video.gaps?.length > 0 && (
         <p className="m-0 mt-1" style={muted}>
           Skips{" "}
-          {video.gaps.map((gap) => formatTimeRange(gap.startAt, gap.endAt)).join(", ")} (no
-          footage)
+          {video.gaps
+            .map((gap) => formatTimeRange(gap.startAt, gap.endAt))
+            .join(", ")}{" "}
+          (no footage)
         </p>
       )}
       {ready && videoSrc && (
@@ -149,7 +183,13 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
  * the write flag, and `onPairDevice(session)` (the page owns the pairing
  * dialogs so a booking can open them too).
  */
-const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }) => {
+const SessionDetailSheet = ({
+  open,
+  onClose,
+  sessionId,
+  canWrite,
+  onPairDevice,
+}) => {
   const { data, isLoading, error } = useGetSessionById(open ? sessionId : null);
   const session = data?.data?.session || null;
   const videos = session?.videos || [];
@@ -161,10 +201,19 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
     ["Waiting", "Scheduled", "Recording"].includes(session?.status) ||
     (session?.devices || []).some((d) => d.status === "Active");
   const showStream =
-    !!session?.stream || ["Waiting", "Scheduled", "Recording"].includes(session?.status);
+    !!session?.stream ||
+    ["Waiting", "Scheduled", "Recording"].includes(session?.status);
 
   const cancelMutation = useCancelSession();
   const endMutation = useEndSession();
+
+  // CR-015: the game's videos open once its payment is recorded here (Payments permission)
+  const { hasPermission } = usePermissions();
+  const [payOpen, setPayOpen] = useState(false);
+  const canTakePayment =
+    hasPermission("payments", null, "write") &&
+    session?.paymentStatus === "Unpaid" &&
+    !["Cancelled", "Failed"].includes(session?.status);
 
   const handleCopy = async () => {
     const ok = await copyText(session?.shareUrl);
@@ -226,7 +275,10 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                   </SheetTitle>
                   <SheetDescription
                     className="m-0 mt-0.5 truncate"
-                    style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
+                    style={{
+                      fontSize: 13,
+                      color: "var(--color-text-secondary)",
+                    }}
                   >
                     {!session
                       ? "Loading…"
@@ -259,7 +311,9 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
 
             {isLoading && <Spinner className="py-16" tip="Loading session…" />}
             {error && (
-              <p style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+              <p
+                style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
+              >
                 {error.response?.data?.message || "Couldn't load this session."}
               </p>
             )}
@@ -272,14 +326,60 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                       label: "Status",
                       value: (
                         <div>
-                          <StatusDot tone={SESSION_STATUS_TONE[session.status] || "muted"}>
+                          <StatusDot
+                            tone={
+                              SESSION_STATUS_TONE[session.status] || "muted"
+                            }
+                          >
                             {session.status}
                           </StatusDot>
                           {session.failureReason && (
-                            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: "var(--color-text-muted)",
+                              }}
+                            >
                               {session.failureReason}
                             </div>
                           )}
+                        </div>
+                      ),
+                    },
+                    {
+                      label: "Payment",
+                      value: (
+                        <div>
+                          <PaymentStatusChip
+                            paymentStatus={session.paymentStatus}
+                            price={session.paidAmount}
+                          />
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "var(--color-text-muted)",
+                            }}
+                          >
+                            {session.paymentStatus === "Unpaid" ? (
+                              <>
+                                Code{" "}
+                                <span
+                                  className="font-mono"
+                                  style={{
+                                    letterSpacing: "0.06em",
+                                    color: "var(--color-text-dark)",
+                                  }}
+                                >
+                                  {formatPayCode(session.payCode)}
+                                </span>{" "}
+                                — the videos open once it&apos;s paid
+                              </>
+                            ) : session.paymentStatus === "Free" ? (
+                              "Free game — open to the player"
+                            ) : (
+                              "The player can watch and download"
+                            )}
+                          </div>
                         </div>
                       ),
                     },
@@ -306,8 +406,14 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                             ? "—"
                             : "One video per camera, after the game ends",
                     },
-                    { label: "Player", value: decodeHTML(session.playerName) || "—" },
-                    { label: "Phone", value: formatPhoneDisplay(session.phone) || "—" },
+                    {
+                      label: "Player",
+                      value: decodeHTML(session.playerName) || "—",
+                    },
+                    {
+                      label: "Phone",
+                      value: formatPhoneDisplay(session.phone) || "—",
+                    },
                     {
                       label: "Player link",
                       value:
@@ -356,7 +462,10 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                 {videos.length > 0 && (
                   <div
                     className="mt-6 overflow-hidden"
-                    style={{ border: "1px solid var(--color-line)", borderRadius: 10 }}
+                    style={{
+                      border: "1px solid var(--color-line)",
+                      borderRadius: 10,
+                    }}
                   >
                     <div
                       className="px-3.5 py-2.5 uppercase"
@@ -382,7 +491,13 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                 )}
 
                 {captures.length > 0 && (
-                  <div className="mt-6 overflow-hidden" style={{ border: "1px solid var(--color-line)", borderRadius: "var(--radius-card)" }}>
+                  <div
+                    className="mt-6 overflow-hidden"
+                    style={{
+                      border: "1px solid var(--color-line)",
+                      borderRadius: "var(--radius-card)",
+                    }}
+                  >
                     <div
                       className="px-3.5 py-2.5 uppercase"
                       style={{
@@ -399,9 +514,14 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                       <div key={capture.captureId}>
                         <div
                           className="px-3.5 pt-3 font-semibold"
-                          style={{ fontSize: 13, color: "var(--color-text-dark)", borderTop: "1px solid var(--color-line)" }}
+                          style={{
+                            fontSize: 13,
+                            color: "var(--color-text-dark)",
+                            borderTop: "1px solid var(--color-line)",
+                          }}
                         >
-                          Save {capture.number} · {clockOf(capture.fromSeconds)} – {clockOf(capture.toSeconds)}
+                          Save {capture.number} · {clockOf(capture.fromSeconds)}{" "}
+                          – {clockOf(capture.toSeconds)}
                         </div>
                         {capture.videos.map((video) => (
                           <WholeVideoRow
@@ -452,29 +572,51 @@ const SessionDetailSheet = ({ open, onClose, sessionId, canWrite, onPairDevice }
                   End game
                 </Button>
               )}
-              {canWrite && ["Waiting", "Scheduled"].includes(session.status) && (
+              {canWrite &&
+                ["Waiting", "Scheduled"].includes(session.status) && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="lg"
+                    className="sm:mr-auto"
+                    disabled={cancelMutation.isPending}
+                    onClick={handleCancel}
+                  >
+                    <Ban />
+                    Cancel session
+                  </Button>
+                )}
+              {session.status !== "Cancelled" && (
                 <Button
                   type="button"
-                  variant="destructive"
                   size="lg"
-                  className="sm:mr-auto"
-                  disabled={cancelMutation.isPending}
-                  onClick={handleCancel}
+                  variant={canTakePayment ? "outline" : "default"}
+                  onClick={handleCopy}
                 >
-                  <Ban />
-                  Cancel session
-                </Button>
-              )}
-              {session.status !== "Cancelled" && (
-                <Button type="button" size="lg" onClick={handleCopy}>
                   <Copy />
                   Copy player link
+                </Button>
+              )}
+              {canTakePayment && (
+                <Button
+                  type="button"
+                  size="lg"
+                  onClick={() => setPayOpen(true)}
+                >
+                  <Banknote />
+                  Record payment
                 </Button>
               )}
             </div>
           )}
         </div>
       </SheetContent>
+      <GamePaymentFormModal
+        open={payOpen}
+        onClose={() => setPayOpen(false)}
+        onSuccess={() => setPayOpen(false)}
+        session={session}
+      />
     </Sheet>
   );
 };

@@ -191,7 +191,21 @@ describe("recording sessions", () => {
       assert.equal(one.data.session.videos[0].status, "Ready");
 
       const token = finished.shareUrl.split("/").pop();
+      // CR-015: locked until paid at the desk — the code, nothing to play
+      const locked = await ctx.api("GET", `/public/sessions/${token}`);
+      assert.equal(locked.data.session.locked, true);
+      assert.match(locked.data.session.payCode, /^[A-Z0-9]{6}$/);
+      assert.equal(locked.data.session.videos[0].videoUrl, null);
+      assert.equal(locked.data.session.videos[0].downloadUrl, null);
+      const paid = await call("POST", "/admin/payments", {
+        sessionId: finished.sessionId,
+        amount: 300,
+      });
+      assert.equal(paid.status, 201, JSON.stringify(paid.body));
+
       const page = await ctx.api("GET", `/public/sessions/${token}`);
+      assert.equal(page.data.session.locked, false);
+      assert.equal(page.data.session.payCode, null);
       assert.equal(page.status, 200);
       assert.equal(page.data.session.status, "Ready");
       assert.equal(page.data.session.sessionId, undefined, "no IDs on the public page");

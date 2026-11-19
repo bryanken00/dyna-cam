@@ -32,7 +32,8 @@ export const useGetPaymentOptions = () => {
   });
 };
 
-// Query: the clip behind a pay code, so staff can check it before taking cash.
+// Query: the clip (or CR-015 game) behind a pay code, so staff can check it
+// before taking cash: { kind: "Clip", clip } | { kind: "Game", game }.
 // Runs only once a code is submitted; a 404 is an answer, not a retry case.
 export const useLookupPayCode = (payCode) => {
   return useQuery({
@@ -45,28 +46,31 @@ export const useLookupPayCode = (payCode) => {
   });
 };
 
-// Mutation: Record a cash payment — the clip unlocks
+// Mutation: Record a cash payment — the clip unlocks (CR-015: or the game's
+// videos open, for { sessionId, amount })
 export const useCreatePayment = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: createPaymentApi,
-    onSuccess: () => {
-      toast.success("Payment recorded — the clip is unlocked");
+    onSuccess: (response) => {
+      toast.success(response?.message || "Payment recorded");
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       queryClient.invalidateQueries({ queryKey: ["clips"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
     onError: (error) => {
       const status = error.response?.status;
       toast.error(
         status === 404
-          ? "No clip has that pay code"
+          ? "No clip or game has that pay code"
           : error.response?.data?.message || "Failed to record the payment",
       );
       // 409 = already paid / free / expired — show the real state
       if (status === 409) {
         queryClient.invalidateQueries({ queryKey: ["payments"] });
         queryClient.invalidateQueries({ queryKey: ["clips"] });
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
       }
     },
   });
@@ -84,12 +88,38 @@ export const useRefundPayment = () => {
       );
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       queryClient.invalidateQueries({ queryKey: ["clips"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] }); // CR-015: a game locks again
     },
     onError: (error) => {
       toast.error(
         error.response?.data?.message || "Failed to refund the payment",
       );
       queryClient.invalidateQueries({ queryKey: ["payments"] });
+    },
+  });
+};
+
+// Mutation: CR-015 — record what the player paid for a game; its videos open
+// on the courtside device and the player's page
+export const useRecordGamePayment = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, amount, note }) =>
+      createPaymentApi({ sessionId, amount, note: note || undefined }),
+    onSuccess: () => {
+      toast.success("Payment recorded — the game's videos are open");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+    },
+    onError: (error) => {
+      toast.error(
+        error.response?.data?.message || "Failed to record the payment",
+      );
+      // 409 = already paid / cancelled — show the real state
+      if (error.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
     },
   });
 };

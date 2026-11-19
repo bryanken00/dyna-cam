@@ -18,15 +18,30 @@ const optionalDate = () =>
 // GET /lookup?payCode=
 export const lookupPaymentQuerySchema = z.object({ payCode });
 
-// POST / — record a cash payment, by pay code or by clip
+/** CR-015: what the player paid for a game, as staff type it (pesos, up to 2 decimals). */
+const amount = z.coerce
+  .number({ error: "Enter the amount paid" })
+  .min(0, "The amount can't be negative")
+  .max(1000000, "That amount is too large")
+  .refine((value) => Math.round(value * 100) === value * 100, "Use at most 2 decimals");
+
+// POST / — record a cash payment: a clip by pay code or ID, or a game (CR-015)
+// by its ID with the amount staff typed
 export const createPaymentSchema = z
   .object({
     payCode: emptyToUndefined(payCode.optional()),
     clipId: emptyToUndefined(z.string().max(50).optional()),
+    sessionId: emptyToUndefined(z.string().max(50).optional()),
+    amount: emptyToUndefined(amount.optional()),
     note: optionalString(255),
   })
-  .refine((body) => Boolean(body.payCode) !== Boolean(body.clipId), {
-    message: "Give the pay code or the clip, not both",
+  .refine(
+    (body) => [body.payCode, body.clipId, body.sessionId].filter(Boolean).length === 1,
+    { message: "Give one of: the pay code, the clip, or the game" }
+  )
+  .refine((body) => !body.sessionId || body.amount !== undefined, {
+    message: "Enter the amount paid",
+    path: ["amount"],
   });
 
 // POST /:paymentId/refund

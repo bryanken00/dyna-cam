@@ -505,6 +505,11 @@ describe("Google Drive per court", () => {
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const { sessionId, shareUrl } = created.data;
+      // CR-015: the Drive link shows on the player's page once the game is paid
+      assert.equal(
+        (await call("POST", "/admin/payments", { sessionId, amount: 250 })).status,
+        201
+      );
       await ctx.sql.query(
         `UPDATE recording_sessions
            SET startAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 12 MINUTE),

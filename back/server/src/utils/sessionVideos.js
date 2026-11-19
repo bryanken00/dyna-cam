@@ -56,6 +56,17 @@ export const toPublicVideo = (row) => {
   };
 };
 
+/**
+ * CR-015: a video of a game that isn't paid yet — status and picture only; no
+ * way to play, download or open its Drive copy until it's paid at the desk.
+ */
+export const toLockedVideo = (row) => ({
+  ...toPublicVideo(row),
+  videoUrl: null,
+  downloadUrl: null,
+  driveUrl: null,
+});
+
 /** A whole video as Admin → Sessions shows it (adds the internal status and why it failed). */
 export const toAdminVideo = (row) => ({
   ...toPublicVideo(row),

@@ -15,11 +15,12 @@ import {
   demoDelay,
   demoEnvelope,
   demoError,
+  demoFindGame,
   makeDemoPairing,
 } from "../../constants/demo";
 import { VERSION } from "../../constants/version";
 import { usePairedStore } from "../../store/usePairedStore";
-import { pairDeviceApi } from "../api/pairing";
+import { findGameApi, pairDeviceApi } from "../api/pairing";
 
 const WRONG_KEY =
   "That pairing key is wrong or has expired. Ask staff for a new one.";
@@ -69,3 +70,37 @@ export const usePairDevice = () => {
     },
   });
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useFindGame — CR-015: Find a game by its code, after the device unpaired
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NO_GAME = "No game has that code — check it and try again.";
+
+/** What to say when Find a game fails (shown inline in the sheet). */
+export const findGameErrorMessage = (error) => {
+  const status = error?.response?.status;
+  if (!status) return "Can't reach Dyna Cam. Check the device's Wi-Fi and try again.";
+  if (status === 404 || status === 400) return NO_GAME;
+  if (status === 429) return error.response.data?.message || "Too many tries — wait a minute.";
+  return "Dyna Cam is having trouble right now. Try again in a minute.";
+};
+
+/**
+ * A lookup per press of Find (a mutation: it's typed and submitted, and the
+ * answer can change — Find again after staff took the payment).
+ * Resolves to the envelope; `data.game.shareUrl` is set only once it's paid.
+ */
+export const useFindGame = () =>
+  useMutation({
+    mutationFn: async (payCode) => {
+      if (IS_DEMO) {
+        await demoDelay();
+        const data = demoFindGame(payCode);
+        if (!data) throw demoError(404, NO_GAME, "NOT_FOUND");
+        return demoEnvelope(data.game.paid ? "Game found" : "Not paid yet", data);
+      }
+      return findGameApi(payCode);
+    },
+    retry: false,
+  });

@@ -3,15 +3,17 @@ import { catchAsync, validateParams } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
-import { CLIP_DURATION_SECONDS, clipShareUrl } from "../../../utils/clips.js";
+import { CLIP_DURATION_SECONDS, clipShareUrl, sessionShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
 import { materializeSessionParts, settleSessions, uploadPercent } from "../../../utils/sessions.js";
-import { loadSessionVideos, toPublicVideo } from "../../../utils/sessionVideos.js";
+import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
+import { gameUnlocked } from "../../../utils/payments.js";
 import { loadCaptures } from "../../../utils/sessionCaptures.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import {
   clipTokenParamsSchema,
   courtTokenParamsSchema,
+  gameCodeParamsSchema,
   sessionTokenParamsSchema,
 } from "../../../validators/public.validator.js";
 
@@ -25,6 +27,7 @@ import {
  *   POST /courts/:qrToken/clips    save the last 60 seconds
  *   GET  /clips/:shareToken        the clip page (polls until Ready)
  *   GET  /sessions/:shareToken     a recorded session's page (its parts)
+ *   GET  /games/:payCode           CR-015: Find a game on the courtside device
  */
 const router = express.Router();
 
@@ -35,6 +38,15 @@ const saveClipLimiter = dynamicLimiter({
   points: parseInt(process.env.RATE_LIMIT_PUBLIC_CLIP_POINTS || "10", 10),
   duration: 60,
   message: "Too many saves — wait a moment and try again.",
+});
+
+// CR-015: Find a game by its code — a code is 6 characters from 31, so a few
+// tries a minute per IP is plenty for staff and useless for guessing
+const findGameLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_FIND_GAME_POINTS || "10", 10),
+  duration: 60,
+  keyGenerator: (req) => `find-game:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
 });
 
 const COURT_BY_TOKEN = `
@@ -200,7 +212,7 @@ router.get(
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
       `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.playerName, s.driveUrl, s.partCameras,
-              s.wholeVideo, s.openEnded,
+              s.wholeVideo, s.openEnded, s.paymentStatus, s.payCode,
               c.name AS courtName, v.name AS venueName, v.logoUrl, s.venueId
        FROM recording_sessions s
        JOIN courts c ON c.courtId = s.courtId
@@ -221,10 +233,14 @@ router.get(
       [rows[0].sessionId]
     );
 
+    // CR-015: until it's paid at the desk, the page shows the game but nothing plays
+    const locked = !gameUnlocked(rows[0]);
+    const toVideo = locked ? toLockedVideo : toPublicVideo;
+
     // CR-003: the whole game, one video per camera
     const videos = await loadSessionVideos(req.db, rows[0].sessionId);
     // CR-013: stretches saved from the courtside device (no business IDs here)
-    const captures = await loadCaptures(req.db, rows[0].sessionId, toPublicVideo);
+    const captures = await loadCaptures(req.db, rows[0].sessionId, toVideo);
 
     // CR-004: players never see parts. Only a game from before whole videos
     // (wholeVideo 'Skipped' with saved parts) still lists its parts.
@@ -248,6 +264,8 @@ router.get(
       partCameras: _partCameras,
       wholeVideo,
       openEnded,
+      paymentStatus,
+      payCode,
       ...info
     } = rows[0];
     // CR-005: an open game shows no end (and no start while it waits for a device)
@@ -262,10 +280,15 @@ router.get(
         // CR-006: "Saving your game… uploading 45%" (null while the box makes the file)
         uploadPercent: uploadPercent(videos),
         openEnded: Number(openEnded) === 1,
+        // CR-015: locked until paid at the front desk, where the player shows this code
+        paymentStatus,
+        locked,
+        payCode: locked ? payCode : null,
         // CR-001: the game's folder in the venue's Google Drive, once a video is in it
-        driveUrl: driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
+        driveUrl:
+          !locked && driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
         // CR-003 / CR-006: one whole video per camera (camera 0 = the court's only camera)
-        videos: videos.map(toPublicVideo),
+        videos: videos.map(toVideo),
         // CR-013: saved stretches, oldest first ("Save 1 · 8:00 – 10:00")
         captures,
         // True while the whole video is still being made (the page keeps checking)
@@ -274,10 +297,59 @@ router.get(
           (wholeVideo === null || wholeVideo === "Pending"),
         parts: parts.map(({ videoPath, thumbnailPath, ...part }) => ({
           ...part,
-          videoUrl: signUploadUrl(videoPath),
-          downloadUrl: signedDownloadUrl(videoPath),
+          videoUrl: locked ? null : signUploadUrl(videoPath),
+          downloadUrl: locked ? null : signedDownloadUrl(videoPath),
           thumbnailUrl: signUploadUrl(thumbnailPath),
         })),
+      },
+    });
+  })
+);
+
+/**
+ * GET /games/:payCode
+ * CR-015: Find a game on the courtside device's "Pair this device" screen,
+ * after it unpaired. The code is the one the device and the locked page show.
+ * The game's link (the download QR) only once it's paid; before that the
+ * device says "Not paid yet — pay at the front desk".
+ */
+router.get(
+  "/games/:payCode",
+  findGameLimiter,
+  validateParams(gameCodeParamsSchema),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT s.sessionId, s.startAt, s.endAt, s.status, s.openEnded, s.paymentStatus,
+              s.shareToken, c.name AS courtName, v.name AS venueName
+       FROM recording_sessions s
+       JOIN courts c ON c.courtId = s.courtId
+       JOIN venues v ON v.venueId = s.venueId
+       WHERE s.payCode = ? AND s.status != 'Cancelled'
+       LIMIT 1`,
+      [req.params.payCode]
+    );
+    if (rows.length === 0) {
+      return res.sendError("No game has that code — check it and try again", 404);
+    }
+    await settleSessions(req.db, rows[0].sessionId);
+    const [now] = await req.db.query(
+      `SELECT status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      [rows[0].sessionId]
+    );
+
+    const game = rows[0];
+    const paid = gameUnlocked(game);
+    const open = Number(game.openEnded) === 1 && ["Waiting", "Recording"].includes(now.status);
+    return res.sendSuccess(paid ? "Game found" : "Not paid yet — pay at the front desk", {
+      game: {
+        courtName: game.courtName,
+        venueName: game.venueName,
+        startAt: now.status === "Waiting" ? null : game.startAt,
+        endAt: open ? null : game.endAt,
+        status: now.status,
+        paymentStatus: game.paymentStatus,
+        paid,
+        shareUrl: paid ? sessionShareUrl(game.shareToken) : null,
       },
     });
   })

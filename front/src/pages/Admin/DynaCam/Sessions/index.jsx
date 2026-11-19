@@ -154,7 +154,7 @@ const SessionsPage = () => {
           <SearchInput
             value={filters.search}
             onChange={handleSearch}
-            placeholder="Filter by player, court or venue…"
+            placeholder="Filter by player, court, venue or game code…"
           />
           <div className="flex items-center gap-2">
             <RefreshButton onRefresh={refetch} isFetching={isFetching} />
