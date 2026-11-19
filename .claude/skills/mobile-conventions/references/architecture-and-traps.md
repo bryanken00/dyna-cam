@@ -223,10 +223,13 @@ override.
   `#E65100`, danger `#E53935`) — the token set has no semantic success/warning
   role and these must read identically in both themes.
 
-The palette is the "Modern" system: monochrome zinc surfaces with a single green
-accent. **`primary` is inverted** — near-black in light mode, near-white in dark
-— and is the button colour. **Green is never a button**; it is only for section
-ticks, status dots, focus rings and chips.
+The palette is the pickleball brand (CR-012, the website's CR-011 palette): cool
+off-white surfaces with navy text, a brand-blue `link`, a soft lime accent, and a
+navy dark mode. **`primary` is the button colour** — navy with white text in light
+mode, white with navy text in dark. **Lime is never a button**; it is only for
+section ticks, status dots, focus rings and chips. `brand`, `brand-raised`,
+`brand-court` and `brand-ball` (`bg-brand`, `text-brand-ball`, …) are the same in
+both themes, for brand panels like the Pair screen's header and the `LogoMark`.
 
 ### Typography — the weight trap
 

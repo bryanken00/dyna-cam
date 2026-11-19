@@ -13,7 +13,7 @@
       "package": "com.dgsi.dynacam",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#6750A4"
+        "backgroundColor": "#0F3264"
       }
     },
     "ios": {

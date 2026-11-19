@@ -47,6 +47,13 @@ module.exports = {
         "text-2": "hsl(var(--text-2) / <alpha-value>)",
         "line-soft": "hsl(var(--line-soft) / <alpha-value>)",
         link: "hsl(var(--link) / <alpha-value>)",
+        // CR-012: the pickleball brand, the same in both themes
+        brand: {
+          DEFAULT: "hsl(var(--brand) / <alpha-value>)",
+          raised: "hsl(var(--brand-raised) / <alpha-value>)",
+          court: "hsl(var(--brand-court) / <alpha-value>)",
+          ball: "hsl(var(--brand-ball) / <alpha-value>)",
+        },
       },
       /*
        * React Native has no synthetic weights — each weight is a separate

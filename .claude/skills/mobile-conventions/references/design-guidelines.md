@@ -45,7 +45,8 @@ themes follow.
 | Overlay surface | `bg-popover` / `text-popover-foreground` | Dialogs, menus, sheets |
 | Soft brand wash | `bg-secondary` / `text-secondary-foreground` | Field fills, decorative blobs, subtle badges |
 | Muted | `bg-muted` / `text-muted-foreground` | Labels, captions, placeholders, inactive icons, disabled fills |
-| Accent (green) | `bg-accent` | Section ticks, status dots, focus rings, chips. **Sparingly — never a button.** |
+| Accent (soft lime) | `bg-accent` | Section ticks, status dots, focus rings, chips. **Sparingly — never a button, never text on a light surface.** |
+| Brand | `bg-brand`, `bg-brand-raised`, `bg-brand-court`, `text-brand-ball` | Navy brand panels (Pair header, LogoMark) — the same in both themes, with `text-white` on them. |
 | Link | `text-link` | Text links |
 | Mid text | `text-text-2` | Between foreground and muted |
 | Row divider | `bg-line-soft` | Hairlines inside a card |
