@@ -154,7 +154,9 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - `sig` = hex HMAC-SHA256(**the hex key string**, `${courtId}.${exp}`), `timingSafeEqual`; bad/expired → 403,
   bad path → 404 (court id `[A-Za-z0-9_-]{1,64}`, file `index.m3u8` or `^\d{9,11}\.ts$`, folder `safeId`), not GET/HEAD → 405.
   Never log the URL, `sig` or the key. Key: `DATA_DIR/live-key` (0600, made once).
-- Playlist: newest 5 CLOSED segments, VERSION 3, TARGETDURATION = ceil(longest), no ENDLIST, `no-store`.
+- Playlist: the newest CLOSED segments covering `LIVE_DVR_SECONDS` (CR-014, default 60, ≥ the old 5
+  segments, ≤ 150; `liveSegmentCount`) so the session device can rewind; players start at the live edge,
+  restreams at `-live_start_index -3`. VERSION 3, TARGETDURATION = ceil(longest), no ENDLIST, `no-store`.
   MEDIA-SEQUENCE: first numbered segment = its name (epoch s), then +1 per segment (never goes back,
   even after a restart); DISCONTINUITY on a new run / gap / untimed file, with DISCONTINUITY-SEQUENCE.
   Newest closed segment > 30 s old → 404.

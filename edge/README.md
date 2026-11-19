@@ -138,6 +138,7 @@ they can enrol again after a reset.
 | `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. Must differ from `BUTTON_PORT`. |
 | `MAX_STACKED_STREAMS` | `2` | Stacked (two-camera, re-encoded) live streams at once, court and player streams together. `0` = never stack. |
 | `LIVE_HOST` | detected | The box's LAN address as phones reach it (e.g. `192.168.1.50`). Leave empty to detect it; set it when the box has several networks (Docker, VPN) or detection picks the wrong one. |
+| `LIVE_DVR_SECONDS` | `60` | How far back the session device can rewind the live view (⟲ 10 s, CR-014). The live stream lists this much of the buffer; nothing extra is stored. Kept 30 s inside `BUFFER_SECONDS`. |
 | `CERT_PATH` | — | Folder with `privkey.pem`, `cert.pem` and (optional) `chain.pem`, the same files as the API's `certPath`. Set it to serve the [live view over HTTPS](#https-cert_path). `LIVE_HOST` must then be the certificate's host name. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
@@ -391,7 +392,7 @@ connection: the box serves the newest segments of its own buffer as an HLS live 
 re-encoding.
 
 ```
-GET http://<box-ip>:8090/live/<courtId>/index.m3u8?exp=<unix seconds>&sig=<hex>   → last 5 segments (~10 s)
+GET http://<box-ip>:8090/live/<courtId>/index.m3u8?exp=<unix seconds>&sig=<hex>   → the last LIVE_DVR_SECONDS (~60 s) of segments; players start at the live edge
 GET http://<box-ip>:8090/live/<courtId>/<epoch>.ts?exp=…&sig=…                   → one segment
 GET http://<box-ip>:8090/live/<courtId>/cam2/index.m3u8?exp=…&sig=…              → camera 2 (same signature)
 ```

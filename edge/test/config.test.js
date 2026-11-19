@@ -92,11 +92,21 @@ describe("loadConfig", () => {
     }
   });
 
+  it("keeps the live rewind inside the buffer (CR-014)", () => {
+    assert.equal(loadConfig({ ...base, LIVE_DVR_SECONDS: "120" }).liveDvrSeconds, 120);
+    assert.equal(
+      loadConfig({ ...base, LIVE_DVR_SECONDS: "600", BUFFER_SECONDS: "180" }).liveDvrSeconds,
+      150,
+      "30 s inside BUFFER_SECONDS, so a listed segment is never pruned under a player"
+    );
+  });
+
   it("applies the defaults and strips the trailing slash", () => {
     const cfg = loadConfig(base);
     assert.equal(cfg.apiUrl, "https://api.example.com");
     assert.equal(cfg.segmentSeconds, 2);
     assert.equal(cfg.bufferSeconds, 180);
+    assert.equal(cfg.liveDvrSeconds, 60, "CR-014: a minute of live rewind");
     assert.equal(cfg.encoder, "auto");
     assert.equal(cfg.heartbeatSeconds, 30);
     assert.equal(cfg.configRefreshSeconds, 60);

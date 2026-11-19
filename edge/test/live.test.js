@@ -16,6 +16,9 @@ import {
   createLiveServer,
   lanAddress,
   LIVE_KEY_FILE,
+  LIVE_MAX_SEGMENTS,
+  LIVE_SEGMENTS,
+  liveSegmentCount,
   LiveSequencer,
   LiveView,
   loadLiveKey,
@@ -200,6 +203,20 @@ describe("readCourtSegments + LiveSequencer + buildPlaylist", () => {
     );
     assert.ok(segs.every((s) => s.timed && s.run === "run-b" && s.duration === 2));
     assert.equal(await readCourtSegments(path.join(dir, "nope")), null);
+  });
+
+  it("CR-014: lists about LIVE_DVR_SECONDS of segments, never fewer than the old window", async () => {
+    assert.equal(liveSegmentCount(60, 2), 31);
+    assert.equal(liveSegmentCount(0, 2), LIVE_SEGMENTS, "the old ~10 s window at least");
+    assert.equal(liveSegmentCount(10_000, 1), LIVE_MAX_SEGMENTS);
+
+    const courtDir = path.join(dir, "court-dvr");
+    await court(courtDir, { rows: steadyRows(0, 40), open: T0 + 80 });
+    const segs = await readCourtSegments(courtDir, liveSegmentCount(60, 2));
+    assert.equal(segs.length, 31);
+    assert.equal(segs.at(-1).name, `${T0 + 78}.ts`, "up to the newest closed segment");
+    const text = buildPlaylist(new LiveSequencer().number(segs), "exp=1&sig=s");
+    assert.equal(text.split("\n").filter((l) => l.startsWith("#EXTINF")).length, 31);
   });
 
   it("builds a live playlist: version, target duration, sequence, signed relative URIs", () => {

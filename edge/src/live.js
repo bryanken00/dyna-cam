@@ -36,6 +36,21 @@ import { cameraDirName, readJson, writeJsonAtomic } from "./util.js";
  */
 
 export const LIVE_SEGMENTS = 5;
+/** Never list more than this many segments, whatever LIVE_DVR_SECONDS says. */
+export const LIVE_MAX_SEGMENTS = 150;
+
+/**
+ * CR-014: how many segments the live playlist lists so the session device can
+ * rewind `dvrSeconds` — at least LIVE_SEGMENTS (the old ~10 s window), one
+ * spare for segments cut shorter than SEGMENT_SECONDS. Players still start at
+ * the live edge; restreams start 3 segments from it (-live_start_index -3).
+ */
+export function liveSegmentCount(dvrSeconds, segmentSeconds) {
+  const dvr = Math.max(0, Number(dvrSeconds) || 0);
+  const segment = Math.max(1, Number(segmentSeconds) || 2);
+  const wanted = Math.ceil(dvr / segment) + 1;
+  return Math.min(LIVE_MAX_SEGMENTS, Math.max(LIVE_SEGMENTS, wanted));
+}
 /** CERT_PATH files (CR-002) — the same names the API reads from its certPath. chain.pem is optional. */
 export const CERT_FILES = Object.freeze({ key: "privkey.pem", cert: "cert.pem", ca: "chain.pem" });
 /** How often a renewed certificate (e.g. Let's Encrypt) is looked for. */
@@ -452,7 +467,13 @@ export function createLiveServer({ tls = null, handler, ...options }) {
  * `cameraDirName(courtId, camera)` inside it. The URL (it holds the signature)
  * is never logged.
  */
-export function createLiveHandler({ bufferDir, key, log, now = () => Date.now() }) {
+export function createLiveHandler({
+  bufferDir,
+  key,
+  log,
+  now = () => Date.now(),
+  segmentCount = LIVE_SEGMENTS,
+}) {
   const courts = new Map(); // camera folder → { sequencer, read: { at, promise } }
   const court = (dir) => {
     if (!courts.has(dir)) courts.set(dir, { sequencer: new LiveSequencer(), read: null });
@@ -462,7 +483,7 @@ export function createLiveHandler({ bufferDir, key, log, now = () => Date.now() 
     const state = court(dir);
     const at = now();
     if (!state.read || at - state.read.at >= READ_CACHE_MS) {
-      state.read = { at, promise: readCourtSegments(dir) };
+      state.read = { at, promise: readCourtSegments(dir, segmentCount) };
       state.read.promise.catch(() => {
         state.read = null;
       });
@@ -612,6 +633,8 @@ export class LiveView {
       key: this.key,
       log: this.log,
       now: this.now,
+      // CR-014: about a minute of history, so the device can rewind
+      segmentCount: liveSegmentCount(this.settings.liveDvrSeconds, this.settings.segmentSeconds),
     });
     let server;
     try {
