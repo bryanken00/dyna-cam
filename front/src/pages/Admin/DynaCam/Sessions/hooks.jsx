@@ -9,6 +9,7 @@ import {
   Smartphone,
   Square,
 } from "lucide-react";
+import PaymentStatusChip from "../../../../components/PaymentStatusChip";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import VideosProgress from "./components/VideosProgress";
@@ -23,6 +24,7 @@ import {
   SESSION_STATUS_TONE,
   formatDate,
   formatMinutes,
+  formatPayCode,
   formatTimeRange,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
@@ -422,6 +424,32 @@ export const useSessionHooks = () => {
               count={Number(record.devicesCount) || 0}
               live={PAIRABLE_STATUSES.includes(status)}
             />
+          </div>
+        ),
+      },
+      {
+        // CR-015: Unpaid (with the code the device shows) until paid at the desk
+        title: "Payment",
+        key: "payment",
+        width: 140,
+        render: (_, record) => (
+          <div className="min-w-0">
+            <PaymentStatusChip
+              paymentStatus={record.paymentStatus}
+              price={record.paidAmount}
+            />
+            {record.paymentStatus === "Unpaid" && record.payCode && (
+              <div
+                className="font-mono mt-0.5"
+                style={{
+                  fontSize: 12,
+                  letterSpacing: "0.06em",
+                  color: "var(--color-text-muted)",
+                }}
+              >
+                {formatPayCode(record.payCode)}
+              </div>
+            )}
           </div>
         ),
       },

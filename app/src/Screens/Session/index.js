@@ -3,6 +3,8 @@ import { Radio, Square } from "lucide-react-native";
 import { Alert, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import ConnectionBanner from "@/components/ConnectionBanner";
 import DotsLoader from "@/components/Loading/DotsLoader";
+import LinkText from "@/components/LinkText";
+import PayCodeCard from "@/components/PayCodeCard";
 import QrCode from "@/components/QrCode";
 import QueryState from "@/components/QueryState";
 import TickingTimer from "@/components/TickingTimer";
@@ -10,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import { formatTime, isConnectionError, shortLink } from "@/utils/dynaCam";
+import { formatTime, isConnectionError } from "@/utils/dynaCam";
 import LivePanel from "./LivePanel";
 import SaveMinutes from "./SaveMinutes";
 import StreamChip from "./StreamChip";
@@ -53,7 +55,7 @@ const StatusPill = ({ m }) => {
   return null;
 };
 
-/** The session's download QR — on screen the whole time. */
+/** The session's download QR — on screen the whole time once the game is paid. */
 const QrCard = ({ url, size, className }) => (
   <View className={cn("border-border bg-card items-center rounded-[18px] border p-4", className)}>
     <Text className="mb-3 text-center font-sans-semibold text-[16px]">
@@ -63,11 +65,20 @@ const QrCard = ({ url, size, className }) => (
     <Text className="text-muted-foreground mt-3 text-center text-[13px]">
       Download it when the game ends
     </Text>
-    <Text className="mt-1 text-center font-mono text-[12px]" numberOfLines={2} selectable>
-      {shortLink(url)}
-    </Text>
+    <LinkText url={url} className="mt-1 text-[12px]" />
   </View>
 );
+
+/**
+ * CR-015: the QR once the game is paid; until then the game's code to pay
+ * with at the front desk.
+ */
+const GetGameCard = ({ s, size, className }) =>
+  s.shareUrl ? (
+    <QrCard url={s.shareUrl} size={size} className={className} />
+  ) : (
+    <PayCodeCard code={s.payment?.payCode} className={className} />
+  );
 
 /**
  * The session device's main screen (PLAN-002 Phase E): which court, the live
@@ -275,12 +286,12 @@ const SessionScreen = () => {
                 {stopBlock}
                 {streamBlock}
               </View>
-              <QrCard url={s.shareUrl} size={qrSize} className="flex-[2] self-start" />
+              <GetGameCard s={s} size={qrSize} className="flex-[2] self-start" />
             </View>
           ) : (
             <View className="w-full max-w-[560px] gap-4 self-center">
               <LivePanel live={m.live} scheduled={m.isScheduled} />
-              <QrCard url={s.shareUrl} size={qrSize} />
+              <GetGameCard s={s} size={qrSize} />
               {saveBlock}
               {stopBlock}
               {streamBlock}

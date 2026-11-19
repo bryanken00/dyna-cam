@@ -11,7 +11,9 @@
  *   startsInSeconds (> 0 only while Scheduled before its start),
  *   elapsedSeconds, endsInSeconds, durationSeconds, openEnded (CR-005),
  *   uploadPercent (CR-006: 0–100 while the game's file uploads, null before),
- *   shareUrl, failureReason }. Times are Manila wall-clock strings; the
+ *   shareUrl (CR-015: null until the game is paid at the desk),
+ *   payment { status: Unpaid | Paid | Free, payCode (only while Unpaid) },
+ *   failureReason }. Times are Manila wall-clock strings; the
  *   "…Seconds" values are as of the response.
  */
 import { createDeviceAxiosInstance } from "./axios";

@@ -6,7 +6,8 @@ import { decryptSecret } from "./crypto/secretBox.js";
 /**
  * Session devices (PLAN-002 Phase E): a phone/tablet paired to ONE recording
  * session. It shows the session live (HLS from the venue's recorder box over
- * the LAN, see edge/src/live.js) with the game's download QR, can stop the
+ * the LAN, see edge/src/live.js) with the game's download QR (CR-015: once
+ * it's paid — before that, the game's code to pay at the desk), can stop the
  * recording, and is unpaired SESSION_DEVICE_GRACE_MINUTES after the session
  * ends (so it can still show the QR while the game is saved).
  */
@@ -30,7 +31,7 @@ const RUNNING = ["Scheduled", "Recording"];
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
-  s.openEnded,
+  s.openEnded, s.paymentStatus, s.payCode,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
@@ -109,7 +110,13 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
             Math.floor((Number(row.uploadSentBytes) / Number(row.uploadTotalBytes)) * 100)
           )
         : null,
-    shareUrl: sessionShareUrl(row.shareToken),
+    // CR-015: the download QR only once the game is paid at the front desk;
+    // until then the device shows the code the player takes to the desk
+    shareUrl: row.paymentStatus === "Unpaid" ? null : sessionShareUrl(row.shareToken),
+    payment: {
+      status: row.paymentStatus,
+      payCode: row.paymentStatus === "Unpaid" ? row.payCode : null,
+    },
     failureReason: row.failureReason || null,
   };
 };

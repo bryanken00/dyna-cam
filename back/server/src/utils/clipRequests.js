@@ -77,8 +77,17 @@ export const requestClip = async (conn, court, { source, requestedAt, pairedAppI
   const price = source === "STAFF" ? 0 : Number(court.clipPrice || 0);
   const priced = price > 0;
 
-  // The pay code is unique; on the (rare) collision try another
+  // The pay code is unique; on the (rare) collision try another. CR-015: and
+  // never one a game uses — staff look codes up on the Payments page
   for (let attempt = 0; ; attempt += 1) {
+    const payCode = priced ? randomPayCode() : null;
+    if (payCode && attempt < 4) {
+      const [taken] = await conn.execute(
+        `SELECT 1 FROM recording_sessions WHERE payCode = ? LIMIT 1`,
+        [payCode]
+      );
+      if (taken.length > 0) continue;
+    }
     try {
       await conn.execute(
         `INSERT INTO clips
@@ -95,7 +104,7 @@ export const requestClip = async (conn, court, { source, requestedAt, pairedAppI
           CLIP_DURATION_SECONDS,
           price,
           priced ? "Unpaid" : "Free",
-          priced ? randomPayCode() : null,
+          payCode,
           shareToken,
           now,
           now,

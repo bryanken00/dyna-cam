@@ -57,6 +57,12 @@ describe("game videos", () => {
       `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
       [await manila(startMinutes), await manila(endMinutes), created.data.sessionId]
     );
+    // CR-015: paid at the desk, so the player's page plays the videos
+    const paid = await call("POST", "/admin/payments", {
+      sessionId: created.data.sessionId,
+      amount: 300,
+    });
+    assert.equal(paid.status, 201, JSON.stringify(paid.body));
     const jobs = await gameJobs(ctx, target.token, created.data.sessionId);
     return { ...created.data, token: created.data.shareUrl.split("/").pop(), jobs };
   };

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
-import { Banknote, CircleAlert, Film, Loader2, Search } from "lucide-react";
+import { Banknote, CircleAlert, Film, Loader2, Search, Trophy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -30,9 +30,12 @@ import { getImageUrl } from "../../../../../utils/upload";
 import {
   CLIP_STATUS_TONE,
   PAY_CODE_PATTERN,
+  SESSION_STATUS_TONE,
+  formatDate,
   formatDateTime,
   formatPayCode,
   formatPeso,
+  formatTimeRange,
   normalizePayCode,
 } from "../../../../../utils/dynaCam";
 import {
@@ -46,12 +49,33 @@ const schema = z.object({
     .string()
     .refine(
       (v) => PAY_CODE_PATTERN.test(normalizePayCode(v)),
-      "Enter the code shown on the player's clip",
+      "Enter the code shown on the player's clip or game",
     ),
+  // CR-015: a game's amount, typed by staff (checked when recording — clips have a set price)
+  amount: z.string().trim(),
   note: z.string().trim().max(255, "Keep the note under 255 characters"),
 });
 
-const EMPTY = { payCode: "", note: "" };
+const EMPTY = { payCode: "", amount: "", note: "" };
+
+const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
+
+/** CR-015: why staff must not take cash for this game, or null when it is payable. */
+const gameBlockedReason = (game) => {
+  if (game.paymentStatus === "Paid")
+    return `This game is already paid${game.paidAmount != null ? ` (${formatPeso(game.paidAmount)})` : ""}.`;
+  if (game.paymentStatus === "Free") return "This game is free — no payment needed.";
+  if (game.status === "Cancelled") return "This game was cancelled — don't take payment.";
+  if (game.status === "Failed") return "This game couldn't be saved — don't take payment.";
+  return null;
+};
+
+/** "Nov 19 · 1:38 PM – 1:45 PM", "Nov 19 · recording since 1:38 PM", or "waiting for a device". */
+const gameWhen = (game) => {
+  if (!game.startAt) return "Waiting for a device";
+  if (!game.endAt) return `${formatDate(game.startAt)} · recording`;
+  return `${formatDate(game.startAt)} · ${formatTimeRange(game.startAt, game.endAt)}`;
+};
 
 /** Why staff must not take cash for this clip, or null when it is payable. */
 const blockedReason = (clip) => {
@@ -64,8 +88,10 @@ const blockedReason = (clip) => {
 
 /**
  * "Take payment": staff type the player's pay code, check the clip it belongs
- * to, then record the cash. A short form, so a Dialog (the `XFormModal`
- * variation). Props: `{ open, onClose, onSuccess }`.
+ * to, then record the cash. CR-015: the code can be a game's (shown on the
+ * courtside device and the game's page) — staff then type the amount paid.
+ * A short form, so a Dialog (the `XFormModal` variation).
+ * Props: `{ open, onClose, onSuccess }`.
  */
 const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
   // The code that was looked up (normalised); "" until staff press Find
@@ -82,7 +108,11 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
     isFetching: isLookingUp,
     error: lookupError,
   } = useLookupPayCode(lookupCode);
-  const clip = lookupCode ? lookupData?.data?.clip || null : null;
+  const found = lookupCode ? lookupData?.data || null : null;
+  const game = found?.kind === "Game" ? found.game : null;
+  const clip = found && !game ? found.clip || null : null;
+  const amount = useWatch({ control: form.control, name: "amount" }) ?? "";
+  const validAmount = AMOUNT_PATTERN.test(String(amount).trim());
   const notFound = lookupError?.response?.status === 404;
 
   const createMutation = useCreatePayment();
@@ -99,11 +129,20 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
   };
 
   const handleRecord = async () => {
+    if (game && !validAmount) {
+      form.setError("amount", { message: "Enter an amount like 300 or 350.50" });
+      return;
+    }
     try {
-      await createMutation.mutateAsync({
-        payCode: lookupCode,
-        note: form.getValues("note") || undefined,
-      });
+      await createMutation.mutateAsync(
+        game
+          ? {
+              sessionId: game.sessionId,
+              amount: String(amount).trim(),
+              note: form.getValues("note") || undefined,
+            }
+          : { payCode: lookupCode, note: form.getValues("note") || undefined },
+      );
       setLookupCode("");
       onSuccess?.();
     } catch (error) {
@@ -112,7 +151,8 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
     }
   };
 
-  const blocked = clip ? blockedReason(clip) : null;
+  const blocked = clip ? blockedReason(clip) : game ? gameBlockedReason(game) : null;
+  const payable = (clip || game) && !blocked;
   const thumb = getImageUrl(clip?.thumbnailUrl);
 
   return (
@@ -135,8 +175,8 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                 Take payment
               </DialogTitle>
               <DialogDescription>
-                Ask for the pay code on the player&apos;s clip page, check the
-                clip, then take the cash.
+                Ask for the pay code on the player&apos;s clip page or the
+                game&apos;s screen, check what it&apos;s for, then take the cash.
               </DialogDescription>
             </DialogHeader>
 
@@ -192,7 +232,7 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                 }}
               >
                 <CircleAlert className="w-4 h-4 shrink-0" style={{ color: "var(--color-error)" }} />
-                No clip has that pay code.
+                No clip or game has that pay code.
               </div>
             )}
             {lookupCode && !isLookingUp && lookupError && !notFound && (
@@ -255,7 +295,57 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
               </div>
             )}
 
-            {clip && blocked && (
+            {game && (
+              <div
+                className="flex gap-3.5 p-3"
+                style={{
+                  border: "1px solid var(--color-line)",
+                  borderRadius: 12,
+                  background: "var(--color-surface-sunken)",
+                }}
+              >
+                <span
+                  className="shrink-0 flex items-center justify-center"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    border: "1px solid var(--color-line)",
+                    background: "var(--color-surface)",
+                    color: "var(--color-text-dark)",
+                  }}
+                >
+                  <Trophy className="w-5 h-5" strokeWidth={1.8} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="truncate font-medium"
+                    style={{ fontSize: 14, color: "var(--color-text-dark)" }}
+                  >
+                    Game on {decodeHTML(game.courtName)}
+                    <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>
+                      {" · "}
+                      {decodeHTML(game.venueName)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                    {gameWhen(game)} · code{" "}
+                    <span className="font-mono">{formatPayCode(game.payCode)}</span>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap mt-1.5">
+                    <StatusDot tone={SESSION_STATUS_TONE[game.status] || "muted"}>
+                      {game.status}
+                    </StatusDot>
+                    <PaymentStatusChip
+                      paymentStatus={game.paymentStatus}
+                      price={game.paidAmount}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(clip || game) && blocked && (
               <p
                 role="alert"
                 className="m-0"
@@ -265,7 +355,29 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
               </p>
             )}
 
-            {clip && !blocked && (
+            {game && !blocked && (
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount paid (₱)</FormLabel>
+                    <FormControl>
+                      <Input
+                        inputMode="decimal"
+                        placeholder="e.g., 300"
+                        className="h-11"
+                        style={{ fontSize: 17 }}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
+            {payable && (
               <FormField
                 control={form.control}
                 name="note"
@@ -288,9 +400,9 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={handleClose}>
-                {clip && !blocked ? "Cancel" : "Close"}
+                {payable ? "Cancel" : "Close"}
               </Button>
-              {clip && !blocked && (
+              {payable && (
                 <Button
                   type="button"
                   onClick={handleRecord}
@@ -301,7 +413,11 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                   ) : (
                     <Banknote />
                   )}
-                  Record {formatPeso(clip.price)} cash
+                  {clip
+                    ? `Record ${formatPeso(clip.price)} cash`
+                    : validAmount
+                      ? `Record ${formatPeso(amount)} cash`
+                      : "Record cash"}
                 </Button>
               )}
             </DialogFooter>

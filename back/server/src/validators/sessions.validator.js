@@ -43,6 +43,8 @@ export const createSessionSchema = z
     ),
     playerName: optionalString(100),
     phone: optionalPhone(),
+    // CR-015: a free game — no payment at the desk, the player gets the videos at once
+    free: z.boolean().optional(),
   })
   .refine((body) => !(body.startNow || body.startAt) || body.durationMinutes, {
     message: "Pick how long the session is",
@@ -74,6 +76,8 @@ export const listSessionsQuerySchema = z.object({
     "Failed",
     "Cancelled",
   ]),
+  // CR-015: Unpaid / Paid / Free (a game from before payments)
+  payment: queryEnum(["Unpaid", "Paid", "Free"]),
   search: z.string().max(100).optional().default(""),
   sortOrder: queryEnumDefault(["ASC", "DESC"], "DESC"),
 });

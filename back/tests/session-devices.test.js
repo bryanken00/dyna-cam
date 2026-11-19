@@ -112,7 +112,10 @@ describe("session devices", () => {
       assert.equal(device.session.sessionId, sessionId);
       assert.match(device.session.courtName, /^Court \d+$/);
       assert.equal(device.session.venueName, "Session Courts");
-      assert.match(device.session.shareUrl, /\/session\//);
+      // CR-015: no download QR until the game is paid — the code to pay with
+      assert.equal(device.session.shareUrl, null);
+      assert.equal(device.session.payment.status, "Unpaid");
+      assert.match(device.session.payment.payCode, /^[A-Z0-9]{6}$/);
     });
 
     it("sees the session recording, with no live view until the box reports one", async () => {

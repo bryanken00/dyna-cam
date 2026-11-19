@@ -14,8 +14,12 @@ The app is a Dyna Cam **session device** (PLAN-002 Phase E): staff book a
 session on the web and pair a phone or tablet to THAT session with a 6-digit
 key. It shows the session — live video from the venue's recorder box, the
 download QR, a timer, Stop recording — then the QR with saving progress, and
-unpairs itself. There is **no sign-in and no staff-account app**: staff work
-happens on the web. Its only API is `/api/v1/pair/app` and `/api/v1/app/*`.
+unpairs itself. CR-015: until staff record the game's payment on the web, the
+QR is replaced by the game's **pay code** (`session.payment.payCode`,
+`shareUrl` is null); the Pair screen's **Find a game** looks a code up
+(`GET /api/v1/public/games/:payCode`) and shows the QR once it's paid. There is
+**no sign-in and no staff-account app**: staff work happens on the web. Its
+only API is `/api/v1/pair/app`, `/api/v1/app/*` and that one public lookup.
 Every path below is relative to `app/` unless it says otherwise.
 
 These rules are **non-negotiable** unless the user says otherwise. Reference
