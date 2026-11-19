@@ -35,7 +35,7 @@ const schema = z.object({
     .min(1, "Enter the amount paid")
     .refine(
       (v) => /^\d+(\.\d{1,2})?$/.test(v),
-      "Enter an amount like 300 or 350.50",
+      "Enter an amount like 300 or 350, with up to 2 decimals",
     )
     .refine((v) => Number(v) <= 1000000, "That amount is too large"),
   note: z.string().trim().max(255, "Keep the note under 255 characters"),

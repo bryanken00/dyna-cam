@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
-import { Banknote, CircleAlert, Film, Loader2, Search, Trophy } from "lucide-react";
+import {
+  Banknote,
+  CircleAlert,
+  Film,
+  Loader2,
+  Search,
+  Trophy,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -64,9 +71,12 @@ const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
 const gameBlockedReason = (game) => {
   if (game.paymentStatus === "Paid")
     return `This game is already paid${game.paidAmount != null ? ` (${formatPeso(game.paidAmount)})` : ""}.`;
-  if (game.paymentStatus === "Free") return "This game is free — no payment needed.";
-  if (game.status === "Cancelled") return "This game was cancelled — don't take payment.";
-  if (game.status === "Failed") return "This game couldn't be saved — don't take payment.";
+  if (game.paymentStatus === "Free")
+    return "This game is free — no payment needed.";
+  if (game.status === "Cancelled")
+    return "This game was cancelled — don't take payment.";
+  if (game.status === "Failed")
+    return "This game couldn't be saved — don't take payment.";
   return null;
 };
 
@@ -80,9 +90,12 @@ const gameWhen = (game) => {
 /** Why staff must not take cash for this clip, or null when it is payable. */
 const blockedReason = (clip) => {
   if (clip.paymentStatus === "Paid") return "This clip is already paid.";
-  if (clip.paymentStatus === "Free") return "This clip is free — no payment needed.";
-  if (clip.status === "Failed") return "This clip couldn't be saved — don't take payment.";
-  if (clip.status === "Expired") return "This clip has expired — don't take payment.";
+  if (clip.paymentStatus === "Free")
+    return "This clip is free — no payment needed.";
+  if (clip.status === "Failed")
+    return "This clip couldn't be saved — don't take payment.";
+  if (clip.status === "Expired")
+    return "This clip has expired — don't take payment.";
   return null;
 };
 
@@ -130,7 +143,9 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
 
   const handleRecord = async () => {
     if (game && !validAmount) {
-      form.setError("amount", { message: "Enter an amount like 300 or 350.50" });
+      form.setError("amount", {
+        message: "Enter an amount like 300 or 350, with up to 2 decimals",
+      });
       return;
     }
     try {
@@ -151,7 +166,11 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
     }
   };
 
-  const blocked = clip ? blockedReason(clip) : game ? gameBlockedReason(game) : null;
+  const blocked = clip
+    ? blockedReason(clip)
+    : game
+      ? gameBlockedReason(game)
+      : null;
   const payable = (clip || game) && !blocked;
   const thumb = getImageUrl(clip?.thumbnailUrl);
 
@@ -176,7 +195,8 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
               </DialogTitle>
               <DialogDescription>
                 Ask for the pay code on the player&apos;s clip page or the
-                game&apos;s screen, check what it&apos;s for, then take the cash.
+                game&apos;s screen, check what it&apos;s for, then take the
+                cash.
               </DialogDescription>
             </DialogHeader>
 
@@ -210,7 +230,11 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                       className="h-11 shrink-0"
                       disabled={isLookingUp}
                     >
-                      {isLookingUp ? <Loader2 className="animate-spin" /> : <Search />}
+                      {isLookingUp ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Search />
+                      )}
                       Find
                     </Button>
                   </div>
@@ -231,13 +255,20 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                   color: "var(--color-text-dark)",
                 }}
               >
-                <CircleAlert className="w-4 h-4 shrink-0" style={{ color: "var(--color-error)" }} />
+                <CircleAlert
+                  className="w-4 h-4 shrink-0"
+                  style={{ color: "var(--color-error)" }}
+                />
                 No clip or game has that pay code.
               </div>
             )}
             {lookupCode && !isLookingUp && lookupError && !notFound && (
-              <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
-                {lookupError.response?.data?.message || "Couldn't look up that code."}
+              <p
+                className="m-0"
+                style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
+              >
+                {lookupError.response?.data?.message ||
+                  "Couldn't look up that code."}
               </p>
             )}
 
@@ -262,7 +293,11 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                   }}
                 >
                   {thumb ? (
-                    <img src={thumb} alt="" className="w-full h-full object-cover" />
+                    <img
+                      src={thumb}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <Film className="w-5 h-5" strokeWidth={1.6} />
                   )}
@@ -273,14 +308,26 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                     style={{ fontSize: 14, color: "var(--color-text-dark)" }}
                   >
                     {decodeHTML(clip.courtName)}
-                    <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>
+                    <span
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontWeight: 400,
+                      }}
+                    >
                       {" · "}
                       {decodeHTML(clip.venueName)}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
                     {formatDateTime(clip.requestedAt)} · code{" "}
-                    <span className="font-mono">{formatPayCode(clip.payCode)}</span>
+                    <span className="font-mono">
+                      {formatPayCode(clip.payCode)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-3 flex-wrap mt-1.5">
                     <StatusDot tone={CLIP_STATUS_TONE[clip.status] || "muted"}>
@@ -323,17 +370,31 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                     style={{ fontSize: 14, color: "var(--color-text-dark)" }}
                   >
                     Game on {decodeHTML(game.courtName)}
-                    <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>
+                    <span
+                      style={{
+                        color: "var(--color-text-muted)",
+                        fontWeight: 400,
+                      }}
+                    >
                       {" · "}
                       {decodeHTML(game.venueName)}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
                     {gameWhen(game)} · code{" "}
-                    <span className="font-mono">{formatPayCode(game.payCode)}</span>
+                    <span className="font-mono">
+                      {formatPayCode(game.payCode)}
+                    </span>
                   </div>
                   <div className="flex items-center gap-3 flex-wrap mt-1.5">
-                    <StatusDot tone={SESSION_STATUS_TONE[game.status] || "muted"}>
+                    <StatusDot
+                      tone={SESSION_STATUS_TONE[game.status] || "muted"}
+                    >
                       {game.status}
                     </StatusDot>
                     <PaymentStatusChip
