@@ -1,6 +1,6 @@
 import { useEvent } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { Volume2, VolumeX, Wifi } from "lucide-react-native";
+import { ChevronsRight, RotateCcw, Volume2, VolumeX, Wifi } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
@@ -12,6 +12,13 @@ import { useLiveSource } from "./useLiveSource";
 
 /** After a playback error, try the same link again this often. */
 const RETRY_MS = 15000;
+
+/**
+ * CR-014: each ⟲ goes back this far, up to REWIND_MAX_SECONDS — the box lists
+ * about a minute (LIVE_DVR_SECONDS) and the live edge sits a few seconds in.
+ */
+const REWIND_STEP_SECONDS = 10;
+const REWIND_MAX_SECONDS = 50;
 
 /**
  * The court's live video, straight from the venue's recorder box over the
@@ -29,6 +36,12 @@ const RETRY_MS = 15000;
  * CR-007: on a two-camera court (`live.cameras`) a Cam 1 | Cam 2 switch sits
  * above the video; one camera plays at a time, starting on Cam 1. Switching
  * only changes what this device plays — recording is never touched.
+ *
+ * CR-014: under the video, ⟲ 10 s goes back (again for 20, 30 … up to 50 s —
+ * the box keeps about a minute in its live stream) and Live → returns to
+ * live. "20 s behind" replaces the LIVE mark meanwhile. A camera switch or a
+ * renewed link starts at live again. A box not yet updated lists only ~10 s,
+ * so going further back stops at what it has.
  *
  * ⚠️ The link and the player's error can contain the link's `sig` — nothing
  * here logs either.
@@ -97,6 +110,27 @@ const LivePanel = ({ live, scheduled, className }) => {
     player.muted = muted;
   }, [muted, player]);
 
+  // CR-014: how far behind live this device is (0 = live). A new source (camera
+  // switch, renewed link) loads at the live edge, so it starts at 0 again
+  const [behind, setBehind] = useState(0);
+  useEffect(() => setBehind(0), [source]);
+
+  const rewind = () => {
+    if (behind >= REWIND_MAX_SECONDS) return;
+    player.seekBy(-REWIND_STEP_SECONDS);
+    player.play();
+    setBehind((b) => Math.min(REWIND_MAX_SECONDS, b + REWIND_STEP_SECONDS));
+  };
+  const goLive = () => {
+    if (!source) return;
+    setBehind(0);
+    // Reloading the live playlist is the dependable way back to its edge
+    player
+      .replaceAsync({ uri: source.uri, contentType: "hls" })
+      .then(() => player.play())
+      .catch(() => {});
+  };
+
   const playing = Boolean(source) && status !== "error";
   const cameraName = twoCameras ? `Cam ${camera}` : null;
 
@@ -143,9 +177,14 @@ const LivePanel = ({ live, scheduled, className }) => {
                 <Volume2 size={20} color="#fff" />
               )}
             </Pressable>
-            <View className="absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1">
+            <View className="absolute left-3 top-3 flex-row items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1">
+              {behind === 0 ? <View className="bg-destructive h-2 w-2 rounded-full" /> : null}
               <Text className="font-sans-semibold text-[11px] uppercase tracking-[0.08em] text-white">
-                {cameraName ? `Live · ${cameraName}` : "Live"}
+                {behind > 0
+                  ? `${behind} s behind${cameraName ? ` · ${cameraName}` : ""}`
+                  : cameraName
+                    ? `Live · ${cameraName}`
+                    : "Live"}
               </Text>
             </View>
           </>
@@ -167,6 +206,52 @@ const LivePanel = ({ live, scheduled, className }) => {
           </View>
         )}
       </View>
+
+      {/* CR-014: "⟲ 10 s            Live →" */}
+      {playing ? (
+        <View className="flex-row items-center justify-between gap-3">
+          <Pressable
+            onPress={rewind}
+            disabled={behind >= REWIND_MAX_SECONDS}
+            accessibilityRole="button"
+            accessibilityLabel={`Back ${REWIND_STEP_SECONDS} seconds`}
+            accessibilityHint="See the last point again"
+            className={cn(
+              "border-border bg-card h-12 flex-row items-center gap-2 rounded-full border px-4 active:opacity-70",
+              behind >= REWIND_MAX_SECONDS && "opacity-50",
+            )}
+          >
+            <RotateCcw size={17} color={colors.foreground} />
+            <Text className="font-sans-semibold text-[14px]">{REWIND_STEP_SECONDS} s</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={goLive}
+            disabled={behind === 0}
+            accessibilityRole="button"
+            accessibilityLabel={behind === 0 ? "Watching live" : "Back to live"}
+            accessibilityState={{ disabled: behind === 0 }}
+            className={cn(
+              "h-12 flex-row items-center gap-1.5 rounded-full px-4",
+              behind === 0 ? "bg-transparent" : "bg-primary active:opacity-85",
+            )}
+          >
+            {behind === 0 ? (
+              <>
+                <View className="bg-destructive h-2.5 w-2.5 rounded-full" />
+                <Text className="text-destructive font-sans-semibold text-[14px]">Live</Text>
+              </>
+            ) : (
+              <>
+                <Text className="text-primary-foreground font-sans-semibold text-[14px]">
+                  Live
+                </Text>
+                <ChevronsRight size={18} color={colors.primaryForeground} />
+              </>
+            )}
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 };

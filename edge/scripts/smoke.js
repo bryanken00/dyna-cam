@@ -46,7 +46,7 @@ import { createApi } from "../src/api.js";
 import { detectEncoder, makeClip } from "../src/clipper.js";
 import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
 import { makeGameFile, uploadGameFile } from "../src/game.js";
-import { createLiveServer, signLive } from "../src/live.js";
+import { createLiveServer, liveSegmentCount, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
 import { CourtRecorder } from "../src/recorder.js";
 import { Restreams } from "../src/restream.js";
@@ -272,7 +272,13 @@ const rtmpReceiver = (file, rtmpUrl) =>
 async function livePhase({ bufferRoot, recorders, encoder }) {
   await sleep(25_000);
   const key = "5".repeat(64);
-  const server = createLiveServer({ bufferDir: bufferRoot, key, log: createLogger("live") });
+  // CR-014: the box lists about a minute (LIVE_DVR_SECONDS=60) so the device can rewind
+  const server = createLiveServer({
+    bufferDir: bufferRoot,
+    key,
+    log: createLogger("live"),
+    segmentCount: liveSegmentCount(60, 2),
+  });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const exp = Math.floor(Date.now() / 1000) + 300;
@@ -281,7 +287,8 @@ async function livePhase({ bufferRoot, recorders, encoder }) {
     const first = await (await fetch(url)).text();
     const bad = await fetch(`${base}?exp=${exp}&sig=${"0".repeat(64)}`);
     const segments = first.split("\n").filter((l) => l.startsWith("#EXTINF")).length;
-    if (segments !== 5 || first.includes("#EXT-X-ENDLIST")) fail(`live playlist:\n${first}`);
+    // CR-014: more than the old 5 (≈ 25 s recorded so far, up to a minute is listed)
+    if (segments <= 5 || first.includes("#EXT-X-ENDLIST")) fail(`live playlist:\n${first}`);
     if (bad.status !== 403) fail(`a bad live signature answered ${bad.status}`);
     // ffmpeg's HLS reader only accepts segment URIs ending in .ts unless extension_picky is off
     const { stdout } = await runFfmpeg(FFPROBE, [
@@ -308,15 +315,19 @@ async function livePhase({ bufferRoot, recorders, encoder }) {
     const span = video.at(-1) - video[0];
     const audio = packets.filter(([type]) => type === "audio").length;
     const sequence = (text) => Number(/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text)?.[1]);
+    // The newest listed segment's number. With CR-014's minute-long window the
+    // first one (MEDIA-SEQUENCE) only moves once the window is full
+    const newest = (text) =>
+      sequence(text) + text.split("\n").filter((l) => l.startsWith("#EXTINF")).length - 1;
     await sleep(5000);
     const second = await (await fetch(url)).text();
     const result =
-      `live view: ${segments} segments, sequence ${sequence(first)} → ${sequence(second)} after 5 s; ` +
+      `live view: ${segments} segments, newest ${newest(first)} → ${newest(second)} after 5 s; ` +
       `ffprobe read ${video.length} video packets over ${span.toFixed(2)}s (${backwards} going back), ${audio} audio packets`;
     if (video.length < 150 || span < 5) fail(`ffprobe could not play the live view — ${result}`);
     if (backwards) fail(`the live clock jumps back between segments — ${result}`);
     if (!audio) fail(`no audio in the live view — ${result}`);
-    if (!(sequence(second) > sequence(first))) fail(`media sequence did not move on — ${result}`);
+    if (!(newest(second) > newest(first))) fail(`the live view did not move on — ${result}`);
     log.info(result);
     const cam2 = await fetch(url.replace("/court-smoke/", "/court-smoke/cam2/"));
     const cam2Text = await cam2.text();

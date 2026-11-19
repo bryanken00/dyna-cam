@@ -156,6 +156,7 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`LIVE_PORT and BUTTON_PORT must differ (both are ${livePort})`);
   }
   const liveHost = parseLiveHost(env.LIVE_HOST);
+  const bufferSeconds = int(env, "BUFFER_SECONDS", 180, 90, 3600);
   // HTTPS live view (CR-002): a folder with privkey.pem, cert.pem (+ chain.pem), like back's certPath
   const certRaw = String(env.CERT_PATH ?? "").trim();
   const certPath = certRaw ? path.resolve(ROOT_DIR, certRaw) : null;
@@ -172,7 +173,10 @@ export function loadConfig(env = process.env) {
     dataDir,
     segmentSeconds: int(env, "SEGMENT_SECONDS", 2, 1, 10),
     // A clip needs 65 s plus the time the job takes to reach the box
-    bufferSeconds: int(env, "BUFFER_SECONDS", 180, 90, 3600),
+    bufferSeconds,
+    // CR-014: how far back the live view can be rewound on the session device —
+    // the live playlist lists this much of the buffer (kept 30 s inside it)
+    liveDvrSeconds: Math.min(int(env, "LIVE_DVR_SECONDS", 60, 10, 3600), bufferSeconds - 30),
     encoder,
     vaapiDevice: env.VAAPI_DEVICE || "/dev/dri/renderD128",
     recordAudio: bool(env, "RECORD_AUDIO", true),
