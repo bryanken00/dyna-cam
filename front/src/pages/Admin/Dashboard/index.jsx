@@ -6,7 +6,6 @@ import Spinner from "../../../components/Spinner";
 import PageHeader from "../../../components/PageHeader";
 import StatCard from "../../../components/StatCard";
 import StatusDot from "../../../components/StatusDot";
-import { decodeHTML } from "../../../utils/decode-html";
 import CourtBoard from "./components/CourtBoard";
 import { durationText, useDashboardHooks } from "./hooks";
 import RefreshButton from "../../../components/RefreshButton";
@@ -174,88 +173,6 @@ const RecorderBoxes = ({ boxes, isLoading, summary }) => (
   </div>
 );
 
-const RecentActivity = ({ items }) => (
-  <div
-    className="overflow-hidden"
-    style={{
-      background: "var(--color-surface)",
-      border: "1px solid var(--color-line)",
-      borderRadius: "var(--radius-card)",
-    }}
-  >
-    <div
-      className="flex items-center gap-2 px-4.5 py-3.5"
-      style={{ borderBottom: "1px solid var(--color-line)" }}
-    >
-      <Clock
-        className="w-4 h-4 shrink-0"
-        strokeWidth={1.8}
-        style={{ color: "var(--color-text-muted)" }}
-      />
-      <span
-        style={{
-          fontSize: 13.5,
-          fontWeight: 600,
-          color: "var(--color-text-dark)",
-        }}
-      >
-        Recent activity
-      </span>
-    </div>
-
-    {items.length === 0 ? (
-      <div className="px-4.5 py-14 text-center">
-        <p
-          className="m-0"
-          style={{ fontSize: 13, color: "var(--color-text-muted)" }}
-        >
-          No recent activity to display
-        </p>
-      </div>
-    ) : (
-      <div>
-        {items.map((item, i) => (
-          <div
-            key={item.auditId}
-            className="flex items-start justify-between gap-4 px-4.5 py-3"
-            style={
-              i === 0
-                ? undefined
-                : { borderTop: "1px solid var(--color-line-soft)" }
-            }
-          >
-            <div className="min-w-0">
-              <p
-                className="m-0 font-medium truncate"
-                style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
-              >
-                {decodeHTML(item.description) || item.action}
-              </p>
-              <p
-                className="m-0 mt-0.5 truncate"
-                style={{ fontSize: 12, color: "var(--color-text-muted)" }}
-              >
-                {[
-                  item.module,
-                  [item.firstName, item.lastName].filter(Boolean).join(" "),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-            </div>
-            <span
-              className="shrink-0"
-              style={{ fontSize: 12, color: "var(--color-text-muted)" }}
-            >
-              {dayjs(item.dateCreated).format("MMM D, h:mm A")}
-            </span>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
-
 const Dashboard = () => {
   const {
     statCards,
@@ -267,7 +184,6 @@ const Dashboard = () => {
     boxes,
     alertsLoading,
     alertsError,
-    recentActivity,
     isLoading,
     isFetching,
     error,
@@ -325,9 +241,6 @@ const Dashboard = () => {
               <RecorderBoxes boxes={boxes} isLoading={alertsLoading} summary={boxSummary} />
             </div>
           )}
-
-          {/* 6. RECENT ACTIVITY */}
-          <RecentActivity items={recentActivity} />
         </>
       )}
     </div>

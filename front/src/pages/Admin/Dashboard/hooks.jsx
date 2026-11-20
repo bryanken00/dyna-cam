@@ -6,7 +6,6 @@ import { Banknote, Camera, Film, Video } from "lucide-react";
 import { usePermissions } from "../../../hooks/usePermissions";
 import {
   useGetDashboardAlerts,
-  useGetDashboardStats,
   useGetDashboardVenues,
 } from "../../../services/requests/admin/dashboard";
 import { formatPeso } from "../../../utils/dynaCam";
@@ -152,7 +151,6 @@ export const useDashboardHooks = () => {
 
   const venuesQuery = useGetDashboardVenues();
   const alertsQuery = useGetDashboardAlerts({ enabled: canSeeAlerts });
-  const statsQuery = useGetDashboardStats();
 
   const venues = venuesQuery.data?.data?.venues;
 
@@ -205,7 +203,6 @@ export const useDashboardHooks = () => {
   const refetch = () => {
     venuesQuery.refetch();
     if (canSeeAlerts) alertsQuery.refetch();
-    statsQuery.refetch();
   };
 
   return {
@@ -218,9 +215,8 @@ export const useDashboardHooks = () => {
     boxes,
     alertsLoading: canSeeAlerts && alertsQuery.isLoading,
     alertsError: alertsQuery.error,
-    recentActivity: statsQuery.data?.data?.recentActivity ?? [],
     isLoading: venuesQuery.isLoading,
-    isFetching: venuesQuery.isFetching || alertsQuery.isFetching || statsQuery.isFetching,
+    isFetching: venuesQuery.isFetching || alertsQuery.isFetching,
     error: venuesQuery.error,
     refetch,
   };
