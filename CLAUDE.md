@@ -129,7 +129,8 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   them with `npm run boxes` / `npm run boxes:revoke -- <name or id>` in `back/`; `/api/v1/public/*` is
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
-  stored encrypted and never returned). CR-015: a game's videos open only once staff record its
+  stored encrypted and never returned; CR-025: while a game records, its page also gets the box's signed
+  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`). CR-015: a game's videos open only once staff record its
   payment (Admin → Sessions → Record payment, Payments permission); until then the session device
   and the player's page show its pay code, and `/public/games/:payCode` (rate-limited) gives a paid
   game's link to Find a game on the device; `/api/v1/oauth/google/callback` is where Google sends staff

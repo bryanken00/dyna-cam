@@ -1,5 +1,5 @@
 import express from "express";
-import { catchAsync, validateParams } from "../../../utils/catchAsync.js";
+import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
@@ -8,8 +8,21 @@ import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../util
 import { materializeSessionParts, settleSessions, uploadPercent } from "../../../utils/sessions.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
-import { loadCaptures } from "../../../utils/sessionCaptures.js";
+import {
+  CAPTURE_MIN_SECONDS,
+  CAPTURE_REFUSALS,
+  captureLimits,
+  createCapture,
+  loadCaptures,
+} from "../../../utils/sessionCaptures.js";
+import {
+  liveLink,
+  loadDeviceSession,
+  sessionRecording,
+  toDeviceSession,
+} from "../../../utils/sessionDevices.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { captureSchema } from "../../../validators/app.validator.js";
 import {
   clipTokenParamsSchema,
   courtTokenParamsSchema,
@@ -26,7 +39,8 @@ import {
  *   GET  /courts/:qrToken          the court page
  *   POST /courts/:qrToken/clips    save the last 60 seconds
  *   GET  /clips/:shareToken        the clip page (polls until Ready)
- *   GET  /sessions/:shareToken     a recorded session's page (its parts)
+ *   GET  /sessions/:shareToken     a recorded session's page (its parts; CR-025: live view)
+ *   POST /sessions/:shareToken/captures   CR-025: Save the last … from the game's page
  *   GET  /games/:payCode           CR-015: Find a game on the courtside device
  */
 const router = express.Router();
@@ -48,6 +62,41 @@ const findGameLimiter = dynamicLimiter({
   keyGenerator: (req) => `find-game:${req.ip}`,
   message: "Too many tries — wait a minute and try again.",
 });
+
+// CR-025: Save the last … from the game's page. The game's limit (CR-013) caps
+// what a link holder can add; this keeps one phone from hammering the route.
+const saveCaptureLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CAPTURE_POINTS || "10", 10),
+  duration: 60,
+  keyGenerator: (req) => `public-capture:${req.ip}`,
+  message: "Too many saves — wait a moment and try again.",
+});
+
+/** A game by its share link (not cancelled), for the routes below. */
+const SESSION_BY_TOKEN = `SELECT sessionId, venueId FROM recording_sessions
+  WHERE shareToken = ? AND status != 'Cancelled' LIMIT 1`;
+
+/**
+ * CR-025: what the game's page needs to show the court device's live view and
+ * "Save the last …" — the same signed LAN link as GET /app/session (null unless
+ * recording), and the save limits with the time played so far.
+ */
+const liveAndCapture = async (db, sessionId, captureCount) => {
+  const row = await loadDeviceSession(db, sessionId);
+  const now = Date.now();
+  if (!row) return { live: null, capture: null };
+  const recording = sessionRecording(row, now);
+  return {
+    live: await liveLink(db, row, now),
+    capture: {
+      minSeconds: CAPTURE_MIN_SECONDS,
+      available: recording,
+      maxPerGame: captureLimits(row).maxPerGame,
+      used: captureCount,
+      playedSeconds: recording ? toDeviceSession(row, now).elapsedSeconds : 0,
+    },
+  };
+};
 
 const COURT_BY_TOKEN = `
   SELECT ${COURT_RECORDING_COLUMNS}
@@ -272,7 +321,11 @@ router.get(
     const open = Number(openEnded) === 1 && ["Waiting", "Recording"].includes(session.status);
     if (open) info.endAt = null;
     if (session.status === "Waiting") info.startAt = null;
+    // CR-025: the court's live video and Save the last … while recording
+    const { live, capture } = await liveAndCapture(req.db, rows[0].sessionId, captures.length);
     return res.sendSuccess("Session", {
+      live,
+      capture,
       session: {
         ...info,
         status: session.status,
@@ -308,6 +361,45 @@ router.get(
         })),
       },
     });
+  })
+);
+
+/**
+ * POST /sessions/:shareToken/captures
+ * CR-025: Save the last `seconds` of the game from its page — the same save as
+ * the court device's (CR-013): while recording, after the first minute, up to
+ * the game's limit, a double tap returns the save already made. The save has
+ * no paired device. It shows under "Your saves" (locked until paid, CR-015).
+ */
+router.post(
+  "/sessions/:shareToken/captures",
+  saveCaptureLimiter,
+  validateParams(sessionTokenParamsSchema),
+  validateBody(captureSchema),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(SESSION_BY_TOKEN, [req.params.shareToken]);
+    if (rows.length === 0) {
+      return res.sendError("This session link is not valid", 404);
+    }
+    // The game's status up to date (it may have just reached its end time)
+    await materializeSessionParts(req.db, { venueId: rows[0].venueId });
+    await settleSessions(req.db, rows[0].sessionId);
+
+    const result = await createCapture(req.db, {
+      sessionId: rows[0].sessionId,
+      pairedAppId: null,
+      seconds: req.body.seconds,
+    });
+    if (!result.ok) {
+      const refusal = CAPTURE_REFUSALS[result.reason];
+      return res.sendError(refusal.message, null, refusal.status, result.reason);
+    }
+    // No IDs on the player's routes: the page re-reads the game to show it
+    return res.sendSuccess(
+      "Saving — it'll be on this page in a few minutes",
+      { repeated: result.repeated },
+      result.repeated ? 200 : 201
+    );
   })
 );
 

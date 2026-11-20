@@ -13,6 +13,8 @@ import {
 import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
 import { useSessionPageHooks } from "./hooks";
+import LivePanel from "./components/LivePanel";
+import SaveLastMinutes from "./components/SaveLastMinutes";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import PayCode from "../../../components/PayCode";
 import ResultState from "../../../components/ResultState";
@@ -81,7 +83,7 @@ const StatusNotice = ({ session }) => {
     );
   }
   if (status === "Recording") {
-    // CR-004: nothing to watch until the game ends
+    // CR-025: the live view and Save the last … sit under this
     return (
       <div className="flex items-start gap-2.5 px-3.5 py-3" style={noticeStyle}>
         <Radio
@@ -89,8 +91,9 @@ const StatusNotice = ({ session }) => {
           style={{ color: "var(--color-error)" }}
         />
         <span>
-          <strong className="font-semibold">Recording now</strong> — your whole
-          game appears here as one video when it ends.
+          <strong className="font-semibold">Recording now</strong> — watch it
+          live below on the venue Wi-Fi. Your whole game appears here as one
+          video when it ends.
         </span>
       </div>
     );
@@ -596,6 +599,11 @@ const LockedGame = ({ session, videos, captures }) => {
 const SessionPage = () => {
   const {
     session,
+    live,
+    capture,
+    isRecording,
+    since,
+    saveCapture,
     parts,
     videos,
     captures,
@@ -715,6 +723,15 @@ const SessionPage = () => {
 
       <StatusNotice session={session} />
       {saving && <SavingProgress percent={saving.percent} />}
+
+      {/* CR-025: what the court device shows while recording — paid or not.
+          End game stays on the court device and in Admin. */}
+      {isRecording && (
+        <>
+          <LivePanel live={live} />
+          <SaveLastMinutes capture={capture} since={since} save={saveCapture} />
+        </>
+      )}
 
       {session.locked && (
         <LockedGame session={session} videos={videos} captures={captures} />
