@@ -302,23 +302,11 @@ const WholeVideoCard = ({ video, twoCameras }) => {
           We&apos;re still putting your video together — check back soon.
         </p>
       )}
+      {/* CR-017: gone from here and from the venue's Google Drive */}
       {video.status === "Expired" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          This video has expired here.
-          {video.driveUrl && (
-            <>
-              {" "}
-              <a
-                href={video.driveUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-                style={{ color: "var(--color-text-dark)" }}
-              >
-                Open it in Google Drive
-              </a>
-            </>
-          )}
+          This video has been deleted — videos are only kept for a short time
+          after the game.
         </p>
       )}
     </div>
@@ -432,7 +420,8 @@ const CaptureCard = ({ capture }) => {
       )}
       {capture.status === "Expired" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          This save has expired here.
+          This save has been deleted — videos are only kept for a short time
+          after the game.
         </p>
       )}
     </div>
@@ -522,21 +511,8 @@ const PartCard = ({ part }) => {
           className="m-0 px-4 pb-3"
           style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
         >
-          This part has expired here.
-          {part.driveUrl && (
-            <>
-              {" "}
-              <a
-                href={part.driveUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-                style={{ color: "var(--color-text-dark)" }}
-              >
-                Open it in Google Drive
-              </a>
-            </>
-          )}
+          This part has been deleted — videos are only kept for a short time
+          after the game.
         </p>
       )}
     </div>
@@ -817,7 +793,8 @@ const SessionPage = () => {
                   className="m-0 mt-3 text-center"
                   style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
                 >
-                  Available until {formatDateTime(expiresAt)}
+                  Available until {formatDateTime(expiresAt)} — download it
+                  before then. It&apos;s deleted after that.
                 </p>
               )}
             </div>

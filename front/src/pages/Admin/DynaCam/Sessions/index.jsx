@@ -22,6 +22,7 @@ import SessionFormDrawer from "./components/SessionFormDrawer";
 import SessionDetailSheet from "./components/SessionDetailSheet";
 import PairDeviceFormModal from "./components/PairDeviceFormModal";
 import AddTimeFormModal from "./components/AddTimeFormModal";
+import GameDriveDialog from "./components/GameDriveDialog";
 import PairingKeyDialog from "../../../../components/PairingKeyDialog";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
@@ -76,6 +77,8 @@ const SessionsPage = () => {
     handlePairingKeyClose,
     addTimeTarget,
     handleAddTimeClose,
+    driveTarget,
+    handleDriveClose,
   } = useSessionHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -299,6 +302,13 @@ const SessionsPage = () => {
         open={!!pairingKey}
         pairingKey={pairingKey}
         onClose={handlePairingKeyClose}
+      />
+
+      {/* CR-001: a finished game's Google Drive folder as a QR + link */}
+      <GameDriveDialog
+        open={!!driveTarget}
+        session={driveTarget}
+        onClose={handleDriveClose}
       />
 
       {/* CR-016: more time for a recording game */}

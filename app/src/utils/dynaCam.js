@@ -66,6 +66,16 @@ export const formatElapsed = (seconds) => {
 export const secondsSince = (dataUpdatedAt, now = Date.now()) =>
   Math.max(0, Math.floor((now - (dataUpdatedAt || now)) / 1000));
 
+/**
+ * CR-017: how long a game's videos are kept, from the API's `keepDays`
+ * (1 → "24 hours", 3 → "3 days"); null when the API doesn't say.
+ */
+export const keepTimeText = (keepDays) => {
+  const days = Math.floor(Number(keepDays) || 0);
+  if (days < 1) return null;
+  return days === 1 ? "24 hours" : `${days} days`;
+};
+
 /** "https://dynacam.ph/session/Ab3…" → "dynacam.ph/session/Ab3…" — what's worth reading out. */
 export const shortLink = (url) => String(url ?? "").replace(/^https?:\/\//, "");
 

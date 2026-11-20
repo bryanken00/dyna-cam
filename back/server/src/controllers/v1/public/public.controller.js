@@ -190,10 +190,10 @@ router.get(
         locked,
         // Shown to the player to pay at the front desk (only while unpaid)
         payCode: locked ? clip.payCode : null,
-        // CR-001: the copy in the venue's Google Drive — paid or free clips only,
-        // and still there after the server's copy expired
+        // CR-001: the copy in the venue's Google Drive — paid or free clips only.
+        // CR-017: only while the clip is kept; its Drive copy goes with it
         driveUrl:
-          !locked && clip.driveStatus === "Uploaded" && ["Ready", "Expired"].includes(clip.status)
+          !locked && clip.driveStatus === "Uploaded" && clip.status === "Ready"
             ? clip.driveUrl
             : null,
       },
@@ -285,8 +285,13 @@ router.get(
         locked,
         payCode: locked ? payCode : null,
         // CR-001: the game's folder in the venue's Google Drive, once a video is in it
+        // (CR-017: while a video in it is still kept)
         driveUrl:
-          !locked && driveUrl && videos.some((v) => v.driveStatus === "Uploaded") ? driveUrl : null,
+          !locked &&
+          driveUrl &&
+          videos.some((v) => v.driveStatus === "Uploaded" && v.status === "Ready")
+            ? driveUrl
+            : null,
         // CR-003 / CR-006: one whole video per camera (camera 0 = the court's only camera)
         videos: videos.map(toVideo),
         // CR-013: saved stretches, oldest first ("Save 1 · 8:00 – 10:00")

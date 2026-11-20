@@ -274,7 +274,7 @@ export const useVenueHooks = () => {
         ),
       },
       {
-        title: "Keeps clips",
+        title: "Keeps videos",
         dataIndex: "clipRetentionDays",
         key: "clipRetentionDays",
         width: 120,

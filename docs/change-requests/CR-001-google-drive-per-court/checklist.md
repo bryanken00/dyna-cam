@@ -59,6 +59,16 @@
 - [x] Clips page: Drive status chip / link
 - [x] Player clip page and whole-game page: Open in Google Drive button
 
+### 2026-11-20 revision — Drive QR + link in Admin → Sessions
+
+- [x] API: the sessions list / detail include the game's Drive folder link (`driveUrl`) once a
+      kept video of it is in Drive (null otherwise)
+- [x] Sessions ⋮ menu: **Google Drive** for a game with a Drive link that is paid or free
+- [x] Dialog: court · venue · player, QR of the folder link, the link, Copy link, Open in Google Drive
+- [x] Game details: a Google Drive row with the link and Show QR
+- [x] Test: the link appears once the game's video is in Drive, and goes after it's deleted
+- [x] `cd back && npm run lint && npm test`; `cd front && npm run lint && npm run build`
+
 ## Acceptance
 
 - [ ] Connect from the court setup page and return showing the account's email
@@ -71,6 +81,8 @@
 - [ ] Revoked access shows "needs reconnecting"; held recordings upload after reconnecting
 - [ ] Read-only staff see the status but no buttons
 - [ ] Clips page shows which clips are in Drive
+- [ ] (2026-11-20) A finished, paid game in Sessions has Google Drive in its ⋮ menu; the dialog's QR
+      opens the game's Drive folder on a phone
 
 ## Wrap-up
 

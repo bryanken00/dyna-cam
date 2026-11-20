@@ -295,10 +295,11 @@ function onListening() {
     // Purge expired idempotency keys now and then hourly
     stopIdempotencyCleanup = scheduleIdempotencyCleanup(db);
 
-    // Expire old clips (and delete their files), fail clips no recorder picked up — hourly
+    // Expire old clips (and delete their files), fail clips no recorder picked up — every 10 min
     stopClipMaintenance = scheduleClipMaintenance(db);
 
     // CR-001: copy Ready clips of courts with a Google account to its Drive — every 30 s
+    // (CR-017: and move expired videos' Drive copies to the Drive's trash)
     stopDriveUploads = scheduleDriveUploads(db);
 
     // CR-008: box offline / camera down / disk / clock / backlog → Discord + email — every minute

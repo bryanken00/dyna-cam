@@ -48,7 +48,10 @@ const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
          s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.addedMinutes, s.paymentStatus,
-         s.payCode, s.dateCreated, s.dateUpdated,
+         s.payCode, s.dateCreated, s.dateUpdated, s.driveUrl AS driveFolderUrl,
+         EXISTS (SELECT 1 FROM session_videos dv
+                 WHERE dv.sessionId = s.sessionId AND dv.status = 'Ready'
+                   AND dv.driveStatus = 'Uploaded') AS driveReady,
          (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
            AS paidAmount,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
@@ -71,7 +74,7 @@ const isOpen = (row) =>
   Number(row.openEnded) === 1 && ["Waiting", "Recording"].includes(row.status);
 
 const toSession = (row) => {
-  const { shareToken, openEnded, ...session } = row;
+  const { shareToken, openEnded, driveFolderUrl, driveReady, ...session } = row;
   const open = isOpen(row);
   const nowM = moment().tz(TIMEZONE);
   return {
@@ -96,6 +99,9 @@ const toSession = (row) => {
     // CR-016: time staff added after New game (Add time)
     addedMinutes: Number(row.addedMinutes || 0),
     shareUrl: sessionShareUrl(shareToken),
+    // CR-001 (2026-11-20): the game's shared Drive folder, for staff to show as a
+    // QR — once a kept video of it is in Drive (CR-017: gone once they're deleted)
+    driveUrl: Number(driveReady) === 1 && driveFolderUrl ? driveFolderUrl : null,
   };
 };
 

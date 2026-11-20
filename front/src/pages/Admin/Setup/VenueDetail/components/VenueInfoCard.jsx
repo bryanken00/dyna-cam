@@ -67,7 +67,7 @@ const VenueInfoCard = ({ venue }) => {
         <Fact label="Address">{decodeHTML(venue.address) || "—"}</Fact>
         <Fact label="Phone">{formatPhoneDisplay(venue.phone) || "—"}</Fact>
         <Fact label="Clip price">{price > 0 ? formatPeso(price) : "Free"}</Fact>
-        <Fact label="Keeps clips">
+        <Fact label="Keeps videos">
           {venue.clipRetentionDays} {Number(venue.clipRetentionDays) === 1 ? "day" : "days"}
         </Fact>
         <Fact label="Courts">{courts}</Fact>

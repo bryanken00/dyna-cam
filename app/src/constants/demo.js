@@ -161,6 +161,8 @@ const demoSession = () => {
         ? { status: "Paid", payCode: null }
         : { status: "Unpaid", payCode: DEMO_PAY_CODE },
       failureReason: null,
+      // CR-017: the venue keeps videos 1 day
+      keepDays: 1,
     },
     unpairInSeconds: endedMs
       ? Math.max(0, UNPAIR_GRACE_SECONDS - Math.floor((now - endedMs) / 1000))

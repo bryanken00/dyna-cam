@@ -97,6 +97,14 @@ accounts (e.g. a court rented by a club).
 - [x] Who can connect → **court setup permission** (`venues.courts` write) (bryanken00, 2026-11-17)
 - [ ] Who owns the Google Cloud project and OAuth client (needed before go-live, not to build)
 
+## Revisions
+
+- 2026-11-20: Added — Admin → Sessions: a finished game whose video is in Google Drive gets a
+  **Google Drive** action (row ⋮ menu and the game's details) that opens a dialog with the game's
+  Drive folder as a **QR code** and a link (copy / open), for staff to show or send the player.
+  Shown only once the game is paid or free (like the player's page, CR-015), and gone once its
+  Drive copies are deleted (CR-017). Asked directly by bryanken00.
+
 ## Approval
 
 | Decision | By | Date | Notes |
