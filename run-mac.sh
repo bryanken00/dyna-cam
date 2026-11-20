@@ -5,6 +5,7 @@
 #   ./run-mac.sh                 # both
 #   ./run-mac.sh back            # just the API (or: front)
 #   ./run-mac.sh back app        # the API + the Expo dev server for the mobile app (opt-in)
+#   ./run-mac.sh back front edge # + the recorder box (opt-in; needs ffmpeg and a paired box in edge/.env)
 #   ./run-mac.sh stop            # free the dev ports if anything was left behind
 #
 # Output is prefixed per app. Ctrl+C stops all of them.
@@ -30,14 +31,28 @@ cd "$(dirname "$0")" || exit 1
 BACK_PORT="$(sed -n 's/^PORT=\([0-9][0-9]*\).*/\1/p' back/.env 2>/dev/null | tail -n 1)"
 BACK_PORT="${BACK_PORT:-4021}"
 
+# The recorder box (edge/) has no web page; it serves the live view on LIVE_PORT
+# from edge/.env (8090 if unset) and court buttons on BUTTON_PORT (8089). The
+# live port is the one checked and freed below — the button port when the live
+# view is turned off (LIVE_PORT empty or 0).
+EDGE_PORT="$(sed -n 's/^LIVE_PORT=\([0-9]*\).*/\1/p' edge/.env 2>/dev/null | tail -n 1)"
+if grep -q '^LIVE_PORT=' edge/.env 2>/dev/null && { [ -z "$EDGE_PORT" ] || [ "$EDGE_PORT" = "0" ]; }; then
+  EDGE_PORT="$(sed -n 's/^BUTTON_PORT=\([0-9][0-9]*\).*/\1/p' edge/.env 2>/dev/null | tail -n 1)"
+  EDGE_PORT="${EDGE_PORT:-8089}"
+fi
+EDGE_PORT="${EDGE_PORT:-8090}"
+
 # name : port : ANSI colour
 # `app` is the Expo dev server (Metro, 8081). It is opt-in — never started by
 # the no-argument default — because Expo is happiest in its own terminal, where
 # its QR code and key shortcuts work. Through this script you get the URL only.
+# `edge` is the recorder box agent (`node --watch`). Also opt-in: it records the
+# cameras in edge/.env with ffmpeg, which a front-end-only session doesn't want.
 ALL=(
   "back:$BACK_PORT:36"
   "front:4020:34"
   "app:8081:35"
+  "edge:$EDGE_PORT:33"
 )
 DEFAULT=(back front)
 
@@ -182,7 +197,7 @@ if [ $# -gt 0 ]; then
     done
     if [ -z "$hit" ]; then
       echo "Unknown app: $want" >&2
-      echo "Choose from: back front app  (or: stop)" >&2
+      echo "Choose from: back front app edge  (or: stop)" >&2
       exit 1
     fi
     selected+=("$hit")
@@ -195,12 +210,20 @@ fi
 fail=0
 for entry in "${selected[@]}"; do
   name="${entry%%:*}"
+  # setup.sh doesn't cover the recorder box — it is set up by hand (edge/README.md)
+  if [ "$name" = "edge" ]; then
+    fix_modules="cd edge && npm install"
+    fix_env="cp edge/.env.example edge/.env, then fill it in (edge/README.md)"
+  else
+    fix_modules="run ./setup.sh"
+    fix_env="run ./setup.sh"
+  fi
   [ -d "$name/node_modules" ] || {
-    echo "!! $name has no node_modules — run ./setup.sh" >&2
+    echo "!! $name has no node_modules — $fix_modules" >&2
     fail=1
   }
   [ -f "$name/.env" ] || {
-    echo "!! $name has no .env — run ./setup.sh" >&2
+    echo "!! $name has no .env — $fix_env" >&2
     fail=1
   }
 done

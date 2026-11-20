@@ -184,8 +184,10 @@ continue from `npm run db:setup` below. The steps it automates are spelled out n
 Once set up, start both dev servers from one terminal — `./run-mac.sh` on macOS, `./run.sh` in
 Git Bash on Windows. Output is prefixed per app and Ctrl+C stops everything. Both take the same
 arguments: `back` or `front` to start just one, `app` (opt-in, e.g. `./run-mac.sh back app`) to
-add the mobile app's Expo dev server, and `stop` to free the dev ports (4021 — or `PORT` from
-`back/.env` — 4020 and 8081) if a server was left running.
+add the mobile app's Expo dev server, `edge` (opt-in, e.g. `./run-mac.sh back front edge`) to add
+the recorder box (it needs ffmpeg and a filled-in `edge/.env`), and `stop` to free the dev ports
+(4021 — or `PORT` from `back/.env` — 4020, 8081 and the box's `LIVE_PORT`, 8090) if a server was
+left running.
 
 ### 1. Backend
 
