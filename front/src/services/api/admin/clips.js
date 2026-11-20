@@ -2,18 +2,9 @@ import { createAxiosInstanceWithInterceptor, userTypeAuth } from "../axios";
 
 const api = createAxiosInstanceWithInterceptor("data", userTypeAuth.admin);
 
-export const getClipsApi = async (filters = {}) => {
-  const response = await api.get("/api/v1/admin/clips", { params: filters });
-  return response.data;
-};
-
-// Venues + courts for the Clips filters (clips permission)
+// Venues + courts for the Sessions filters and New game (clips permission).
+// CR-024: the Clips list page is gone, so its list / by-ID calls are too.
 export const getClipOptionsApi = async () => {
   const response = await api.get("/api/v1/admin/clips/options");
-  return response.data;
-};
-
-export const getClipByIdApi = async (clipId) => {
-  const response = await api.get(`/api/v1/admin/clips/${clipId}`);
   return response.data;
 };

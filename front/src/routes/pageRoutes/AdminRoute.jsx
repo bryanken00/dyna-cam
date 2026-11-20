@@ -25,7 +25,6 @@ const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
 const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
 const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
 // Dyna Cam (PLAN-001): day-to-day work
-const Clips = lazy(() => import("../../pages/Admin/DynaCam/Clips"));
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
 
@@ -90,21 +89,6 @@ const AdminRoute = () => {
       isFilter: true,
       isShow: true,
       children: [
-        {
-          route: "/clips",
-          name: "Clips",
-          label: "Clips",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute module="clips" accessLevel="read">
-                <Clips />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: { module: "clips", submodule: null, accessLevel: "read" },
-          isFilter: true,
-          isShow: true,
-        },
         {
           route: "/sessions",
           name: "Sessions",
@@ -310,6 +294,11 @@ const AdminRoute = () => {
         <Route
           path="setup/recorder-boxes"
           element={<Navigate to="/admin/setup/venues" replace />}
+        />
+        {/* CR-024: the Clips page was removed — games are in Sessions */}
+        <Route
+          path="dyna-cam/clips"
+          element={<Navigate to="/admin/dyna-cam/sessions" replace />}
         />
         {/* PLAN-002 Phase E: devices are paired to a session now */}
         <Route
