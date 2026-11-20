@@ -1,5 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
-import { Cloud, Copy, ExternalLink } from "lucide-react";
+import { Cloud, Copy, ExternalLink, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -14,17 +14,24 @@ import {
 
 import { copyText } from "../../../../../utils/clipboard";
 import { decodeHTML } from "../../../../../utils/decode-html";
+import { DRIVE_EMAIL_SENDABLE, driveEmailText } from "../../../../../utils/dynaCam";
+import { useSendSessionDriveEmail } from "../../../../../services/requests/admin/sessions";
 
 /**
  * CR-001 (2026-11-20): a finished game's Google Drive folder as a QR code and
  * a link, for staff to show or send the player. The folder is shared "anyone
  * with the link", so it opens on a phone with no Google sign-in.
  *
- * Props: `{ open, onClose, session }` — `session` needs `driveUrl`,
- * `courtName`, `venueName` and, optionally, `playerName`.
+ * CR-018: with the player's email on the game, staff can also email the link.
+ *
+ * Props: `{ open, onClose, session, canWrite }` — `session` needs `driveUrl`,
+ * `courtName`, `venueName` and, optionally, `playerName`, `email`, `driveEmail`.
  */
-const GameDriveDialog = ({ open, onClose, session }) => {
+const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
   const url = session?.driveUrl || "";
+  const sendEmailMutation = useSendSessionDriveEmail();
+  const canEmail =
+    canWrite && !!session?.email && DRIVE_EMAIL_SENDABLE.includes(session?.driveEmail?.status);
 
   const handleCopy = async () => {
     const ok = await copyText(url);
@@ -91,6 +98,15 @@ const GameDriveDialog = ({ open, onClose, session }) => {
               The Drive copy is deleted with the game&apos;s videos when the
               venue&apos;s keep time ends.
             </p>
+            {/* CR-018: the automatic email, and sending it now */}
+            {session?.driveEmail && session.driveEmail.status !== "NoEmail" && (
+              <p
+                className="m-0 text-center"
+                style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}
+              >
+                {driveEmailText(session.driveEmail)}
+              </p>
+            )}
           </div>
         ) : (
           <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
@@ -99,6 +115,18 @@ const GameDriveDialog = ({ open, onClose, session }) => {
         )}
 
         <DialogFooter>
+          {canEmail && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={sendEmailMutation.isPending}
+              onClick={() => sendEmailMutation.mutate(session.sessionId)}
+              title={`Email the link to ${session.email}`}
+            >
+              <Send />
+              Email it
+            </Button>
+          )}
           <Button type="button" variant="outline" onClick={handleCopy} disabled={!url}>
             <Copy />
             Copy link

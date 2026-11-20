@@ -4,6 +4,7 @@ import { getCurrentTimestampLocal, moment } from "../utils/dateUtils.js";
 import { toEpochMs } from "../utils/clips.js";
 import { decryptSecret } from "../utils/crypto/secretBox.js";
 import { runDriveCleanup } from "./driveCleanup.js";
+import { runDriveEmails } from "./driveEmails.js";
 import {
   accessToken,
   createFolder,
@@ -335,6 +336,12 @@ export const scheduleDriveUploads = (db, intervalMs = INTERVAL_MS) => {
         if (Object.keys(tally).length > 0) logger.info("Google Drive uploads", tally);
       })
       .catch((err) => logger.error("Google Drive uploads failed", { error: err.message }))
+      // CR-018: email each finished, paid game's Drive link to its player
+      .then(() => runDriveEmails(db))
+      .then((tally) => {
+        if (tally && Object.keys(tally).length > 0) logger.info("Game Drive emails", tally);
+      })
+      .catch((err) => logger.error("Game Drive emails failed", { error: err.message }))
       // CR-017: then trash the Drive copies of videos whose server copy expired
       .then(() => runDriveCleanup(db))
       .then((tally) => {

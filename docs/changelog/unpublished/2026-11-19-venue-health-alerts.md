@@ -21,8 +21,8 @@ cameras are recording, and anything that needs attention at the top.
   problems are only logged and shown on the Dashboard. Optional: `ALERT_DISCORD_USERNAME`,
   `ALERT_GRACE_MINUTES` (4), `ALERT_DISK_FREE_PERCENT` (10), `ALERT_CLOCK_MS` (2000),
   `ALERT_BACKLOG_MINUTES` (60), `ALERTS_ENABLED=false` to turn the job off.
-- back/: email alerts to users with Venue alerts are built in, but only sent once `SMTP_HOST` is
-  set (`ALERT_EMAIL=false` keeps them off even then).
+- back/: email alerts to users with Venue alerts are built in, but only sent once
+  `SENDGRID_API_KEY` is set (CR-018; `ALERT_EMAIL=false` keeps them off even then).
 - back/: new `GET /api/v1/admin/dashboard/venues` (dashboard) and `/dashboard/alerts` (alerts);
   the heartbeat accepts an optional `system` field. Job `jobs/venueAlerts.js` runs every minute.
 - front/: Dashboard rebuilt as "Today on court" (court board, figures, problems). The user, role

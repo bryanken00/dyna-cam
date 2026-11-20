@@ -309,6 +309,7 @@ const SessionsPage = () => {
         open={!!driveTarget}
         session={driveTarget}
         onClose={handleDriveClose}
+        canWrite={canWrite}
       />
 
       {/* CR-016: more time for a recording game */}

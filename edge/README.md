@@ -174,7 +174,7 @@ Every heartbeat (30 s) also carries the box's own health, read without any extra
 The API turns these into problems: **disk almost full** (under 10% free), **clock off** (more than
 2 s), **uploads piling up** (something unsent for over an hour), plus **box offline** (no
 heartbeat) and **camera not recording**. A problem that lasts about 5 minutes is posted to the
-staff Discord channel (and emailed once SMTP is set up), and again when it's fixed. The web
+staff Discord channel (and emailed once SendGrid is set up), and again when it's fixed. The web
 Dashboard shows the same per box. Older boxes keep working; only their disk, clock and backlog
 don't show.
 

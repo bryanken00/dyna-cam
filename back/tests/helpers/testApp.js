@@ -119,7 +119,7 @@ export const loadTestEnv = (overrides = {}) => {
     UPLOAD_URL_SECRET: crypto.randomBytes(32).toString("hex"),
     // Recorder boxes enrol with this (PLAN-002 Phase I); ctx.pairBox() uses it
     RECORDER_ENROLL_KEY: TEST_ENROLL_KEY,
-    SMTP_HOST: "", // never send real email
+    SENDGRID_API_KEY: "", // never send real email (a test that wants SendGrid fakes it)
     OWNER_EMAIL: OWNER.email,
     OWNER_PASSWORD: OWNER.password,
     // The app runs from a temp directory, so key paths must be absolute

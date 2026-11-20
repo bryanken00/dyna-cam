@@ -1,7 +1,7 @@
 // CR-008 — venue health and alerts. A recorder box reports its own health
 // (disk, memory, clock, upload backlog) in the heartbeat; the venue-alerts job
 // turns problems that last the grace period into Open alerts sent to Discord
-// (and email once SMTP is set up), and back to Resolved when they clear. The
+// (and email once SendGrid is set up), and back to Resolved when they clear. The
 // Dashboard shows today's figures, and the open problems to staff with the
 // Venue alerts permission.
 
@@ -203,7 +203,7 @@ describe("venue health and alerts", () => {
     assert.match(text, /3 clip\(s\)\/game video\(s\) unsent, the oldest for 2 h 0 min/);
   });
 
-  it("emails staff with Venue alerts once SMTP is set up — never the ones without", async () => {
+  it("emails staff with Venue alerts once email is set up — never the ones without", async () => {
     sent = [];
     mailed = [];
     await beat({ cameras: [{ courtId, status: "ok" }], system: HEALTHY });

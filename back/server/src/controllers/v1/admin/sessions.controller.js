@@ -28,9 +28,15 @@ import {
   GAME_MAX_TOTAL_MINUTES,
   listSessionsQuerySchema,
   sessionVideoParamsSchema,
+  updateSessionEmailSchema,
 } from "../../../validators/sessions.validator.js";
 import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
 import { captureLimits, loadCaptures } from "../../../utils/sessionCaptures.js";
+import {
+  DRIVE_EMAIL_COLUMNS,
+  driveEmailState,
+  sendGameDriveEmail,
+} from "../../../utils/gameEmails.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -49,6 +55,7 @@ const SESSION_SELECT = `
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
          s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.addedMinutes, s.paymentStatus,
          s.payCode, s.dateCreated, s.dateUpdated, s.driveUrl AS driveFolderUrl,
+         ${DRIVE_EMAIL_COLUMNS},
          EXISTS (SELECT 1 FROM session_videos dv
                  WHERE dv.sessionId = s.sessionId AND dv.status = 'Ready'
                    AND dv.driveStatus = 'Uploaded') AS driveReady,
@@ -74,7 +81,19 @@ const isOpen = (row) =>
   Number(row.openEnded) === 1 && ["Waiting", "Recording"].includes(row.status);
 
 const toSession = (row) => {
-  const { shareToken, openEnded, driveFolderUrl, driveReady, ...session } = row;
+  const {
+    shareToken,
+    openEnded,
+    driveFolderUrl,
+    driveReady,
+    driveEmailStatus: _driveEmailStatus,
+    driveEmailTo: _driveEmailTo,
+    driveEmailSentAt: _driveEmailSentAt,
+    driveEmailError: _driveEmailError,
+    driveEmailReady: _driveEmailReady,
+    driveEmailUploading: _driveEmailUploading,
+    ...session
+  } = row;
   const open = isOpen(row);
   const nowM = moment().tz(TIMEZONE);
   return {
@@ -102,7 +121,16 @@ const toSession = (row) => {
     // CR-001 (2026-11-20): the game's shared Drive folder, for staff to show as a
     // QR — once a kept video of it is in Drive (CR-017: gone once they're deleted)
     driveUrl: Number(driveReady) === 1 && driveFolderUrl ? driveFolderUrl : null,
+    // CR-018: the player's email and where the Drive-link email stands
+    email: row.email || null,
+    driveEmail: driveEmailState(row),
   };
+};
+
+/** One session as Admin shows it (after a change). */
+const loadSession = async (db, sessionId) => {
+  const rows = await db.query(`${SESSION_SELECT} WHERE s.sessionId = ? LIMIT 1`, [sessionId]);
+  return rows[0] ? toSession(rows[0]) : null;
 };
 
 /**
@@ -267,7 +295,7 @@ router.get(
  * and only End game / End stops it. One open game per court.
  */
 const createOpenGame = async (req, res) => {
-  const { courtId, playerName, phone, maxCaptures } = req.body;
+  const { courtId, playerName, phone, email, maxCaptures } = req.body;
   const now = getCurrentTimestampLocal();
   let conn;
   try {
@@ -309,10 +337,10 @@ const createOpenGame = async (req, res) => {
     const payCode = await insertWithPayCode((code) =>
       conn.execute(
         `INSERT INTO recording_sessions
-           (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
+           (sessionId, venueId, courtId, startAt, endAt, playerName, phone, email, shareToken,
             createdByAccountId, openEnded, maxCaptures, status, paymentStatus, payCode,
             dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'Waiting', ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'Waiting', ?, ?, ?, ?)`,
         [
           sessionId,
           courts[0].venueId,
@@ -321,6 +349,7 @@ const createOpenGame = async (req, res) => {
           openGameEnd(),
           playerName || null,
           phone || null,
+          email || null,
           shareToken,
           req.user.accountId,
           maxCaptures ?? null,
@@ -354,7 +383,7 @@ router.post(
   checkPermission("clips", null, "write"),
   validateBody(createSessionSchema),
   catchAsync(async (req, res) => {
-    const { courtId, startNow, startAt, durationMinutes, playerName, phone, maxCaptures } =
+    const { courtId, startNow, startAt, durationMinutes, playerName, phone, email, maxCaptures } =
       req.body;
     if (!startNow && !startAt) return createOpenGame(req, res);
     const start = startNow ? moment().tz(TIMEZONE) : moment.tz(startAt, FORMAT, TIMEZONE);
@@ -419,10 +448,10 @@ router.post(
       const payCode = await insertWithPayCode((code) =>
         conn.execute(
           `INSERT INTO recording_sessions
-             (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
+             (sessionId, venueId, courtId, startAt, endAt, playerName, phone, email, shareToken,
               createdByAccountId, maxCaptures, status, paymentStatus, payCode, dateCreated,
               dateUpdated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             sessionId,
             courts[0].venueId,
@@ -431,6 +460,7 @@ router.post(
             endLocal,
             playerName || null,
             phone || null,
+            email || null,
             shareToken,
             req.user.accountId,
             maxCaptures ?? null,
@@ -584,6 +614,110 @@ router.post(
       req.params.sessionId,
     ]);
     return res.sendSuccess(`Added ${minutes} min to the game`, { session: toSession(rows[0]) });
+  })
+);
+
+/**
+ * PATCH /:sessionId/email — CR-018: fix (or clear) the player's email. A new
+ * address gets the Drive-link email again (the automatic send starts over).
+ */
+router.patch(
+  "/:sessionId/email",
+  checkPermission("clips", null, "write"),
+  validateBody(updateSessionEmailSchema),
+  catchAsync(async (req, res) => {
+    const email = req.body.email || null;
+    const rows = await req.db.query(
+      `SELECT s.email FROM recording_sessions s
+       JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
+       WHERE s.sessionId = ? LIMIT 1`,
+      [req.params.sessionId]
+    );
+    if (rows.length === 0) return res.sendError("Session not found", 404);
+    if ((rows[0].email || null) !== email) {
+      await req.db.query(
+        `UPDATE recording_sessions
+         SET email = ?, driveEmailStatus = NULL, driveEmailTo = NULL, driveEmailSentAt = NULL,
+             driveEmailAttempts = 0, driveEmailNextAttemptAt = NULL, driveEmailError = NULL,
+             dateUpdated = ?
+         WHERE sessionId = ?`,
+        [email, getCurrentTimestampLocal(), req.params.sessionId]
+      );
+    }
+    return res.sendSuccess(email ? "Player email saved" : "Player email removed", {
+      session: await loadSession(req.db, req.params.sessionId),
+    });
+  })
+);
+
+/**
+ * POST /:sessionId/drive-email — CR-018: email the game's Google Drive link to
+ * the player now (again). Needs an email, a paid or free game, and its videos
+ * in Drive.
+ */
+router.post(
+  "/:sessionId/drive-email",
+  checkPermission("clips", null, "write"),
+  catchAsync(async (req, res) => {
+    const live = await req.db.query(
+      `SELECT s.sessionId FROM recording_sessions s
+       JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
+       WHERE s.sessionId = ? LIMIT 1`,
+      [req.params.sessionId]
+    );
+    if (live.length === 0) return res.sendError("Session not found", 404);
+    const before = await loadSession(req.db, req.params.sessionId);
+    if (!before.email) return res.sendError("Add the player's email first", 409);
+    if (before.paymentStatus === "Unpaid") {
+      return res.sendError("The game isn't paid yet — record the payment first", 409);
+    }
+    if (before.driveEmail.status === "NotSetUp") {
+      return res.sendError(
+        "Email isn't set up on the server — add SENDGRID_API_KEY to the API's .env",
+        409
+      );
+    }
+    if (!["Queued", "Sent", "Failed"].includes(before.driveEmail.status)) {
+      return res.sendError("The game's videos aren't in Google Drive yet", 409);
+    }
+
+    const now = getCurrentTimestampLocal();
+    // Claimed so the automatic send can't send it at the same moment
+    const claimed = await req.db.query(
+      `UPDATE recording_sessions SET driveEmailStatus = 'Sending', driveEmailNextAttemptAt = ?
+       WHERE sessionId = ?
+         AND (driveEmailStatus IS NULL OR driveEmailStatus IN ('Sent', 'Failed')
+              OR driveEmailNextAttemptAt <= ?)`,
+      [moment().tz(TIMEZONE).add(5, "minutes").format(FORMAT), req.params.sessionId, now]
+    );
+    if (!claimed.affectedRows) {
+      return res.sendError("The email is being sent right now — check again in a moment", 409);
+    }
+
+    try {
+      const sent = await sendGameDriveEmail(req.db, req.params.sessionId);
+      if (!sent.sent) throw new Error("The game is no longer ready for the email");
+      await req.db.query(
+        `UPDATE recording_sessions
+         SET driveEmailStatus = 'Sent', driveEmailTo = ?, driveEmailSentAt = ?,
+             driveEmailError = NULL, driveEmailNextAttemptAt = NULL
+         WHERE sessionId = ?`,
+        [sent.to, getCurrentTimestampLocal(), req.params.sessionId]
+      );
+      return res.sendSuccess(`Google Drive link emailed to ${sent.to}`, {
+        session: await loadSession(req.db, req.params.sessionId),
+      });
+    } catch (err) {
+      // Back to how it was (a sent email stays "Sent"), with why this try failed
+      await req.db.query(
+        `UPDATE recording_sessions
+         SET driveEmailStatus = IF(driveEmailSentAt IS NULL, 'Failed', 'Sent'),
+             driveEmailError = ?, driveEmailNextAttemptAt = NULL
+         WHERE sessionId = ?`,
+        [String(err.message || "Sending failed").slice(0, 255), req.params.sessionId]
+      );
+      return res.sendError(`Couldn't send the email: ${err.message}`, 502);
+    }
   })
 );
 

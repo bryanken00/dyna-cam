@@ -44,6 +44,19 @@ export const extendSessionApi = async ({ sessionId, minutes }) => {
   return response.data;
 };
 
+// CR-018: fix (or clear, with "") the player's email → { session }
+export const updateSessionEmailApi = async ({ sessionId, email }) => {
+  const response = await api.patch(`/api/v1/admin/sessions/${sessionId}/email`, { email });
+  return response.data;
+};
+
+// CR-018: email the game's Google Drive link to the player now → { session }
+// 409 no email / unpaid / not in Drive yet · 502 SendGrid refused
+export const sendSessionDriveEmailApi = async (sessionId) => {
+  const response = await api.post(`/api/v1/admin/sessions/${sessionId}/drive-email`);
+  return response.data;
+};
+
 // Finish a recording session now — 409 if it isn't recording
 export const endSessionApi = async (sessionId) => {
   const response = await api.post(`/api/v1/admin/sessions/${sessionId}/end`);

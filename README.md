@@ -231,7 +231,7 @@ Optional, with safe defaults (all documented in the example file):
 | Upload links     | `UPLOAD_URL_TTL_SECONDS`                                       | `3600` (a link lives 1–2 hours)  |
 | Logs             | `LOG_RETENTION_DAYS`                                           | `90`                             |
 
-Rate limiting, Redis, SMTP and SSL are also optional and documented there.
+Rate limiting, Redis, email (SendGrid) and SSL are also optional and documented there.
 
 ### 2. Frontend
 

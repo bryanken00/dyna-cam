@@ -90,7 +90,7 @@ const escapeHtml = (value) =>
 
 /**
  * CR-008: venue problems that just opened and ones that just cleared, in one
- * email per run of the venue-alerts job. Sent only when SMTP is set up.
+ * email per run of the venue-alerts job. Sent only when SendGrid is set up.
  *
  * @param {{ opened: object[], resolved: object[], dashboardUrl: string }} p
  *   each item: { label, venueName, message, since }
@@ -133,3 +133,42 @@ export const venueAlertsEmail = ({ opened, resolved, dashboardUrl }) => {
     ),
   };
 };
+
+/**
+ * CR-018: "Your game is in Google Drive" — sent to the player's email once the
+ * game's videos are in the court's Drive and the game is paid (or free).
+ *
+ * @param {{ playerName?: string, courtName: string, venueName: string,
+ *           playedOn: string, driveUrl: string, keepUntil?: string|null }} p
+ *   playedOn / keepUntil: already formatted ("Nov 20, 2026, 3:00 PM")
+ */
+export const gameDriveEmail = ({ playerName, courtName, venueName, playedOn, driveUrl, keepUntil }) => {
+  const where = `${escapeHtml(courtName)} · ${escapeHtml(venueName)}`;
+  const href = escapeHtml(driveUrl);
+  return {
+    subject: `Your game at ${venueName} is ready in Google Drive`,
+    html: layout(
+      "Your game is ready",
+      `
+    <p style="font-size: 14px; line-height: 1.6; margin: 0 0 8px;">
+      ${playerName ? `Hi ${escapeHtml(playerName)},` : "Hi,"} the videos of your game are in
+      Google Drive — open them on any phone or computer, no Google account needed.
+    </p>
+    <p style="font-size: 13px; color: #71717a; line-height: 1.6; margin: 0 0 20px;">
+      ${where}<br />${escapeHtml(playedOn)}
+    </p>
+    <p style="margin: 0 0 20px;">${button(href, "Open your game in Google Drive")}</p>
+    <p style="font-size: 13px; color: #71717a; line-height: 1.6; margin: 0;">
+      ${
+        keepUntil
+          ? `Download your videos before <strong>${escapeHtml(keepUntil)}</strong> — they are deleted after that.`
+          : "Download your videos soon — they are only kept for a short time."
+      }
+      If the button doesn't work, copy this link into your browser:<br />
+      <span style="color: #2563eb; word-break: break-all;">${href}</span>
+    </p>
+  `
+    ),
+  };
+};
+
