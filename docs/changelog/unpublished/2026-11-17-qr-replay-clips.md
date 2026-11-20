@@ -31,3 +31,6 @@ print each court's QR sign, and browse, play and delete saved clips.
   locked itself (Tapo `400 Server is locked`) every 5 → 15 min, instead of every ≤ 30 s, so the
   box can't lock a camera or keep it locked; the court page says the camera is locked and to
   restart it (BUG-002).
+- `edge/`: the box now records on Windows. Windows' `strftime` has no `%s`, so segments there are
+  named by ffmpeg's counter (`-segment_start_number` + `%d.ts`, starting at the epoch second, or one
+  past the newest file) instead of `-strftime 1` + `%s.ts`; Linux/macOS are unchanged (BUG-004).

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseFfmpegMajor } from "../src/ffmpeg.js";
-import { buildRecordArgs, describeFailure } from "../src/recorder.js";
+import os from "node:os";
+import path from "node:path";
+import {
+  buildRecordArgs,
+  CourtRecorder,
+  describeFailure,
+  nextSegmentNumber,
+} from "../src/recorder.js";
 
 const URL = "rtsp://camuser:s3cret@192.168.1.50:554/stream1";
 
@@ -32,9 +39,23 @@ describe("buildRecordArgs", () => {
     assert.equal(after("-segment_time"), "2");
     assert.equal(after("-reset_timestamps"), "1");
     assert.equal(after("-strftime"), "1");
-    assert.equal(after("-segment_list"), "/data/buffer/court-1/segments.csv");
+    assert.equal(after("-segment_list"), path.join("/data/buffer/court-1", "segments.csv"));
     assert.equal(after("-segment_list_type"), "csv");
-    assert.equal(args.at(-1), "/data/buffer/court-1/%s.ts");
+    assert.equal(args.at(-1), path.join("/data/buffer/court-1", "%s.ts"));
+  });
+
+  it("names segments by counter from startNumber where strftime has no %s (BUG-004, Windows)", () => {
+    const win = buildRecordArgs({
+      rtspUrl: URL,
+      outDir: "/data/buffer/court-1",
+      segmentSeconds: 2,
+      startNumber: 1795162249,
+    });
+    const at = (flag) => win[win.indexOf(flag) + 1];
+    assert.equal(at("-segment_start_number"), "1795162249");
+    assert.ok(!win.includes("-strftime"));
+    assert.equal(win.at(-1), path.join("/data/buffer/court-1", "%d.ts"));
+    assert.equal(at("-segment_list"), path.join("/data/buffer/court-1", "segments.csv"));
   });
 
   it("uses -stimeout on ffmpeg 4 (where -timeout means listen) and -an without audio", () => {
@@ -47,6 +68,56 @@ describe("buildRecordArgs", () => {
     });
     assert.ok(old.includes("-stimeout") && !old.includes("-timeout"));
     assert.ok(old.includes("-an") && !old.includes("aac"));
+  });
+});
+
+describe("nextSegmentNumber (BUG-004)", () => {
+  const now = 1_795_162_249_500;
+  it("starts at the current epoch second in an empty folder", () => {
+    assert.equal(nextSegmentNumber([], now), 1795162249);
+    assert.equal(nextSegmentNumber(["segments.csv", "run.json"], now), 1795162249);
+  });
+
+  it("starts one past the newest segment when a counter run got ahead of the clock", () => {
+    const names = ["1795162250.ts", "1795162251.ts", "index.json", "1795162100.ts"];
+    assert.equal(nextSegmentNumber(names, now), 1795162252);
+  });
+
+  it("never goes below the clock because of old files", () => {
+    assert.equal(nextSegmentNumber(["1795160000.ts"], now), 1795162249);
+  });
+});
+
+describe("CourtRecorder segment naming", () => {
+  const make = (strftimeEpoch) => {
+    const spawned = [];
+    const rec = new CourtRecorder({
+      court: { courtId: "court-1", name: "Court 1", cameraRtspUrl: URL },
+      dir: path.join(os.tmpdir(), `dc-naming-${process.pid}-${strftimeEpoch}`),
+      settings: { segmentSeconds: 2, recordAudio: true, ffmpegPath: "ffmpeg", bufferSeconds: 180 },
+      ffmpegMajor: 9,
+      log: { info() {}, warn() {}, error() {}, debug() {} },
+      strftimeEpoch,
+      spawnImpl: (bin, args) => {
+        spawned.push(args);
+        return { pid: 0, stderr: null, on() {} };
+      },
+    });
+    rec.spawn();
+    rec.stopping = true;
+    return spawned[0];
+  };
+
+  it("uses strftime %s where the C runtime has it", () => {
+    const args = make(true);
+    assert.ok(args.includes("-strftime") && args.at(-1).endsWith("%s.ts"));
+  });
+
+  it("uses the counter on Windows", () => {
+    const args = make(false);
+    const start = Number(args[args.indexOf("-segment_start_number") + 1]);
+    assert.ok(Math.abs(start - Date.now() / 1000) < 5);
+    assert.ok(args.at(-1).endsWith("%d.ts") && !args.includes("-strftime"));
   });
 });
 
