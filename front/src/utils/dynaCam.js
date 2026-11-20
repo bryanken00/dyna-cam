@@ -54,6 +54,8 @@ export const CLIP_DRIVE_LABEL = {
   Uploaded: "In Google Drive",
   Failed: "Drive: couldn't upload",
   Skipped: "Drive: skipped",
+  // CR-017: moved to the Drive's trash when the server's copy expired
+  Deleted: "Drive: moved to trash",
 };
 
 /** Clip source → the label staff read. */

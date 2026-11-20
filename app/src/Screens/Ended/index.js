@@ -10,6 +10,7 @@ import TickingTimer from "@/components/TickingTimer";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
+import { keepTimeText } from "@/utils/dynaCam";
 import { useEndedScreen } from "./useEndedScreen";
 
 /** Wide enough to put the QR beside the text (landscape tablet / phone). */
@@ -45,6 +46,12 @@ const SavingLine = ({ session }) => {
           {session.failureReason ? (
             <Text className="text-muted-foreground text-center text-[13px]">
               {session.failureReason}
+            </Text>
+          ) : null}
+          {/* CR-017: the videos are deleted after the venue's keep time */}
+          {keepTimeText(session.keepDays) ? (
+            <Text className="text-muted-foreground text-center text-[13px]">
+              {`Download within ${keepTimeText(session.keepDays)} — then it's deleted.`}
             </Text>
           ) : null}
         </View>

@@ -58,7 +58,7 @@ import {
 } from "../../../../../services/requests/upload";
 
 // Mirrors venues.validator.js: name required (≤100), address/phone/logo
-// optional (NULL columns), retention 1–365 whole days.
+// optional (NULL columns), retention 1–365 whole days (CR-017: 1 by default).
 const venueSchema = z.object({
   name: z
     .string()
@@ -72,8 +72,8 @@ const venueSchema = z.object({
     .string()
     .trim()
     .regex(/^\d+$/, "Enter a whole number of days")
-    .refine((v) => Number(v) >= 1, "Keep clips for at least 1 day")
-    .refine((v) => Number(v) <= 365, "Keep clips for at most 365 days"),
+    .refine((v) => Number(v) >= 1, "Keep videos for at least 1 day")
+    .refine((v) => Number(v) <= 365, "Keep videos for at most 365 days"),
   // Pesos, at most 2 decimals; 0 = clips are free
   clipPrice: z
     .string()
@@ -88,7 +88,7 @@ const EMPTY = {
   address: "",
   phone: "",
   logoUrl: "",
-  clipRetentionDays: "30",
+  clipRetentionDays: "1",
   clipPrice: "0",
   status: "Active",
 };
@@ -121,7 +121,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             address: decodeHTML(entity.address) ?? "",
             phone: entity.phone ?? "",
             logoUrl: entity.logoUrl ?? "",
-            clipRetentionDays: String(entity.clipRetentionDays ?? 30),
+            clipRetentionDays: String(entity.clipRetentionDays ?? 1),
             clipPrice: String(Number(entity.clipPrice) || 0),
             status: entity.status === "Inactive" ? "Inactive" : "Active",
           }
@@ -454,7 +454,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                   name="clipRetentionDays"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Keep clips for (days) {req}</FormLabel>
+                      <FormLabel>Keep videos for (days) {req}</FormLabel>
                       <div className="relative max-w-60">
                         <CalendarClock
                           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
@@ -473,8 +473,9 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                         </FormControl>
                       </div>
                       <FormDescription>
-                        Saved clips and their links are removed after this
-                        many days (1–365).
+                        Saved replays and game videos — and their Google
+                        Drive copies — are deleted this many days after
+                        they&apos;re saved. 1 day = 24 hours (1–365).
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

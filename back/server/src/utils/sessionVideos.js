@@ -49,10 +49,8 @@ export const toPublicVideo = (row) => {
     videoUrl: ready ? signUploadUrl(row.videoPath) : null,
     downloadUrl: ready ? signedDownloadUrl(row.videoPath) : null,
     thumbnailUrl: ready ? signUploadUrl(row.thumbnailPath) : null,
-    driveUrl:
-      row.driveStatus === "Uploaded" && ["Ready", "Expired"].includes(row.status)
-        ? row.driveUrl
-        : null,
+    // CR-017: only while the video is kept — its Drive copy goes when the server's does
+    driveUrl: row.driveStatus === "Uploaded" && row.status === "Ready" ? row.driveUrl : null,
   };
 };
 
@@ -73,10 +71,13 @@ export const toAdminVideo = (row) => ({
   status: row.status,
   failureReason: row.failureReason || null,
   driveStatus: row.driveStatus || null,
+  // CR-017: why its Drive copy wasn't moved to the trash yet (staff only)
+  driveError: row.driveError || null,
 });
 
 export const SESSION_VIDEO_COLUMNS = `camera, status, gaps, videoPath, thumbnailPath, sizeBytes,
-  uploadBytes, receivedBytes, durationSeconds, failureReason, expiresAt, driveStatus, driveUrl`;
+  uploadBytes, receivedBytes, durationSeconds, failureReason, expiresAt, driveStatus, driveUrl,
+  driveError`;
 
 /** A session's whole videos, camera order (CR-013 saves are loadCaptures'). */
 export const loadSessionVideos = (db, sessionId) =>

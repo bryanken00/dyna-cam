@@ -3,6 +3,7 @@ import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal, moment } from "../utils/dateUtils.js";
 import { toEpochMs } from "../utils/clips.js";
 import { decryptSecret } from "../utils/crypto/secretBox.js";
+import { runDriveCleanup } from "./driveCleanup.js";
 import {
   accessToken,
   createFolder,
@@ -32,6 +33,9 @@ import {
  *
  * A claim is a lease (`driveNextAttemptAt`): an upload cut off by a restart is
  * picked up again once the lease runs out.
+ *
+ * CR-017: each pass is followed by jobs/driveCleanup.js, which moves the Drive
+ * copy of a video whose server copy expired to the Drive's trash.
  */
 
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
@@ -331,6 +335,12 @@ export const scheduleDriveUploads = (db, intervalMs = INTERVAL_MS) => {
         if (Object.keys(tally).length > 0) logger.info("Google Drive uploads", tally);
       })
       .catch((err) => logger.error("Google Drive uploads failed", { error: err.message }))
+      // CR-017: then trash the Drive copies of videos whose server copy expired
+      .then(() => runDriveCleanup(db))
+      .then((tally) => {
+        if (tally && Object.keys(tally).length > 0) logger.info("Google Drive deletes", tally);
+      })
+      .catch((err) => logger.error("Google Drive deletes failed", { error: err.message }))
       .finally(() => {
         running = false;
       });

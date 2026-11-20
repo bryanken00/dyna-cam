@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import { formatTime, isConnectionError } from "@/utils/dynaCam";
+import { formatTime, isConnectionError, keepTimeText } from "@/utils/dynaCam";
 import EndingSoonNotice from "./EndingSoonNotice";
 import LivePanel from "./LivePanel";
 import SaveMinutes from "./SaveMinutes";
@@ -57,14 +57,17 @@ const StatusPill = ({ m }) => {
 };
 
 /** The session's download QR — on screen the whole time once the game is paid. */
-const QrCard = ({ url, size, className }) => (
+const QrCard = ({ url, size, keepDays, className }) => (
   <View className={cn("border-border bg-card items-center rounded-[18px] border p-4", className)}>
     <Text className="mb-3 text-center font-sans-semibold text-[16px]">
       Scan to get your game
     </Text>
     <QrCode value={url} size={size} />
     <Text className="text-muted-foreground mt-3 text-center text-[13px]">
-      Download it when the game ends
+      {/* CR-017: videos are deleted after the venue's keep time (24 hours by default) */}
+      {keepTimeText(keepDays)
+        ? `Download it within ${keepTimeText(keepDays)} after the game`
+        : "Download it when the game ends"}
     </Text>
     <LinkText url={url} className="mt-1 text-[12px]" />
   </View>
@@ -76,7 +79,7 @@ const QrCard = ({ url, size, className }) => (
  */
 const GetGameCard = ({ s, size, className }) =>
   s.shareUrl ? (
-    <QrCard url={s.shareUrl} size={size} className={className} />
+    <QrCard url={s.shareUrl} size={size} keepDays={s.keepDays} className={className} />
   ) : (
     <PayCodeCard code={s.payment?.payCode} className={className} />
   );

@@ -31,7 +31,7 @@ const RUNNING = ["Scheduled", "Recording"];
 /** Columns of a session as the device sees it (needs `s`, `c`, `v` joined). */
 export const SESSION_DEVICE_COLUMNS = `s.sessionId, s.venueId, s.courtId, c.name AS courtName,
   v.name AS venueName, s.startAt, s.endAt, s.status, s.failureReason, s.shareToken,
-  s.openEnded, s.maxCaptures, s.paymentStatus, s.payCode,
+  s.openEnded, s.maxCaptures, s.paymentStatus, s.payCode, v.clipRetentionDays,
   s.streamUrl, s.streamPlatform, s.streamLayout, s.streamUpdatedAt,
   c.camera2RtspUrl IS NOT NULL AS hasCamera2,
   (SELECT SUM(CASE WHEN sv.status = 'Ready' THEN COALESCE(sv.sizeBytes, sv.uploadBytes, 1)
@@ -118,6 +118,9 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
       payCode: row.paymentStatus === "Unpaid" ? row.payCode : null,
     },
     failureReason: row.failureReason || null,
+    // CR-017: the game's videos are deleted this many days after they're saved
+    // ("Download it within 24 hours after the game")
+    keepDays: Number(row.clipRetentionDays) || null,
   };
 };
 

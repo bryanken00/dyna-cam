@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import dayjs from "dayjs";
 import {
   Ban,
+  Cloud,
   Copy,
   Eye,
   ExternalLink,
@@ -62,6 +63,8 @@ export const useSessionHooks = () => {
   const [pairingKey, setPairingKey] = useState(null);
   // CR-016: the recording game time is being added to, or null
   const [addTimeTarget, setAddTimeTarget] = useState(null);
+  // CR-001 (2026-11-20): the game whose Google Drive QR + link is shown, or null
+  const [driveTarget, setDriveTarget] = useState(null);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -159,6 +162,10 @@ export const useSessionHooks = () => {
   const handleAddTime = useCallback((record) => setAddTimeTarget(record), []);
   const handleAddTimeClose = useCallback(() => setAddTimeTarget(null), []);
 
+  // ─── CR-001: a finished game's Google Drive folder as a QR + link ──
+  const handleShowDrive = useCallback((record) => setDriveTarget(record), []);
+  const handleDriveClose = useCallback(() => setDriveTarget(null), []);
+
   const handleView = useCallback((record) => {
     setDetailSessionId(record.sessionId);
   }, []);
@@ -237,6 +244,15 @@ export const useSessionHooks = () => {
           },
         );
       }
+      // CR-001: once its video is in Drive — and paid or free, like the player's page
+      if (record.driveUrl && record.paymentStatus !== "Unpaid") {
+        items.push({
+          key: "drive",
+          label: "Google Drive QR & link",
+          icon: <Cloud className="w-4 h-4" />,
+          onClick: () => handleShowDrive(record),
+        });
+      }
       if (canWrite && PAIRABLE_STATUSES.includes(record.status)) {
         items.push({
           key: "pair",
@@ -285,6 +301,7 @@ export const useSessionHooks = () => {
       handleView,
       handleCopyLink,
       handleOpenLink,
+      handleShowDrive,
       handlePairDevice,
       handleAddTime,
       handleEndRequest,
@@ -538,5 +555,8 @@ export const useSessionHooks = () => {
     handlePairingKeyClose,
     addTimeTarget,
     handleAddTimeClose,
+    driveTarget,
+    handleShowDrive,
+    handleDriveClose,
   };
 };

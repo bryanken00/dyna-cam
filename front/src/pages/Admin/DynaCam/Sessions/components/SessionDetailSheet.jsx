@@ -6,6 +6,7 @@ import {
   Copy,
   Download,
   Film,
+  QrCode,
   RotateCcw,
   Square,
   TimerReset,
@@ -21,6 +22,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import AddTimeFormModal from "./AddTimeFormModal";
+import GameDriveDialog from "./GameDriveDialog";
 import GamePaymentFormModal from "./GamePaymentFormModal";
 import SessionDevices from "./SessionDevices";
 import SessionStreamLine from "./SessionStreamLine";
@@ -102,7 +104,9 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
               ? "Being made on the box"
               : video.status === "Uploading"
                 ? `Uploading ${video.uploadPercent ?? 0}%`
-                : video.status}
+                : video.status === "Expired"
+                  ? "Deleted"
+                  : video.status}
           </StatusDot>
           {ready && downloadHref && (
             <Button asChild variant="outline" size="sm">
@@ -147,6 +151,19 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
         <p className="m-0 mt-1" style={muted}>
           {video.failureReason}. Try again asks the recorder box to send it
           again — it works while the box still has the game&apos;s footage.
+        </p>
+      )}
+      {/* CR-017: deleted after the venue's days, with its Drive copy */}
+      {video.status === "Expired" && (
+        <p className="m-0 mt-1" style={muted} title={video.driveError || undefined}>
+          Deleted after the venue&apos;s keep time
+          {video.driveStatus === "Deleted"
+            ? " — its Google Drive copy was moved to the Drive's trash."
+            : video.driveStatus === "Uploaded"
+              ? video.driveError
+                ? ` — its Google Drive copy is still there (${video.driveError.replace(/^Not deleted from Drive: /, "")}).`
+                : " — its Google Drive copy goes once the court's Drive is connected."
+              : "."}
         </p>
       )}
       {video.gaps?.length > 0 && (
@@ -214,6 +231,9 @@ const SessionDetailSheet = ({
   const [payOpen, setPayOpen] = useState(false);
   // CR-016: more time for a recording game with a game time
   const [addTimeOpen, setAddTimeOpen] = useState(false);
+  // CR-001: the game's Google Drive folder as a QR + link (paid or free games)
+  const [driveOpen, setDriveOpen] = useState(false);
+  const showDrive = !!session?.driveUrl && session?.paymentStatus !== "Unpaid";
   const canAddTime = canWrite && session?.status === "Recording" && !!session?.endAt;
   const canTakePayment =
     hasPermission("payments", null, "write") &&
@@ -451,6 +471,27 @@ const SessionDetailSheet = ({
                           </a>
                         ),
                     },
+                    // CR-001: the game's folder in the court's Google Drive
+                    ...(session.driveUrl
+                      ? [
+                          {
+                            label: "Google Drive",
+                            value: showDrive ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setDriveOpen(true)}
+                              >
+                                <QrCode />
+                                Show QR & link
+                              </Button>
+                            ) : (
+                              "In Drive — the link opens once the game is paid"
+                            ),
+                          },
+                        ]
+                      : []),
                     // The player's own live stream — shown while it can run,
                     // or while one is still set
                     ...(showStream
@@ -646,6 +687,11 @@ const SessionDetailSheet = ({
         open={payOpen}
         onClose={() => setPayOpen(false)}
         onSuccess={() => setPayOpen(false)}
+        session={session}
+      />
+      <GameDriveDialog
+        open={driveOpen}
+        onClose={() => setDriveOpen(false)}
         session={session}
       />
       <AddTimeFormModal

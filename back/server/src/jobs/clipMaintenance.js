@@ -13,10 +13,10 @@ export const GAME_UPLOAD_GIVE_UP_HOURS = Math.max(
 );
 
 /**
- * Clip housekeeping (PLAN-001), run at startup and then every hour:
+ * Clip housekeeping (PLAN-001), run at startup and then every 10 minutes:
  *
- * 1. Expire: a Ready clip past its `expiresAt` (the venue's retention days)
- *    becomes Expired and its files are deleted. The row stays (soft), so the
+ * 1. Expire: a Ready clip past its `expiresAt` (the venue's retention days —
+ *    1 day by default, CR-017) becomes Expired and its files are deleted. The row stays (soft), so the
  *    share link says "expired" instead of "not found".
  *    Whole-game videos (CR-003) expire the same way.
  * 2. Give up: a clip still Pending/Processing after CLIP_STALE_MINUTES (a
@@ -56,7 +56,8 @@ export const runClipMaintenance = async (db) => {
     }
   }
 
-  // CR-003: whole-game videos expire like clips (their Drive copy stays)
+  // CR-003: whole-game videos (and CR-013 saves) expire like clips. CR-017: a
+  // Drive copy of either then goes to the Drive's trash (jobs/driveCleanup.js)
   const dueVideos = await db.query(
     `SELECT sessionVideoId, videoPath, thumbnailPath FROM session_videos
      WHERE status = 'Ready' AND expiresAt IS NOT NULL AND expiresAt <= ?
@@ -120,13 +121,14 @@ export const runClipMaintenance = async (db) => {
   return { expired, failed };
 };
 
-const HOUR_MS = 60 * 60 * 1000;
+/** CR-017: videos go 24 hours after they're saved — check every 10 minutes, not hourly. */
+const MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * Run now, then every `intervalMs`. Returns a function that stops it.
  * @param {import("../../config/database.js").default} db
  */
-export const scheduleClipMaintenance = (db, intervalMs = HOUR_MS) => {
+export const scheduleClipMaintenance = (db, intervalMs = MAINTENANCE_INTERVAL_MS) => {
   const run = () =>
     runClipMaintenance(db)
       .then(({ expired, failed }) => {

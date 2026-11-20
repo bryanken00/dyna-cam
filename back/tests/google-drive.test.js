@@ -32,6 +32,7 @@ const fakeGoogle = () => {
     files: new Map(), // id → { name, parents, owner, mimeType, size, shared }
     sessions: new Map(), // upload session → { meta, owner, received }
     fail: null, // { status, body } to answer the next upload start with
+    trashFail: null, // CR-017: { status, body } to answer the next "move to trash" with
     count: 0,
   };
   const next = (prefix) => `${prefix}-${++state.count}`;
@@ -118,6 +119,15 @@ const fakeGoogle = () => {
       const permission = JSON.parse(body.toString());
       file.shared = permission.type === "anyone" && permission.role === "reader";
       json(res, 200, { id: "anyoneWithLink" });
+    } else if (req.method === "PATCH") {
+      // CR-017: { trashed: true } moves it to the owner's trash
+      if (state.trashFail) {
+        json(res, state.trashFail.status, state.trashFail.body);
+        state.trashFail = null;
+      } else {
+        file.trashed = Boolean(JSON.parse(body.toString()).trashed);
+        json(res, 200, { id: match[1], trashed: file.trashed });
+      }
     } else {
       json(res, 200, { id: match[1], trashed: Boolean(file.trashed) });
     }
@@ -183,6 +193,8 @@ describe("Google Drive per court", () => {
   let viewer;
   let google;
   let runDriveUploads;
+  let runDriveCleanup;
+  let runClipMaintenance;
   let db;
   const home = {};
 
@@ -253,9 +265,13 @@ describe("Google Drive per court", () => {
         GOOGLE_DRIVE_API_URL: `${base}/drive`,
         GOOGLE_DRIVE_UPLOAD_URL: `${base}/upload`,
         APP_URL: "http://web.test",
+        // Many replays from one court QR in this file
+        RATE_LIMIT_PUBLIC_CLIP_POINTS: "1000",
       },
     });
     ({ runDriveUploads } = await ctx.importFromBack("server/src/jobs/driveUploads.js"));
+    ({ runDriveCleanup } = await ctx.importFromBack("server/src/jobs/driveCleanup.js"));
+    ({ runClipMaintenance } = await ctx.importFromBack("server/src/jobs/clipMaintenance.js"));
     db = ctx.db;
     admin = await ctx.createStaff("Admin", { access: "write" });
     viewer = await ctx.createStaff("Viewer", { access: "read" });
@@ -446,7 +462,7 @@ describe("Google Drive per court", () => {
       assert.ok(page.data.clip.driveUrl);
     });
 
-    it("keeps the Drive link after the server's copy expires", async () => {
+    it("hides the Drive link once the server's copy expires (CR-017)", async () => {
       await ctx.sql.query(
         `UPDATE clips SET status = 'Expired', videoPath = NULL, thumbnailPath = NULL
          WHERE clipId = ?`,
@@ -455,7 +471,7 @@ describe("Google Drive per court", () => {
       const page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
       assert.equal(page.data.clip.status, "Expired");
       assert.equal(page.data.clip.videoUrl, null);
-      assert.ok(page.data.clip.driveUrl);
+      assert.equal(page.data.clip.driveUrl, null, "its Drive copy is on its way to the trash");
     });
 
     it("re-creates the court's folder when it was deleted in Drive", async () => {
@@ -543,6 +559,185 @@ describe("Google Drive per court", () => {
       assert.equal(page.data.session.driveUrl, session.driveUrl);
       assert.ok(page.data.session.videos[0].driveUrl);
       assert.equal((await court()).googleDrive.queue.waiting, 0);
+
+      // Staff get the game's Drive folder link in Sessions, for the QR dialog
+      const listed = await call("GET", `/admin/sessions?courtId=${home.courtId}`);
+      assert.equal(
+        listed.data.sessions.find((g) => g.sessionId === sessionId).driveUrl,
+        session.driveUrl
+      );
+      const one = await call("GET", `/admin/sessions/${sessionId}`);
+      assert.equal(one.data.session.driveUrl, session.driveUrl);
+    });
+  });
+
+  // CR-017: a video goes after the venue's days (1 by default) — on the server
+  // and, by moving it to the trash, in the court's Google Drive
+  describe("deleting after the venue's days (CR-017)", () => {
+    const clipFull = async (clipId) =>
+      (
+        await ctx.sql.query(
+          `SELECT status, expiresAt, driveStatus, driveUrl, driveFileId, driveDeleteAttempts,
+                  driveDeletedAt, driveError, driveNextAttemptAt
+           FROM clips WHERE clipId = ?`,
+          [clipId]
+        )
+      )[0][0];
+    const expireNow = (table, key, id) =>
+      ctx.sql.query(
+        `UPDATE ${table} SET expiresAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                                                  INTERVAL 1 MINUTE)
+         WHERE ${key} = ?`,
+        [id]
+      );
+    /** A replay copied to Drive. */
+    const uploadedReplay = async () => {
+      const clip = await replay();
+      await runDriveUploads(db);
+      assert.equal((await clipFull(clip.clipId)).driveStatus, "Uploaded");
+      return clip;
+    };
+
+    it("keeps videos 1 day by default: a replay goes 24 hours after it's saved", async () => {
+      const venue = await call("POST", "/admin/venues", { name: "Default Days" });
+      assert.equal(venue.status, 201, JSON.stringify(venue.body));
+      const [[{ clipRetentionDays }]] = await ctx.sql.query(
+        `SELECT clipRetentionDays FROM venues WHERE venueId = ?`,
+        [venue.data.venueId]
+      );
+      assert.equal(clipRetentionDays, 1);
+
+      const clip = await replay();
+      const [[{ hours }]] = await ctx.sql.query(
+        `SELECT TIMESTAMPDIFF(MINUTE, CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), expiresAt)
+                  / 60 AS hours
+         FROM clips WHERE clipId = ?`,
+        [clip.clipId]
+      );
+      assert.ok(Math.abs(Number(hours) - 24) < 0.1, `expires in ${hours} h`);
+      await runDriveUploads(db); // leave nothing pending for the next tests
+    });
+
+    it("moves the Drive copy to the trash when the server's copy expires", async () => {
+      const clip = await uploadedReplay();
+      const { driveFileId } = await clipFull(clip.clipId);
+
+      assert.equal((await runDriveCleanup(db)).trashed ?? 0, 1, "only the clip expired earlier");
+      assert.equal(google.state.files.get(driveFileId).trashed, undefined, "not before it expires");
+
+      await expireNow("clips", "clipId", clip.clipId);
+      await runClipMaintenance(db);
+      let row = await clipFull(clip.clipId);
+      assert.equal(row.status, "Expired");
+      assert.equal(row.driveStatus, "Uploaded", "the server's copy goes first");
+      const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
+      assert.equal(page.data.clip.driveUrl, null);
+
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
+      row = await clipFull(clip.clipId);
+      assert.equal(row.driveStatus, "Deleted");
+      assert.equal(row.driveUrl, null);
+      assert.ok(row.driveDeletedAt);
+      assert.equal(google.state.files.get(driveFileId).trashed, true, "in the Drive's trash");
+      assert.deepEqual(await runDriveCleanup(db), {}, "done once");
+    });
+
+    it("counts a copy already gone from Drive as deleted", async () => {
+      const clip = await uploadedReplay();
+      google.state.files.delete((await clipFull(clip.clipId)).driveFileId);
+      await expireNow("clips", "clipId", clip.clipId);
+      await runClipMaintenance(db);
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
+      assert.equal((await clipFull(clip.clipId)).driveStatus, "Deleted");
+    });
+
+    it("retries a failed delete later", async () => {
+      const clip = await uploadedReplay();
+      await expireNow("clips", "clipId", clip.clipId);
+      await runClipMaintenance(db);
+
+      google.state.trashFail = { status: 503, body: { error: { message: "Backend Error" } } };
+      assert.deepEqual(await runDriveCleanup(db), { retry: 1 });
+      let row = await clipFull(clip.clipId);
+      assert.equal(row.driveStatus, "Uploaded");
+      assert.equal(row.driveDeleteAttempts, 1);
+      assert.match(row.driveError, /Not deleted from Drive: .*Backend Error/);
+      assert.deepEqual(await runDriveCleanup(db), {}, "not before its retry time");
+
+      await ctx.sql.query(`UPDATE clips SET driveNextAttemptAt = NULL WHERE clipId = ?`, [
+        clip.clipId,
+      ]);
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
+      row = await clipFull(clip.clipId);
+      assert.equal(row.driveStatus, "Deleted");
+      assert.equal(row.driveError, null);
+    });
+
+    it("waits while the court needs reconnecting, then deletes", async () => {
+      const clip = await uploadedReplay();
+      await expireNow("clips", "clipId", clip.clipId);
+      await runClipMaintenance(db);
+
+      await ctx.sql.query(`UPDATE courts SET driveStatus = 'NeedsReconnect' WHERE courtId = ?`, [
+        home.courtId,
+      ]);
+      assert.deepEqual(await runDriveCleanup(db), {});
+      assert.equal((await clipFull(clip.clipId)).driveStatus, "Uploaded");
+
+      await ctx.sql.query(`UPDATE courts SET driveStatus = 'Connected' WHERE courtId = ?`, [
+        home.courtId,
+      ]);
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
+    });
+
+    it("trashes a game's video, then the game's folder once it's empty", async () => {
+      const [[game]] = await ctx.sql.query(
+        `SELECT sessionId, driveFolderId FROM recording_sessions WHERE playerName = 'Drive Player'`
+      );
+      assert.ok(game.driveFolderId);
+      const [[video]] = await ctx.sql.query(
+        `SELECT sessionVideoId, driveFileId FROM session_videos
+         WHERE sessionId = ? AND driveStatus = 'Uploaded'`,
+        [game.sessionId]
+      );
+
+      await expireNow("session_videos", "sessionVideoId", video.sessionVideoId);
+      await runClipMaintenance(db);
+      const page = await ctx.api(
+        "GET",
+        `/public/sessions/${(
+          await ctx.sql.query(`SELECT shareToken FROM recording_sessions WHERE sessionId = ?`, [
+            game.sessionId,
+          ])
+        )[0][0].shareToken}`
+      );
+      assert.equal(page.data.session.videos[0].status, "Expired");
+      assert.equal(page.data.session.videos[0].driveUrl, null);
+      assert.equal(page.data.session.driveUrl, null, "no folder link once nothing is kept");
+      const staff = await call("GET", `/admin/sessions/${game.sessionId}`);
+      assert.equal(staff.data.session.driveUrl, null, "nor in Sessions");
+
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1, folder: 1 });
+      assert.equal(google.state.files.get(video.driveFileId).trashed, true);
+      assert.equal(google.state.files.get(game.driveFolderId).trashed, true);
+      const [[after]] = await ctx.sql.query(
+        `SELECT driveFolderId, driveUrl FROM recording_sessions WHERE sessionId = ?`,
+        [game.sessionId]
+      );
+      assert.deepEqual(after, { driveFolderId: null, driveUrl: null });
+      const [[{ driveStatus }]] = await ctx.sql.query(
+        `SELECT driveStatus FROM session_videos WHERE sessionVideoId = ?`,
+        [video.sessionVideoId]
+      );
+      assert.equal(driveStatus, "Deleted");
+    });
+
+    it("never touches the court's own folder", async () => {
+      const [[{ driveFolderId }]] = await ctx.sql.query(
+        `SELECT driveFolderId FROM courts WHERE courtId = ?`,
+        [home.courtId]
+      );
+      assert.ok(!google.state.files.get(driveFolderId).trashed);
     });
   });
 

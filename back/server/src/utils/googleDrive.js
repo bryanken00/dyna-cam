@@ -309,6 +309,26 @@ export const shareWithLink = async (token, fileId) => {
   if (!res.ok) throw await driveFailure(res, "Sharing the file");
 };
 
+/**
+ * CR-017: move a file or folder this sign-in made to the Drive's trash
+ * (Google empties it after 30 days; until then the owner can restore it, and
+ * its shared link stops working).
+ * @returns {Promise<boolean>} false when it was already gone (or isn't this sign-in's)
+ */
+export const trashFile = async (token, fileId) => {
+  const res = await request(
+    `${urls().api}/files/${encodeURIComponent(fileId)}?fields=id,trashed`,
+    {
+      method: "PATCH",
+      headers: { ...auth(token), "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify({ trashed: true }),
+    }
+  );
+  if (res.status === 404) return false;
+  if (!res.ok) throw await driveFailure(res, "Moving it to the Drive's trash");
+  return true;
+};
+
 /** Read up to `length` bytes of an open file at `position`. */
 const readChunk = async (handle, position, length) => {
   const buffer = Buffer.alloc(length);

@@ -222,18 +222,9 @@ const ClipPage = () => {
         <div style={cardStyle}>
           <ResultState
             status="404"
-            title="This clip has expired"
-            description={
-              clip.driveUrl
-                ? "It's no longer on this page, but the venue kept a copy in Google Drive."
-                : "Clips are only kept for a limited time after they're saved."
-            }
+            title="This clip has been deleted"
+            description="Clips are only kept for a short time after they're saved."
           />
-          {clip.driveUrl && (
-            <div className="px-4 pb-4">
-              <DriveButton href={clip.driveUrl} className="w-full" />
-            </div>
-          )}
         </div>
       </PublicLayout>
     );

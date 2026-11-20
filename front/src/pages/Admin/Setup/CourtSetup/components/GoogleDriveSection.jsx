@@ -67,7 +67,7 @@ const GoogleDriveSection = ({ court, canWrite }) => {
   const handleDisconnect = async () => {
     const ok = await confirm({
       title: "Disconnect Google Drive",
-      description: `New recordings on this court stop going to ${drive.email || "this Google account"}. Videos already in that Drive stay there, and their links keep working.`,
+      description: `New recordings on this court stop going to ${drive.email || "this Google account"}. Videos already in that Drive stay there and their links keep working — Dyna Cam can no longer delete them after the venue's keep time, so remove them in Drive yourself if needed.`,
       confirmText: "Disconnect",
       danger: true,
     });
@@ -135,7 +135,8 @@ const GoogleDriveSection = ({ court, canWrite }) => {
             <div className="mt-1" style={{ ...muted, color: "var(--color-warning)" }}>
               {drive.problem ||
                 "Google refused the sign-in. Reconnect to resume uploads."}{" "}
-              Recordings made meanwhile upload once it&apos;s reconnected.
+              Recordings made meanwhile upload once it&apos;s reconnected, and
+              expired videos leave the Drive then too.
             </div>
           )}
           {queue && (
@@ -148,6 +149,11 @@ const GoogleDriveSection = ({ court, canWrite }) => {
               Last problem: {drive.queue.lastError}
             </div>
           )}
+          {/* CR-017 */}
+          <div className="mt-1" style={muted}>
+            Each video&apos;s Drive copy is moved to the Drive&apos;s trash when the
+            venue&apos;s keep time ends (Google empties the trash after 30 days).
+          </div>
           {drive.connectedAt && (
             <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
               Connected {formatDateTime(drive.connectedAt)}
