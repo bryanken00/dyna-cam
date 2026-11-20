@@ -1,6 +1,6 @@
 # CR-008 · Venue health and alerts
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** PLAN-001 (heartbeat, Dashboard), PLAN-002 (recorder boxes from `.env`)
 
 ## Requested change
@@ -96,6 +96,7 @@ hardware are the next best thing.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly ("Keeping it running") |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |
 
 ## Revisions
 

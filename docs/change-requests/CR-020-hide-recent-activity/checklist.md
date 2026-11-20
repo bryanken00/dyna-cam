@@ -14,11 +14,11 @@
 
 ## Acceptance
 
-- [ ] The Dashboard no longer shows Recent activity; the rest is unchanged
-- [ ] The Audit Trail page still lists the activity
+- [x] The Dashboard no longer shows Recent activity; the rest is unchanged
+- [x] The Audit Trail page still lists the activity
 
 ## Wrap-up
 
 - [x] Changelog entry added (`ref: CR-020`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

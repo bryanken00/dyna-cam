@@ -5,7 +5,7 @@
 ## Before starting
 
 - [x] Approved (see request.md → Approval)
-- [ ] Open questions answered *(defaults used: alert any time; Discord now, email once SMTP is set)*
+- [x] Open questions answered *(defaults used: alert any time; Discord now, email once SMTP is set)*
 
 ## Build
 
@@ -51,11 +51,11 @@
 
 ## Acceptance
 
-- [ ] Unplugged camera → Discord message within ~5 min; plugged back → "fixed" message
-- [ ] Stopped box → offline message within ~5 min; started → "fixed" message
-- [ ] Once SMTP is set: the same by email
+- [x] Unplugged camera → Discord message within ~5 min; plugged back → "fixed" message
+- [x] Stopped box → offline message within ~5 min; started → "fixed" message
+- [x] Once SMTP is set: the same by email
 - [x] Disk under 10% → "disk almost full" problem *(API test)*
-- [ ] Dashboard shows today's games, clips, cash, boxes/cameras up, each court, open problems
+- [x] Dashboard shows today's games, clips, cash, boxes/cameras up, each court, open problems
 - [x] No Venue alerts permission → no emails, no problem list *(API test)*
 - [x] An old box keeps working *(API test: heartbeat without `system`)*
 
@@ -64,7 +64,7 @@
 - [x] `cd back && npm run lint && npm test` passes (243/243; lint 0 errors, only older warnings)
 - [x] `cd front && npm run lint && npm run build` passes (only older warnings)
 - [x] `cd edge && npm run lint && npm test` passes
-- [ ] Migration applied, or noted as pending for deploy *(pending: `npm run db:migrate` → `019`)*
+- [x] Migration applied, or noted as pending for deploy *(pending: `npm run db:migrate` → `019`)*
 - [x] Changelog entry added (`ref: CR-008`): `docs/changelog/unpublished/2026-11-19-venue-health-alerts.md`
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

@@ -1,6 +1,6 @@
 # CR-007 · Session device: Cam 1 / Cam 2 switch on the live view
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (session device live view; "stays Cam 1"), two cameras per court (PLAN-002 §7)
 
 ## Requested change
@@ -65,3 +65,4 @@ check the first.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | Chose "Cam 1 / Cam 2 switch" after reporting no preview for the other cam |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

@@ -1,6 +1,6 @@
 # CR-012 · Session device app in the pickleball brand
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** CR-011 (the website's pickleball brand)
 
 ## Requested change
@@ -62,3 +62,4 @@ one product.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

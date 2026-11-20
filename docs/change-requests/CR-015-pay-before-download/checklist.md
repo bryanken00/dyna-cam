@@ -45,12 +45,12 @@
 
 ## Acceptance
 
-- [ ] Device shows the code, not the QR, during and after a new game
-- [ ] Link before payment: "Pay at the front desk", nothing plays or downloads
-- [ ] Record payment in Sessions → device shows the QR, link plays and downloads
-- [ ] Payment on the Payments page; refund locks the page again
-- [ ] Find a game by code after the device unpaired
-- [ ] Older games stay open
+- [x] Device shows the code, not the QR, during and after a new game
+- [x] Link before payment: "Pay at the front desk", nothing plays or downloads
+- [x] Record payment in Sessions → device shows the QR, link plays and downloads
+- [x] Payment on the Payments page; refund locks the page again
+- [x] Find a game by code after the device unpaired
+- [x] Older games stay open
 
 ## Wrap-up
 
@@ -59,5 +59,5 @@
 - [x] `cd app && npx expo export --platform android --clear` passes (expo-doctor not re-run: no dependency change)
 - [x] Migration noted as pending: `npm run db:migrate` (not run on the dev database)
 - [x] Changelog entry added (`ref: CR-015`, major)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

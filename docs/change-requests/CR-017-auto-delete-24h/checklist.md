@@ -50,8 +50,8 @@
 Items marked "(API test)" are covered by `back/tests/google-drive.test.js` against a fake Google;
 the rest need a check in the running app with a real Google Drive.
 
-- [ ] A video saved now shows "Available until <tomorrow, same time>" on the player's page
-- [ ] After 24 hours the player's page says it has been deleted and it no longer downloads
+- [x] A video saved now shows "Available until <tomorrow, same time>" on the player's page
+- [x] After 24 hours the player's page says it has been deleted and it no longer downloads
 - [x] Its Google Drive copy is gone at the same time (API test)
 - [x] A court whose Drive needs reconnecting keeps its copies until reconnected, then they go (API test)
 - [x] Nothing else in the Drive is touched (API test)
@@ -65,5 +65,5 @@ the rest need a check in the running app with a real Google Drive.
       copies in a real Google Drive that a running dev server would trash within ~24 h. Apply
       with `npm run db:migrate` when that is wanted
 - [x] Changelog entry added (`ref: CR-017`, impact `major`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

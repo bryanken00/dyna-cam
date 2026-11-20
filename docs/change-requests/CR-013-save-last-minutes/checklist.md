@@ -43,14 +43,14 @@
 
 ## Acceptance
 
-- [ ] 10 min in, 2 min → a video of 8:00–10:00 (on a device, real box)
+- [x] 10 min in, 2 min → a video of 8:00–10:00 (on a device, real box)
 - [x] Two cameras → one video each *(API test; real box still to try)*
-- [ ] Game page lists, plays and downloads saves
+- [x] Game page lists, plays and downloads saves
 - [x] Whole-game video and game finish unchanged *(API test)*
 - [x] Refused before 1 min, after the game, and at 5 saves; queued, not refused, while another is
       made *(API tests)*
-- [ ] Delete on a device removes it from the game's page
-- [ ] Preview plays a finished save on a device (both cameras on a two-camera court); the scrubber
+- [x] Delete on a device removes it from the game's page
+- [x] Preview plays a finished save on a device (both cameras on a two-camera court); the scrubber
       and ±15 s move through it
 
 ## Wrap-up
@@ -60,5 +60,5 @@
 - [x] `cd app && npx expo export --platform android --clear` bundles
 - [x] Migration applied on the development database (2026-11-19); pending for deploy elsewhere
 - [x] Changelog entry added (`ref: CR-013`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

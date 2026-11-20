@@ -18,12 +18,12 @@
 
 ## Acceptance
 
-- [ ] No Settings in the sidebar; `/admin/settings` → Not found
-- [ ] Roles / user permissions show no Settings permission
+- [x] No Settings in the sidebar; `/admin/settings` → Not found
+- [x] Roles / user permissions show no Settings permission
 
 ## Wrap-up
 
 - [x] Migration `026` pending (`npm run db:migrate`)
 - [x] Changelog entry added (`ref: CR-021`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

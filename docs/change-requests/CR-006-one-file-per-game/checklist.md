@@ -40,12 +40,12 @@
 
 ## Acceptance
 
-- [ ] No 5-minute pieces anywhere for a new game
-- [ ] Upload progress, then one video per camera with one Download
-- [ ] Network drop / box restart mid-upload resumes, doesn't restart
-- [ ] Camera drop-out shown as a named missing stretch
-- [ ] Server works without ffmpeg
-- [ ] Replays unchanged
+- [x] No 5-minute pieces anywhere for a new game
+- [x] Upload progress, then one video per camera with one Download
+- [x] Network drop / box restart mid-upload resumes, doesn't restart
+- [x] Camera drop-out shown as a named missing stretch
+- [x] Server works without ffmpeg
+- [x] Replays unchanged
 
 ## Wrap-up
 
@@ -56,5 +56,5 @@
 - [x] `cd app && npx expo export --platform android --clear` passes
 - [x] Migration and box update noted for deploy (changelog Dev notes)
 - [x] Changelog: CR-003 is unreleased, so update its entry
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

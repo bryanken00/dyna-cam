@@ -19,16 +19,16 @@
 
 ## Acceptance
 
-- [ ] Two-camera court: Cam 1 live with a Cam 1 | Cam 2 switch
-- [ ] Cam 2 shows Cam 2's live video; Cam 1 goes back
-- [ ] Cam 2 offline: the panel says so; Cam 1 still works
-- [ ] One-camera court: no switch
-- [ ] Recording unaffected by switching
+- [x] Two-camera court: Cam 1 live with a Cam 1 | Cam 2 switch
+- [x] Cam 2 shows Cam 2's live video; Cam 1 goes back
+- [x] Cam 2 offline: the panel says so; Cam 1 still works
+- [x] One-camera court: no switch
+- [x] Recording unaffected by switching
 
 ## Wrap-up
 
 - [x] `cd back && npm run lint && npm test` passes (228/228; lint 0 errors, warnings are older files)
 - [x] `cd app && npx expo export --platform android --clear` bundles; `expo-doctor`'s one failing check (SDK patch versions of 5 packages) fails the same without this change
 - [x] Changelog entry added (`ref: CR-007`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

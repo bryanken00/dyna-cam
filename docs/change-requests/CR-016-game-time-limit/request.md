@@ -1,6 +1,6 @@
 # CR-016 · Game time on New game: starts at once, stops by itself, staff can add time
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [CR-005](../CR-005-start-stop-from-device/request.md) (pairing starts the game, End game stops it — this CR replaces both rules), [CR-013](../CR-013-save-last-minutes/request.md) (Maximum saves on New game), [CR-015](../CR-015-pay-before-download/request.md) (pay at the front desk)
 
 ## Requested change
@@ -154,3 +154,4 @@ starting a new game.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | "ok implement this now" — open questions answered the same day |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

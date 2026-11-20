@@ -1,6 +1,6 @@
 # CR-020 · Hide Recent activity on the Dashboard
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [CR-019](../CR-019-sidebar-order/request.md) (admin pages moved down the sidebar)
 
 ## Requested change
@@ -53,3 +53,4 @@ It repeats the Audit Trail page and isn't useful on the day-to-day court view.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

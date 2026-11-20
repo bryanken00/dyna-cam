@@ -1,6 +1,6 @@
 # CR-006 · One file per game — no 5-minute pieces at all
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — (design notes below) · **Related:** [CR-003](../CR-003-whole-game-video-per-camera/request.md) (whole video per camera, joined from pieces), [CR-004](../CR-004-players-never-see-parts/request.md) (players never see pieces), [CR-005](../CR-005-start-stop-from-device/request.md) (pairing starts the game, End game stops it)
 
 ## Requested change
@@ -146,3 +146,4 @@ view isn't possible; a box that can't do per-camera files is the fallback case (
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | "now implement this" |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

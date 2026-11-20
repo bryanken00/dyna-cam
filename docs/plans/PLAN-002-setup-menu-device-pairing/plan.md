@@ -1,6 +1,6 @@
 # PLAN-002 · Setup menu, camera setup, and 6-digit device pairing
 
-> **Status:** In progress · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
+> **Status:** Done · **Created:** 2026-11-17 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
 > **Related:** [PLAN-001](../PLAN-001-court-replay-cameras/plan.md) (builds on its venues, courts,
 > recorder boxes, clips and staff app)
 
@@ -687,4 +687,4 @@ first start, no data/device.json:
   in the box's `.env`; the Recorder Boxes page is removed; boxes are listed and revoked from the
   API's command line. Supersedes box pairing keys (3.x, Phase B) — session-device pairing stays.
   Document first; build waits for the go-ahead.
-
+- 2026-11-20: **Done** — Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one.

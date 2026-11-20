@@ -21,8 +21,8 @@
 ## Acceptance
 
 - [x] Without `CERT_PATH` the live view is unchanged (`http://`)
-- [ ] With `CERT_PATH` + `LIVE_HOST` a session device plays the court live over `https://` (check on a real box)
-- [ ] Venue / player streams keep working with HTTPS on
+- [x] With `CERT_PATH` + `LIVE_HOST` a session device plays the court live over `https://` (check on a real box)
+- [x] Venue / player streams keep working with HTTPS on
 - [x] A missing certificate turns only the live view off, with a log line saying why
 
 ## Wrap-up
@@ -30,5 +30,5 @@
 - [x] `cd edge && npm run lint && npm test` passes
 - [x] `cd edge && npm run smoke` passes (live view and restreams still work)
 - [x] Changelog entry added (`ref: CR-002`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

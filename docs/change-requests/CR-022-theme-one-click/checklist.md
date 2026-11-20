@@ -14,12 +14,12 @@
 
 ## Acceptance
 
-- [ ] One click changes the theme, Auto → Light → Dark → Auto
-- [ ] Icon shows the current theme; tooltip names it and the next one
-- [ ] Remembered after a reload
+- [x] One click changes the theme, Auto → Light → Dark → Auto
+- [x] Icon shows the current theme; tooltip names it and the next one
+- [x] Remembered after a reload
 
 ## Wrap-up
 
 - [x] Changelog entry added (`ref: CR-022`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

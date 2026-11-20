@@ -41,13 +41,13 @@
 
 ## Acceptance
 
-- [ ] New game: "Waiting for a device", nothing recorded
-- [ ] Pairing starts recording at once (timer from 0:00)
-- [ ] Only End game on the device; no stop/pause
-- [ ] End game → one whole video per camera
-- [ ] Admin End works; Cancel only before pairing
-- [ ] No automatic end (unless a safety limit was chosen); long games highlighted
-- [ ] Second game on a busy court refused
+- [x] New game: "Waiting for a device", nothing recorded
+- [x] Pairing starts recording at once (timer from 0:00)
+- [x] Only End game on the device; no stop/pause
+- [x] End game → one whole video per camera
+- [x] Admin End works; Cancel only before pairing
+- [x] No automatic end (unless a safety limit was chosen); long games highlighted
+- [x] Second game on a busy court refused
 
 ## Wrap-up
 
@@ -58,5 +58,5 @@
 - [x] Recorder box confirmed unchanged (or updated and tested)
 - [x] Migration noted for deploy
 - [x] Changelog entry (`ref: CR-005`, impact `major`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

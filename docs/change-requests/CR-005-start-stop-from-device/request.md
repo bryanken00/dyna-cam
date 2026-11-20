@@ -1,6 +1,6 @@
 # CR-005 · Pairing the device starts the game, End game stops it
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (session device, pairing, booking), [CR-003](../CR-003-whole-game-video-per-camera/request.md) (whole video per camera), [CR-004](../CR-004-players-never-see-parts/request.md) (no 5-minute pieces for players)
 
 ## Requested change
@@ -130,3 +130,4 @@ ends when the players say they're done, not at times guessed when booking.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | "ok implement this now" — no safety limit (as said earlier), the rest as recommended |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |
