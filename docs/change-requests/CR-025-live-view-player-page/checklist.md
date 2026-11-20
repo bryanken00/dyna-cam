@@ -19,19 +19,19 @@
 
 ## Acceptance
 
-- [ ] On the venue Wi-Fi, a recording game's page plays the court's live video
-- [ ] Two-camera court: Cam 1 / Cam 2 switch
-- [ ] Sound off at first, toggle; ⟲ 10 s and Back to live
-- [ ] Off the venue Wi-Fi: notice, rest of the page works
-- [ ] Save the last … appears under Your saves, counts toward the limit
-- [ ] No End game on the page
-- [ ] Unpaid game: live + Save, videos locked
-- [ ] Game ends: live and Save go, saving progress shows
+- [x] On the venue Wi-Fi, a recording game's page plays the court's live video
+- [x] Two-camera court: Cam 1 / Cam 2 switch
+- [x] Sound off at first, toggle; ⟲ 10 s and Back to live
+- [x] Off the venue Wi-Fi: notice, rest of the page works
+- [x] Save the last … appears under Your saves, counts toward the limit
+- [x] No End game on the page
+- [x] Unpaid game: live + Save, videos locked
+- [x] Game ends: live and Save go, saving progress shows
 
 ## Wrap-up
 
 - [x] `cd back && npm run lint && npm test` passes
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] Changelog entry added (`ref: CR-025`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

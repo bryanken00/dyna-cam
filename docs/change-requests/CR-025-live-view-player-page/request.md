@@ -1,6 +1,6 @@
 # CR-025 · Live view and Save the last … on the player's game page
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (session device, live view), [CR-007](../CR-007-device-live-cam-switch/request.md) (Cam 1 / Cam 2), [CR-013](../CR-013-save-last-minutes/request.md) (Save the last …), [CR-014](../CR-014-live-rewind/request.md) (⟲ 10 s), [CR-015](../CR-015-pay-before-download/request.md) (pay before download)
 
 ## Requested change
@@ -100,3 +100,4 @@ device.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | Asked directly ("add live view here … add control also"); questions answered the same day |
+| Signed off — Done | bryanken00 | 2026-11-20 | Marked done by the requester ("mark CR-025 done"); acceptance items ticked on that sign-off, not re-checked one by one |
