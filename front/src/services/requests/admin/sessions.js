@@ -11,6 +11,7 @@ import {
   createSessionApi,
   cancelSessionApi,
   endSessionApi,
+  extendSessionApi,
   createSessionPairingCodeApi,
   cancelSessionPairingCodeApi,
   unpairSessionDeviceApi,
@@ -56,22 +57,41 @@ export const useGetSessionById = (sessionId) => {
   });
 };
 
-// Mutation: Book a court for a session (`startNow: true` or a `startAt`)
+// Mutation: New game (CR-016: `startNow: true` + durationMinutes — records at once)
 export const useCreateSession = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: createSessionApi,
-    onSuccess: () => {
-      toast.success("Session booked");
+    onSuccess: (response) => {
+      toast.success(response?.message || "Game created");
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
     onError: (error) => {
       toast.error(
         error.response?.status === 409
-          ? "This court already has a session in that time"
-          : error.response?.data?.message || "Failed to book the session",
+          ? "This court already has a game — end it before starting a new one"
+          : error.response?.data?.message || "Failed to create the game",
       );
+    },
+  });
+};
+
+// Mutation: CR-016 Add time to a recording game ({ sessionId, minutes })
+export const useExtendSession = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: extendSessionApi,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to add time");
+      // A 409 means the game has ended meanwhile — show the real status
+      if (error.response?.status === 409) {
+        queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
     },
   });
 };

@@ -24,10 +24,11 @@ const localDateTime = z
   });
 
 // POST /
+// CR-016: Admin's New game sends startNow + durationMinutes (the game time) —
+// it records at once and stops by itself at the end.
 // CR-005: just a court (+ player) is an open game — it waits for a device,
-// starts when the first one pairs, and ends only by End game / End.
-// Older clients may still book a time window: startNow or startAt, with
-// durationMinutes (PLAN-001/002).
+// starts when the first one pairs, and ends only by End game / End (older
+// clients). startAt + durationMinutes books ahead (PLAN-001/002).
 export const createSessionSchema = z
   .object({
     courtId: z.string().min(1, "Court is required").max(50),
@@ -63,6 +64,18 @@ export const createSessionSchema = z
     message: "Pick a start date and time, or start now",
     path: ["startAt"],
   });
+
+/** CR-016: a game may run at most this long in total, with the time added. */
+export const GAME_MAX_TOTAL_MINUTES = 360;
+
+// POST /:sessionId/extend — CR-016: Add time to a recording game
+export const extendSessionSchema = z.object({
+  minutes: z.coerce
+    .number()
+    .int("Use whole minutes")
+    .min(1, "Add at least 1 minute")
+    .max(GAME_MAX_TOTAL_MINUTES, "A game is at most 6 hours"),
+});
 
 // GET /
 /** CR-003: POST /:sessionId/videos/:camera/retry — camera 0 (one / stacked), 1 or 2. */

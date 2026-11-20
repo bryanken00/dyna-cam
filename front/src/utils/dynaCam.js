@@ -116,8 +116,13 @@ export const LONG_GAME_MINUTES = 180;
 
 /** The length choices in the booking drawer, in minutes. */
 export const SESSION_DURATIONS = [30, 60, 90, 120, 180];
+/** CR-016: a game time on New game is 5 min to 3 h (the API's limits)… */
 export const SESSION_MIN_MINUTES = 5;
 export const SESSION_MAX_MINUTES = 180;
+/** …and Add time can stretch it to 6 h in all. */
+export const GAME_MAX_TOTAL_MINUTES = 360;
+/** CR-016: the game time New game opens with. */
+export const DEFAULT_GAME_MINUTES = 60;
 export const SESSION_MAX_DAYS_AHEAD = 14;
 
 /** 90 → "1 h 30 min", 45 → "45 min". */

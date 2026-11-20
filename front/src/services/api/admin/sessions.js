@@ -21,8 +21,9 @@ export const getSessionByIdApi = async (sessionId) => {
 };
 
 // { courtId, startNow?: true, startAt?: "YYYY-MM-DD HH:mm" (Manila, unless startNow),
-//   durationMinutes, playerName?, phone? }
-// → 201 { sessionId, startAt, endAt, shareUrl } · 409 overlapping session
+//   durationMinutes, playerName?, phone?, free?, maxCaptures? }
+// CR-016: New game sends startNow + durationMinutes — it records at once.
+// → 201 { sessionId, status, startAt, endAt, payCode, shareUrl } · 409 court busy
 export const createSessionApi = async (sessionData) => {
   const response = await api.post("/api/v1/admin/sessions", sessionData);
   return response.data;
@@ -31,6 +32,15 @@ export const createSessionApi = async (sessionData) => {
 // Only before it starts — 409 otherwise
 export const cancelSessionApi = async (sessionId) => {
   const response = await api.post(`/api/v1/admin/sessions/${sessionId}/cancel`);
+  return response.data;
+};
+
+// CR-016: Add time to a recording game — { minutes } → { session }
+// 400 past 6 h in all · 409 if it isn't recording
+export const extendSessionApi = async ({ sessionId, minutes }) => {
+  const response = await api.post(`/api/v1/admin/sessions/${sessionId}/extend`, {
+    minutes,
+  });
   return response.data;
 };
 
