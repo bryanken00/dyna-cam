@@ -741,6 +741,95 @@ describe("Google Drive per court", () => {
     });
   });
 
+  // CR-018 (2026-11-20): Re-upload to Google Drive from Sessions
+  describe("re-uploading a game from Sessions (CR-018)", () => {
+    /** A finished, paid game on `courtId` whose video the box has sent. */
+    const sentGame = async (courtId) => {
+      const created = await call("POST", "/admin/sessions", {
+        courtId,
+        startAt: (
+          await ctx.sql.query(
+            `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                 INTERVAL 1 MINUTE), '%Y-%m-%d %H:%i:%s') AS t`
+          )
+        )[0][0].t,
+        durationMinutes: 5,
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const { sessionId } = created.data;
+      await call("POST", "/admin/payments", { sessionId, amount: 250 });
+      await ctx.sql.query(
+        `UPDATE recording_sessions
+           SET startAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 12 MINUTE),
+               endAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 2 MINUTE)
+           WHERE sessionId = ?`,
+        [sessionId]
+      );
+      const jobs = await gameJobs(ctx, home.token, sessionId);
+      const sent = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      return sessionId;
+    };
+    const upload = async (sessionId) =>
+      (await call("GET", `/admin/sessions/${sessionId}`)).data.session.driveUpload;
+
+    it("shows a failed upload, re-queues it, and it uploads", async () => {
+      const sessionId = await sentGame(home.courtId);
+      google.state.fail = { status: 400, body: { error: { message: "Invalid metadata" } } };
+      assert.deepEqual(await runDriveUploads(db), { failed: 1 });
+
+      let state = await upload(sessionId);
+      assert.equal(state.status, "Failed");
+      assert.match(state.error, /Invalid metadata/);
+      assert.equal(state.canReupload, true);
+      const listed = await call("GET", `/admin/sessions?courtId=${home.courtId}`);
+      assert.equal(
+        listed.data.sessions.find((g) => g.sessionId === sessionId).driveUpload.status,
+        "Failed"
+      );
+
+      const viewerTry = await call(
+        "POST",
+        `/admin/sessions/${sessionId}/drive-upload`,
+        undefined,
+        viewer
+      );
+      assert.equal(viewerTry.status, 403);
+
+      const again = await call("POST", `/admin/sessions/${sessionId}/drive-upload`);
+      assert.equal(again.status, 200, JSON.stringify(again.body));
+      assert.match(again.body.message, /Uploading 1 video/);
+      assert.equal(again.data.session.driveUpload.status, "Uploading");
+      assert.equal(
+        (await call("POST", `/admin/sessions/${sessionId}/drive-upload`)).status,
+        409,
+        "nothing more to queue"
+      );
+
+      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
+      state = await upload(sessionId);
+      assert.equal(state.status, "Uploaded");
+      assert.equal(state.canReupload, false);
+      assert.ok((await call("GET", `/admin/sessions/${sessionId}`)).data.session.driveUrl);
+    });
+
+    it("refuses on a court without Google Drive, and for a missing game", async () => {
+      const sessionId = await sentGame(home.court2Id);
+      const state = await upload(sessionId);
+      assert.equal(state.status, "NoDrive");
+      assert.equal(state.canReupload, false);
+      assert.match(state.problem, /no Google Drive/);
+
+      const res = await call("POST", `/admin/sessions/${sessionId}/drive-upload`);
+      assert.equal(res.status, 409);
+      assert.match(res.body.message, /no Google Drive connected/);
+      assert.equal(
+        (await call("POST", "/admin/sessions/no-such-game/drive-upload")).status,
+        404
+      );
+    });
+  });
+
   describe("large files", () => {
     it("uploads in 8 MB chunks, resuming where Google says it stopped", async () => {
       const { uploadFile } = await ctx.importFromBack("server/src/utils/googleDrive.js");

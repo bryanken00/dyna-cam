@@ -7,9 +7,11 @@ import {
   Copy,
   Eye,
   ExternalLink,
+  Mail,
   Smartphone,
   Square,
   TimerReset,
+  UploadCloud,
 } from "lucide-react";
 import PaymentStatusChip from "../../../../components/PaymentStatusChip";
 import RowActions from "../../../../components/RowActions";
@@ -28,7 +30,10 @@ import {
   formatMinutes,
   formatPayCode,
   formatTimeRange,
+  DRIVE_EMAIL_SENDABLE,
+  driveEmailActionLabel,
   driveEmailText,
+  driveUploadText,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import { useGetClipOptions } from "../../../../services/requests/admin/clips";
@@ -36,6 +41,8 @@ import {
   useGetSessions,
   useCancelSession,
   useEndSession,
+  useReuploadSessionDrive,
+  useSendSessionDriveEmail,
 } from "../../../../services/requests/admin/sessions";
 
 const EMPTY_FILTERS = { search: "", venueId: "", courtId: "", status: "" };
@@ -87,6 +94,9 @@ export const useSessionHooks = () => {
   const { data: optionsData } = useGetClipOptions();
   const cancelMutation = useCancelSession();
   const endMutation = useEndSession();
+  // CR-018 (2026-11-20): Re-upload to Google Drive / Re-send email
+  const reuploadMutation = useReuploadSessionDrive();
+  const sendEmailMutation = useSendSessionDriveEmail();
 
   const venueOptions = useMemo(
     () =>
@@ -254,6 +264,28 @@ export const useSessionHooks = () => {
           onClick: () => handleShowDrive(record),
         });
       }
+      // CR-018: the upload failed (or never ran) — try it again
+      if (canWrite && record.driveUpload?.canReupload) {
+        items.push({
+          key: "reupload",
+          label: "Re-upload to Google Drive",
+          icon: <UploadCloud className="w-4 h-4" />,
+          onClick: () => reuploadMutation.mutate(record.sessionId),
+        });
+      }
+      // CR-018: the Drive-link email failed, or should go again
+      if (
+        canWrite &&
+        record.email &&
+        DRIVE_EMAIL_SENDABLE.includes(record.driveEmail?.status)
+      ) {
+        items.push({
+          key: "email",
+          label: driveEmailActionLabel(record.driveEmail.status),
+          icon: <Mail className="w-4 h-4" />,
+          onClick: () => sendEmailMutation.mutate(record.sessionId),
+        });
+      }
       if (canWrite && PAIRABLE_STATUSES.includes(record.status)) {
         items.push({
           key: "pair",
@@ -303,6 +335,8 @@ export const useSessionHooks = () => {
       handleCopyLink,
       handleOpenLink,
       handleShowDrive,
+      reuploadMutation,
+      sendEmailMutation,
       handlePairDevice,
       handleAddTime,
       handleEndRequest,
@@ -446,6 +480,9 @@ export const useSessionHooks = () => {
               >
                 {record.email}
                 {record.driveEmail?.status === "Sent" ? " · link sent" : ""}
+                {record.driveEmail?.status === "Failed" && (
+                  <span style={{ color: "var(--color-error)" }}> · email failed</span>
+                )}
               </div>
             )}
             {record.startedBy && (
@@ -516,11 +553,31 @@ export const useSessionHooks = () => {
         key: "videos",
         width: 120,
         render: (_, record) => (
-          <VideosProgress
-            ready={Number(record.videosReady) || 0}
-            total={Number(record.videosTotal) || 0}
-            status={record.status}
-          />
+          <div className="min-w-0">
+            <VideosProgress
+              ready={Number(record.videosReady) || 0}
+              total={Number(record.videosTotal) || 0}
+              status={record.status}
+            />
+            {/* CR-018: a Drive upload that failed or never ran (Re-upload in ⋮) */}
+            {["Failed", "NotUploaded", "Uploading"].includes(record.driveUpload?.status) && (
+              <div
+                className="truncate mt-1"
+                style={{
+                  fontSize: 12,
+                  color:
+                    record.driveUpload.status === "Failed"
+                      ? "var(--color-error)"
+                      : "var(--color-text-muted)",
+                }}
+                title={driveUploadText(record.driveUpload)}
+              >
+                {record.driveUpload.status === "Failed"
+                  ? "Drive upload failed"
+                  : driveUploadText(record.driveUpload)}
+              </div>
+            )}
+          </div>
         ),
       },
       {

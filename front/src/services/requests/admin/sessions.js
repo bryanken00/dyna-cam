@@ -14,6 +14,7 @@ import {
   extendSessionApi,
   updateSessionEmailApi,
   sendSessionDriveEmailApi,
+  reuploadSessionDriveApi,
   createSessionPairingCodeApi,
   cancelSessionPairingCodeApi,
   unpairSessionDeviceApi,
@@ -126,6 +127,23 @@ export const useSendSessionDriveEmail = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to send the email");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+};
+
+// Mutation: CR-018 (2026-11-20) upload the game to Google Drive again (sessionId)
+export const useReuploadSessionDrive = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: reuploadSessionDriveApi,
+    onSuccess: (response) => {
+      toast.success(response?.message || "Uploading to Google Drive");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to re-upload to Google Drive");
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });

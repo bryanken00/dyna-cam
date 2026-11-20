@@ -5,10 +5,13 @@ audience: user
 ref: CR-018
 ---
 
-New game now takes the player's email. Once the game's videos are in the court's Google Drive and
+New game now takes the player's email, and checks the phone number (0912 3456 789) and email as
+soon as you leave each field. Once the game's videos are in the court's Google Drive and
 the game is paid (or free), the player automatically gets an email with a button to open the game
 in Google Drive. In Sessions, staff can see whether the link was emailed, fix a mistyped email and
-send the link again (also from the Google Drive QR dialog). All emails, including password resets
+send the link again (also from the Google Drive QR dialog). When a game's Google Drive upload
+fails, Sessions shows it, and **Re-upload to Google Drive** and **Re-send email** are in the game's
+menu. All emails, including password resets
 and venue alerts, are now sent through SendGrid.
 
 ## Dev notes
@@ -26,4 +29,7 @@ and venue alerts, are now sent through SendGrid.
   game Ready, paid or free, its whole videos' Drive uploads finished with one in Drive. Retries 5
   times, then Failed. New `PATCH /api/v1/admin/sessions/:sessionId/email` and
   `POST /api/v1/admin/sessions/:sessionId/drive-email` (`clips` write).
+- back/: new `POST /api/v1/admin/sessions/:sessionId/drive-upload` (`clips` write) re-queues the
+  game's kept videos whose Drive upload failed, was skipped or never ran; sessions include
+  `driveUpload` (status, error, canReupload).
 - app/, edge/: no change.

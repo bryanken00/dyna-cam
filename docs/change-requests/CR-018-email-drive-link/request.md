@@ -127,6 +127,15 @@ without staff having to show a QR or send the link by hand.
   only): `SMTP_*` settings, the SMTP transport and the `nodemailer` package are gone. Without
   `SENDGRID_API_KEY` emails are only logged, and the Drive-link email waits ("NotSetUp") instead of
   counting as sent.
+- 2026-11-20: Added — Admin → Sessions: when a game's Google Drive upload failed (or never ran,
+  e.g. the court was connected after the game), **Re-upload to Google Drive** in the row ⋮ menu
+  and the game's details; when the email failed or should go again, **Re-send email** in the row
+  ⋮ menu. The list shows a failed upload or email under the game. Re-upload needs the court's
+  Drive connected and the videos still kept (CR-017); once it's in Drive the email follows by
+  itself if it wasn't sent. Extends CR-001's upload. Asked directly by bryanken00.
+- 2026-11-20: New game's phone (and email) are checked as soon as staff leave the field, then as
+  they type — not only on Create game — with the format `0912 3456 789` shown under the phone.
+  The rule itself is unchanged (`09XX XXXX XXX`, optional). Asked directly by bryanken00.
 
 ## Approval
 

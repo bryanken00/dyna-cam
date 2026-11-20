@@ -50,12 +50,31 @@ const router = express.Router();
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
 
+/** A kept video of `s` (alias `dv`): the whole game per camera, and CR-013 saves. */
+const KEPT_VIDEO = `dv.sessionId = s.sessionId AND dv.status = 'Ready'`;
+
+/** CR-018 (2026-11-20): how the game's Drive upload went — for driveUploadState. */
+const DRIVE_UPLOAD_COLUMNS = `
+  (SELECT COUNT(*) FROM session_videos dv
+   WHERE ${KEPT_VIDEO} AND dv.driveStatus IN ('Pending', 'Uploading')) AS driveUploadingCount,
+  (SELECT COUNT(*) FROM session_videos dv
+   WHERE ${KEPT_VIDEO} AND dv.driveStatus = 'Failed') AS driveFailedCount,
+  (SELECT COUNT(*) FROM session_videos dv
+   WHERE ${KEPT_VIDEO} AND (dv.driveStatus IN ('Failed', 'Skipped') OR dv.driveStatus IS NULL))
+    AS driveMissingCount,
+  (SELECT dv.driveError FROM session_videos dv
+   WHERE ${KEPT_VIDEO} AND dv.driveStatus IN ('Failed', 'Skipped') AND dv.driveError IS NOT NULL
+   ORDER BY dv.dateUpdated DESC LIMIT 1) AS driveLastError,
+  (c.driveRefreshToken IS NOT NULL AND c.status != 'Deleted') AS courtDriveLinked,
+  c.driveStatus AS courtDriveStatus`;
+
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
          s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.addedMinutes, s.paymentStatus,
          s.payCode, s.dateCreated, s.dateUpdated, s.driveUrl AS driveFolderUrl,
          ${DRIVE_EMAIL_COLUMNS},
+         ${DRIVE_UPLOAD_COLUMNS},
          EXISTS (SELECT 1 FROM session_videos dv
                  WHERE dv.sessionId = s.sessionId AND dv.status = 'Ready'
                    AND dv.driveStatus = 'Uploaded') AS driveReady,
@@ -76,6 +95,36 @@ const SESSION_SELECT = `
   LEFT JOIN users u ON u.accountId = s.createdByAccountId
   LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId`;
 
+/**
+ * CR-018 (2026-11-20): the game's Google Drive upload, for Re-upload in Sessions.
+ *   status: Uploading · Failed · NotUploaded (never ran / skipped) · Uploaded
+ *           · NoDrive (court without Drive, nothing in it) · None (nothing kept)
+ *   canReupload: something kept isn't in Drive and the court's Drive is connected
+ *   problem: why it can't be re-uploaded right now (court not connected / needs reconnect)
+ */
+const driveUploadState = (row) => {
+  const uploading = Number(row.driveUploadingCount || 0);
+  const failed = Number(row.driveFailedCount || 0);
+  const missing = Number(row.driveMissingCount || 0);
+  const linked = Number(row.courtDriveLinked) === 1;
+  const connected = linked && row.courtDriveStatus === "Connected";
+  let status = "None";
+  if (uploading > 0) status = "Uploading";
+  else if (failed > 0) status = "Failed";
+  else if (missing > 0) status = linked ? "NotUploaded" : "NoDrive";
+  else if (Number(row.driveReady) === 1) status = "Uploaded";
+  return {
+    status,
+    error: ["Failed", "NotUploaded"].includes(status) ? row.driveLastError || null : null,
+    canReupload: connected && uploading === 0 && missing > 0,
+    problem: !linked
+      ? "This court has no Google Drive connected"
+      : connected
+        ? null
+        : "The court's Google Drive needs reconnecting",
+  };
+};
+
 /** CR-005: an open game still waiting or recording has no real end time yet. */
 const isOpen = (row) =>
   Number(row.openEnded) === 1 && ["Waiting", "Recording"].includes(row.status);
@@ -92,6 +141,12 @@ const toSession = (row) => {
     driveEmailError: _driveEmailError,
     driveEmailReady: _driveEmailReady,
     driveEmailUploading: _driveEmailUploading,
+    driveUploadingCount: _driveUploadingCount,
+    driveFailedCount: _driveFailedCount,
+    driveMissingCount: _driveMissingCount,
+    driveLastError: _driveLastError,
+    courtDriveLinked: _courtDriveLinked,
+    courtDriveStatus: _courtDriveStatus,
     ...session
   } = row;
   const open = isOpen(row);
@@ -124,6 +179,8 @@ const toSession = (row) => {
     // CR-018: the player's email and where the Drive-link email stands
     email: row.email || null,
     driveEmail: driveEmailState(row),
+    // CR-018 (2026-11-20): Re-upload to Google Drive
+    driveUpload: driveUploadState(row),
   };
 };
 
@@ -647,6 +704,59 @@ router.patch(
     return res.sendSuccess(email ? "Player email saved" : "Player email removed", {
       session: await loadSession(req.db, req.params.sessionId),
     });
+  })
+);
+
+/**
+ * POST /:sessionId/drive-upload — CR-018 (2026-11-20): upload the game's kept
+ * videos (whole game and saves) to the court's Google Drive again — the ones
+ * whose upload failed, was skipped, or never ran (the court was connected
+ * after the game). jobs/driveUploads.js picks them up within 30 s; the
+ * Drive-link email follows by itself if it wasn't sent.
+ */
+router.post(
+  "/:sessionId/drive-upload",
+  checkPermission("clips", null, "write"),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT c.driveRefreshToken IS NOT NULL AND c.status != 'Deleted' AS linked,
+              c.driveStatus AS courtDriveStatus
+       FROM recording_sessions s
+       JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
+       JOIN courts c ON c.courtId = s.courtId
+       WHERE s.sessionId = ? LIMIT 1`,
+      [req.params.sessionId]
+    );
+    if (rows.length === 0) return res.sendError("Session not found", 404);
+    if (Number(rows[0].linked) !== 1) {
+      return res.sendError(
+        "This court has no Google Drive connected — connect it in the court's setup first",
+        409
+      );
+    }
+    if (rows[0].courtDriveStatus !== "Connected") {
+      return res.sendError("Reconnect the court's Google Drive first (court setup)", 409);
+    }
+
+    const now = getCurrentTimestampLocal();
+    const queued = await req.db.query(
+      `UPDATE session_videos
+       SET driveStatus = 'Pending', driveAttempts = 0, driveNextAttemptAt = NULL,
+           driveError = NULL, dateUpdated = ?
+       WHERE sessionId = ? AND status = 'Ready'
+         AND (driveStatus IN ('Failed', 'Skipped') OR driveStatus IS NULL)`,
+      [now, req.params.sessionId]
+    );
+    if (!queued.affectedRows) {
+      return res.sendError(
+        "Nothing to upload — the game's videos are already in Google Drive, uploading, or no longer kept",
+        409
+      );
+    }
+    return res.sendSuccess(
+      `Uploading ${queued.affectedRows} ${queued.affectedRows === 1 ? "video" : "videos"} to Google Drive — within a minute`,
+      { session: await loadSession(req.db, req.params.sessionId) }
+    );
   })
 );
 
