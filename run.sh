@@ -8,7 +8,9 @@
 #   ./run.sh back front edge     # + the recorder box (opt-in; needs ffmpeg and a paired box in edge/.env)
 #   ./run.sh stop                # free the dev ports if anything was left behind
 #
-# Output is prefixed per app. Ctrl+C stops all of them.
+# Output is prefixed per app. Ctrl+C stops all of them. Before starting, the
+# LAN IP in the .env files' URLs is updated to this machine's current one
+# (NO_IP_UPDATE=1 skips that).
 #
 # 📌 The Windows sibling of ./run-mac.sh — same flags, same ports, same colours.
 #    What differs is how ports and processes are found, because Git Bash pids
@@ -69,6 +71,57 @@ ALL=(
 DEFAULT=(back front)
 
 PIDFILE=".run.pid"
+
+# ── LAN IP ───────────────────────────────────────────────────────────────────
+# This machine's LAN IPv4: the adapter that is up and has a default gateway
+# (Wi-Fi or Ethernet), asked of PowerShell. Empty when offline.
+lan_ip() {
+  powershell.exe -NoProfile -Command \
+    "(Get-NetIPConfiguration | Where-Object { \$_.IPv4DefaultGateway -ne \$null -and \$_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1).IPv4Address.IPAddress" \
+    2>/dev/null | tr -d '\r' | head -n 1
+}
+
+# Rewrites every http(s)://<private LAN IPv4> in the .env files' values to the
+# current IP. localhost, 0.0.0.0 and public addresses are left alone; comments
+# are skipped; line endings are kept. Prints what changed, never the values.
+update_env_ips() {
+  local ip="$1"
+  shift
+  node - "$ip" "$@" <<'NODE'
+const fs = require("fs");
+const [ip, ...files] = process.argv.slice(2);
+const PRIVATE = /^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
+const URL_IP = /(https?:\/\/)(\d{1,3}(?:\.\d{1,3}){3})(?=[:/,"'\s]|$)/g;
+for (const file of files) {
+  if (!fs.existsSync(file)) continue;
+  const text = fs.readFileSync(file, "utf8");
+  const changed = new Set();
+  const olds = new Set();
+  const out = text.split("\n").map((raw) => {
+    // Windows files end lines in \r\n: match without the \r, put it back after
+    const cr = raw.endsWith("\r") ? "\r" : "";
+    const line = cr ? raw.slice(0, -1) : raw;
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!m) return raw;
+    const value = m[2].replace(URL_IP, (all, scheme, host) => {
+      if (host === ip || !PRIVATE.test(host)) return all;
+      changed.add(m[1]);
+      olds.add(host);
+      return scheme + ip;
+    });
+    return value === m[2] ? raw : line.slice(0, line.length - m[2].length) + value + cr;
+  });
+  if (changed.size) {
+    fs.writeFileSync(file, out.join("\n"));
+    console.log(`🔁 ${file}: ${[...olds].join(", ")} → ${ip} (${[...changed].join(", ")})`);
+  }
+}
+NODE
+}
+
+# The .env files whose URLs point at this machine on the LAN (phones, the
+# recorder box and the web app reach the API by IP, not localhost).
+ENV_FILES=(back/.env front/.env app/.env edge/.env)
 
 # ── process helpers (all pids here are Windows pids) ─────────────────────────
 
@@ -172,20 +225,12 @@ fi
 fail=0
 for entry in "${selected[@]}"; do
   name="${entry%%:*}"
-  # setup.sh doesn't cover the recorder box — it is set up by hand (edge/README.md)
-  if [ "$name" = "edge" ]; then
-    fix_modules="cd edge && npm install"
-    fix_env="cp edge/.env.example edge/.env, then fill it in (edge/README.md)"
-  else
-    fix_modules="run ./setup.sh"
-    fix_env="run ./setup.sh"
-  fi
   [ -d "$name/node_modules" ] || {
-    echo "!! $name has no node_modules — $fix_modules" >&2
+    echo "!! $name has no node_modules — run ./setup.sh" >&2
     fail=1
   }
   [ -f "$name/.env" ] || {
-    echo "!! $name has no .env — $fix_env" >&2
+    echo "!! $name has no .env — run ./setup.sh" >&2
     fail=1
   }
 done
@@ -235,6 +280,23 @@ stop() {
   exit 0
 }
 trap stop INT TERM EXIT
+
+# ── keep the LAN IP current ──────────────────────────────────────────────────
+# A new Wi-Fi (or a new DHCP lease) gives this machine another IP, and every
+# URL below that still names the old one stops working — the app can't reach
+# the API, the box can't upload, the web app's calls fail. Before anything
+# starts (each app reads its .env at start), point them at the current IP.
+# Skip with NO_IP_UPDATE=1 (e.g. when an .env points at another machine).
+if [ "${NO_IP_UPDATE:-}" != "1" ]; then
+  CURRENT_IP="$(lan_ip)"
+  if [ -n "$CURRENT_IP" ]; then
+    update_env_ips "$CURRENT_IP" "${ENV_FILES[@]}"
+    printf 'LAN IP %s  (phones and the recorder box reach the API at http://%s:%s)\n' \
+      "$CURRENT_IP" "$CURRENT_IP" "$BACK_PORT"
+  else
+    echo "!! no LAN IP found (offline?) — .env URLs left as they are" >&2
+  fi
+fi
 
 # ── start ────────────────────────────────────────────────────────────────────
 winpid_of $$ > "$PIDFILE"

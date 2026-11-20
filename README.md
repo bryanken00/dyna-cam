@@ -104,7 +104,7 @@ The repository is a **monorepo of four independent apps**:
 .
 ├── README.md                  ← you are here
 ├── CLAUDE.md                  ← project map for AI agents
-├── setup.sh                   ← first-time setup: installs, both .env files, secrets, JWT keys
+├── setup.sh                   ← first-time setup: installs, .env files (back, front, edge), secrets, JWT keys
 ├── run.sh                     ← Windows (Git Bash): both dev servers in one terminal
 ├── run-mac.sh                 ← macOS: the same, for the bash macOS ships
 ├── .claude/skills/            ← Claude Code skills (checked in)
@@ -173,9 +173,15 @@ The repository is a **monorepo of four independent apps**:
 ./setup.sh
 ```
 
-Installs both apps' dependencies, creates `back/.env` and `front/.env` from their examples,
-generates `CSRF_SECRET`, `LOG_SALT` and `UPLOAD_URL_SECRET`, and creates the JWT keypair. It is
-safe to re-run: an existing `.env`, an already-set secret, and existing keys are kept. It then asks
+Installs the dependencies of `back/`, `front/` and `edge/`, creates `back/.env`, `front/.env` and
+`edge/.env` from their examples, generates `CSRF_SECRET`, `LOG_SALT` and `UPLOAD_URL_SECRET`, and
+creates the JWT keypair. For running the recorder box on this machine it also points `edge/.env`'s
+`API_URL` at the local API, generates `RECORDER_ENROLL_KEY` in `back/.env` if it is empty and
+copies it into the box's `ENROLL_KEY`, and checks that ffmpeg is installed. Last, it pairs the box:
+it lists the venues in your database so you pick the box's venue (`VENUE_ID`), asks for an
+optional box name (`BOX_NAME`), and checks the two keys match — the box then enrols itself on its
+first start. No venue yet? Add one in Admin → Setup → Venues and re-run `./setup.sh`. It is safe to re-run: an existing `.env`, an already-set
+secret or key, and existing JWT keys are kept. It then asks
 for `DB_USER`, `DB_PASS` and `DB_DATABASE` (press Enter to skip one, or keep its current value),
 writes them into `back/.env`, and — once all three are set — runs `npm run db:setup` for you, which
 prints the Owner's one-time password. If you skip any, set the `DB_*` values in `back/.env` and
@@ -187,7 +193,11 @@ arguments: `back` or `front` to start just one, `app` (opt-in, e.g. `./run-mac.s
 add the mobile app's Expo dev server, `edge` (opt-in, e.g. `./run-mac.sh back front edge`) to add
 the recorder box (it needs ffmpeg and a filled-in `edge/.env`), and `stop` to free the dev ports
 (4021 — or `PORT` from `back/.env` — 4020, 8081 and the box's `LIVE_PORT`, 8090) if a server was
-left running.
+left running. Before starting, both scripts look up this machine's current LAN IP and rewrite any
+old private IP in the `.env` files' URLs (`back/`, `front/`, `app/`, `edge/` — e.g. `APP_URL`,
+`VITE_API_URL`, `EXPO_PUBLIC_API_URL`, the box's `API_URL`), so phones and the recorder box still
+reach the API after the Wi-Fi hands out a new address. `localhost` and public addresses are left
+alone; `NO_IP_UPDATE=1 ./run-mac.sh` skips it.
 
 ### 1. Backend
 
