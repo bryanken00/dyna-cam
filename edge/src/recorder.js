@@ -56,8 +56,32 @@ const CONNECT_GRACE_MS = 30_000;
 const RTSP_TIMEOUT_US = "10000000"; // 10 s socket timeout: a stalled stream exits instead of hanging
 
 /**
+ * BUG-004: Windows' C runtime strftime has no `%s` (epoch seconds), so
+ * `-strftime 1` + `%s.ts` makes ffmpeg open a segment named '' and exit. There
+ * the segment muxer's own counter names the files instead, starting at
+ * `nextSegmentNumber` — still `<epoch-like>.ts`, never going back.
+ */
+export const STRFTIME_EPOCH = process.platform !== "win32";
+
+/**
+ * First file number for a counter-named run: the current epoch second, or one
+ * past the newest segment already in the folder if that is higher (a counter
+ * run's names lag the clock, but a restart must never reuse or go below one).
+ */
+export function nextSegmentNumber(names, nowMs) {
+  let next = Math.floor(nowMs / 1000);
+  for (const name of names) {
+    const match = /^(\d{9,11})\.ts$/.exec(name);
+    if (match) next = Math.max(next, Number(match[1]) + 1);
+  }
+  return next;
+}
+
+/**
  * ffmpeg arguments for one camera's recorder. segments.csv lists each closed
  * segment's content start/end; segments.js turns those into wall-clock times.
+ * `startNumber` (a number) names segments by counter from there (`%d.ts`, Windows);
+ * null names them by the epoch second they opened (`-strftime 1` + `%s.ts`).
  */
 export function buildRecordArgs({
   rtspUrl,
@@ -65,7 +89,11 @@ export function buildRecordArgs({
   segmentSeconds,
   recordAudio = true,
   ffmpegMajor = 99,
+  startNumber = null,
 }) {
+  const naming = Number.isInteger(startNumber)
+    ? { opts: ["-segment_start_number", String(startNumber)], pattern: "%d.ts" }
+    : { opts: ["-strftime", "1"], pattern: "%s.ts" };
   return [
     "-hide_banner",
     "-nostdin",
@@ -100,9 +128,8 @@ export function buildRecordArgs({
     "100",
     "-reset_timestamps",
     "1",
-    "-strftime",
-    "1",
-    path.join(outDir, "%s.ts"),
+    ...naming.opts,
+    path.join(outDir, naming.pattern),
   ];
 }
 
@@ -185,7 +212,16 @@ export function describeFailure(line, retryInMs = null) {
  * `court` = { courtId, name, camera (1|2), cameraRtspUrl, cameraVersion }.
  */
 export class CourtRecorder {
-  constructor({ court, dir, settings, ffmpegMajor, log, spawnImpl = spawn }) {
+  constructor({
+    court,
+    dir,
+    settings,
+    ffmpegMajor,
+    log,
+    spawnImpl = spawn,
+    strftimeEpoch = STRFTIME_EPOCH,
+  }) {
+    this.strftimeEpoch = strftimeEpoch;
     this.court = court;
     this.courtId = court.courtId;
     this.camera = court.camera === 2 ? 2 : 1;
@@ -243,6 +279,18 @@ export class CourtRecorder {
     );
   }
 
+  /** Counter start for this run (BUG-004), or null where strftime `%s` works. */
+  startNumber() {
+    if (this.strftimeEpoch) return null;
+    let names = [];
+    try {
+      names = fs.readdirSync(this.dir);
+    } catch (_err) {
+      // no folder yet: start at the clock
+    }
+    return nextSegmentNumber(names, Date.now());
+  }
+
   spawn() {
     if (this.stopping) return;
     const args = buildRecordArgs({
@@ -251,6 +299,7 @@ export class CourtRecorder {
       segmentSeconds: this.settings.segmentSeconds,
       recordAudio: this.settings.recordAudio,
       ffmpegMajor: this.ffmpegMajor,
+      startNumber: this.startNumber(),
     });
     this.state = "starting";
     this.message = "Connecting to camera";

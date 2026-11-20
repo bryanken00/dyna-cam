@@ -196,6 +196,9 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 ## Segment timing (`segments.js`)
 
 Segments are cut on keyframes (1.7–6.1 s seen) and the `%s` name is only when the file opened.
+On Windows (no `%s` in its strftime, BUG-004) names come from the muxer's counter instead
+(`-segment_start_number` = epoch second or newest + 1, `%d.ts`): same `<epoch-like>.ts` shape,
+never going back, but lagging the clock — never time anything by the name when a csv row exists.
 A closed segment's real span = **content times** from `segments.csv` (from 0 per ffmpeg run) +
 the run's **anchor** (smallest `mtime − content end` within ±120 s of that run).
 

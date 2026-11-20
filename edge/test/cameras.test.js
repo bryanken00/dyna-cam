@@ -13,7 +13,13 @@ import {
   selectSegments,
 } from "../src/clipper.js";
 import { LiveView } from "../src/live.js";
-import { buildRecordArgs, cameraKey, courtCameras, RecorderManager } from "../src/recorder.js";
+import {
+  buildRecordArgs,
+  cameraKey,
+  courtCameras,
+  RecorderManager,
+  STRFTIME_EPOCH,
+} from "../src/recorder.js";
 import {
   buildRestreamArgs,
   normalizeLayout,
@@ -123,9 +129,10 @@ describe("a recorder and a buffer per camera", () => {
     await manager.sync([court()]);
     await waitFor(() => spawn.children.length === 2);
     const outputs = spawn.children.map((c) => c.args.at(-1));
+    const pattern = STRFTIME_EPOCH ? "%s.ts" : "%d.ts"; // BUG-004: Windows has no strftime %s
     assert.deepEqual(outputs.sort(), [
-      path.join(dir, "buffer", "court-1", "%s.ts"),
-      path.join(dir, "buffer", "court-1~cam2", "%s.ts"),
+      path.join(dir, "buffer", "court-1", pattern),
+      path.join(dir, "buffer", "court-1~cam2", pattern),
     ]);
     assert.deepEqual(spawn.children.map((c) => c.args[c.args.indexOf("-i") + 1]).sort(), [
       CAM1,
