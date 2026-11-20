@@ -3,6 +3,7 @@ import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal, moment } from "../utils/dateUtils.js";
 import { toEpochMs } from "../utils/clips.js";
 import { decryptSecret } from "../utils/crypto/secretBox.js";
+import { DRIVE_KEEP_DAYS, driveKeepCutoff } from "../utils/driveKeep.js";
 import { runDriveCleanup } from "./driveCleanup.js";
 import { runDriveEmails } from "./driveEmails.js";
 import {
@@ -296,6 +297,7 @@ export const runDriveUploads = async (db, { limit = BATCH } = {}) => {
   if (!driveConfigured()) return tally;
 
   const now = getCurrentTimestampLocal();
+  const cutoff = driveKeepCutoff();
   const max = Math.max(1, Math.min(50, Number(limit) || BATCH));
   const tokens = new Map();
   for (const kind of Object.values(KINDS)) {
@@ -304,6 +306,14 @@ export const runDriveUploads = async (db, { limit = BATCH } = {}) => {
       `UPDATE ${kind.table} SET driveStatus = 'Pending'
        WHERE driveStatus = 'Uploading' AND driveNextAttemptAt <= ?`,
       [now]
+    );
+    // CR-026: a copy would be trashed as soon as it landed — past its Drive days
+    await db.query(
+      `UPDATE ${kind.table}
+       SET driveStatus = 'Skipped', driveNextAttemptAt = NULL,
+           driveError = 'Not copied: Google Drive keeps videos only ${DRIVE_KEEP_DAYS} days after they are saved'
+       WHERE driveStatus = 'Pending' AND dateCreated <= ?`,
+      [cutoff]
     );
     const due = await db.query(`${kind.due} LIMIT ${max}`, [now]);
     for (const { id } of due) {
@@ -342,7 +352,7 @@ export const scheduleDriveUploads = (db, intervalMs = INTERVAL_MS) => {
         if (tally && Object.keys(tally).length > 0) logger.info("Game Drive emails", tally);
       })
       .catch((err) => logger.error("Game Drive emails failed", { error: err.message }))
-      // CR-017: then trash the Drive copies of videos whose server copy expired
+      // CR-017 / CR-026: then trash Drive copies 2 days old, or whose server copy expired
       .then(() => runDriveCleanup(db))
       .then((tally) => {
         if (tally && Object.keys(tally).length > 0) logger.info("Google Drive deletes", tally);

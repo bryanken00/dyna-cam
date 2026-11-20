@@ -149,10 +149,10 @@ const GoogleDriveSection = ({ court, canWrite }) => {
               Last problem: {drive.queue.lastError}
             </div>
           )}
-          {/* CR-017 */}
+          {/* CR-017 / CR-026 */}
           <div className="mt-1" style={muted}>
-            Each video&apos;s Drive copy is moved to the Drive&apos;s trash when the
-            venue&apos;s keep time ends (Google empties the trash after 30 days).
+            Each video&apos;s Drive copy is moved to the Drive&apos;s trash 2 days
+            after it&apos;s saved (Google empties the trash after 30 days).
           </div>
           {drive.connectedAt && (
             <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>

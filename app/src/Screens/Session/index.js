@@ -64,7 +64,7 @@ const QrCard = ({ url, size, keepDays, className }) => (
     </Text>
     <QrCode value={url} size={size} />
     <Text className="text-muted-foreground mt-3 text-center text-[13px]">
-      {/* CR-017: videos are deleted after the venue's keep time (24 hours by default) */}
+      {/* CR-017: videos are deleted after the venue's keep time (7 days by default, CR-026) */}
       {keepTimeText(keepDays)
         ? `Download it within ${keepTimeText(keepDays)} after the game`
         : "Download it when the game ends"}

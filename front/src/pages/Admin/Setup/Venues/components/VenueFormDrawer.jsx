@@ -88,7 +88,7 @@ const EMPTY = {
   address: "",
   phone: "",
   logoUrl: "",
-  clipRetentionDays: "1",
+  clipRetentionDays: "7",
   clipPrice: "0",
   status: "Active",
 };
@@ -121,7 +121,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             address: decodeHTML(entity.address) ?? "",
             phone: entity.phone ?? "",
             logoUrl: entity.logoUrl ?? "",
-            clipRetentionDays: String(entity.clipRetentionDays ?? 1),
+            clipRetentionDays: String(entity.clipRetentionDays ?? 7),
             clipPrice: String(Number(entity.clipPrice) || 0),
             status: entity.status === "Inactive" ? "Inactive" : "Active",
           }
@@ -473,9 +473,9 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                         </FormControl>
                       </div>
                       <FormDescription>
-                        Saved replays and game videos — and their Google
-                        Drive copies — are deleted this many days after
-                        they&apos;re saved. 1 day = 24 hours (1–365).
+                        Saved replays and game videos are deleted this many
+                        days after they&apos;re saved (1–365). Their Google
+                        Drive copies go after 2 days.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

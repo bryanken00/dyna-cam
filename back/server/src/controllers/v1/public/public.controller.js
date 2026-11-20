@@ -240,7 +240,7 @@ router.get(
         // Shown to the player to pay at the front desk (only while unpaid)
         payCode: locked ? clip.payCode : null,
         // CR-001: the copy in the venue's Google Drive — paid or free clips only.
-        // CR-017: only while the clip is kept; its Drive copy goes with it
+        // CR-017: only while the clip is kept and its Drive copy is there (CR-026: 2 days)
         driveUrl:
           !locked && clip.driveStatus === "Uploaded" && clip.status === "Ready"
             ? clip.driveUrl
