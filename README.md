@@ -193,11 +193,14 @@ arguments: `back` or `front` to start just one, `app` (opt-in, e.g. `./run-mac.s
 add the mobile app's Expo dev server, `edge` (opt-in, e.g. `./run-mac.sh back front edge`) to add
 the recorder box (it needs ffmpeg and a filled-in `edge/.env`), and `stop` to free the dev ports
 (4021 — or `PORT` from `back/.env` — 4020, 8081 and the box's `LIVE_PORT`, 8090) if a server was
-left running. Before starting, both scripts look up this machine's current LAN IP and rewrite any
-old private IP in the `.env` files' URLs (`back/`, `front/`, `app/`, `edge/` — e.g. `APP_URL`,
-`VITE_API_URL`, `EXPO_PUBLIC_API_URL`, the box's `API_URL`), so phones and the recorder box still
-reach the API after the Wi-Fi hands out a new address. `localhost` and public addresses are left
-alone; `NO_IP_UPDATE=1 ./run-mac.sh` skips it.
+left running. Before starting, both scripts look up this machine's current LAN IP and point the `.env` files'
+URLs at it (`back/`, `front/`, `app/`, `edge/` — e.g. `APP_URL`, `FRONTEND_URL`, `VITE_API_URL`,
+`EXPO_PUBLIC_API_URL`, the box's `API_URL`): an old private IP or `localhost` in a URL becomes the
+current IP, so phones and the recorder box reach the API and the links they're given, even after
+the Wi-Fi hands out a new address. Left as they are: `GOOGLE_REDIRECT_URI` (Google refuses a
+private IP there), the `localhost` entries of `ALLOWED_ORIGINS` (the IP ones are added beside
+them), plain host names such as `DB_HOST=localhost` (MySQL and Redis listen on loopback), and
+public addresses. `NO_IP_UPDATE=1 ./run-mac.sh` skips it.
 
 ### 1. Backend
 

@@ -78,9 +78,16 @@ lan_ip() {
   ip -4 route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit } }'
 }
 
-# Rewrites every http(s)://<private LAN IPv4> in the .env files' values to the
-# current IP. localhost, 0.0.0.0 and public addresses are left alone; comments
-# are skipped; line endings are kept. Prints what changed, never the values.
+# Points the .env files' URLs at this machine's current LAN IP: every
+# http(s)://<private IPv4> and http(s)://localhost (or 127.0.0.1) in a value
+# becomes http(s)://<ip>. Kept as they are:
+#   • GOOGLE_REDIRECT_URI — Google accepts localhost there, never a private IP
+#   • ALLOWED_ORIGINS' localhost entries — the IP ones are added beside them, so
+#     the web app works opened either way
+#   • plain host names (DB_HOST=localhost, RATE_LIMIT_REDIS_HOST) — MySQL and
+#     Redis usually listen on this machine's loopback only
+#   • public addresses, 0.0.0.0, comments; line endings
+# Prints what changed, never the values.
 update_env_ips() {
   local ip="$1"
   shift
@@ -89,6 +96,9 @@ const fs = require("fs");
 const [ip, ...files] = process.argv.slice(2);
 const PRIVATE = /^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/;
 const URL_IP = /(https?:\/\/)(\d{1,3}(?:\.\d{1,3}){3})(?=[:/,"'\s]|$)/g;
+const URL_LOCAL = /(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/,"'\s]|$)/g;
+const IS_LOCAL = /^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/;
+const KEEP_LOCAL = new Set(["GOOGLE_REDIRECT_URI"]);
 for (const file of files) {
   if (!fs.existsSync(file)) continue;
   const text = fs.readFileSync(file, "utf8");
@@ -100,12 +110,33 @@ for (const file of files) {
     const line = cr ? raw.slice(0, -1) : raw;
     const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
     if (!m) return raw;
-    const value = m[2].replace(URL_IP, (all, scheme, host) => {
+    const key = m[1];
+    let value = m[2].replace(URL_IP, (all, scheme, host) => {
       if (host === ip || !PRIVATE.test(host)) return all;
-      changed.add(m[1]);
+      changed.add(key);
       olds.add(host);
       return scheme + ip;
     });
+    if (key === "ALLOWED_ORIGINS") {
+      // Add the IP twin of each localhost origin that lacks one
+      const quote = /^(['"]).*\1$/.test(value) ? value[0] : "";
+      const list = (quote ? value.slice(1, -1) : value).split(",").map((o) => o.trim()).filter(Boolean);
+      const twins = list
+        .filter((o) => IS_LOCAL.test(o))
+        .map((o) => o.replace(IS_LOCAL, `$1${ip}`))
+        .filter((o) => !list.includes(o));
+      if (twins.length) {
+        value = quote + [...list, ...new Set(twins)].join(",") + quote;
+        changed.add(key);
+        olds.add("localhost");
+      }
+    } else if (!KEEP_LOCAL.has(key)) {
+      value = value.replace(URL_LOCAL, (all, scheme, host) => {
+        changed.add(key);
+        olds.add(host);
+        return scheme + ip;
+      });
+    }
     return value === m[2] ? raw : line.slice(0, line.length - m[2].length) + value + cr;
   });
   if (changed.size) {
