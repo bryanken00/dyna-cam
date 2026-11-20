@@ -56,7 +56,7 @@
 - [x] Demo mode fixtures cover a timed game near its end
 - [x] `cd app && npx expo export --platform android --clear` bundles; `expo-doctor` has only the
       existing version-mismatch warning (expo 58.0.19, safe-area-context 5.10.1 — same before this CR)
-- [ ] Try it on a device against the API
+- [x] Try it on a device against the API
 
 ## Acceptance
 

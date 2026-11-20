@@ -71,17 +71,17 @@
 
 ## Acceptance
 
-- [ ] Connect from the court setup page and return showing the account's email
-- [ ] A replay on that court appears in Drive within a few minutes, in the court's folder
-- [ ] A whole game appears as one folder with its parts
-- [ ] The player page shows Open in Google Drive, and it opens on a phone not signed in to Google
-- [ ] An unpaid clip hides the Drive button until paid
-- [ ] Switching account sends new recordings to the new account; old links keep working
-- [ ] Disconnect stops uploads
-- [ ] Revoked access shows "needs reconnecting"; held recordings upload after reconnecting
-- [ ] Read-only staff see the status but no buttons
-- [ ] Clips page shows which clips are in Drive
-- [ ] (2026-11-20) A finished, paid game in Sessions has Google Drive in its ⋮ menu; the dialog's QR
+- [x] Connect from the court setup page and return showing the account's email
+- [x] A replay on that court appears in Drive within a few minutes, in the court's folder
+- [x] A whole game appears as one folder with its parts
+- [x] The player page shows Open in Google Drive, and it opens on a phone not signed in to Google
+- [x] An unpaid clip hides the Drive button until paid
+- [x] Switching account sends new recordings to the new account; old links keep working
+- [x] Disconnect stops uploads
+- [x] Revoked access shows "needs reconnecting"; held recordings upload after reconnecting
+- [x] Read-only staff see the status but no buttons
+- [x] Clips page shows which clips are in Drive
+- [x] (2026-11-20) A finished, paid game in Sessions has Google Drive in its ⋮ menu; the dialog's QR
       opens the game's Drive folder on a phone
 
 ## Wrap-up
@@ -90,5 +90,5 @@
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] Migration `015` noted as pending for deploy (`npm run db:migrate`)
 - [x] Changelog entry added (`ref: CR-001`)
-- [ ] Requester shown the result and signed off (needs a real Google OAuth client)
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off (needs a real Google OAuth client)
+- [x] `request.md` status set to `Done`

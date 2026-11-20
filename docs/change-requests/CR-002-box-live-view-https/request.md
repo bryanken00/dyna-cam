@@ -1,6 +1,6 @@
 # CR-002 · Recorder box live view over HTTPS
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (§5.4 live view)
 
 ## Requested change
@@ -69,3 +69,4 @@ So the live view works from an HTTPS setup the same way the API does, with one c
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

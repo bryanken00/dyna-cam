@@ -1,6 +1,6 @@
 # CR-004 · Players never see parts — one game, one video
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [CR-003](../CR-003-whole-game-video-per-camera/request.md) (whole-game video per camera — this finishes its player side), [BUG-002](../../bug-reports/BUG-002-camera-lock-reconnect-loop/bug.md) (camera locking)
 
 ## Requested change
@@ -125,3 +125,4 @@ stable enough.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | "implement this all now" |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

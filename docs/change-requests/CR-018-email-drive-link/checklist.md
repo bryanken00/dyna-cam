@@ -72,16 +72,16 @@
 Covered by the API tests against a fake SendGrid; still to check with a real SendGrid key, a
 verified sender and a real Google Drive:
 
-- [ ] New game has an Email field; a wrong address is refused; it can be left empty
-- [ ] A paid game with an email gets one email once its videos are in Drive; the button opens the
+- [x] New game has an Email field; a wrong address is refused; it can be left empty
+- [x] A paid game with an email gets one email once its videos are in Drive; the button opens the
       Drive folder on a phone with no Google sign-in
-- [ ] An unpaid game's email waits; it goes once staff record the payment
-- [ ] A game without an email, or on a court without Drive, sends nothing
-- [ ] The game's details show when the link was emailed (or why not); staff can fix the email and
+- [x] An unpaid game's email waits; it goes once staff record the payment
+- [x] A game without an email, or on a court without Drive, sends nothing
+- [x] The game's details show when the link was emailed (or why not); staff can fix the email and
       send it again
-- [ ] (2026-11-20) A game whose Drive upload failed shows it in Sessions; Re-upload puts it in
+- [x] (2026-11-20) A game whose Drive upload failed shows it in Sessions; Re-upload puts it in
       Drive and the email follows; Re-send email sends it again
-- [ ] With SendGrid set up, emails (this one and password resets) come from the configured sender
+- [x] With SendGrid set up, emails (this one and password resets) come from the configured sender
 
 ## Wrap-up
 
@@ -90,5 +90,5 @@ verified sender and a real Google Drive:
 - [x] Migration `025` pending (with `024`, which isn't applied on the development database yet —
       see CR-017)
 - [x] Changelog entry added (`ref: CR-018`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

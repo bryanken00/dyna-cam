@@ -1,6 +1,6 @@
 # CR-019 · Sidebar: User Management, Settings and Audit Trail at the bottom
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** S
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** S
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** —
 
 ## Requested change
@@ -66,3 +66,4 @@ bottom.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

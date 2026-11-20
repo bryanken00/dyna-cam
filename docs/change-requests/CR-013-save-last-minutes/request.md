@@ -1,6 +1,6 @@
 # CR-013 · Save the last few minutes of a game from the courtside device
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** CR-005 (pairing starts the game), CR-006 (one file per game), CR-012 (app look)
 
 ## Requested change
@@ -74,6 +74,7 @@ for and scrubbing through the whole game.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly; copy like game videos, free |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |
 
 ## Revisions
 

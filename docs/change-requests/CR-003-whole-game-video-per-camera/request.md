@@ -1,6 +1,6 @@
 # CR-003 · Whole-game video, one per camera
 
-> **Status:** In progress · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-18 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — (design notes in the checklist) · **Related:** [PLAN-001](../../plans/PLAN-001-court-replay-cameras/plan.md) (sessions in 5-minute parts), [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (whole-game recording from the phone, second camera), [CR-001](../CR-001-google-drive-per-court/request.md) (Google Drive copies)
 
 ## Requested change
@@ -138,3 +138,4 @@ The whole video only exists after the game ends plus the last part's processing 
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-18 | "ok start implementing" — recommendations accepted |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

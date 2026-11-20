@@ -1,6 +1,6 @@
 # CR-015 · Pay at the front desk before the game's videos open
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** CR-005 (open games), CR-006 (one file per game), CR-013 (saves), PLAN-001 Phase 4 (clip payments)
 
 ## Requested change
@@ -102,3 +102,4 @@ The venue charges for the game's video. Today players can walk away with it with
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly; breaking change requested by the venue owner |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

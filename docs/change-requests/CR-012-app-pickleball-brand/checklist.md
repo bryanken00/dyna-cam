@@ -18,15 +18,15 @@
 
 ## Acceptance
 
-- [ ] Pair, Session, Ended in the new colours, light and dark (on a device)
-- [ ] Pair screen navy panel with the court logo (on a device)
-- [ ] Pairing and the game work as before (on a device)
+- [x] Pair, Session, Ended in the new colours, light and dark (on a device)
+- [x] Pair screen navy panel with the court logo (on a device)
+- [x] Pairing and the game work as before (on a device)
 
 ## Wrap-up
 
 - [x] `npx expo export --platform android --clear` bundles (3639 modules)
-- [ ] `npx expo-doctor@latest` — 1 check fails: 11 Expo packages behind SDK 58 (was already failing;
+- [x] `npx expo-doctor@latest` — 1 check fails: 11 Expo packages behind SDK 58 (was already failing;
       PLAN-001)
 - [x] Changelog entry added (`ref: CR-012`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

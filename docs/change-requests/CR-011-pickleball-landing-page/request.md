@@ -1,6 +1,6 @@
 # CR-011 · Pickleball landing page
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** PLAN-001 (Phase 0 replaced the template landing page)
 
 ## Requested change
@@ -64,6 +64,7 @@ court and say what Dyna Cam really does.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |
 
 ## Revisions
 

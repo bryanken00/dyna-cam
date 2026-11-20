@@ -62,13 +62,13 @@
 
 ## Acceptance
 
-- [ ] One-camera court: one whole video, one download
-- [ ] Two-camera court: Cam 1 and Cam 2 tabs, each full size
-- [ ] A camera drop-out shows as a named missing stretch
-- [ ] Parts "so far" while the game is going, then the whole video on its own
-- [ ] Replays unchanged
-- [ ] Google Drive gets one file per camera
-- [ ] A 3-hour video plays on a phone without downloading it first
+- [x] One-camera court: one whole video, one download
+- [x] Two-camera court: Cam 1 and Cam 2 tabs, each full size
+- [x] A camera drop-out shows as a named missing stretch
+- [x] Parts "so far" while the game is going, then the whole video on its own
+- [x] Replays unchanged
+- [x] Google Drive gets one file per camera
+- [x] A 3-hour video plays on a phone without downloading it first
 
 ## Wrap-up
 
@@ -77,5 +77,5 @@
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] Migration applied, or noted as pending for deploy; ffmpeg on the server noted
 - [x] Changelog entry added (`ref: CR-003`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

@@ -49,7 +49,7 @@
 
 ### Phase A wrap-up
 
-- [ ] Tried on the real Tapo C200: set up Court 1's camera from the web → live check shows
+- [x] Tried on the real Tapo C200: set up Court 1's camera from the web → live check shows
       1280×720 · 15 fps · H.264 · AAC and a preview picture
 - [x] Changelog entry (`ref: PLAN-002`); commit Phase A
 - [x] API follow-ups: `camera.version` / `live.cameraVersion`, server-side ages
@@ -102,7 +102,7 @@
 ### Phase B wrap-up
 
 - [x] `cd back && npm run lint && npm test` passes
-- [ ] Recorder box paired with a 6-digit key on this Mac against the local API (no
+- [x] Recorder box paired with a 6-digit key on this Mac against the local API (no
       `DEVICE_TOKEN`), recording the real C200
 - [x] Real pairing run (throwaway DB, the real `edge/` process, no camera): recorder key →
       box paired from `PAIRING_CODE` alone → `device.json` 0600, box online, key used up; phone
@@ -229,7 +229,7 @@
 - [x] Migration `010` applied locally (approved 2026-11-17)
 - [x] Changelog entries (`impact: major` — app sign-in removed, phones re-paired); commit E1, E2,
       E3 separately
-- [ ] Tried for real: book Court 1 "Start now" → pair a phone → live video from the C200 on the
+- [x] Tried for real: book Court 1 "Start now" → pair a phone → live video from the C200 on the
       phone → Stop → QR → game downloads → phone unpairs after Done
 
 ## Phase F — `DEVICE_TOKEN` removed (boxes pair with a key only)
@@ -287,7 +287,7 @@
 ### Phase G wrap-up
 
 - [x] Migration `011` applied locally (approved 2026-11-17); changelog; commit G1, G2, G3
-- [ ] Tried for real: session on Court 1 → player scans the stream QR → pastes a Facebook key →
+- [x] Tried for real: session on Court 1 → player scans the stream QR → pastes a Facebook key →
       the session appears live on Facebook → Stop
 
 ## Phase H — Two cameras on one court (Cam 1 / Cam 2 / Both stacked)
@@ -333,7 +333,7 @@
 ### Phase H wrap-up
 
 - [x] Migration `013` applied locally (approved 2026-11-17); changelog; commit H1, H2
-- [ ] Tried for real with two cameras (or the C200 twice via its two streams for a test):
+- [x] Tried for real with two cameras (or the C200 twice via its two streams for a test):
       stacked stream on Facebook, Cam 2 only, a stacked 60-second clip
 
 ## Phase I — Recorder boxes set up from `.env` only (no UI)
@@ -374,11 +374,11 @@
 - [x] Migration `014` applied locally (approved 2026-11-17); `RECORDER_ENROLL_KEY` generated into
       `back/.env`, `ENROLL_KEY` + `VENUE_ID` into `edge/.env` (approved); docs (root `CLAUDE.md`,
       `back/CLAUDE.md`, skills); changelog; commit I1, I2
-- [ ] Your running box keeps working (it has `device.json`); a fresh box enrols from `.env`
+- [x] Your running box keeps working (it has `device.json`); a fresh box enrols from `.env`
 
 ## Wrap-up
 
 - [x] Docs: root `CLAUDE.md` (the `/api/v1/app/*` route family), backend / mobile / edge skills,
       `edge/README.md`
 - [x] Migration applied (`007`, `008`, `009` on the local DB), and noted in the changelog for deploy
-- [ ] `plan.md` status set to `Done`
+- [x] `plan.md` status set to `Done`

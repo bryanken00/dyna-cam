@@ -1,6 +1,6 @@
 # CR-018 · Email the player their game's Google Drive link (SendGrid)
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [CR-001](../CR-001-google-drive-per-court/request.md) (Google Drive per court, Drive QR in Sessions), [CR-015](../CR-015-pay-before-download/request.md) (pay before download), [CR-016](../CR-016-game-time-limit/request.md) (New game), [CR-017](../CR-017-auto-delete-24h/request.md) (videos deleted after 24 hours)
 
 ## Requested change
@@ -142,3 +142,4 @@ without staff having to show a QR or send the link by hand.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | Asked directly ("add sendgrid implementation", "add sendgrid API key on ENV"); open questions answered the same day |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

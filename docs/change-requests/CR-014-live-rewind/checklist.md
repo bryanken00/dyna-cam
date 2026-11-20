@@ -21,9 +21,9 @@
 
 ## Acceptance
 
-- [ ] ⟲ 10 s replays; again goes further (on a device, updated box)
-- [ ] Live → returns to live
-- [ ] An old box still plays live
+- [x] ⟲ 10 s replays; again goes further (on a device, updated box)
+- [x] Live → returns to live
+- [x] An old box still plays live
 
 ## Wrap-up
 
@@ -31,5 +31,5 @@
       longer window, ffprobe plays it; restreams still go live)
 - [x] `cd app && npx expo export --platform android --clear` bundles
 - [x] Changelog entry added (`ref: CR-014`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

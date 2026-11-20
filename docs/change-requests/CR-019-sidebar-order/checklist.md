@@ -25,12 +25,12 @@
 
 ## Acceptance
 
-- [ ] User Management (Users, Roles) below the divider, above Settings and Audit Trail
-- [ ] Top: Dashboard, Venues, Dyna Cam; Venues stays highlighted on a venue / court page
-- [ ] Staff without user permissions don't see User Management
+- [x] User Management (Users, Roles) below the divider, above Settings and Audit Trail
+- [x] Top: Dashboard, Venues, Dyna Cam; Venues stays highlighted on a venue / court page
+- [x] Staff without user permissions don't see User Management
 
 ## Wrap-up
 
 - [x] Changelog entry added (`ref: CR-019`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

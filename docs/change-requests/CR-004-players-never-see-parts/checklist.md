@@ -32,12 +32,12 @@
 
 ## Acceptance
 
-- [ ] No videos during the game, "Recording now" only
-- [ ] After Stop / End: progress, then one video per camera, one Download each
-- [ ] Session device end screen never says "parts"
-- [ ] Missing footage named in minutes and times
-- [ ] Failed join: "check back soon" for players; Try again in Admin
-- [ ] Admin still lists the parts
+- [x] No videos during the game, "Recording now" only
+- [x] After Stop / End: progress, then one video per camera, one Download each
+- [x] Session device end screen never says "parts"
+- [x] Missing footage named in minutes and times
+- [x] Failed join: "check back soon" for players; Try again in Admin
+- [x] Admin still lists the parts
 
 ## Wrap-up
 
@@ -47,5 +47,5 @@
       out-of-date packages (already so before this change — no dependency touched here)
 - [x] Changelog: CR-003 is unreleased, so update its entry
       (`docs/changelog/unpublished/2026-11-18-whole-game-video.md`) instead of a new one
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`

@@ -1,6 +1,6 @@
 # CR-001 · Google Drive auto-upload per court
 
-> **Status:** In progress · **Requested:** 2026-11-17 · **Requested by:** bryanken00 · **Size:** L
+> **Status:** Done · **Requested:** 2026-11-17 · **Requested by:** bryanken00 · **Size:** L
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-001](../../plans/PLAN-001-court-replay-cameras/plan.md) (clips, sessions), [PLAN-002](../../plans/PLAN-002-setup-menu-device-pairing/plan.md) (court setup page, whole-game recording)
 
 ## Requested change
@@ -110,3 +110,4 @@ accounts (e.g. a court rented by a club).
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-17 | Asked directly; design choices answered in chat |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

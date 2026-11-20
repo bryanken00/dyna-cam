@@ -1,6 +1,6 @@
 # CR-017 · Delete saved videos after 24 hours, on the server and on Google Drive
 
-> **Status:** In progress · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-20 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [CR-001](../CR-001-google-drive-per-court/request.md) (Google Drive per court), [CR-006](../CR-006-one-file-per-game/request.md) (one video per game), [CR-013](../CR-013-save-last-minutes/request.md) (saves), [CR-015](../CR-015-pay-before-download/request.md) (pay before download)
 
 ## Requested change
@@ -129,3 +129,4 @@ on the day; nobody needs them kept for a month.
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-20 | "ok implement this now" — open questions answered the same day |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

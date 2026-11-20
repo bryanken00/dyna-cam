@@ -1,6 +1,6 @@
 # CR-014 · Rewind the live view on the courtside device
 
-> **Status:** In progress · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Done · **Requested:** 2026-11-19 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** PLAN-002 §5.4 (live view), CR-007 (Cam 1 / Cam 2 switch), CR-013 (saves)
 
 ## Requested change
@@ -60,3 +60,4 @@ Players want to see the last point again right away, at the bench, without savin
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-19 | Asked directly |
+| Signed off — Done | bryanken00 | 2026-11-20 | Bulk sign-off by the requester ("check all CR and plan… mark all complete"); acceptance items ticked on that sign-off, not re-checked one by one |

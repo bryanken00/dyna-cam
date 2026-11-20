@@ -45,11 +45,11 @@
 - [x] Tab says "Dyna Cam"
 - [x] Staff sign-in matches the landing page, light and dark, desktop and phone *(screenshots)*
 - [x] Landing page matches the design, light and dark, desktop and phone *(screenshots)*
-- [ ] Admin pages checked in the running app (sidebar, buttons, tables, drawers, light and dark)
+- [x] Admin pages checked in the running app (sidebar, buttons, tables, drawers, light and dark)
 
 ## Wrap-up
 
 - [x] `cd front && npm run lint && npm run build` passes
 - [x] Changelog entry added (`ref: CR-011`)
-- [ ] Requester shown the result and signed off
-- [ ] `request.md` status set to `Done`
+- [x] Requester shown the result and signed off
+- [x] `request.md` status set to `Done`
