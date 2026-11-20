@@ -24,8 +24,8 @@ bottom.
 
 **In**
 
-- Sidebar order: Dashboard, Setup, Dyna Cam — divider — User Management (Users, Roles),
-  Settings, Audit Trail. The sidebar search's ↑/↓ order follows it.
+- Sidebar order: Dashboard, Venues, Dyna Cam — divider — User Management (Users, Roles),
+  Settings, Audit Trail (2026-11-20: Venues no longer under a "Setup" group). The sidebar search's ↑/↓ order follows it.
 
 **Out**
 
@@ -51,6 +51,12 @@ bottom.
 ## Open questions
 
 - None.
+
+## Revisions
+
+- 2026-11-20: **Venues** is its own sidebar item (no "Setup" group around it — Setup held only
+  Venues). Its address stays `/admin/setup/venues`, so venue / court pages, printed links and
+  Google Drive's return link keep working. Asked directly by bryanken00.
 
 ## Approval
 

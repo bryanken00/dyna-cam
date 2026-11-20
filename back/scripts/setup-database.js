@@ -69,7 +69,7 @@ async function main() {
       { module: "dashboard", submodule: null, description: "Dashboard access" },
       { module: "users", submodule: "list", description: "Users list management" },
       { module: "users", submodule: "roles", description: "Roles management" },
-      { module: "settings", submodule: null, description: "Settings management" },
+      // CR-021: no "settings" permission — the Settings page was removed (migration 026)
       { module: "audit_trail", submodule: null, description: "Audit Trail access" },
       // PLAN-001 — also inserted by migrations 001/002 on existing databases
       { module: "venues", submodule: "list", description: "Venues management" },

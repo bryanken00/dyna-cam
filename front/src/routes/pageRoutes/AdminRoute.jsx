@@ -1,5 +1,5 @@
-import { Home, User, Video, Wrench } from "lucide-react";
-import { FileText, Settings } from "lucide-react";
+import { Building2, Home, User, Video } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router";
 import BasicLayout from "../../components/layout/BasicLayout";
@@ -16,7 +16,6 @@ const ResetPassword = lazy(() => import("../../pages/Auth/ResetPassword"));
 const Dashboard = lazy(() => import("../../pages/Admin/Dashboard"));
 const Users = lazy(() => import("../../pages/Admin/UserManagement/Users"));
 const Roles = lazy(() => import("../../pages/Admin/UserManagement/Roles"));
-const SettingsPage = lazy(() => import("../../pages/Admin/Settings"));
 const AuditTrail = lazy(() => import("../../pages/Admin/AuditTrail"));
 const AccountSettings = lazy(() => import("../../pages/Admin/AccountSettings"));
 // Setup (PLAN-002): venues → courts → camera setup. Recorder boxes have no
@@ -60,31 +59,22 @@ const AdminRoute = () => {
       isShow: true,
     },
     {
-      key: "setup",
-      name: "Setup",
-      label: "Setup",
-      icon: <Wrench className="h-5 w-5" />,
+      // CR-019: its own item — Setup had only Venues. The address stays
+      // /admin/setup/venues (venue and court pages, Google Drive's return link)
+      route: "/setup/venues",
+      name: "Venues",
+      label: "Venues",
+      icon: <Building2 className="h-5 w-5" />,
+      component: (
+        <Suspense fallback={<ComponentLoader />}>
+          <ProtectedRoute anyOf={VENUE_PAGE_ACCESS}>
+            <Venues />
+          </ProtectedRoute>
+        </Suspense>
+      ),
       permission: { anyOf: VENUE_PAGE_ACCESS },
       isFilter: true,
       isShow: true,
-      children: [
-        {
-          // Venue list → venue page (its courts) → court setup, below
-          route: "/venues",
-          name: "Venues",
-          label: "Venues",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute anyOf={VENUE_PAGE_ACCESS}>
-                <Venues />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: { anyOf: VENUE_PAGE_ACCESS },
-          isFilter: true,
-          isShow: true,
-        },
-      ],
     },
     {
       key: "dyna-cam",
@@ -164,7 +154,7 @@ const AdminRoute = () => {
       },
       isFilter: true,
       isShow: true,
-      section: "system", // CR-019: below the divider, above Settings and Audit Trail
+      section: "system", // CR-019: below the divider, above Audit Trail
       children: [
         {
           route: "/users",
@@ -213,23 +203,6 @@ const AdminRoute = () => {
           isShow: true,
         },
       ],
-    },
-    {
-      route: "/settings",
-      name: "Settings",
-      label: "Settings",
-      icon: <Settings className="h-5 w-5" />,
-      component: (
-        <Suspense fallback={<ComponentLoader />}>
-          <ProtectedRoute module="settings" accessLevel="read">
-            <SettingsPage />
-          </ProtectedRoute>
-        </Suspense>
-      ),
-      permission: { module: "settings", submodule: null, accessLevel: "read" },
-      isFilter: true,
-      isShow: true,
-      section: "system", // renders below the sidebar divider
     },
     {
       route: "/audit-trail",

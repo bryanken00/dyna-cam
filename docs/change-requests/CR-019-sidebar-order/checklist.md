@@ -12,10 +12,16 @@
 - [x] `AdminRoute.jsx`: User Management moved after Dyna Cam, `section: "system"`
 - [x] `cd front && npm run lint && npm run build`
 
+### 2026-11-20 revision — Venues as its own item
+
+- [x] `AdminRoute.jsx`: Setup group replaced by a top-level Venues item at `/setup/venues`
+      (same address), Building icon
+- [x] `cd front && npm run lint && npm run build`
+
 ## Acceptance
 
 - [ ] User Management (Users, Roles) below the divider, above Settings and Audit Trail
-- [ ] Top: Dashboard, Setup, Dyna Cam
+- [ ] Top: Dashboard, Venues, Dyna Cam; Venues stays highlighted on a venue / court page
 - [ ] Staff without user permissions don't see User Management
 
 ## Wrap-up
