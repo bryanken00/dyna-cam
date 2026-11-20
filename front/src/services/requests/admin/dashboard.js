@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   getDashboardAlertsApi,
+  getDashboardInsightsApi,
   getDashboardStatsApi,
   getDashboardVenuesApi,
 } from "../../api/admin/dashboard";
@@ -21,6 +22,16 @@ export const useGetDashboardVenues = () =>
     queryFn: getDashboardVenuesApi,
     refetchInterval: VENUE_REFRESH_MS,
     staleTime: 15 * 1000,
+  });
+
+// CR-023: the Insights section (7 or 30 days) — refreshed every 5 minutes
+export const useGetDashboardInsights = (days = 7) =>
+  useQuery({
+    queryKey: ["dashboard-insights", "admin", { days }],
+    queryFn: () => getDashboardInsightsApi(days),
+    placeholderData: keepPreviousData,
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
   });
 
 export const useGetDashboardAlerts = ({ enabled = true } = {}) =>

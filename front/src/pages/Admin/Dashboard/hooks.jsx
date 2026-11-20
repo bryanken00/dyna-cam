@@ -1,14 +1,24 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import dayjs from "dayjs";
-import { Banknote, Camera, Film, Video } from "lucide-react";
+import {
+  Banknote,
+  Camera,
+  CircleDollarSign,
+  Film,
+  Hourglass,
+  Timer,
+  Trophy,
+  Video,
+} from "lucide-react";
 
 import { usePermissions } from "../../../hooks/usePermissions";
 import {
   useGetDashboardAlerts,
+  useGetDashboardInsights,
   useGetDashboardVenues,
 } from "../../../services/requests/admin/dashboard";
-import { formatPeso } from "../../../utils/dynaCam";
+import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
 
 const ICON = { className: "w-4.25 h-4.25", strokeWidth: 1.8 };
 
@@ -23,6 +33,129 @@ export const durationText = (seconds) => {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} h ${minutes % 60} min`;
   return `${Math.floor(hours / 24)} days`;
+};
+
+/** CR-023: seconds → "1 h 12 min" (whole minutes; "0 min" when nothing). */
+const minutesText = (seconds) => formatMinutes(Math.round((Number(seconds) || 0) / 60));
+
+/** 0 → "12 AM", 13 → "1 PM"; `short` → "12a", "1p" for chart axes. */
+const hourText = (hour, short = false) => {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  const am = hour < 12;
+  return short ? `${h12}${am ? "a" : "p"}` : `${h12} ${am ? "AM" : "PM"}`;
+};
+
+/** "+2 vs prior 7 days", "same as prior 7 days", "−1 vs prior 30 days" */
+const versusText = (now, before, days) => {
+  const diff = now - before;
+  if (diff === 0) return `same as prior ${days} days`;
+  return `${diff > 0 ? "+" : "−"}${Math.abs(diff)} vs prior ${days} days`;
+};
+
+/**
+ * CR-023: the Insights section — the last 7 or 30 days. Cards, and chart data
+ * for games per day, the hour games start (6 AM – 10 PM, wider when games fall
+ * outside) and the weekday.
+ */
+const useInsights = () => {
+  const [period, setPeriod] = useState(7);
+  const query = useGetDashboardInsights(period);
+  const insights = query.data?.data?.insights;
+
+  const cards = useMemo(() => {
+    if (!insights) return [];
+    const cash = insights.cash;
+    const unpaid = insights.unpaidGames;
+    return [
+      {
+        title: "Games played",
+        value: insights.gamesPlayed,
+        change: versusText(insights.gamesPlayed, insights.gamesPrevious, insights.days),
+        icon: <Trophy {...ICON} />,
+      },
+      {
+        title: "Average game length",
+        value: insights.gamesPlayed ? minutesText(insights.averageGameSeconds) : "—",
+        change: "recorded per game",
+        icon: <Timer {...ICON} />,
+      },
+      {
+        title: "Recorded per day",
+        value: minutesText(insights.recordedPerDaySeconds),
+        change: `${minutesText(insights.totalRecordedSeconds)} total`,
+        icon: <Hourglass {...ICON} />,
+      },
+      {
+        title: "Not paid yet",
+        value: unpaid.count,
+        change:
+          unpaid.count === 0
+            ? "every game is paid"
+            : `${unpaid.count === 1 ? "game" : "games"} · oldest ${dayjs(unpaid.oldestEndAt).format("MMM D")}`,
+        icon: <CircleDollarSign {...ICON} />,
+        // Opens Sessions filtered to Unpaid (all dates)
+        to: "/admin/dyna-cam/sessions?payment=Unpaid",
+      },
+      {
+        title: "Cash collected",
+        value: formatPeso(cash.total),
+        change: cash.gamePayments
+          ? `${cash.payments} paid · ${formatPeso(cash.averagePerGame)} per game`
+          : `${cash.payments} paid`,
+        icon: <Banknote {...ICON} />,
+      },
+    ];
+  }, [insights]);
+
+  const perDay = useMemo(
+    () =>
+      (insights?.perDay ?? []).map((d) => ({
+        label: dayjs(d.date).format(insights.days > 7 ? "MMM D" : "ddd D"),
+        value: d.games,
+      })),
+    [insights]
+  );
+
+  const byHour = useMemo(() => {
+    const rows = insights?.byHour ?? [];
+    const played = rows.filter((r) => r.games > 0).map((r) => r.hour);
+    const first = Math.min(6, ...played);
+    const last = Math.max(22, ...played);
+    return rows
+      .filter((r) => r.hour >= first && r.hour <= last)
+      .map((r) => ({ label: hourText(r.hour, true), value: r.games }));
+  }, [insights]);
+
+  const byWeekday = useMemo(
+    () => (insights?.byWeekday ?? []).map((d) => ({ label: d.label, value: d.games })),
+    [insights]
+  );
+
+  const busiestHourText = insights?.busiestHour
+    ? `Busiest: ${hourText(insights.busiestHour.hour)} – ${hourText((insights.busiestHour.hour + 1) % 24)} · ${insights.busiestHour.games} ${insights.busiestHour.games === 1 ? "game" : "games"}`
+    : "No games yet";
+  const busiestDayText = insights?.busiestWeekday
+    ? `Busiest: ${insights.busiestWeekday.label} · ${insights.busiestWeekday.games} ${insights.busiestWeekday.games === 1 ? "game" : "games"}`
+    : "No games yet";
+  const perDayText = insights
+    ? `${insights.gamesPlayed} ${insights.gamesPlayed === 1 ? "game" : "games"} · ${minutesText(insights.totalRecordedSeconds)} recorded`
+    : "";
+
+  return {
+    period,
+    setPeriod,
+    cards,
+    perDay,
+    perDayText,
+    byHour,
+    busiestHourText,
+    byWeekday,
+    busiestDayText,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error,
+    refetch: query.refetch,
+  };
 };
 
 /**
@@ -150,6 +283,8 @@ export const useDashboardHooks = () => {
   const canSeeAlerts = hasPermission("alerts", null, "read");
 
   const venuesQuery = useGetDashboardVenues();
+  // CR-023: the last 7 / 30 days
+  const insights = useInsights();
   const alertsQuery = useGetDashboardAlerts({ enabled: canSeeAlerts });
 
   const venues = venuesQuery.data?.data?.venues;
@@ -203,6 +338,7 @@ export const useDashboardHooks = () => {
   const refetch = () => {
     venuesQuery.refetch();
     if (canSeeAlerts) alertsQuery.refetch();
+    insights.refetch();
   };
 
   return {
@@ -215,8 +351,9 @@ export const useDashboardHooks = () => {
     boxes,
     alertsLoading: canSeeAlerts && alertsQuery.isLoading,
     alertsError: alertsQuery.error,
+    insights,
     isLoading: venuesQuery.isLoading,
-    isFetching: venuesQuery.isFetching || alertsQuery.isFetching,
+    isFetching: venuesQuery.isFetching || alertsQuery.isFetching || insights.isFetching,
     error: venuesQuery.error,
     refetch,
   };

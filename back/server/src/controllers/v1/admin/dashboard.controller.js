@@ -1,5 +1,6 @@
 import express from "express";
-import { catchAsync } from "../../../utils/catchAsync.js";
+import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
+import { dashboardInsightsQuerySchema } from "../../../validators/dashboard.validator.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { ALERT_LABELS, boxHealth } from "../../../utils/venueHealth.js";
@@ -22,6 +23,136 @@ const fillDailySeries = (rows, days = SERIES_DAYS) => {
   }
   return series;
 };
+
+const FORMAT = "YYYY-MM-DD HH:mm:ss";
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** CR-023: a game that recorded (not waiting, booked ahead or cancelled). */
+const PLAYED = `status IN ('Recording', 'Processing', 'Ready', 'Failed')`;
+/** Seconds a game recorded so far (an open game's endAt is a placeholder ahead of now). */
+const RECORDED_SECONDS = `GREATEST(0, TIMESTAMPDIFF(SECOND, startAt, LEAST(endAt, ?)))`;
+
+/** The busiest entry of [{ ..., games }], or null when nothing was played. */
+const busiest = (rows) =>
+  rows.reduce((best, row) => (row.games > (best?.games ?? 0) ? row : best), null);
+
+/**
+ * GET /insights?days=7|30 — CR-023: how the courts were used over the last
+ * 7 or 30 days (Manila dates, today included), all venues together:
+ * games played (and the period before), average game length, recorded time
+ * per day, cash collected, games per day / by start hour / by weekday — and
+ * every finished game still unpaid, whatever its date.
+ */
+router.get(
+  "/insights",
+  checkPermission("dashboard", null, "read"),
+  validateQuery(dashboardInsightsQuerySchema),
+  catchAsync(async (req, res) => {
+    const days = req.query.days;
+    const nowM = moment().tz(TZ);
+    const now = nowM.format(FORMAT);
+    const fromM = nowM.clone().startOf("day").subtract(days - 1, "days");
+    const from = fromM.format(FORMAT);
+    const prevFrom = fromM.clone().subtract(days, "days").format(FORMAT);
+
+    const [perDayRows, hourRows, weekdayRows, previous, unpaid, cash] = await Promise.all([
+      req.db.query(
+        `SELECT DATE_FORMAT(startAt, '%Y-%m-%d') AS day, COUNT(*) AS games,
+                COALESCE(SUM(${RECORDED_SECONDS}), 0) AS seconds
+         FROM recording_sessions
+         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         GROUP BY day`,
+        [now, from, now]
+      ),
+      req.db.query(
+        `SELECT HOUR(startAt) AS hour, COUNT(*) AS games
+         FROM recording_sessions
+         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         GROUP BY hour`,
+        [from, now]
+      ),
+      req.db.query(
+        `SELECT WEEKDAY(startAt) AS weekday, COUNT(*) AS games
+         FROM recording_sessions
+         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         GROUP BY weekday`,
+        [from, now]
+      ),
+      req.db.query(
+        `SELECT COUNT(*) AS games FROM recording_sessions
+         WHERE ${PLAYED} AND startAt >= ? AND startAt < ?`,
+        [prevFrom, from]
+      ),
+      // Finished games still waiting for their payment at the desk — any date
+      req.db.query(
+        `SELECT COUNT(*) AS games, MIN(endAt) AS oldestEndAt FROM recording_sessions
+         WHERE paymentStatus = 'Unpaid' AND status IN ('Processing', 'Ready')`
+      ),
+      req.db.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS payments,
+                SUM(sessionId IS NOT NULL) AS gamePayments,
+                COALESCE(SUM(CASE WHEN sessionId IS NOT NULL THEN amount END), 0) AS gameTotal
+         FROM payments
+         WHERE status = 'Paid' AND paidAt >= ? AND paidAt <= ?`,
+        [from, now]
+      ),
+    ]);
+
+    const byDay = new Map(perDayRows.map((row) => [row.day, row]));
+    const perDay = [];
+    for (let i = 0; i < days; i += 1) {
+      const date = fromM.clone().add(i, "days").format("YYYY-MM-DD");
+      const row = byDay.get(date);
+      perDay.push({
+        date,
+        games: Number(row?.games || 0),
+        recordedSeconds: Number(row?.seconds || 0),
+      });
+    }
+    const gamesPlayed = perDay.reduce((sum, d) => sum + d.games, 0);
+    const totalRecordedSeconds = perDay.reduce((sum, d) => sum + d.recordedSeconds, 0);
+
+    const hours = new Map(hourRows.map((row) => [Number(row.hour), Number(row.games)]));
+    const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, games: hours.get(hour) || 0 }));
+    const weekdays = new Map(weekdayRows.map((row) => [Number(row.weekday), Number(row.games)]));
+    const byWeekday = WEEKDAYS.map((label, weekday) => ({
+      weekday,
+      label,
+      games: weekdays.get(weekday) || 0,
+    }));
+
+    const gamePayments = Number(cash[0]?.gamePayments || 0);
+    return res.sendSuccess("Dashboard insights", {
+      insights: {
+        days,
+        from,
+        to: now,
+        gamesPlayed,
+        gamesPrevious: Number(previous[0]?.games || 0),
+        totalRecordedSeconds,
+        averageGameSeconds: gamesPlayed ? Math.round(totalRecordedSeconds / gamesPlayed) : 0,
+        recordedPerDaySeconds: Math.round(totalRecordedSeconds / days),
+        unpaidGames: {
+          count: Number(unpaid[0]?.games || 0),
+          oldestEndAt: unpaid[0]?.oldestEndAt || null,
+        },
+        cash: {
+          total: Number(cash[0]?.total || 0),
+          payments: Number(cash[0]?.payments || 0),
+          gamePayments,
+          averagePerGame: gamePayments
+            ? Math.round((Number(cash[0]?.gameTotal || 0) / gamePayments) * 100) / 100
+            : 0,
+        },
+        perDay,
+        byHour,
+        busiestHour: busiest(byHour),
+        byWeekday,
+        busiestWeekday: busiest(byWeekday),
+      },
+    });
+  })
+);
 
 /**
  * GET /stats

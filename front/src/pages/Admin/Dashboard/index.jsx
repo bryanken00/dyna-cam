@@ -7,6 +7,7 @@ import PageHeader from "../../../components/PageHeader";
 import StatCard from "../../../components/StatCard";
 import StatusDot from "../../../components/StatusDot";
 import CourtBoard from "./components/CourtBoard";
+import InsightsSection from "./components/InsightsSection";
 import { durationText, useDashboardHooks } from "./hooks";
 import RefreshButton from "../../../components/RefreshButton";
 
@@ -184,6 +185,7 @@ const Dashboard = () => {
     boxes,
     alertsLoading,
     alertsError,
+    insights,
     isLoading,
     isFetching,
     error,
@@ -228,6 +230,9 @@ const Dashboard = () => {
           {canSeeAlerts && problems.length > 0 && (
             <OpenProblems problems={problems} isLoading={alertsLoading} error={alertsError} />
           )}
+
+          {/* CR-023: INSIGHTS — the last 7 / 30 days, under today's numbers */}
+          <InsightsSection insights={insights} />
 
           {/* 4. THE COURTS */}
           <CourtBoard venues={courtVenues} />

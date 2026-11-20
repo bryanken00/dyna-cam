@@ -11,7 +11,8 @@ import { memo } from "react";
  */
 const StatCard = ({ title, value, change, icon }) => (
   <div
-    className="theme-transition"
+    // h-full: cards in one grid row are the same height
+    className="theme-transition h-full"
     style={{
       background: "var(--color-surface)",
       border: "1px solid var(--color-line)",
@@ -43,8 +44,10 @@ const StatCard = ({ title, value, change, icon }) => (
       )}
     </div>
 
-    <div className="flex items-baseline gap-1.5 mt-2.5">
+    {/* The value never breaks; the caption moves under it when there's no room */}
+    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 mt-2.5">
       <span
+        className="whitespace-nowrap"
         style={{
           fontSize: 30,
           fontWeight: 600,
@@ -56,7 +59,7 @@ const StatCard = ({ title, value, change, icon }) => (
         {value}
       </span>
       {change && (
-        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+        <span className="min-w-0" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
           {change}
         </span>
       )}
