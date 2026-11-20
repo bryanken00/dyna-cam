@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Smartphone,
   Square,
+  TimerReset,
 } from "lucide-react";
 import PaymentStatusChip from "../../../../components/PaymentStatusChip";
 import RowActions from "../../../../components/RowActions";
@@ -59,6 +60,8 @@ export const useSessionHooks = () => {
   const [pairTarget, setPairTarget] = useState(null);
   // { code, name, courtName, expiresInSeconds, receivedAt } — a new key, or null
   const [pairingKey, setPairingKey] = useState(null);
+  // CR-016: the recording game time is being added to, or null
+  const [addTimeTarget, setAddTimeTarget] = useState(null);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -152,6 +155,10 @@ export const useSessionHooks = () => {
   }, []);
   const handlePairingKeyClose = useCallback(() => setPairingKey(null), []);
 
+  // ─── CR-016: Add time to a recording game ──────────────────────────
+  const handleAddTime = useCallback((record) => setAddTimeTarget(record), []);
+  const handleAddTimeClose = useCallback(() => setAddTimeTarget(null), []);
+
   const handleView = useCallback((record) => {
     setDetailSessionId(record.sessionId);
   }, []);
@@ -238,6 +245,15 @@ export const useSessionHooks = () => {
           onClick: () => handlePairDevice(record),
         });
       }
+      // CR-016: a game with a game time (not an open game) can get more time
+      if (canWrite && record.status === "Recording" && record.endAt) {
+        items.push({
+          key: "addTime",
+          label: "Add time",
+          icon: <TimerReset className="w-4 h-4" />,
+          onClick: () => handleAddTime(record),
+        });
+      }
       if (canWrite && record.status === "Recording") {
         items.push(
           { type: "divider" },
@@ -270,6 +286,7 @@ export const useSessionHooks = () => {
       handleCopyLink,
       handleOpenLink,
       handlePairDevice,
+      handleAddTime,
       handleEndRequest,
       handleCancelRequest,
     ],
@@ -363,6 +380,18 @@ export const useSessionHooks = () => {
                 {formatTimeRange(startAt, record.endAt)} ·{" "}
                 {formatMinutes(record.durationMinutes)}
               </div>
+              {/* CR-016: a recording game stops by itself; time staff added */}
+              {(record.status === "Recording" || record.addedMinutes > 0) && (
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                  {record.status === "Recording"
+                    ? `Stops at ${dayjs(record.endAt).format("h:mm A")}`
+                    : ""}
+                  {record.status === "Recording" && record.addedMinutes > 0 ? " · " : ""}
+                  {record.addedMinutes > 0
+                    ? `+${formatMinutes(record.addedMinutes)} added`
+                    : ""}
+                </div>
+              )}
             </div>
           );
         },
@@ -507,5 +536,7 @@ export const useSessionHooks = () => {
     handlePairFormSuccess,
     pairingKey,
     handlePairingKeyClose,
+    addTimeTarget,
+    handleAddTimeClose,
   };
 };

@@ -24,6 +24,8 @@ import {
 } from "../../../utils/sessions.js";
 import {
   createSessionSchema,
+  extendSessionSchema,
+  GAME_MAX_TOTAL_MINUTES,
   listSessionsQuerySchema,
   sessionVideoParamsSchema,
 } from "../../../validators/sessions.validator.js";
@@ -45,8 +47,8 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const SESSION_SELECT = `
   SELECT s.sessionId, s.venueId, v.name AS venueName, s.courtId, c.name AS courtName,
          s.startAt, s.endAt, s.playerName, s.phone, s.shareToken, s.status, s.failureReason,
-         s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.paymentStatus, s.payCode,
-         s.dateCreated, s.dateUpdated,
+         s.partCameras, s.wholeVideo, s.openEnded, s.maxCaptures, s.addedMinutes, s.paymentStatus,
+         s.payCode, s.dateCreated, s.dateUpdated,
          (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
            AS paidAmount,
          COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
@@ -91,6 +93,8 @@ const toSession = (row) => {
     paidAmount: row.paidAmount === null || row.paidAmount === undefined ? null : Number(row.paidAmount),
     // CR-013: saves the courtside device may hold at once (chosen on New game)
     maxCaptures: captureLimits(row).maxPerGame,
+    // CR-016: time staff added after New game (Add time)
+    addedMinutes: Number(row.addedMinutes || 0),
     shareUrl: sessionShareUrl(shareToken),
   };
 };
@@ -394,7 +398,7 @@ router.post(
         await req.db.rollback(conn);
         return res.sendError(
           startNow
-            ? "This court already has a session running now — end it or pick a later time"
+            ? "This court already has a game — end it before starting a new one"
             : "This court already has a session in that time",
           409
         );
@@ -403,13 +407,16 @@ router.post(
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
       const sessionId = uuidRow[0].id;
       const shareToken = randomToken();
+      // CR-016: a game started now records at once — no device needed — and
+      // stops by itself at endLocal (advanceSessions)
+      const status = startNow ? "Recording" : "Scheduled";
       const payCode = await insertWithPayCode((code) =>
         conn.execute(
           `INSERT INTO recording_sessions
              (sessionId, venueId, courtId, startAt, endAt, playerName, phone, shareToken,
               createdByAccountId, maxCaptures, status, paymentStatus, payCode, dateCreated,
               dateUpdated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled', ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             sessionId,
             courts[0].venueId,
@@ -421,6 +428,7 @@ router.post(
             shareToken,
             req.user.accountId,
             maxCaptures ?? null,
+            status,
             code ? "Unpaid" : "Free",
             code,
             now,
@@ -432,9 +440,10 @@ router.post(
 
       await req.db.commit(conn);
       return res.sendSuccess(
-        "Session booked",
+        startNow ? "Game created — recording now" : "Session booked",
         {
           sessionId,
+          status,
           startAt: startLocal,
           endAt: endLocal,
           payCode,
@@ -490,6 +499,85 @@ router.post(
         : res.sendError("Only a session that is recording can be ended", 409);
     }
     return res.sendSuccess("Session ended — its footage is being saved", { endAt: result.endAt });
+  })
+);
+
+/**
+ * POST /:sessionId/extend — CR-016: Add time to a game that is recording with
+ * a game time. Moves its end later (at most GAME_MAX_TOTAL_MINUTES in all);
+ * the payment is left as it is. Open games (CR-005) have no end to move.
+ */
+router.post(
+  "/:sessionId/extend",
+  checkPermission("clips", null, "write"),
+  validateBody(extendSessionSchema),
+  catchAsync(async (req, res) => {
+    const { minutes } = req.body;
+    const now = getCurrentTimestampLocal();
+    let conn;
+    try {
+      conn = await req.db.beginTransaction();
+      const [sessions] = await conn.execute(
+        `SELECT s.sessionId, s.courtId, s.startAt, s.endAt, s.status, s.openEnded
+         FROM recording_sessions s JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
+         WHERE s.sessionId = ?
+         LIMIT 1 FOR UPDATE`,
+        [req.params.sessionId]
+      );
+      if (sessions.length === 0) {
+        await req.db.rollback(conn);
+        return res.sendError("Session not found", 404);
+      }
+      const session = sessions[0];
+      if (session.status !== "Recording" || Number(session.openEnded) === 1 || session.endAt <= now) {
+        await req.db.rollback(conn);
+        return res.sendError("Time can only be added to a game that is recording", 409);
+      }
+      const start = moment.tz(session.startAt, FORMAT, TIMEZONE);
+      const newEnd = moment.tz(session.endAt, FORMAT, TIMEZONE).add(minutes, "minutes");
+      if (newEnd.diff(start, "minutes") > GAME_MAX_TOTAL_MINUTES) {
+        await req.db.rollback(conn);
+        const left = Math.max(
+          0,
+          GAME_MAX_TOTAL_MINUTES -
+            moment.tz(session.endAt, FORMAT, TIMEZONE).diff(start, "minutes")
+        );
+        return res.sendError(
+          left > 0
+            ? `A game is at most 6 hours — at most ${left} more minutes can be added`
+            : "A game is at most 6 hours — no more time can be added",
+          400
+        );
+      }
+      const newEndLocal = newEnd.format(FORMAT);
+      // A session booked later on the same court (older clients) keeps its time
+      const [overlap] = await conn.execute(
+        `SELECT sessionId FROM recording_sessions
+         WHERE courtId = ? AND sessionId != ? AND status NOT IN ('Cancelled', 'Failed')
+           AND startAt < ? AND endAt > ?
+         LIMIT 1`,
+        [session.courtId, session.sessionId, newEndLocal, session.endAt]
+      );
+      if (overlap.length > 0) {
+        await req.db.rollback(conn);
+        return res.sendError("Another session is booked on this court in that time", 409);
+      }
+      await conn.execute(
+        `UPDATE recording_sessions
+         SET endAt = ?, addedMinutes = addedMinutes + ?, dateUpdated = ?
+         WHERE sessionId = ?`,
+        [newEndLocal, minutes, now, session.sessionId]
+      );
+      await req.db.commit(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    const rows = await req.db.query(`${SESSION_SELECT} WHERE s.sessionId = ? LIMIT 1`, [
+      req.params.sessionId,
+    ]);
+    return res.sendSuccess(`Added ${minutes} min to the game`, { session: toSession(rows[0]) });
   })
 );
 

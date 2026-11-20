@@ -1,4 +1,5 @@
 import { useState } from "react";
+import dayjs from "dayjs";
 import {
   CalendarClock,
   Plus,
@@ -20,6 +21,7 @@ import { useSessionHooks } from "./hooks";
 import SessionFormDrawer from "./components/SessionFormDrawer";
 import SessionDetailSheet from "./components/SessionDetailSheet";
 import PairDeviceFormModal from "./components/PairDeviceFormModal";
+import AddTimeFormModal from "./components/AddTimeFormModal";
 import PairingKeyDialog from "../../../../components/PairingKeyDialog";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
@@ -31,6 +33,8 @@ import DataTable from "../../../../components/DataTable";
 import FilterField from "../../../../components/FilterField";
 
 const ALL = "all";
+/** CR-016: a recording game this close to its end counts as "Ending soon". */
+const ENDING_SOON_MINUTES = 10;
 const STATUSES = [
   "Waiting",
   "Scheduled",
@@ -70,15 +74,22 @@ const SessionsPage = () => {
     handlePairFormSuccess,
     pairingKey,
     handlePairingKeyClose,
+    addTimeTarget,
+    handleAddTimeClose,
   } = useSessionHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
 
   const totalSessions = pagination?.total || 0;
   const recording = data?.filter((s) => s.status === "Recording").length || 0;
-  // CR-005: games waiting for their device (and any old bookings still to come)
-  const upcoming =
-    data?.filter((s) => ["Waiting", "Scheduled"].includes(s.status)).length || 0;
+  // CR-016: recording games that stop by themselves within 10 minutes (Add time?)
+  const endingSoon =
+    data?.filter(
+      (s) =>
+        s.status === "Recording" &&
+        s.endAt &&
+        dayjs(s.endAt).diff(dayjs(), "minute") < ENDING_SOON_MINUTES,
+    ).length || 0;
 
   const hasPanelFilters = Boolean(
     filters.venueId || filters.courtId || filters.status,
@@ -105,7 +116,7 @@ const SessionsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Sessions"
-        subtitle="Start a game on a court, then pair the phone or tablet there — recording starts when it pairs and stops with End game. The player gets the whole game on one link."
+        subtitle="Start a game on a court with its game time — recording starts at once and stops by itself when the time is up (Add time gives it more). Pair the phone or tablet there for the player. The player gets the whole game on one link."
         actions={
           canWrite && (
             <Button onClick={handleCreate}>
@@ -131,9 +142,9 @@ const SessionsPage = () => {
           icon={<Radio className="w-4.25 h-4.25" strokeWidth={1.8} />}
         />
         <StatCard
-          title="Waiting for a device"
-          value={upcoming}
-          change="on this page"
+          title="Ending soon"
+          value={endingSoon}
+          change={`stop within ${ENDING_SOON_MINUTES} min`}
           icon={<CalendarClock className="w-4.25 h-4.25" strokeWidth={1.8} />}
         />
       </div>
@@ -288,6 +299,14 @@ const SessionsPage = () => {
         open={!!pairingKey}
         pairingKey={pairingKey}
         onClose={handlePairingKeyClose}
+      />
+
+      {/* CR-016: more time for a recording game */}
+      <AddTimeFormModal
+        open={!!addTimeTarget}
+        session={addTimeTarget}
+        onClose={handleAddTimeClose}
+        onSuccess={handleAddTimeClose}
       />
     </div>
   );

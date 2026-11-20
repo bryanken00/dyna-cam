@@ -13,6 +13,7 @@ import { Text } from "@/components/ui/text";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import { formatTime, isConnectionError } from "@/utils/dynaCam";
+import EndingSoonNotice from "./EndingSoonNotice";
 import LivePanel from "./LivePanel";
 import SaveMinutes from "./SaveMinutes";
 import StreamChip from "./StreamChip";
@@ -83,8 +84,12 @@ const GetGameCard = ({ s, size, className }) =>
 /**
  * The session device's main screen (PLAN-002 Phase E): which court, the live
  * video from the venue's recorder box, the session's download QR, a REC
- * timer, and End game (CR-005: the game started when this device paired, and
- * only End game — or staff on the web — stops it).
+ * timer, and End game. CR-016: a game is created with a game time and records
+ * from then on (pairing doesn't start it); it stops by itself at its end —
+ * "Stops by itself at 4:30 PM", with a "5 minutes left" notice
+ * (EndingSoonNotice) near the end — or earlier with End game. Staff can Add
+ * time on the web; the next poll moves the end. An open game (CR-005, from an
+ * older web client) runs until End game.
  *
  * A landscape tablet puts video and QR side by side; a portrait phone stacks
  * them — video, QR, then Stop. The screen stays awake. Before a booked
@@ -277,6 +282,8 @@ const SessionScreen = () => {
           showsVerticalScrollIndicator={false}
         >
           <ConnectionBanner error={m.error} className="mb-4" />
+          {/* CR-016: a game with a game time — its last 5 minutes */}
+          <EndingSoonNotice session={s} since={m.since} className="mb-4" />
 
           {sideBySide ? (
             <View className="flex-row gap-5">

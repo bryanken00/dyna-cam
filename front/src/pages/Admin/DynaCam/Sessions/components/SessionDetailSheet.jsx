@@ -8,6 +8,7 @@ import {
   Film,
   RotateCcw,
   Square,
+  TimerReset,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +20,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import AddTimeFormModal from "./AddTimeFormModal";
 import GamePaymentFormModal from "./GamePaymentFormModal";
 import SessionDevices from "./SessionDevices";
 import SessionStreamLine from "./SessionStreamLine";
@@ -210,6 +212,9 @@ const SessionDetailSheet = ({
   // CR-015: the game's videos open once its payment is recorded here (Payments permission)
   const { hasPermission } = usePermissions();
   const [payOpen, setPayOpen] = useState(false);
+  // CR-016: more time for a recording game with a game time
+  const [addTimeOpen, setAddTimeOpen] = useState(false);
+  const canAddTime = canWrite && session?.status === "Recording" && !!session?.endAt;
   const canTakePayment =
     hasPermission("payments", null, "write") &&
     session?.paymentStatus === "Unpaid" &&
@@ -288,7 +293,9 @@ const SessionDetailSheet = ({
                           ? `${decodeHTML(session.venueName)} · ${formatDate(session.startAt)}, recording since ${dayjs(session.startAt).format("h:mm A")}`
                           : `${decodeHTML(session.venueName)} · ${formatDate(
                               session.startAt,
-                            )}, ${formatTimeRange(session.startAt, session.endAt)}`}
+                            )}, ${formatTimeRange(session.startAt, session.endAt)}${
+                              session.status === "Recording" ? " · stops by itself" : ""
+                            }`}
                   </SheetDescription>
                 </div>
               </div>
@@ -390,7 +397,15 @@ const SessionDetailSheet = ({
                           ? "Starts when a device pairs"
                           : !session.endAt
                             ? `${formatMinutes(session.durationMinutes)} so far — until End game`
-                            : formatMinutes(session.durationMinutes),
+                            : `${formatMinutes(session.durationMinutes)}${
+                                session.addedMinutes > 0
+                                  ? ` (${formatMinutes(session.addedMinutes)} added)`
+                                  : ""
+                              }${
+                                session.status === "Recording"
+                                  ? ` — stops at ${dayjs(session.endAt).format("h:mm A")}`
+                                  : ""
+                              }`,
                     },
                     {
                       label: "Footage",
@@ -577,6 +592,17 @@ const SessionDetailSheet = ({
                   End game
                 </Button>
               )}
+              {canAddTime && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() => setAddTimeOpen(true)}
+                >
+                  <TimerReset />
+                  Add time
+                </Button>
+              )}
               {canWrite &&
                 ["Waiting", "Scheduled"].includes(session.status) && (
                   <Button
@@ -620,6 +646,12 @@ const SessionDetailSheet = ({
         open={payOpen}
         onClose={() => setPayOpen(false)}
         onSuccess={() => setPayOpen(false)}
+        session={session}
+      />
+      <AddTimeFormModal
+        open={addTimeOpen}
+        onClose={() => setAddTimeOpen(false)}
+        onSuccess={() => setAddTimeOpen(false)}
         session={session}
       />
     </Sheet>

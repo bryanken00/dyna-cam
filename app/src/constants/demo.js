@@ -42,6 +42,8 @@ const DEMO_APP_URL = "https://dynacam.example";
 const DEMO_SAVE_MS = 8000;
 const UNPAIR_GRACE_SECONDS = 10 * 60;
 const SESSION_LENGTH_MS = 60 * 60000;
+/** CR-016: how much of the demo game has been played when the device pairs. */
+const DEMO_PLAYED_MS = 53 * 60000;
 const STREAM_LINK_SECONDS = 15 * 60;
 const DEMO_STREAM_SAVED_MS = 6000; // the "player" pastes their key
 const DEMO_STREAM_LIVE_MS = 5000; // then the box gets it live
@@ -64,8 +66,9 @@ const stampAt = (ms) => {
 let demoGame = null;
 
 const startDemoGame = () => {
-  // CR-005: pairing starts the game — the demo starts at 0:00 like a real one
-  const startMs = Date.now();
+  // CR-016: the game started on the web (Create game) before this device
+  // paired — a 1-hour game with 7 minutes left, so "5 minutes left" shows soon
+  const startMs = Date.now() - DEMO_PLAYED_MS;
   demoGame = {
     startMs,
     stopMs: startMs + SESSION_LENGTH_MS,
@@ -125,7 +128,8 @@ export const demoFindGame = (payCode) => {
 const demoSession = () => {
   const now = Date.now();
   const g = demoGame;
-  // CR-005: an open game ends only with End game (no end time)
+  // CR-016: it stops by itself at its game time's end, or earlier with End game
+  if (!g.endedMs && now >= g.stopMs) g.endedMs = g.stopMs;
   const endedMs = g.endedMs ?? null;
   const lengthMs = Math.max(10000, (endedMs ?? now) - g.startMs);
 
@@ -142,12 +146,12 @@ const demoSession = () => {
       courtName: "Court 1",
       venueName: "Dink City Pickleball",
       startAt: stampAt(g.startMs),
-      endAt: stampAt(endedMs ?? g.stopMs), // a placeholder while open, as the API's
-      openEnded: !endedMs,
+      endAt: stampAt(endedMs ?? g.stopMs),
+      openEnded: false,
       status,
       startsInSeconds: 0,
       elapsedSeconds: Math.floor(lengthMs / 1000),
-      endsInSeconds: 0,
+      endsInSeconds: endedMs ? 0 : Math.max(0, Math.round((g.stopMs - now) / 1000)),
       durationSeconds: Math.floor(lengthMs / 1000),
       // CR-006: the game's file uploads after End game
       uploadPercent: endedMs ? Math.min(100, Math.floor(((now - endedMs) / DEMO_SAVE_MS) * 100)) : null,

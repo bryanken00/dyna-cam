@@ -18,10 +18,21 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
+import GameTimeFields from "./GameTimeFields";
 import SearchableSelect from "../../../../../components/SearchableSelect";
 import SectionLabel from "../../../../../components/SectionLabel";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../../utils/decode-html";
+import {
+  DEFAULT_GAME_MINUTES,
+  SESSION_MAX_MINUTES,
+  SESSION_MIN_MINUTES,
+} from "../../../../../utils/dynaCam";
+import {
+  fromGameMinutes,
+  gameTimeFields,
+  toGameMinutes,
+} from "../../../../../utils/gameTime";
 import {
   PHONE_MAX_LENGTH,
   PHONE_PLACEHOLDER,
@@ -31,27 +42,50 @@ import {
 import { useGetClipOptions } from "../../../../../services/requests/admin/clips";
 import { useCreateSession } from "../../../../../services/requests/admin/sessions";
 
-// CR-005: a game is just a court (+ optional player). No times: pairing the
-// court's device starts the recording, End game stops it.
-const gameSchema = z.object({
-  courtId: z.string().min(1, "Choose the court to record"),
-  playerName: z.string().trim().max(100, "Keep the name under 100 characters"),
-  phone: zPhone,
-  // CR-015: no payment at the desk — the player gets the videos at once
-  free: z.boolean(),
-  // CR-013: how many saves the courtside device may hold for this game
-  maxCaptures: z
-    .string()
-    .trim()
-    .refine((v) => /^\d+$/.test(v), "Enter a whole number")
-    .refine((v) => Number(v) >= 1 && Number(v) <= 20, "From 1 to 20 saves"),
-});
+// CR-016: a game is a court (+ optional player) and a game time. It records
+// from Create game — no device needed — and stops by itself when the time is up.
+const gameSchema = z
+  .object({
+    courtId: z.string().min(1, "Choose the court to record"),
+    ...gameTimeFields,
+    playerName: z.string().trim().max(100, "Keep the name under 100 characters"),
+    phone: zPhone,
+    // CR-015: no payment at the desk — the player gets the videos at once
+    free: z.boolean(),
+    // CR-013: how many saves the courtside device may hold for this game
+    maxCaptures: z
+      .string()
+      .trim()
+      .refine((v) => /^\d+$/.test(v), "Enter a whole number")
+      .refine((v) => Number(v) >= 1 && Number(v) <= 20, "From 1 to 20 saves"),
+  })
+  // Same limits as the API: 5 min to 3 h (Add time can go further later)
+  .superRefine((values, ctx) => {
+    const total = toGameMinutes(values);
+    if (total < SESSION_MIN_MINUTES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["minutes"],
+        message: `A game is at least ${SESSION_MIN_MINUTES} minutes`,
+      });
+    } else if (total > SESSION_MAX_MINUTES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["hours"],
+        message: "At most 3 hours — add more time while it records",
+      });
+    }
+  });
+
+/** One-tap game times, in minutes. */
+const GAME_TIME_PRESETS = [30, 60, 90, 120, 180];
 
 /** Saves per game unless staff change it (the API's default too). */
 const DEFAULT_MAX_SAVES = "5";
 
 const emptyValues = () => ({
   courtId: "",
+  ...fromGameMinutes(DEFAULT_GAME_MINUTES),
   playerName: "",
   phone: "",
   free: false,
@@ -63,11 +97,12 @@ const iconPrefix =
 const mutedIcon = { color: "var(--color-text-muted)" };
 
 /**
- * New game (CR-005): a court and, optionally, the player. The game waits for
- * the court's session device — pairing it starts the recording, and End game
- * on the device (or End here) stops it. Create only. On success `onSuccess`
- * receives `{ sessionId, shareUrl, courtName, venueName, playerName }` so the
- * page can go straight on to pairing the device.
+ * New game (CR-016): a court, a game time and, optionally, the player. The
+ * game records from Create game and stops by itself when the time is up; End
+ * game on the device (or End here) stops it early, Add time gives it more.
+ * Create only. On success `onSuccess` receives `{ sessionId, shareUrl,
+ * courtName, venueName, startAt, endAt, playerName }` so the page can go
+ * straight on to pairing the court's device.
  */
 const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
   const req = <span style={{ color: "var(--color-error)" }}>*</span>;
@@ -124,6 +159,8 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
     try {
       const response = await createMutation.mutateAsync({
         courtId: values.courtId,
+        startNow: true,
+        durationMinutes: toGameMinutes(values),
         playerName: values.playerName || null,
         phone: values.phone || null,
         free: values.free,
@@ -135,6 +172,8 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
         shareUrl: response?.data?.shareUrl,
         courtName: decodeHTML(court?.name),
         venueName: decodeHTML(court?.venueName),
+        startAt: response?.data?.startAt,
+        endAt: response?.data?.endAt,
         playerName: values.playerName,
       });
     } catch (error) {
@@ -185,8 +224,8 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                         color: "var(--color-text-secondary)",
                       }}
                     >
-                      Pair the court&apos;s device next — recording starts when
-                      it pairs and stops with End game
+                      Recording starts now and stops by itself when the game
+                      time is up — pair the court&apos;s device next
                     </p>
                   </div>
                 </div>
@@ -236,6 +275,19 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                   </FormItem>
                 )}
               />
+
+              {/* CR-016: how long it records — minutes only is fine */}
+              <div className="mt-7">
+                <SectionLabel>Game time</SectionLabel>
+                <GameTimeFields form={form} presets={GAME_TIME_PRESETS} />
+                <p
+                  className="m-0 mt-3"
+                  style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+                >
+                  5 minutes to 3 hours. Recording stops by itself at the end —
+                  staff can add time while it records.
+                </p>
+              </div>
 
               {/* Player */}
               <div className="mt-7">
