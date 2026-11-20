@@ -18,6 +18,11 @@
       (same address), Building icon
 - [x] `cd front && npm run lint && npm run build`
 
+### 2026-11-20 revision — spacing
+
+- [x] `Sidebar.jsx`: 4px between sub-pages of a group (`space-y-1`) and between top-level items
+- [x] `cd front && npm run lint && npm run build`
+
 ## Acceptance
 
 - [ ] User Management (Users, Roles) below the divider, above Settings and Audit Trail
