@@ -60,68 +60,6 @@ const AdminRoute = () => {
       isShow: true,
     },
     {
-      key: "user-management",
-      name: "User Management",
-      label: "User Management",
-      icon: <User className="h-5 w-5" />,
-      permission: {
-        anyOf: [
-          { module: "users", submodule: "list", accessLevel: "read" },
-          { module: "users", submodule: "roles", accessLevel: "read" },
-        ],
-      },
-      isFilter: true,
-      isShow: true,
-      children: [
-        {
-          route: "/users",
-          name: "Users",
-          label: "Users",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="users"
-                submodule="list"
-                accessLevel="read"
-              >
-                <Users />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: {
-            module: "users",
-            submodule: "list",
-            accessLevel: "read",
-          },
-          isFilter: true,
-          isShow: true,
-        },
-        {
-          route: "/roles",
-          name: "Roles",
-          label: "Roles",
-          component: (
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="users"
-                submodule="roles"
-                accessLevel="read"
-              >
-                <Roles />
-              </ProtectedRoute>
-            </Suspense>
-          ),
-          permission: {
-            module: "users",
-            submodule: "roles",
-            accessLevel: "read",
-          },
-          isFilter: true,
-          isShow: true,
-        },
-      ],
-    },
-    {
       key: "setup",
       name: "Setup",
       label: "Setup",
@@ -206,6 +144,69 @@ const AdminRoute = () => {
           permission: {
             module: "payments",
             submodule: null,
+            accessLevel: "read",
+          },
+          isFilter: true,
+          isShow: true,
+        },
+      ],
+    },
+    {
+      key: "user-management",
+      name: "User Management",
+      label: "User Management",
+      icon: <User className="h-5 w-5" />,
+      permission: {
+        anyOf: [
+          { module: "users", submodule: "list", accessLevel: "read" },
+          { module: "users", submodule: "roles", accessLevel: "read" },
+        ],
+      },
+      isFilter: true,
+      isShow: true,
+      section: "system", // CR-019: below the divider, above Settings and Audit Trail
+      children: [
+        {
+          route: "/users",
+          name: "Users",
+          label: "Users",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="users"
+                submodule="list"
+                accessLevel="read"
+              >
+                <Users />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "users",
+            submodule: "list",
+            accessLevel: "read",
+          },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/roles",
+          name: "Roles",
+          label: "Roles",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute
+                module="users"
+                submodule="roles"
+                accessLevel="read"
+              >
+                <Roles />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: {
+            module: "users",
+            submodule: "roles",
             accessLevel: "read",
           },
           isFilter: true,
