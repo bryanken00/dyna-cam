@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSessionHooks } from "./hooks";
+import { PAYMENT_FILTERS, useSessionHooks } from "./hooks";
 import SessionFormDrawer from "./components/SessionFormDrawer";
 import SessionDetailSheet from "./components/SessionDetailSheet";
 import PairDeviceFormModal from "./components/PairDeviceFormModal";
@@ -81,7 +81,8 @@ const SessionsPage = () => {
     handleDriveClose,
   } = useSessionHooks();
 
-  const [isFilterVisible, setIsFilterVisible] = useState(false);
+  // Open when the page was opened with a filter (CR-023: the Dashboard's "Not paid yet")
+  const [isFilterVisible, setIsFilterVisible] = useState(() => Boolean(filters.payment));
 
   const totalSessions = pagination?.total || 0;
   const recording = data?.filter((s) => s.status === "Recording").length || 0;
@@ -95,7 +96,7 @@ const SessionsPage = () => {
     ).length || 0;
 
   const hasPanelFilters = Boolean(
-    filters.venueId || filters.courtId || filters.status,
+    filters.venueId || filters.courtId || filters.status || filters.payment,
   );
   const hasActiveFilters = Boolean(filters.search) || hasPanelFilters;
   const isEmpty = !isLoading && (data?.length || 0) === 0;
@@ -224,6 +225,27 @@ const SessionsPage = () => {
                   {STATUSES.map((s) => (
                     <SelectItem key={s} value={s}>
                       {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            {/* CR-023: Unpaid / Paid / Free (CR-015) */}
+            <FilterField label="Payment">
+              <Select
+                value={filters.payment || ALL}
+                onValueChange={(v) =>
+                  handleFilterChange("payment", v === ALL ? "" : v)
+                }
+              >
+                <SelectTrigger className="h-10 w-36">
+                  <SelectValue placeholder="All payments" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>All payments</SelectItem>
+                  {PAYMENT_FILTERS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
                     </SelectItem>
                   ))}
                 </SelectContent>

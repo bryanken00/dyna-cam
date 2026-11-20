@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 import dayjs from "dayjs";
 import {
@@ -45,7 +46,10 @@ import {
   useSendSessionDriveEmail,
 } from "../../../../services/requests/admin/sessions";
 
-const EMPTY_FILTERS = { search: "", venueId: "", courtId: "", status: "" };
+const EMPTY_FILTERS = { search: "", venueId: "", courtId: "", status: "", payment: "" };
+
+/** CR-023: the Payment filter (CR-015 statuses) — also read from `?payment=`. */
+export const PAYMENT_FILTERS = ["Unpaid", "Paid", "Free"];
 
 /** A device can be paired to a session until it ends (CR-005: a waiting game too — it starts it). */
 const PAIRABLE_STATUSES = ["Waiting", "Scheduled", "Recording"];
@@ -59,7 +63,12 @@ export const useSessionHooks = () => {
   const canWrite = hasPermission("clips", null, "write");
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // CR-023: the Dashboard's "Not paid yet" opens this page with ?payment=Unpaid
+  const [searchParams] = useSearchParams();
+  const [filters, setFilters] = useState(() => {
+    const payment = searchParams.get("payment");
+    return { ...EMPTY_FILTERS, payment: PAYMENT_FILTERS.includes(payment) ? payment : "" };
+  });
   const debouncedSearch = useDebounce(filters.search, 500);
 
   // ─── Drawer / Dialog / Sheet State ─────────────────────────────────
@@ -88,6 +97,7 @@ export const useSessionHooks = () => {
     venueId: filters.venueId,
     courtId: filters.courtId,
     status: filters.status,
+    payment: filters.payment,
   });
 
   // Venue + court filter options — under the clips permission
