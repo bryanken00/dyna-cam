@@ -1,16 +1,18 @@
 import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal, moment } from "../utils/dateUtils.js";
 import { decryptSecret } from "../utils/crypto/secretBox.js";
+import { driveKeepCutoff } from "../utils/driveKeep.js";
 import { accessToken, DriveAuthError, driveConfigured, trashFile } from "../utils/googleDrive.js";
 
 /**
- * CR-017: a video's Google Drive copy goes when its server copy does.
+ * CR-017 / CR-026: a video's Google Drive copy goes DRIVE_KEEP_DAYS (2) after
+ * the video was saved — or sooner, once its server copy expired.
  *
- * jobs/clipMaintenance.js expires a video after the venue's days (1 by
- * default): status Expired, server files deleted. This pass then moves its
- * Drive copy (`driveStatus = 'Uploaded'`) to the Drive's trash — Google
- * empties the trash after 30 days — and marks it `Deleted`. A game's own
- * Drive folder follows once nothing in it is left.
+ * jobs/clipMaintenance.js expires a video after the venue's days (7 by
+ * default): status Expired, server files deleted. This pass moves a Drive copy
+ * (`driveStatus = 'Uploaded'`) that is past its 2 days, or whose server copy
+ * expired, to the Drive's trash — Google empties the trash after 30 days — and
+ * marks it `Deleted`. A game's own Drive folder follows once nothing in it is left.
  *
  *   - The court needs reconnecting, or was disconnected → waits; it goes once
  *     the court is connected again.
@@ -38,7 +40,10 @@ const minutesFromNow = (minutes) => moment().tz(TIMEZONE).add(minutes, "minutes"
 const COURT_CONNECTED = `c.driveStatus = 'Connected' AND c.driveRefreshToken IS NOT NULL
   AND c.status != 'Deleted'`;
 
-/** Expired videos whose Drive copy is still there: replays and whole-game videos / saves. */
+/** A video (alias `a`) whose Drive copy is due: past its Drive days (1st ?) or expired. */
+const driveDue = (a) => `(${a}.status = 'Expired' OR ${a}.dateCreated <= ?)`;
+
+/** Videos whose Drive copy is due and still there: replays and whole-game videos / saves. */
 const KINDS = [
   {
     table: "clips",
@@ -47,11 +52,11 @@ const KINDS = [
       SELECT cl.clipId AS id, cl.driveFileId, cl.driveDeleteAttempts AS attempts,
              c.courtId, c.driveRefreshToken
       FROM clips cl JOIN courts c ON c.courtId = cl.courtId
-      WHERE cl.status = 'Expired' AND cl.driveStatus = 'Uploaded' AND cl.driveFileId IS NOT NULL
+      WHERE ${driveDue("cl")} AND cl.driveStatus = 'Uploaded' AND cl.driveFileId IS NOT NULL
         AND cl.driveDeleteAttempts < ${DRIVE_DELETE_MAX_ATTEMPTS}
         AND (cl.driveNextAttemptAt IS NULL OR cl.driveNextAttemptAt <= ?)
         AND ${COURT_CONNECTED}
-      ORDER BY cl.expiresAt ASC`,
+      ORDER BY cl.dateCreated ASC`,
   },
   {
     table: "session_videos",
@@ -62,16 +67,21 @@ const KINDS = [
       FROM session_videos sv
       JOIN recording_sessions s ON s.sessionId = sv.sessionId
       JOIN courts c ON c.courtId = s.courtId
-      WHERE sv.status = 'Expired' AND sv.driveStatus = 'Uploaded' AND sv.driveFileId IS NOT NULL
+      WHERE ${driveDue("sv")} AND sv.driveStatus = 'Uploaded' AND sv.driveFileId IS NOT NULL
         AND sv.driveDeleteAttempts < ${DRIVE_DELETE_MAX_ATTEMPTS}
         AND (sv.driveNextAttemptAt IS NULL OR sv.driveNextAttemptAt <= ?)
         AND ${COURT_CONNECTED}
-      ORDER BY sv.expiresAt ASC`,
+      ORDER BY sv.dateCreated ASC`,
   },
 ];
 
-/** A video (alias `a`) that may still be — or still go — in its game's Drive folder. */
-const stillInFolder = (a) => `(${a}.status NOT IN ('Expired', 'Failed', 'Deleted')
+/**
+ * A video (alias `a`) that may still be — or still go — in its game's Drive
+ * folder: in Drive or on its way there, or not finished yet (it may still be
+ * copied). A Ready video whose Drive copy is gone (CR-026: after 2 days, while
+ * the server still keeps it) no longer holds the folder.
+ */
+const stillInFolder = (a) => `(${a}.status NOT IN ('Ready', 'Expired', 'Failed', 'Deleted')
   OR ${a}.driveStatus IN ('Pending', 'Uploading', 'Uploaded'))`;
 
 /** Finished games whose Drive folder has nothing left in it. */
@@ -185,7 +195,7 @@ const trashFolder = async (db, row, tokens) => {
 };
 
 /**
- * One pass: trash up to `limit` expired videos' Drive copies of each kind,
+ * One pass: trash up to `limit` due Drive copies of each kind,
  * then up to `limit` emptied game folders.
  * @param {import("../../config/database.js").default} db
  * @returns {Promise<Record<string, number>>} how each one ended
@@ -198,16 +208,18 @@ export const runDriveCleanup = async (db, { limit = BATCH } = {}) => {
   };
 
   const now = getCurrentTimestampLocal();
+  const cutoff = driveKeepCutoff();
   const max = Math.max(1, Math.min(100, Number(limit) || BATCH));
   const tokens = new Map();
   for (const kind of KINDS) {
-    const due = await db.query(`${kind.due} LIMIT ${max}`, [now]);
+    const due = await db.query(`${kind.due} LIMIT ${max}`, [cutoff, now]);
     for (const row of due) {
       const claimed = await db.query(
         `UPDATE ${kind.table} SET driveNextAttemptAt = ?
-         WHERE ${kind.key} = ? AND status = 'Expired' AND driveStatus = 'Uploaded'
+         WHERE ${kind.key} = ? AND (status = 'Expired' OR dateCreated <= ?)
+           AND driveStatus = 'Uploaded'
            AND (driveNextAttemptAt IS NULL OR driveNextAttemptAt <= ?)`,
-        [minutesFromNow(LEASE_MINUTES), row.id, now]
+        [minutesFromNow(LEASE_MINUTES), row.id, cutoff, now]
       );
       if (!claimed.affectedRows) continue;
       count(await trashItem(db, kind, row, tokens));

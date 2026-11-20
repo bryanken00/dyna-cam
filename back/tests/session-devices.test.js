@@ -125,8 +125,8 @@ describe("session devices", () => {
       assert.equal(session.status, "Recording");
       assert.equal(session.startsInSeconds, 0);
       assert.ok(session.endsInSeconds > 59 * 60);
-      // CR-017: the venue keeps videos 1 day — "Download it within 24 hours"
-      assert.equal(session.keepDays, 1);
+      // CR-026: the venue keeps videos 7 days — "Download it within 7 days"
+      assert.equal(session.keepDays, 7);
       assert.equal(live, null);
       assert.equal(unpairInSeconds, null);
       assert.equal(res.data.device.name, "Court 1 tablet");

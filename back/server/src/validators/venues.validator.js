@@ -27,8 +27,8 @@ export const createVenueSchema = z.object({
   address: optionalString(255),
   phone: optionalPhone(),
   logoUrl: optionalUploadPath(255),
-  // CR-017: videos go after 1 day (24 hours) unless the venue keeps them longer
-  clipRetentionDays: retentionDays.default(1),
+  // CR-026: videos are kept 7 days unless the venue chooses otherwise
+  clipRetentionDays: retentionDays.default(7),
   clipPrice: clipPrice.default(0),
 });
 

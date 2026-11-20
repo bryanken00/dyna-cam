@@ -32,8 +32,8 @@ const percentOf = (row) => {
 
 /**
  * A whole video as the player's page shows it. Making and sending it is
- * "Saving" to the player. Links only while Ready; the Drive copy also after
- * the server's copy expired.
+ * "Saving" to the player. Links only while Ready; the Drive link only while
+ * its Drive copy is there (it goes 2 days after saving, CR-026).
  */
 export const toPublicVideo = (row) => {
   const ready = row.status === "Ready";
@@ -49,7 +49,7 @@ export const toPublicVideo = (row) => {
     videoUrl: ready ? signUploadUrl(row.videoPath) : null,
     downloadUrl: ready ? signedDownloadUrl(row.videoPath) : null,
     thumbnailUrl: ready ? signUploadUrl(row.thumbnailPath) : null,
-    // CR-017: only while the video is kept — its Drive copy goes when the server's does
+    // CR-017: only while the video is kept and its Drive copy is there (CR-026: 2 days)
     driveUrl: row.driveStatus === "Uploaded" && row.status === "Ready" ? row.driveUrl : null,
   };
 };

@@ -396,8 +396,8 @@ const LandingPage = () => {
             <p className="m-0 max-w-3xl" style={{ ...bodyStyle, fontSize: 14 }}>
               Courts are recorded all the time, but only what players choose to save is kept.
               Everything else is recorded over within minutes, and saved replays and game videos
-              are deleted 24 hours after they&apos;re saved (unless the venue keeps them longer),
-              together with any copy in the venue&apos;s Google Drive.
+              are deleted 7 days after they&apos;re saved (unless the venue chooses otherwise).
+              Any copy in the venue&apos;s Google Drive goes after 2 days.
             </p>
           </div>
         </section>

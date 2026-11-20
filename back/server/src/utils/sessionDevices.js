@@ -119,7 +119,7 @@ export const toDeviceSession = (row, nowMs = Date.now()) => {
     },
     failureReason: row.failureReason || null,
     // CR-017: the game's videos are deleted this many days after they're saved
-    // ("Download it within 24 hours after the game")
+    // ("Download it within 7 days after the game")
     keepDays: Number(row.clipRetentionDays) || null,
   };
 };

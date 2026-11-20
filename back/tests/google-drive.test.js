@@ -598,14 +598,14 @@ describe("Google Drive per court", () => {
       return clip;
     };
 
-    it("keeps videos 1 day by default: a replay goes 24 hours after it's saved", async () => {
+    it("keeps videos 7 days by default (CR-026)", async () => {
       const venue = await call("POST", "/admin/venues", { name: "Default Days" });
       assert.equal(venue.status, 201, JSON.stringify(venue.body));
       const [[{ clipRetentionDays }]] = await ctx.sql.query(
         `SELECT clipRetentionDays FROM venues WHERE venueId = ?`,
         [venue.data.venueId]
       );
-      assert.equal(clipRetentionDays, 1);
+      assert.equal(clipRetentionDays, 7);
 
       const clip = await replay();
       const [[{ hours }]] = await ctx.sql.query(
@@ -614,7 +614,7 @@ describe("Google Drive per court", () => {
          FROM clips WHERE clipId = ?`,
         [clip.clipId]
       );
-      assert.ok(Math.abs(Number(hours) - 24) < 0.1, `expires in ${hours} h`);
+      assert.ok(Math.abs(Number(hours) - 7 * 24) < 0.1, `expires in ${hours} h`);
       await runDriveUploads(db); // leave nothing pending for the next tests
     });
 
@@ -730,6 +730,45 @@ describe("Google Drive per court", () => {
         [video.sessionVideoId]
       );
       assert.equal(driveStatus, "Deleted");
+    });
+
+    /** Pretend the video was saved `days` ago (the Drive clock, CR-026). */
+    const savedDaysAgo = (table, key, id, days) =>
+      ctx.sql.query(
+        `UPDATE ${table}
+         SET dateCreated = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                                    INTERVAL ${days} * 24 * 60 + 1 MINUTE)
+         WHERE ${key} = ?`,
+        [id]
+      );
+
+    it("trashes the Drive copy 2 days after saving while the server keeps the video (CR-026)", async () => {
+      const clip = await uploadedReplay();
+      const { driveFileId } = await clipFull(clip.clipId);
+
+      await savedDaysAgo("clips", "clipId", clip.clipId, 1);
+      assert.equal((await runDriveCleanup(db)).trashed ?? 0, 0, "kept in Drive for 2 days");
+      assert.equal(google.state.files.get(driveFileId).trashed, undefined);
+
+      await savedDaysAgo("clips", "clipId", clip.clipId, 2);
+      assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
+      const row = await clipFull(clip.clipId);
+      assert.equal(row.status, "Ready", "the server still keeps it");
+      assert.equal(row.driveStatus, "Deleted");
+      assert.equal(google.state.files.get(driveFileId).trashed, true);
+
+      const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
+      assert.ok(page.data.clip.videoUrl, "still plays from the server");
+      assert.equal(page.data.clip.driveUrl, null, "no Drive link once its copy is gone");
+    });
+
+    it("skips copying a video to Drive once it's past the 2 days (CR-026)", async () => {
+      const clip = await replay();
+      await savedDaysAgo("clips", "clipId", clip.clipId, 2);
+      assert.deepEqual(await runDriveUploads(db), {});
+      const row = await clipFull(clip.clipId);
+      assert.equal(row.driveStatus, "Skipped");
+      assert.match(row.driveError, /keeps videos only 2 days/);
     });
 
     it("never touches the court's own folder", async () => {

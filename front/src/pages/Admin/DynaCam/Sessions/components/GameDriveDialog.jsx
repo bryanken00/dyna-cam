@@ -95,8 +95,8 @@ const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
               className="m-0 text-center"
               style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
             >
-              The Drive copy is deleted with the game&apos;s videos when the
-              venue&apos;s keep time ends.
+              The Drive copy is moved to the Drive&apos;s trash 2 days after
+              the game&apos;s videos are saved.
             </p>
             {/* CR-018: the automatic email, and sending it now */}
             {session?.driveEmail && session.driveEmail.status !== "NoEmail" && (

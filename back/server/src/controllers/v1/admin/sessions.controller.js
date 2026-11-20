@@ -8,6 +8,7 @@ import {
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
+import { DRIVE_KEEP_DAYS, driveKeepCutoff } from "../../../utils/driveKeep.js";
 import { insertWithPayCode } from "../../../utils/payments.js";
 import { sessionShareUrl, toEpochMs } from "../../../utils/clips.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
@@ -744,12 +745,14 @@ router.post(
        SET driveStatus = 'Pending', driveAttempts = 0, driveNextAttemptAt = NULL,
            driveError = NULL, dateUpdated = ?
        WHERE sessionId = ? AND status = 'Ready'
-         AND (driveStatus IN ('Failed', 'Skipped') OR driveStatus IS NULL)`,
-      [now, req.params.sessionId]
+         AND (driveStatus IN ('Failed', 'Skipped') OR driveStatus IS NULL)
+         AND dateCreated > ?`,
+      // CR-026: Drive keeps a video only DRIVE_KEEP_DAYS after it's saved
+      [now, req.params.sessionId, driveKeepCutoff()]
     );
     if (!queued.affectedRows) {
       return res.sendError(
-        "Nothing to upload — the game's videos are already in Google Drive, uploading, or no longer kept",
+        `Nothing to upload — the game's videos are already in Google Drive, uploading, or older than the ${DRIVE_KEEP_DAYS} days Google Drive keeps them`,
         409
       );
     }

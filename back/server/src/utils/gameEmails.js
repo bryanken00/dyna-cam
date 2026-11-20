@@ -1,6 +1,7 @@
 import { sendgridConfigured, sendMail } from "../lib/mailer/mailer.js";
 import { gameDriveEmail } from "../lib/mailer/templates.js";
 import { moment } from "./dateUtils.js";
+import { DRIVE_KEEP_DAYS } from "./driveKeep.js";
 
 /**
  * CR-018: "Your game is ready in Google Drive" — the game's Drive folder link,
@@ -9,7 +10,7 @@ import { moment } from "./dateUtils.js";
  *   - the game has ended and settled (Ready),
  *   - it is paid or free (CR-015: the Drive link stays hidden until paid),
  *   - every whole-game video's Drive upload has finished, with at least one in
- *     Drive and still kept (CR-017 deletes them after the venue's days).
+ *     Drive and still kept (CR-026: Drive copies go 2 days after saving).
  *
  * A court without Drive (or an upload that failed) sends nothing. The send
  * itself goes through lib/mailer (SendGrid when SENDGRID_API_KEY is set).
@@ -75,10 +76,12 @@ const formatLocal = (value) =>
  * @returns {Promise<{ sent: true, to: string } | { sent: false }>}
  */
 export const sendGameDriveEmail = async (db, sessionId) => {
+  // keepUntil (CR-026): the Drive copy goes DRIVE_KEEP_DAYS after saving, or with the server's
   const [row] = await db.query(
     `SELECT s.sessionId, s.email, s.driveUrl, s.startAt, s.playerName,
             c.name AS courtName, v.name AS venueName,
-            (SELECT MIN(sv.expiresAt) FROM session_videos sv
+            (SELECT MIN(LEAST(sv.expiresAt, DATE_ADD(sv.dateCreated, INTERVAL ${DRIVE_KEEP_DAYS} DAY)))
+             FROM session_videos sv
              WHERE ${WHOLE} AND sv.status = 'Ready' AND sv.driveStatus = 'Uploaded') AS keepUntil
      FROM recording_sessions s
      JOIN courts c ON c.courtId = s.courtId

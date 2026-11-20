@@ -16,7 +16,7 @@ export const GAME_UPLOAD_GIVE_UP_HOURS = Math.max(
  * Clip housekeeping (PLAN-001), run at startup and then every 10 minutes:
  *
  * 1. Expire: a Ready clip past its `expiresAt` (the venue's retention days —
- *    1 day by default, CR-017) becomes Expired and its files are deleted. The row stays (soft), so the
+ *    7 days by default, CR-026) becomes Expired and its files are deleted. The row stays (soft), so the
  *    share link says "expired" instead of "not found".
  *    Whole-game videos (CR-003) expire the same way.
  * 2. Give up: a clip still Pending/Processing after CLIP_STALE_MINUTES (a
@@ -57,7 +57,8 @@ export const runClipMaintenance = async (db) => {
   }
 
   // CR-003: whole-game videos (and CR-013 saves) expire like clips. CR-017: a
-  // Drive copy of either then goes to the Drive's trash (jobs/driveCleanup.js)
+  // Drive copy still there then goes to the Drive's trash (jobs/driveCleanup.js;
+  // CR-026: it usually went already, 2 days after saving)
   const dueVideos = await db.query(
     `SELECT sessionVideoId, videoPath, thumbnailPath FROM session_videos
      WHERE status = 'Ready' AND expiresAt IS NOT NULL AND expiresAt <= ?
@@ -121,7 +122,7 @@ export const runClipMaintenance = async (db) => {
   return { expired, failed };
 };
 
-/** CR-017: videos go 24 hours after they're saved — check every 10 minutes, not hourly. */
+/** CR-017: videos go after the venue's days — check every 10 minutes, not hourly. */
 const MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
