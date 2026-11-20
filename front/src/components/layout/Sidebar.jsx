@@ -327,7 +327,7 @@ const NavGroup = ({
         <HoverCardContent
           side="right"
           align="start"
-          className="w-auto min-w-45 p-1.5"
+          className="w-auto min-w-45 p-1.5 space-y-1"
         >
           <div
             className="px-2 pb-1.5 mb-1 text-xs font-semibold uppercase tracking-wide"
@@ -382,7 +382,8 @@ const NavGroup = ({
       </div>
 
       {isOpen && (
-        <div className="relative mt-0.5" style={{ marginLeft: 22 }}>
+        <div className="relative mt-1 space-y-1" style={{ marginLeft: 22 }}>
+          {/* CR-019: space-y-1 — a highlighted sub-page and a focused one don't touch */}
           {/* rail */}
           <div
             className="absolute left-0 top-1 bottom-1 w-px"
@@ -694,7 +695,7 @@ const SidebarShell = ({
       )}
 
       <nav
-        className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-3 space-y-0.5"
+        className="flex-1 overflow-y-auto overflow-x-hidden px-2 pb-3 space-y-1"
         // Locked: visible but not clickable or focusable
         inert={locked}
         aria-disabled={locked || undefined}

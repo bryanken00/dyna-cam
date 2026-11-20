@@ -57,6 +57,9 @@ bottom.
 - 2026-11-20: **Venues** is its own sidebar item (no "Setup" group around it — Setup held only
   Venues). Its address stays `/admin/setup/venues`, so venue / court pages, printed links and
   Google Drive's return link keep working. Asked directly by bryanken00.
+- 2026-11-20: A little space (4px) between sidebar items, including the pages inside a group
+  (Clips / Sessions / Payments), so a highlighted item and a focused one don't touch. Asked
+  directly by bryanken00.
 
 ## Approval
 
