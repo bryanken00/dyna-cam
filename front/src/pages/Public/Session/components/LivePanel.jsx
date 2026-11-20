@@ -64,9 +64,21 @@ const blockedByPage = (url) =>
   window.location.protocol === "https:" && String(url).startsWith("http:");
 
 /**
- * Plays `link` in `videoRef`: the browser's own HLS where it has one (Safari,
- * iOS), otherwise hls.js, loaded on first use (Chrome, Firefox). Returns the
- * player's state and `reload()` (back to the live edge, or a retry).
+ * True only where hls.js can't run (no Media Source — older iPhones), so the
+ * browser's own HLS is the one way to play. Not `canPlayType()` alone: Edge
+ * and Chrome on Windows answer "maybe" for HLS and then fail the box's stream
+ * (BUG-005), so hls.js goes first wherever it works.
+ */
+const nativeHlsOnly = (video) =>
+  !("MediaSource" in window) &&
+  !("ManagedMediaSource" in window) &&
+  Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
+
+/**
+ * Plays `link` in `videoRef`: hls.js, loaded on first use, wherever Media
+ * Source exists (Chrome, Edge, Firefox, Safari); the browser's own HLS only
+ * where it doesn't (older iPhones). Returns the player's state and `reload()`
+ * (back to the live edge, or a retry).
  */
 const useHlsPlayer = (videoRef, link) => {
   const [state, setState] = useState("idle"); // idle · loading · playing · error
@@ -85,8 +97,8 @@ const useHlsPlayer = (videoRef, link) => {
 
     let hls = null;
     let cancelled = false;
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // The browser plays HLS itself (Safari, iOS) — no hls.js download
+    if (nativeHlsOnly(video)) {
+      // No Media Source: the browser plays HLS itself — no hls.js download
       video.addEventListener("error", onError);
       video.src = link.url;
       video.play().catch(() => {});

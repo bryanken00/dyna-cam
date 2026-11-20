@@ -17,8 +17,9 @@ plays on the venue Wi-Fi. Ending the game stays on the court device and in Admin
   same as `/app/session`) and `capture`. New `POST /api/v1/public/sessions/:shareToken/captures`
   (`{ seconds }`), rate-limited per IP by `RATE_LIMIT_PUBLIC_CAPTURE_POINTS` (default 10/min).
   No migration.
-- front/: new dependency `hls.js` — run `npm install`. It is loaded only on browsers without
-  built-in HLS.
+- front/: new dependency `hls.js` — run `npm install`. It plays the live view on every browser
+  with Media Source; the browser's own HLS is used only where Media Source is missing (older
+  iPhones). Edge/Chrome on Windows claim built-in HLS but fail the box's stream (BUG-005).
 - edge/: no recorder box update. If the web app is served over HTTPS, browsers block the box's
   plain-HTTP live video: give the box its certificate (`CERT_PATH`, with `LIVE_HOST` a name the
   certificate covers) for the live view to play on the game page.
