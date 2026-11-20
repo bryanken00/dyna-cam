@@ -49,6 +49,24 @@
 - [x] Venue alert emails need `SENDGRID_API_KEY`
 - [x] `.env.example`, local `.env`, README, testing doc, changelog entries: no SMTP
 
+### 2026-11-20 revision — Re-upload to Drive and Re-send email in Sessions
+
+- [x] API: sessions list / detail include the game's Drive upload state (uploaded / uploading /
+      failed / not uploaded / no Drive, last error, can re-upload)
+- [x] `POST /admin/sessions/:sessionId/drive-upload` — re-queue the game's kept videos (whole game
+      and saves) whose Drive upload failed, was skipped or never ran; 409 when the court's Drive
+      isn't connected or nothing needs it; 404 missing; `clips` write
+- [x] Sessions ⋮ menu: **Re-upload to Google Drive** and **Re-send email** (when sendable)
+- [x] List: "Drive upload failed" / "Email failed" lines; details: Re-upload button by Footage
+- [x] Tests: a failed upload is re-queued and uploads; refused when not connected / nothing failed
+- [x] `cd back && npm run lint && npm test`; `cd front && npm run lint && npm run build`
+
+### 2026-11-20 revision — phone / email checked as you type on New game
+
+- [x] New game form validates a field on leaving it, then on every change (`mode: "onTouched"`)
+- [x] Phone hint "Format: 0912 3456 789 — 11 digits starting with 09" under the field
+- [x] `cd front && npm run lint && npm run build`
+
 ## Acceptance
 
 Covered by the API tests against a fake SendGrid; still to check with a real SendGrid key, a
@@ -61,6 +79,8 @@ verified sender and a real Google Drive:
 - [ ] A game without an email, or on a court without Drive, sends nothing
 - [ ] The game's details show when the link was emailed (or why not); staff can fix the email and
       send it again
+- [ ] (2026-11-20) A game whose Drive upload failed shows it in Sessions; Re-upload puts it in
+      Drive and the email follows; Re-send email sends it again
 - [ ] With SendGrid set up, emails (this one and password resets) come from the configured sender
 
 ## Wrap-up

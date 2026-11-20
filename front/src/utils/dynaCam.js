@@ -94,6 +94,30 @@ export const driveEmailText = (driveEmail) => {
   }
 };
 
+/**
+ * CR-018 (2026-11-20): the game's Google Drive upload (session.driveUpload) →
+ * a short line for staff, or "" when there's nothing to say.
+ */
+export const driveUploadText = (driveUpload) => {
+  if (!driveUpload) return "";
+  switch (driveUpload.status) {
+    case "Uploading":
+      return "Uploading to Google Drive";
+    case "Failed":
+      return `Google Drive upload failed${driveUpload.error ? `: ${driveUpload.error}` : ""}`;
+    case "NotUploaded":
+      return "Not in Google Drive";
+    case "Uploaded":
+      return "In Google Drive";
+    default:
+      return "";
+  }
+};
+
+/** CR-018: the row-menu label for sending the Drive-link email, by its state. */
+export const driveEmailActionLabel = (status) =>
+  status === "Sent" ? "Send email again" : status === "Failed" ? "Re-send email" : "Send email now";
+
 /** CR-018: Send Drive link (again) is possible in these states. */
 export const DRIVE_EMAIL_SENDABLE = ["Queued", "Sent", "Failed"];
 

@@ -50,6 +50,13 @@ export const updateSessionEmailApi = async ({ sessionId, email }) => {
   return response.data;
 };
 
+// CR-018 (2026-11-20): upload the game's videos to the court's Drive again
+// (failed / skipped / never ran) → { session } · 409 court not connected / nothing to upload
+export const reuploadSessionDriveApi = async (sessionId) => {
+  const response = await api.post(`/api/v1/admin/sessions/${sessionId}/drive-upload`);
+  return response.data;
+};
+
 // CR-018: email the game's Google Drive link to the player now → { session }
 // 409 no email / unpaid / not in Drive yet · 502 SendGrid refused
 export const sendSessionDriveEmailApi = async (sessionId) => {

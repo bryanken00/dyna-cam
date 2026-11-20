@@ -12,6 +12,7 @@ import {
   Send,
   Square,
   TimerReset,
+  UploadCloud,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,6 +45,7 @@ import {
   DRIVE_EMAIL_SENDABLE,
   SESSION_STATUS_TONE,
   driveEmailText,
+  driveUploadText,
   formatBytes,
   formatDate,
   formatMinutes,
@@ -55,6 +57,7 @@ import {
   useEndSession,
   useGetSessionById,
   useRetrySessionVideo,
+  useReuploadSessionDrive,
   useSendSessionDriveEmail,
 } from "../../../../../services/requests/admin/sessions";
 
@@ -243,6 +246,7 @@ const SessionDetailSheet = ({
   // CR-018: the player's email and the Drive-link email
   const [emailOpen, setEmailOpen] = useState(false);
   const sendEmailMutation = useSendSessionDriveEmail();
+  const reuploadMutation = useReuploadSessionDrive();
   const canSendEmail =
     canWrite && !!session?.email && DRIVE_EMAIL_SENDABLE.includes(session?.driveEmail?.status);
   const canAddTime = canWrite && session?.status === "Recording" && !!session?.endAt;
@@ -441,16 +445,52 @@ const SessionDetailSheet = ({
                     {
                       label: "Footage",
                       // CR-006: one video per camera, made after the game ends
-                      value:
-                        session.videosTotal > 0
-                          ? session.status === "Processing"
-                            ? session.uploadPercent != null
-                              ? `Uploading ${session.uploadPercent}%`
-                              : "Being made on the recorder box"
-                            : `${session.videosReady}/${session.videosTotal} ${session.videosTotal === 1 ? "video" : "videos"} ready`
-                          : session.status === "Cancelled"
-                            ? "—"
-                            : "One video per camera, after the game ends",
+                      value: (
+                        <div className="space-y-1.5">
+                          <div>
+                            {session.videosTotal > 0
+                              ? session.status === "Processing"
+                                ? session.uploadPercent != null
+                                  ? `Uploading ${session.uploadPercent}%`
+                                  : "Being made on the recorder box"
+                                : `${session.videosReady}/${session.videosTotal} ${session.videosTotal === 1 ? "video" : "videos"} ready`
+                              : session.status === "Cancelled"
+                                ? "—"
+                                : "One video per camera, after the game ends"}
+                          </div>
+                          {/* CR-018: the Google Drive copy, and Re-upload when it failed */}
+                          {driveUploadText(session.driveUpload) && (
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color:
+                                  session.driveUpload.status === "Failed"
+                                    ? "var(--color-error)"
+                                    : "var(--color-text-muted)",
+                              }}
+                            >
+                              {driveUploadText(session.driveUpload)}
+                              {!session.driveUpload.canReupload &&
+                              session.driveUpload.problem &&
+                              ["Failed", "NotUploaded"].includes(session.driveUpload.status)
+                                ? ` — ${session.driveUpload.problem}`
+                                : ""}
+                            </div>
+                          )}
+                          {canWrite && session.driveUpload?.canReupload && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={reuploadMutation.isPending}
+                              onClick={() => reuploadMutation.mutate(session.sessionId)}
+                            >
+                              <UploadCloud />
+                              Re-upload to Google Drive
+                            </Button>
+                          )}
+                        </div>
+                      ),
                     },
                     {
                       // CR-013: saves from the courtside device, of the most allowed

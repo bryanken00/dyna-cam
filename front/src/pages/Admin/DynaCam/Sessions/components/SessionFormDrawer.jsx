@@ -117,6 +117,9 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
   const form = useForm({
     resolver: zodResolver(gameSchema),
     defaultValues: emptyValues(),
+    // A wrong phone / email shows as soon as staff leave the field, then
+    // clears while they fix it — not only on Create game
+    mode: "onTouched",
   });
   const {
     formState: { isDirty, isSubmitSuccessful },
@@ -343,6 +346,9 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                             />
                           </FormControl>
                         </div>
+                        <FormDescription>
+                          11 digits starting with 09, e.g. {PHONE_PLACEHOLDER}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
