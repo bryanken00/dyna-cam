@@ -140,7 +140,8 @@ Before reporting a fix done, confirm the new test fails on the old code and pass
 
 - `DISABLE_CSRF=true` — CSRF uses its own cookie flow; these tests exercise the API rules.
 - Rate limits raised to 1000, so repeated logins in a test are not throttled.
-- A random `UPLOAD_URL_SECRET`, and `SMTP_HOST=""` so no email is ever sent.
+- A random `UPLOAD_URL_SECRET`, and `SENDGRID_API_KEY=""` so no email is ever sent (a test that
+  needs SendGrid points `SENDGRID_API_URL` at a fake — see `tests/drive-email.test.js`).
 - The first Owner is `owner@template.com` with a fixed test password (`OWNER_EMAIL` /
   `OWNER_PASSWORD`), and its `mustChangePassword` flag is cleared (pass
   `keepFirstPasswordFlag: true` to keep it).

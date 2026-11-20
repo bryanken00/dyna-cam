@@ -28,6 +28,7 @@ import {
   formatMinutes,
   formatPayCode,
   formatTimeRange,
+  driveEmailText,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import { useGetClipOptions } from "../../../../services/requests/admin/clips";
@@ -434,6 +435,17 @@ export const useSessionHooks = () => {
             {record.phone && (
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                 {formatPhoneDisplay(record.phone)}
+              </div>
+            )}
+            {/* CR-018: gets the game's Google Drive link */}
+            {record.email && (
+              <div
+                className="truncate"
+                style={{ fontSize: 12, color: "var(--color-text-muted)" }}
+                title={record.driveEmail ? driveEmailText(record.driveEmail) : undefined}
+              >
+                {record.email}
+                {record.driveEmail?.status === "Sent" ? " · link sent" : ""}
               </div>
             )}
             {record.startedBy && (

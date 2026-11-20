@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   emptyToUndefined,
+  optionalEmail,
   optionalPhone,
   optionalString,
   queryEnum,
@@ -44,6 +45,8 @@ export const createSessionSchema = z
     ),
     playerName: optionalString(100),
     phone: optionalPhone(),
+    // CR-018: gets the game's Google Drive link once it's in Drive (and paid)
+    email: optionalEmail(255),
     // CR-015: a free game — no payment at the desk, the player gets the videos at once
     free: z.boolean().optional(),
     // CR-013 revision: saves the courtside device may hold at once (default 5)
@@ -64,6 +67,11 @@ export const createSessionSchema = z
     message: "Pick a start date and time, or start now",
     path: ["startAt"],
   });
+
+// PATCH /:sessionId/email — CR-018: fix (or clear) the player's email
+export const updateSessionEmailSchema = z.object({
+  email: optionalEmail(255),
+});
 
 /** CR-016: a game may run at most this long in total, with the time added. */
 export const GAME_MAX_TOTAL_MINUTES = 360;

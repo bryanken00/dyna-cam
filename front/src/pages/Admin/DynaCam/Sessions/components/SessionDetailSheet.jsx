@@ -6,8 +6,10 @@ import {
   Copy,
   Download,
   Film,
+  Mail,
   QrCode,
   RotateCcw,
+  Send,
   Square,
   TimerReset,
   X,
@@ -23,6 +25,7 @@ import {
 } from "@/components/ui/sheet";
 import AddTimeFormModal from "./AddTimeFormModal";
 import GameDriveDialog from "./GameDriveDialog";
+import SessionEmailFormModal from "./SessionEmailFormModal";
 import GamePaymentFormModal from "./GamePaymentFormModal";
 import SessionDevices from "./SessionDevices";
 import SessionStreamLine from "./SessionStreamLine";
@@ -38,7 +41,9 @@ import { formatPhoneDisplay } from "../../../../../utils/phoneFormat";
 import { getImageUrl } from "../../../../../utils/upload";
 import {
   CLIP_STATUS_TONE,
+  DRIVE_EMAIL_SENDABLE,
   SESSION_STATUS_TONE,
+  driveEmailText,
   formatBytes,
   formatDate,
   formatMinutes,
@@ -50,6 +55,7 @@ import {
   useEndSession,
   useGetSessionById,
   useRetrySessionVideo,
+  useSendSessionDriveEmail,
 } from "../../../../../services/requests/admin/sessions";
 
 /** CR-003 / CR-006: whole-video status → StatusDot tone. */
@@ -234,6 +240,11 @@ const SessionDetailSheet = ({
   // CR-001: the game's Google Drive folder as a QR + link (paid or free games)
   const [driveOpen, setDriveOpen] = useState(false);
   const showDrive = !!session?.driveUrl && session?.paymentStatus !== "Unpaid";
+  // CR-018: the player's email and the Drive-link email
+  const [emailOpen, setEmailOpen] = useState(false);
+  const sendEmailMutation = useSendSessionDriveEmail();
+  const canSendEmail =
+    canWrite && !!session?.email && DRIVE_EMAIL_SENDABLE.includes(session?.driveEmail?.status);
   const canAddTime = canWrite && session?.status === "Recording" && !!session?.endAt;
   const canTakePayment =
     hasPermission("payments", null, "write") &&
@@ -453,6 +464,55 @@ const SessionDetailSheet = ({
                     {
                       label: "Phone",
                       value: formatPhoneDisplay(session.phone) || "—",
+                    },
+                    {
+                      // CR-018: gets the game's Google Drive link
+                      label: "Email",
+                      value: (
+                        <div className="space-y-1.5">
+                          <div className="break-all">{session.email || "—"}</div>
+                          {session.driveEmail && (
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color:
+                                  session.driveEmail.status === "Failed"
+                                    ? "var(--color-error)"
+                                    : "var(--color-text-muted)",
+                              }}
+                            >
+                              {driveEmailText(session.driveEmail)}
+                            </div>
+                          )}
+                          {canWrite && (
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setEmailOpen(true)}
+                              >
+                                <Mail />
+                                {session.email ? "Edit email" : "Add email"}
+                              </Button>
+                              {canSendEmail && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={sendEmailMutation.isPending}
+                                  onClick={() => sendEmailMutation.mutate(session.sessionId)}
+                                >
+                                  <Send />
+                                  {session.driveEmail.status === "Sent"
+                                    ? "Send Drive link again"
+                                    : "Send Drive link"}
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ),
                     },
                     {
                       label: "Player link",
@@ -692,6 +752,13 @@ const SessionDetailSheet = ({
       <GameDriveDialog
         open={driveOpen}
         onClose={() => setDriveOpen(false)}
+        session={session}
+        canWrite={canWrite}
+      />
+      <SessionEmailFormModal
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        onSuccess={() => setEmailOpen(false)}
         session={session}
       />
       <AddTimeFormModal

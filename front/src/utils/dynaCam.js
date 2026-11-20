@@ -58,6 +58,45 @@ export const CLIP_DRIVE_LABEL = {
   Deleted: "Drive: moved to trash",
 };
 
+/**
+ * CR-018: where a game's "your game is in Google Drive" email stands
+ * (session.driveEmail from the API) → the line staff read.
+ */
+export const driveEmailText = (driveEmail) => {
+  if (!driveEmail) return "";
+  switch (driveEmail.status) {
+    case "NoEmail":
+      return "No email — add one to send the player the Google Drive link";
+    case "WaitingForGame":
+      return "The Google Drive link is emailed once the game ends and its videos are in Drive";
+    case "WaitingForPayment":
+      return "The Google Drive link is emailed once the game is paid";
+    case "WaitingForDrive":
+      return "The Google Drive link is emailed once its videos finish uploading to Drive";
+    case "Queued":
+      return driveEmail.error
+        ? `Sending again shortly — last try: ${driveEmail.error}`
+        : "Sending the Google Drive link shortly";
+    case "NotSetUp":
+      return "Ready to email, but email isn't set up on the server (SendGrid key missing)";
+    case "Sending":
+      return "Sending the Google Drive link…";
+    case "Sent":
+      return `Google Drive link emailed to ${driveEmail.to}${
+        driveEmail.sentAt ? ` · ${formatDateTime(driveEmail.sentAt)}` : ""
+      }${driveEmail.error ? ` (last resend failed: ${driveEmail.error})` : ""}`;
+    case "Failed":
+      return `Couldn't email the Google Drive link: ${driveEmail.error || "sending failed"}`;
+    case "NoDrive":
+      return "Not emailed — this game has no Google Drive copy";
+    default:
+      return "";
+  }
+};
+
+/** CR-018: Send Drive link (again) is possible in these states. */
+export const DRIVE_EMAIL_SENDABLE = ["Queued", "Sent", "Failed"];
+
 /** Clip source → the label staff read. */
 export const CLIP_SOURCE_LABEL = {
   QR: "QR scan",

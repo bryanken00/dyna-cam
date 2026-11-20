@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
-import { Film, Loader2, Phone, Plus, User, X } from "lucide-react";
+import { Film, Loader2, Mail, Phone, Plus, User, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,6 +50,12 @@ const gameSchema = z
     ...gameTimeFields,
     playerName: z.string().trim().max(100, "Keep the name under 100 characters"),
     phone: zPhone,
+    // CR-018: optional — gets the game's Google Drive link once it's in Drive and paid
+    email: z
+      .string()
+      .trim()
+      .max(255, "Keep the email under 255 characters")
+      .refine((v) => v === "" || z.string().email().safeParse(v).success, "Enter a valid email"),
     // CR-015: no payment at the desk — the player gets the videos at once
     free: z.boolean(),
     // CR-013: how many saves the courtside device may hold for this game
@@ -88,6 +94,7 @@ const emptyValues = () => ({
   ...fromGameMinutes(DEFAULT_GAME_MINUTES),
   playerName: "",
   phone: "",
+  email: "",
   free: false,
   maxCaptures: DEFAULT_MAX_SAVES,
 });
@@ -163,6 +170,7 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
         durationMinutes: toGameMinutes(values),
         playerName: values.playerName || null,
         phone: values.phone || null,
+        email: values.email || null,
         free: values.free,
         maxCaptures: Number(values.maxCaptures),
       });
@@ -339,13 +347,39 @@ const SessionFormDrawer = ({ open, onClose, onSuccess }) => {
                       </FormItem>
                     )}
                   />
+                  {/* CR-018: the game's Google Drive link is emailed here */}
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2">
+                        <FormLabel>Email</FormLabel>
+                        <div className="relative">
+                          <Mail className={iconPrefix} style={mutedIcon} />
+                          <FormControl>
+                            <Input
+                              type="email"
+                              inputMode="email"
+                              autoCapitalize="none"
+                              placeholder="e.g., juan@gmail.com"
+                              className="h-10 pl-9"
+                              maxLength={255}
+                              {...field}
+                            />
+                          </FormControl>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
                 <p
                   className="m-0 mt-3"
                   style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
                 >
-                  Optional — shown on the player&apos;s page so they know the
-                  footage is theirs.
+                  Optional — the name shows on the player&apos;s page. The email
+                  gets the game&apos;s Google Drive link once its videos are in
+                  Drive and the game is paid.
                 </p>
               </div>
 

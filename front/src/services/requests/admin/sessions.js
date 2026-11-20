@@ -12,6 +12,8 @@ import {
   cancelSessionApi,
   endSessionApi,
   extendSessionApi,
+  updateSessionEmailApi,
+  sendSessionDriveEmailApi,
   createSessionPairingCodeApi,
   cancelSessionPairingCodeApi,
   unpairSessionDeviceApi,
@@ -92,6 +94,39 @@ export const useExtendSession = () => {
       if (error.response?.status === 409) {
         queryClient.invalidateQueries({ queryKey: ["sessions"] });
       }
+    },
+  });
+};
+
+// Mutation: CR-018 fix the player's email ({ sessionId, email })
+export const useUpdateSessionEmail = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: updateSessionEmailApi,
+    onSuccess: (response) => {
+      toast.success(response?.message || "Player email saved");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to save the email");
+    },
+  });
+};
+
+// Mutation: CR-018 email the game's Google Drive link to the player now (sessionId)
+export const useSendSessionDriveEmail = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: sendSessionDriveEmailApi,
+    onSuccess: (response) => {
+      toast.success(response?.message || "Google Drive link emailed");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to send the email");
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
 };

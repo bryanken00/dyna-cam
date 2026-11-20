@@ -25,8 +25,8 @@ const sinceText = (stored, prefix) =>
  *
  * All new problems and fixes of a pass go out together on each channel:
  *  • Discord: one message to ALERT_DISCORD_WEBHOOK_URL.
- *  • Email: one per user with the Venue alerts permission — only when SMTP is
- *    set up (SMTP_HOST) and ALERT_EMAIL isn't "false".
+ *  • Email: one per user with the Venue alerts permission — only when email is
+ *    set up (SENDGRID_API_KEY, CR-018) and ALERT_EMAIL isn't "false".
  * With neither, they are only logged.
  *
  * @param {import("../../config/database.js").default} db
@@ -143,9 +143,10 @@ export const runVenueAlerts = async (
   return tally;
 };
 
-/** Email alerts need a real SMTP server; ALERT_EMAIL=false turns them off. */
+/** Email alerts need SendGrid (SENDGRID_API_KEY); ALERT_EMAIL=false turns them off. */
 export const alertEmailEnabled = () =>
-  Boolean(process.env.SMTP_HOST) && process.env.ALERT_EMAIL !== "false";
+  Boolean(process.env.SENDGRID_API_KEY) &&
+  process.env.ALERT_EMAIL !== "false";
 
 /**
  * Staff who get alert emails: Active users with an Active sign-in whose access
@@ -227,7 +228,7 @@ const notify = async (db, { opened, resolved, now, discord, mail, emailEnabled }
   }
 
   if (!result.discord && result.emailed === 0) {
-    logger.warn("Venue alerts reached nobody (set ALERT_DISCORD_WEBHOOK_URL, or SMTP for email)", {
+    logger.warn("Venue alerts reached nobody (set ALERT_DISCORD_WEBHOOK_URL, or SENDGRID_API_KEY for email)", {
       opened: opened.map((row) => row.message),
       resolved: resolved.map((row) => row.message),
     });
