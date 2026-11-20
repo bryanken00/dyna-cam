@@ -132,19 +132,18 @@ export const signLiveLink = (liveKey, courtId, exp) =>
   crypto.createHmac("sha256", liveKey).update(`${courtId}.${exp}`).digest("hex");
 
 /**
- * A signed live-view link for the session's court, from the venue's online
- * recorder box that reported a LAN address; null when the session isn't
- * recording or no box can serve it.
- *
- * CR-007: on a two-camera court `cameras` lists each camera's link (the box
- * serves camera 2 at /live/<court>/cam2/, same signature) for the device's
- * Cam 1 | Cam 2 switch; `hlsUrl` stays camera 1 for apps without the switch.
- *
- * @returns {Promise<{ hlsUrl: string, expiresAt: string,
- *   cameras?: Array<{ camera: 1 | 2, hlsUrl: string }> } | null>}
+ * CR-029: the signature on a replay link — hex HMAC-SHA256(liveKey,
+ * `replay.${courtId}.${from}.${to}.${exp}`), from/to in epoch seconds. Must
+ * match edge/src/live.js signReplay.
  */
-export const liveLink = async (db, row, nowMs = Date.now()) => {
-  if (!sessionRecording(row, nowMs)) return null;
+export const signReplayLink = (liveKey, courtId, from, to, exp) =>
+  crypto.createHmac("sha256", liveKey).update(`replay.${courtId}.${from}.${to}.${exp}`).digest("hex");
+
+/**
+ * The venue's online recorder box that serves the session's court live view:
+ * { liveUrl (no trailing /), liveKey (plain) }, or null.
+ */
+const liveBox = async (db, row) => {
   const boxes = await db.query(
     `SELECT liveUrl, liveKey, lastStatus FROM devices
      WHERE venueId = ? AND status = 'Active' AND lastSeenAt >= ?
@@ -164,10 +163,29 @@ export const liveLink = async (db, row, nowMs = Date.now()) => {
   // null when it was stored under another server key — the box's next heartbeat fixes it
   const liveKey = decryptSecret(box.liveKey);
   if (!liveKey) return null;
+  return { liveUrl: String(box.liveUrl).replace(/\/+$/, ""), liveKey };
+};
+
+/**
+ * A signed live-view link for the session's court, from the venue's online
+ * recorder box that reported a LAN address; null when the session isn't
+ * recording or no box can serve it.
+ *
+ * CR-007: on a two-camera court `cameras` lists each camera's link (the box
+ * serves camera 2 at /live/<court>/cam2/, same signature) for the device's
+ * Cam 1 | Cam 2 switch; `hlsUrl` stays camera 1 for apps without the switch.
+ *
+ * @returns {Promise<{ hlsUrl: string, expiresAt: string,
+ *   cameras?: Array<{ camera: 1 | 2, hlsUrl: string }> } | null>}
+ */
+export const liveLink = async (db, row, nowMs = Date.now()) => {
+  if (!sessionRecording(row, nowMs)) return null;
+  const box = await liveBox(db, row);
+  if (!box) return null;
 
   const exp = Math.floor(nowMs / 1000) + LIVE_LINK_MINUTES * 60;
-  const sig = signLiveLink(liveKey, row.courtId, exp);
-  const base = `${String(box.liveUrl).replace(/\/+$/, "")}/live/${encodeURIComponent(row.courtId)}`;
+  const sig = signLiveLink(box.liveKey, row.courtId, exp);
+  const base = `${box.liveUrl}/live/${encodeURIComponent(row.courtId)}`;
   const query = `exp=${exp}&sig=${sig}`;
   const hlsUrl = `${base}/index.m3u8?${query}`;
   return {
@@ -180,6 +198,38 @@ export const liveLink = async (db, row, nowMs = Date.now()) => {
           cameras: [
             { camera: 1, hlsUrl },
             { camera: 2, hlsUrl: `${base}/cam2/index.m3u8?${query}` },
+          ],
+        }
+      : {}),
+  };
+};
+
+/**
+ * CR-029: a signed link to replay one stretch of the session's court — the
+ * game page's Preview before a save. The box builds a finished HLS playlist
+ * of that stretch from its buffer. The caller checks the stretch is inside
+ * the game. null when no box of the venue can serve it.
+ *
+ * @param {{ fromMs: number, toMs: number }} stretch - epoch ms
+ * @returns {Promise<{ hlsUrl: string, cameras?: Array<{ camera: 1 | 2, hlsUrl: string }> } | null>}
+ */
+export const replayLink = async (db, row, { fromMs, toMs }, nowMs = Date.now()) => {
+  const box = await liveBox(db, row);
+  if (!box) return null;
+  const from = Math.floor(fromMs / 1000);
+  const to = Math.ceil(toMs / 1000);
+  const exp = Math.floor(nowMs / 1000) + LIVE_LINK_MINUTES * 60;
+  const sig = signReplayLink(box.liveKey, row.courtId, from, to, exp);
+  const base = `${box.liveUrl}/live/${encodeURIComponent(row.courtId)}`;
+  const query = `from=${from}&to=${to}&exp=${exp}&sig=${sig}`;
+  const hlsUrl = `${base}/replay.m3u8?${query}`;
+  return {
+    hlsUrl,
+    ...(Number(row.hasCamera2)
+      ? {
+          cameras: [
+            { camera: 1, hlsUrl },
+            { camera: 2, hlsUrl: `${base}/cam2/replay.m3u8?${query}` },
           ],
         }
       : {}),

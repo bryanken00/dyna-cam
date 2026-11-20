@@ -13,11 +13,6 @@ const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 export const CLIP_PRE_SECONDS = 60;
 /** Seconds after it — covers the time it takes to reach the QR or button. */
 export const CLIP_POST_SECONDS = 5;
-/** The length a player is told they get. */
-export const CLIP_DURATION_SECONDS = CLIP_PRE_SECONDS;
-
-/** A second save on the same court within this window returns the first clip. */
-export const CLIP_COOLDOWN_SECONDS = 20;
 
 /** A recorder box counts as online if its last heartbeat is this recent. */
 export const DEVICE_ONLINE_SECONDS = 90;
@@ -63,7 +58,7 @@ export const appUrl = () =>
     .trim()
     .replace(/\/+$/, "");
 
-/** Public page for a court's QR sign. */
+/** Public page for a court's QR sign — CR-027: where a player starts a game. */
 export const courtQrUrl = (qrToken) => `${appUrl()}/court/${qrToken}`;
 
 /** Public page for a clip's share link. */

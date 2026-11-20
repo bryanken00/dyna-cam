@@ -101,6 +101,9 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   (`retentionWindows`); dropped below `DISK_CRITICAL_MB` so recording never stops.
 - Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
   retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
+  **CR-027: the API no longer has this route** — court buttons and 60-second clips are gone (the
+  court QR starts a game). Every press now gets 404, which the box drops; the listener and relay
+  are dead code kept so old boxes need no update. Don't build on them; remove them in a box release.
 - Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
   (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion` + `camera: 1 | 2`
   (one entry per camera). `/config` court `previewWanted` → one JPEG per camera per ~30 s to
@@ -160,6 +163,14 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   MEDIA-SEQUENCE: first numbered segment = its name (epoch s), then +1 per segment (never goes back,
   even after a restart); DISCONTINUITY on a new run / gap / untimed file, with DISCONTINUITY-SEQUENCE.
   Newest closed segment > 30 s old → 404.
+- **Replay (CR-029)**: `GET /live/:courtId/[cam2/]replay.m3u8?from=<epoch s>&to=<epoch s>&exp&sig` — the
+  game page's Preview before a save. `sig` = HMAC(key, `replay.${courtId}.${from}.${to}.${exp}`)
+  (`signReplay` / `checkReplaySignature`; ≤ `REPLAY_MAX_SECONDS`), so a link replays only the stretch the
+  API signed. VOD playlist (`buildReplayPlaylist`): VERSION 6, `PLAYLIST-TYPE:VOD`, MEDIA- and
+  DISCONTINUITY-SEQUENCE 0, `EXT-X-START` at `from`, DISCONTINUITY on a wall-clock jump or untimed file,
+  ENDLIST. Segments come from the wall-clock time line (`readReplaySegments` → `buildTimeline`, timing files
+  read, never moved); their URIs carry the replay query and are served only when named inside the stretch
+  (`segmentInReplay`, 120 s slack before it). Nothing recorded there → 404. A live link can't ask for one.
 - Buffer files restart their clock at 0 (`reset_timestamps`): segments are served with PTS/DTS/PCR
   + the csv content start (90 kHz) — a Transform over `createReadStream`, in place, no remux.
 - Heartbeat: `live: { url: "http(s)://<LIVE_HOST | first private IPv4>:<port>", key } | null`.

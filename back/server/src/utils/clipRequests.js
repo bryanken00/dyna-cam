@@ -1,30 +1,15 @@
-import {
-  CLIP_COOLDOWN_SECONDS,
-  CLIP_DURATION_SECONDS,
-  DEVICE_ONLINE_SECONDS,
-  secondsAgoLocal,
-} from "./clips.js";
-import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
-import { randomPayCode, randomToken } from "./crypto/tokens.js";
+import { DEVICE_ONLINE_SECONDS, secondsAgoLocal } from "./clips.js";
 
 /**
- * Saving a clip — shared by every way a player or staff member can ask for one
- * (court QR, court button, Admin "save now"). Runs inside the caller's
- * transaction (`conn` from req.db.beginTransaction()).
- *
- * Rules (PLAN-001):
- *  - the court and its venue must be Active, the court must have a camera, and
- *    the venue's recorder box must be online — otherwise nothing could cut it
- *  - a request within CLIP_COOLDOWN_SECONDS of another clip on the same court
- *    returns that clip (merged) instead of making a second one
+ * Whether a court can record right now — for the court's Start a game page
+ * (CR-027). Until CR-027 this file also saved 60-second clips from the court
+ * QR and the court button; that is gone, and clips already saved only expire.
  */
-
-const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 
 /** Columns every caller needs to decide whether a court can record. */
 export const COURT_RECORDING_COLUMNS = `
   c.courtId, c.venueId, c.name, c.cameraRtspUrl IS NOT NULL AS hasCamera,
-  v.name AS venueName, v.logoUrl, v.clipPrice, c.streamEnabled, c.streamWatchUrl,
+  v.name AS venueName, v.logoUrl, c.streamEnabled, c.streamWatchUrl,
   EXISTS (
     SELECT 1 FROM devices d
     WHERE d.venueId = c.venueId AND d.status = 'Active' AND d.lastSeenAt >= ?
@@ -32,89 +17,3 @@ export const COURT_RECORDING_COLUMNS = `
 
 /** The `?` parameter COURT_RECORDING_COLUMNS needs (first in the list). */
 export const onlineSince = () => secondsAgoLocal(DEVICE_ONLINE_SECONDS);
-
-/** Manila timestamp of an epoch-ms instant (a button press time from the box). */
-export const localFromEpochMs = (ms) => moment(ms).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss");
-
-/**
- * @param {import("mysql2/promise").PoolConnection} conn - inside a transaction
- * @param {Object} court - a row with COURT_RECORDING_COLUMNS
- * @param {Object} options
- * @param {"QR"|"BUTTON"|"STAFF"} options.source
- * @param {string} [options.pairedAppId] - the paired staff phone that asked (PLAN-002)
- * @param {string} options.requestedAt - Manila timestamp of the moment to keep
- * @returns {Promise<{ ok: false, reason: "CAMERA_OFFLINE" }
- *   | { ok: true, merged: boolean, clipId: string, shareToken: string }>}
- */
-export const requestClip = async (conn, court, { source, requestedAt, pairedAppId = null }) => {
-  if (!court.hasCamera || !court.recorderOnline) {
-    return { ok: false, reason: "CAMERA_OFFLINE" };
-  }
-
-  // Lock just the court row: concurrent requests on one court are serialised,
-  // so the cooldown check below can't be raced
-  await conn.execute(`SELECT id FROM courts WHERE courtId = ? FOR UPDATE`, [court.courtId]);
-
-  const [recent] = await conn.execute(
-    `SELECT clipId, shareToken FROM clips
-     WHERE courtId = ? AND status IN ('Pending', 'Processing', 'Ready')
-       AND requestedAt BETWEEN DATE_SUB(?, INTERVAL ? SECOND) AND DATE_ADD(?, INTERVAL ? SECOND)
-     ORDER BY requestedAt DESC
-     LIMIT 1`,
-    [court.courtId, requestedAt, CLIP_COOLDOWN_SECONDS, requestedAt, CLIP_COOLDOWN_SECONDS]
-  );
-  if (recent.length > 0) {
-    return { ok: true, merged: true, clipId: recent[0].clipId, shareToken: recent[0].shareToken };
-  }
-
-  const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
-  const clipId = uuidRow[0].id;
-  const shareToken = randomToken();
-  const now = getCurrentTimestampLocal();
-
-  // Players' clips cost the venue's price (Phase 4, paid in cash at the desk);
-  // a staff save is free
-  const price = source === "STAFF" ? 0 : Number(court.clipPrice || 0);
-  const priced = price > 0;
-
-  // The pay code is unique; on the (rare) collision try another. CR-015: and
-  // never one a game uses — staff look codes up on the Payments page
-  for (let attempt = 0; ; attempt += 1) {
-    const payCode = priced ? randomPayCode() : null;
-    if (payCode && attempt < 4) {
-      const [taken] = await conn.execute(
-        `SELECT 1 FROM recording_sessions WHERE payCode = ? LIMIT 1`,
-        [payCode]
-      );
-      if (taken.length > 0) continue;
-    }
-    try {
-      await conn.execute(
-        `INSERT INTO clips
-           (clipId, venueId, courtId, pairedAppId, source, requestedAt, durationSeconds, price,
-            paymentStatus, payCode, shareToken, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`,
-        [
-          clipId,
-          court.venueId,
-          court.courtId,
-          pairedAppId,
-          source,
-          requestedAt,
-          CLIP_DURATION_SECONDS,
-          price,
-          priced ? "Unpaid" : "Free",
-          payCode,
-          shareToken,
-          now,
-          now,
-        ]
-      );
-      break;
-    } catch (err) {
-      if (err.code !== "ER_DUP_ENTRY" || attempt >= 4) throw err;
-    }
-  }
-
-  return { ok: true, merged: false, clipId, shareToken };
-};

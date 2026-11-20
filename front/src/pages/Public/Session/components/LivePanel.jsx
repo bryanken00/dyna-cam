@@ -10,9 +10,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
+  blockedByPage,
   liveExpiryMs,
   liveIdentity,
   liveUrlFor,
+  nativeHlsOnly,
 } from "../../../../utils/liveLink";
 
 /** After a playback error, try the same link again this often. */
@@ -55,24 +57,6 @@ const useStableLink = (url) => {
   }
   return link;
 };
-
-/**
- * A plain-HTTP box link can't play on an HTTPS page (the browser blocks it as
- * mixed content) — the box needs its certificate (CERT_PATH) for that.
- */
-const blockedByPage = (url) =>
-  window.location.protocol === "https:" && String(url).startsWith("http:");
-
-/**
- * True only where hls.js can't run (no Media Source — older iPhones), so the
- * browser's own HLS is the one way to play. Not `canPlayType()` alone: Edge
- * and Chrome on Windows answer "maybe" for HLS and then fail the box's stream
- * (BUG-005), so hls.js goes first wherever it works.
- */
-const nativeHlsOnly = (video) =>
-  !("MediaSource" in window) &&
-  !("ManagedMediaSource" in window) &&
-  Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
 
 /**
  * BUG-006: the box numbers the live playlist's discontinuities from the epoch

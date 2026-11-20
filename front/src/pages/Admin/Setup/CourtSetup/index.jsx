@@ -2,7 +2,6 @@ import { Link } from "react-router";
 import { ChevronLeft, CircleAlert } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useCourtSetupHooks } from "./hooks";
-import ButtonSection from "./components/ButtonSection";
 import CameraSection from "./components/CameraSection";
 import GoogleDriveSection from "./components/GoogleDriveSection";
 import QrSignSection from "./components/QrSignSection";
@@ -16,8 +15,8 @@ import { VENUES_PATH, venuePath } from "../../../../utils/dynaCam";
 
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — set up one court: its
- * camera and optional camera 2 (guided, with the live check), QR sign,
- * button and live stream.
+ * camera and optional camera 2 (guided, with the live check), QR sign (where
+ * players start a game, CR-027), live stream and Google Drive.
  * Each section saves on its own with the court's full PUT.
  */
 const CourtSetupPage = () => {
@@ -98,7 +97,7 @@ const CourtSetupPage = () => {
 
       <PageHeader
         title={courtName}
-        subtitle={`${venueName} · set up the cameras, QR sign, button, live stream and Google Drive`}
+        subtitle={`${venueName} · set up the cameras, QR sign, live stream and Google Drive`}
         actions={
           <div className="flex items-center gap-3">
             <StatusDot tone={court.status === "Active" ? "success" : "muted"}>
@@ -129,7 +128,6 @@ const CourtSetupPage = () => {
         onSaved={handleCameraSaved}
       />
       <QrSignSection key={`qr-${court.courtId}`} court={court} canWrite={canWrite} />
-      <ButtonSection key={`button-${court.courtId}`} court={court} canWrite={canWrite} />
       <StreamSection key={`stream-${court.courtId}`} court={court} canWrite={canWrite} />
       <GoogleDriveSection key={`drive-${court.courtId}`} court={court} canWrite={canWrite} />
     </div>

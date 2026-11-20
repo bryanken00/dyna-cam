@@ -110,40 +110,6 @@ export const driveEmailActionLabel = (status) =>
 /** CR-018: Send Drive link (again) is possible in these states. */
 export const DRIVE_EMAIL_SENDABLE = ["Queued", "Sent", "Failed"];
 
-/* ── Court buttons ───────────────────────────────────────────────────────── */
-
-/** Same rule as the API: 3–32 letters, digits, "-" or "_". */
-export const BUTTON_CODE_PATTERN = /^[A-Za-z0-9_-]{3,32}$/;
-export const BUTTON_CODE_MAX = 32;
-
-/** The recorder box's LAN listener port for Wi-Fi button presses. */
-export const BUTTON_PRESS_PORT = 8089;
-
-/** "Dink City Pickleball" → "dink-city-pickleball". */
-const slugify = (value) =>
-  String(value || "")
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-/**
- * Suggest a court button code: `<venue-slug>-<court-slug>`, lowercase, cut to
- * fit 32 characters by shortening the venue part first.
- *
- *   suggestButtonCode("Dink City Pickleball", "Court 1") → "dink-city-pickleball-court-1"
- */
-export const suggestButtonCode = (venueName, courtName) => {
-  const court = slugify(courtName) || "court";
-  const venue = slugify(venueName);
-  if (!venue) return court.slice(0, BUTTON_CODE_MAX);
-  const room = BUTTON_CODE_MAX - court.length - 1;
-  if (room < 3) return court.slice(0, BUTTON_CODE_MAX);
-  const venuePart = venue.slice(0, room).replace(/-+$/, "");
-  return `${venuePart}-${court}`;
-};
-
 /* ── Recording sessions ──────────────────────────────────────────────────── */
 
 /** Session status → StatusDot tone. Recording gets the live (glowing) dot. */
@@ -458,7 +424,6 @@ export const formatStreamDetails = (live) => {
 export const courtUpdatePayload = (court, overrides = {}) => ({
   name: decodeHTML(court?.name),
   status: court?.status === "Inactive" ? "Inactive" : "Active",
-  buttonCode: court?.buttonCode || "",
   streamEnabled: !!court?.stream?.enabled,
   streamWatchUrl: court?.stream?.watchUrl || "",
   // CAM2 / STACKED need camera 2 (the API answers 400 otherwise)

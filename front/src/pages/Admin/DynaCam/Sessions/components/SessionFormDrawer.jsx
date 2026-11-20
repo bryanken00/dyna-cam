@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
-import GameTimeFields from "./GameTimeFields";
+import GameTimeFields from "../../../../../components/GameTimeFields";
 import SearchableSelect from "../../../../../components/SearchableSelect";
 import SectionLabel from "../../../../../components/SectionLabel";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";

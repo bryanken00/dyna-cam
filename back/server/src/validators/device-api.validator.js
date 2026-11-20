@@ -97,15 +97,6 @@ export const jobsQuerySchema = z.object({
   wait: queryInt(25, { min: 0, max: 30 }),
 });
 
-// POST /buttons/:buttonCode/press
-export const buttonParamsSchema = z.object({
-  buttonCode: z.string().regex(/^[A-Za-z0-9_-]{3,32}$/, "Invalid button code"),
-});
-export const buttonPressSchema = z.object({
-  // When the button was pressed, by the box's (NTP) clock. Omitted = now.
-  pressedAtMs: z.number().int().positive().optional(),
-});
-
 // POST /clips/:clipId/fail
 export const failClipSchema = z.object({
   reason: z.string().trim().min(1, "Reason is required").max(255),

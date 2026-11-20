@@ -10,11 +10,10 @@ single file. On a court with two cameras, players get a separate full-size video
 with **Cam 1** and **Cam 2** buttons on their page. While the game is recording, the page simply
 says so; after **End game** the court's recorder sends the game, and the page shows "Saving your
 game… uploading 45%", then the video. A dropped connection picks up where it stopped instead of
-starting over. Game videos are the camera's own full quality (60-second replays still carry the
-venue logo; game videos don't). If the camera missed a stretch, the video skips it and the page
+starting over. Game videos are the camera's own full quality (they don't carry the venue logo). If the camera missed a stretch, the video skips it and the page
 says how many minutes and when ("8 minutes weren't recorded (11:23 – 11:31 AM)"). Staff see each
 camera's video, its upload progress and a **Try again** button in Admin → Sessions. With Google
-Drive connected, the game's folder gets the whole video. 60-second replays are unchanged.
+Drive connected, the game's folder gets the whole video.
 
 ## Dev notes
 

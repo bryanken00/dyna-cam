@@ -1,11 +1,17 @@
 import express from "express";
 import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
-import { CLIP_DURATION_SECONDS, clipShareUrl, sessionShareUrl } from "../../../utils/clips.js";
-import { COURT_RECORDING_COLUMNS, onlineSince, requestClip } from "../../../utils/clipRequests.js";
-import { materializeSessionParts, settleSessions, uploadPercent } from "../../../utils/sessions.js";
+import { sessionShareUrl } from "../../../utils/clips.js";
+import { COURT_RECORDING_COLUMNS, onlineSince } from "../../../utils/clipRequests.js";
+import {
+  advanceSessions,
+  materializeSessionParts,
+  settleSessions,
+  uploadPercent,
+} from "../../../utils/sessions.js";
+import { bookCourt } from "../../../utils/gameStart.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
 import {
@@ -18,9 +24,11 @@ import {
 import {
   liveLink,
   loadDeviceSession,
+  sessionEnded,
   sessionRecording,
   toDeviceSession,
 } from "../../../utils/sessionDevices.js";
+import { describeStream } from "../../../utils/sessionStreams.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { captureSchema } from "../../../validators/app.validator.js";
 import {
@@ -28,30 +36,38 @@ import {
   courtTokenParamsSchema,
   gameCodeParamsSchema,
   sessionTokenParamsSchema,
+  startGameSchema,
 } from "../../../validators/public.validator.js";
 
 /**
  * Player routes (PLAN-001) — mounted at /api/v1/public with NO login.
- * Anyone holding a court's QR code or a clip's share link can use them, so they
+ * Anyone holding a court's QR code or a share link can use them, so they
  * reveal only what the player's page shows (no IDs, no camera details) and the
- * write is rate-limited.
+ * writes are rate-limited.
  *
- *   GET  /courts/:qrToken          the court page
- *   POST /courts/:qrToken/clips    save the last 60 seconds
- *   GET  /clips/:shareToken        the clip page (polls until Ready)
+ *   GET  /courts/:qrToken          CR-027: the court's Start a game page
+ *   POST /courts/:qrToken/games    CR-027: start a game (free, 5 saves, records now)
+ *   GET  /clips/:shareToken        a clip saved before CR-027 (polls until Ready)
  *   GET  /sessions/:shareToken     a recorded session's page (its parts; CR-025: live view)
  *   POST /sessions/:shareToken/captures   CR-025: Save the last … from the game's page
+ *   (CR-028: End game, delete a save and the player's stream are in game-controls.controller.js)
  *   GET  /games/:payCode           CR-015: Find a game on the courtside device
  */
 const router = express.Router();
 
-// Per IP: a player saving a clip every few seconds is plenty. Someone with a
-// photo of the QR code can't flood the recorder (the per-court cooldown below
-// also merges bursts into one clip).
-const saveClipLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CLIP_POINTS || "10", 10),
+const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
+const FORMAT = "YYYY-MM-DD HH:mm:ss";
+
+/** CR-027: saves a player-started game allows (the requester's "max clip is only 5"). */
+export const PLAYER_MAX_CAPTURES = 5;
+
+// CR-027, per IP: starting a game is a once-a-booking thing. A few tries a
+// minute covers a mistyped form; the court's one-game rule stops the rest.
+const startGameLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_START_POINTS || "5", 10),
   duration: 60,
-  message: "Too many saves — wait a moment and try again.",
+  keyGenerator: (req) => `public-start:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
 });
 
 // CR-015: Find a game by its code — a code is 6 characters from 31, so a few
@@ -79,15 +95,18 @@ const SESSION_BY_TOKEN = `SELECT sessionId, venueId FROM recording_sessions
 /**
  * CR-025: what the game's page needs to show the court device's live view and
  * "Save the last …" — the same signed LAN link as GET /app/session (null unless
- * recording), and the save limits with the time played so far.
+ * recording), and the save limits with the time played so far. CR-028: and the
+ * player's own stream, as the device shows it.
  */
 const liveAndCapture = async (db, sessionId, captureCount) => {
   const row = await loadDeviceSession(db, sessionId);
   const now = Date.now();
-  if (!row) return { live: null, capture: null };
+  if (!row) return { live: null, capture: null, stream: null, canStream: false };
   const recording = sessionRecording(row, now);
   return {
     live: await liveLink(db, row, now),
+    stream: await describeStream(db, row, now),
+    canStream: !sessionEnded(row, now),
     capture: {
       minSeconds: CAPTURE_MIN_SECONDS,
       available: recording,
@@ -102,24 +121,43 @@ const COURT_BY_TOKEN = `
   SELECT ${COURT_RECORDING_COLUMNS}
   FROM courts c
   JOIN venues v ON v.venueId = c.venueId
-  WHERE c.qrToken = ? AND c.status = 'Active' AND v.status = 'Active'`;
+  WHERE c.qrToken = ? AND c.status = 'Active' AND v.status = 'Active'
+  LIMIT 1`;
+
+const findCourt = async (db, qrToken) => {
+  const rows = await db.query(COURT_BY_TOKEN, [onlineSince(), qrToken]);
+  return rows[0] || null;
+};
+
+/** "3:45 PM" for a stored Manila timestamp. */
+const clockTime = (local) => moment.tz(local, FORMAT, TIMEZONE).format("h:mm A");
 
 /**
  * GET /courts/:qrToken
+ * CR-027: the court's Start a game page — the court, and whether a game is on
+ * it now (and until when).
  */
 router.get(
   "/courts/:qrToken",
   validateParams(courtTokenParamsSchema),
   catchAsync(async (req, res) => {
-    const rows = await req.db.query(`${COURT_BY_TOKEN} LIMIT 1`, [
-      onlineSince(),
-      req.params.qrToken,
-    ]);
-    if (rows.length === 0) {
+    const court = await findCourt(req.db, req.params.qrToken);
+    if (!court) {
       return res.sendError("This court code is not valid", 404);
     }
 
-    const court = rows[0];
+    // Statuses and open games' windows up to date before reading them
+    await advanceSessions(req.db, { venueId: court.venueId });
+    const now = getCurrentTimestampLocal();
+    const [current] = await req.db.query(
+      `SELECT endAt, openEnded FROM recording_sessions
+       WHERE courtId = ? AND status NOT IN ('Cancelled', 'Failed')
+         AND startAt <= ? AND endAt > ?
+       ORDER BY startAt ASC
+       LIMIT 1`,
+      [court.courtId, now, now]
+    );
+
     return res.sendSuccess("Court", {
       court: {
         name: court.name,
@@ -129,65 +167,92 @@ router.get(
         // Phase 5: where to watch this court live (when the venue streams it)
         liveWatchUrl:
           court.streamEnabled && court.recorderOnline ? court.streamWatchUrl || null : null,
-        clipSeconds: CLIP_DURATION_SECONDS,
+        // A game is on the court now; busyUntil is when it ends (null: open-ended)
+        busy: Boolean(current),
+        busyUntil: current && Number(current.openEnded) !== 1 ? current.endAt : null,
+        maxSaves: PLAYER_MAX_CAPTURES,
       },
     });
   })
 );
 
 /**
- * POST /courts/:qrToken/clips
- * Save the last CLIP_DURATION_SECONDS. A save on the same court within
- * CLIP_COOLDOWN_SECONDS of another returns that clip instead (200, merged) —
- * four players tapping after the same rally get one clip, not four.
- * The rules live in utils/clipRequests.js (shared with the button and staff save).
+ * POST /courts/:qrToken/games
+ * CR-027: a player starts their own game. Body: { durationMinutes, playerName?,
+ * phone?, email? }. The court is paid for with its reservation, outside the
+ * system, so the game is free (no pay code) and allows PLAYER_MAX_CAPTURES
+ * saves. It records at once and stops by itself, like Admin's New game with a
+ * game time (CR-016). One game per court; the reply has only the game's link.
  */
 router.post(
-  "/courts/:qrToken/clips",
-  saveClipLimiter,
+  "/courts/:qrToken/games",
+  startGameLimiter,
   validateParams(courtTokenParamsSchema),
+  validateBody(startGameSchema),
   catchAsync(async (req, res) => {
-    let conn;
-    let result;
-    try {
-      conn = await req.db.beginTransaction();
-
-      const [courts] = await conn.execute(`${COURT_BY_TOKEN} LIMIT 1`, [
-        onlineSince(),
-        req.params.qrToken,
-      ]);
-      if (courts.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError("This court code is not valid", 404);
-      }
-
-      result = await requestClip(conn, courts[0], {
-        source: "QR",
-        requestedAt: getCurrentTimestampLocal(),
-      });
-      await req.db.commit(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
+    const court = await findCourt(req.db, req.params.qrToken);
+    if (!court) {
+      return res.sendError("This court code is not valid", 404);
     }
-
-    if (!result.ok) {
+    // Nothing would be recorded — say so instead of starting an empty game
+    if (!court.hasCamera || !court.recorderOnline) {
       return res.sendError(
-        "This court's camera is offline right now, so nothing can be saved. Please tell the front desk.",
+        "This court's camera is offline right now, so a game can't start. Please tell the front desk.",
         null,
         503,
         ERROR_CODES.CAMERA_OFFLINE
       );
     }
+    await advanceSessions(req.db, { venueId: court.venueId });
 
-    const body = {
-      shareToken: result.shareToken,
-      shareUrl: clipShareUrl(result.shareToken),
-      merged: result.merged,
-    };
-    return result.merged
-      ? res.sendSuccess("Already saving this moment", body)
-      : res.sendSuccess("Saving your clip", body, 201);
+    const { durationMinutes, playerName, phone, email } = req.body;
+    const start = moment().tz(TIMEZONE);
+    const startLocal = start.format(FORMAT);
+    const endLocal = start.clone().add(durationMinutes, "minutes").format(FORMAT);
+
+    let conn;
+    let booked;
+    try {
+      conn = await req.db.beginTransaction();
+      booked = await bookCourt(conn, {
+        courtId: court.courtId,
+        startLocal,
+        endLocal,
+        status: "Recording",
+        now: getCurrentTimestampLocal(),
+        playerName,
+        phone,
+        email,
+        maxCaptures: PLAYER_MAX_CAPTURES,
+        free: true,
+        startedByPlayer: true,
+      });
+      if (booked.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!booked.ok) {
+      if (booked.reason === "BUSY") {
+        // A game on now, or one booked later inside the chosen game time
+        const later = booked.busyFrom && booked.busyFrom > startLocal;
+        return res.sendError(
+          later
+            ? `This court is booked from ${clockTime(booked.busyFrom)} — pick a shorter game time`
+            : "This court already has a game going",
+          409
+        );
+      }
+      return res.sendError("This court code is not valid", 404);
+    }
+
+    return res.sendSuccess(
+      "Game started — the camera is recording",
+      { shareToken: booked.shareToken, shareUrl: sessionShareUrl(booked.shareToken) },
+      201
+    );
   })
 );
 
@@ -322,10 +387,17 @@ router.get(
     if (open) info.endAt = null;
     if (session.status === "Waiting") info.startAt = null;
     // CR-025: the court's live video and Save the last … while recording
-    const { live, capture } = await liveAndCapture(req.db, rows[0].sessionId, captures.length);
+    const { live, capture, stream, canStream } = await liveAndCapture(
+      req.db,
+      rows[0].sessionId,
+      captures.length
+    );
     return res.sendSuccess("Session", {
       live,
       capture,
+      // CR-028: the player's own Facebook / YouTube stream (null = none)
+      stream,
+      canStream,
       session: {
         ...info,
         status: session.status,
@@ -366,7 +438,8 @@ router.get(
 
 /**
  * POST /sessions/:shareToken/captures
- * CR-025: Save the last `seconds` of the game from its page — the same save as
+ * CR-025: Save the last `seconds` of the game from its page (CR-029: or the
+ * stretch `fromSeconds` → `toSeconds`, seconds into the game) — the same save as
  * the court device's (CR-013): while recording, after the first minute, up to
  * the game's limit, a double tap returns the save already made. The save has
  * no paired device. It shows under "Your saves" (locked until paid, CR-015).
@@ -389,6 +462,9 @@ router.post(
       sessionId: rows[0].sessionId,
       pairedAppId: null,
       seconds: req.body.seconds,
+      // CR-029: or the stretch picked with both handles
+      fromSeconds: req.body.fromSeconds,
+      toSeconds: req.body.toSeconds,
     });
     if (!result.ok) {
       const refusal = CAPTURE_REFUSALS[result.reason];

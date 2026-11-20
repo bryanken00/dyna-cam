@@ -1,21 +1,22 @@
 // Player pages — no login. The plain axiosInstance sends no Authorization
-// header. GETs need no CSRF token. The save POST is not CSRF-checked by the API
-// today (csrfProtection only guards /admin/auth/*); if that ever changes, this
-// instance's response interceptor already handles a first-time visitor: on 403
-// CSRF_VALIDATION_FAILED it fetches /api/v1/admin/auth/csrf-token (which sets
-// the cookie) and retries once with the same Idempotency-Key.
+// header; the court's QR token is the credential. GETs need no CSRF token. The
+// POST is not CSRF-checked by the API today (csrfProtection only guards
+// /admin/auth/*); if that ever changes, this instance's response interceptor
+// already handles a first-time visitor: on 403 CSRF_VALIDATION_FAILED it
+// fetches /api/v1/admin/auth/csrf-token (which sets the cookie) and retries
+// once with the same Idempotency-Key.
 import axiosInstance from "../axios";
 
+// CR-027: the court's Start a game page →
+// { court: { name, venueName, venueLogoUrl, cameraReady, liveWatchUrl, busy, busyUntil, maxSaves } }
 export const getPublicCourtApi = async (qrToken) => {
   const response = await axiosInstance.get(`/api/v1/public/courts/${qrToken}`);
   return response.data;
 };
 
-// 201 { shareToken, shareUrl, merged: false } — a new clip
-// 200 { shareToken, shareUrl, merged: true }  — someone saved this moment already
-export const savePublicClipApi = async (qrToken) => {
-  const response = await axiosInstance.post(
-    `/api/v1/public/courts/${qrToken}/clips`,
-  );
+// CR-027: start a game. body: { durationMinutes, playerName?, phone?, email? }
+// 201 { shareToken, shareUrl } — the game records now; open its page
+export const startPublicGameApi = async ({ qrToken, body }) => {
+  const response = await axiosInstance.post(`/api/v1/public/courts/${qrToken}/games`, body);
   return response.data;
 };

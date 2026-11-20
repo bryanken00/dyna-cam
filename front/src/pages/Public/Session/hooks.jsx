@@ -1,24 +1,41 @@
 import { useCallback, useMemo, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { decodeHTML } from "../../../utils/decode-html";
 import { copyText } from "../../../utils/clipboard";
+import { confirm } from "../../../store/confirmStore";
 import {
+  useDeletePublicCapture,
+  useEndPublicGame,
   useGetPublicSession,
+  usePublicPreview,
+  usePublicStreamLink,
   useSavePublicCapture,
+  useStopPublicStream,
 } from "../../../services/requests/public/sessions";
 
 export const useSessionPageHooks = () => {
   const { shareToken } = useParams();
+  const navigate = useNavigate();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
     useGetPublicSession(shareToken);
   // CR-025: Save the last … from this page
   const saveCapture = useSavePublicCapture(shareToken);
+  // CR-029: Preview a stretch before saving it
+  const previewStretch = usePublicPreview(shareToken);
+  // CR-028: the courtside device's other controls
+  const endGame = useEndPublicGame(shareToken);
+  const deleteCapture = useDeletePublicCapture(shareToken);
+  const streamLink = usePublicStreamLink(shareToken);
+  const stopStream = useStopPublicStream(shareToken);
 
   const session = data?.data?.session || null;
   // CR-025: the court's live video (null unless recording) and the save limits
   const live = data?.data?.live || null;
   const capture = data?.data?.capture || null;
+  // CR-028: the player's own Facebook / YouTube stream
+  const stream = data?.data?.stream || null;
+  const canStream = !!data?.data?.canStream;
   const isRecording = session?.status === "Recording";
   const notFound = error?.response?.status === 404;
   const parts = useMemo(() => session?.parts || [], [session]);
@@ -75,6 +92,59 @@ export const useSessionPageHooks = () => {
     else toast.error("Couldn't copy the link");
   }, [courtName, venueName]);
 
+  // CR-028: End game, as on the court device
+  const handleEndGame = useCallback(async () => {
+    const ok = await confirm({
+      title: "End the game?",
+      description: "Recording stops and the whole game is saved for you.",
+      confirmText: "End game",
+      cancelText: "Keep recording",
+      danger: true,
+    });
+    if (ok) endGame.mutate();
+  }, [endGame]);
+
+  // CR-028: delete a save — frees one of the game's saves
+  const handleDeleteCapture = useCallback(
+    async (item) => {
+      const waiting = ["Queued", "Saving"].includes(item.status);
+      const ok = await confirm({
+        title: `Delete Save ${item.number}?`,
+        description: waiting
+          ? "It won't be made, and it won't appear on this page."
+          : "Its video is removed from this page.",
+        confirmText: "Delete",
+        cancelText: "Keep",
+        danger: true,
+      });
+      if (ok) deleteCapture.mutate({ number: item.number, savedAt: item.savedAt });
+    },
+    [deleteCapture],
+  );
+
+  // CR-028: add or change the player's stream on the stream setup page
+  const handleOpenStream = useCallback(() => {
+    streamLink.mutate(undefined, {
+      onSuccess: (response) => {
+        const url = response?.data?.url;
+        if (!url) return;
+        // The API builds it from APP_URL; open its path on this site
+        navigate(new URL(url, window.location.origin).pathname);
+      },
+    });
+  }, [streamLink, navigate]);
+
+  const handleStopStream = useCallback(async () => {
+    const ok = await confirm({
+      title: "Stop streaming?",
+      description: "The recording keeps going.",
+      confirmText: "Stop streaming",
+      cancelText: "Keep streaming",
+      danger: true,
+    });
+    if (ok) stopStream.mutate();
+  }, [stopStream]);
+
   return {
     session,
     live,
@@ -82,6 +152,17 @@ export const useSessionPageHooks = () => {
     isRecording,
     since: dataUpdatedAt,
     saveCapture,
+    previewStretch,
+    stream,
+    canStream,
+    handleEndGame,
+    isEnding: endGame.isPending,
+    handleDeleteCapture,
+    deletingNumber: deleteCapture.isPending ? deleteCapture.variables?.number : null,
+    handleOpenStream,
+    isOpeningStream: streamLink.isPending,
+    handleStopStream,
+    isStoppingStream: stopStream.isPending,
     parts,
     videos,
     captures,

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Form } from "@/components/ui/form";
 
-import GameTimeFields from "./GameTimeFields";
+import GameTimeFields from "../../../../../components/GameTimeFields";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { GAME_MAX_TOTAL_MINUTES, formatMinutes } from "../../../../../utils/dynaCam";
 import { gameTimeFields, toGameMinutes } from "../../../../../utils/gameTime";

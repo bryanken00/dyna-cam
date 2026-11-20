@@ -44,7 +44,7 @@ const router = express.Router();
 
 const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
-         c.cameraRtspUrl, c.camera2RtspUrl, c.qrToken, c.buttonCode, c.streamEnabled,
+         c.cameraRtspUrl, c.camera2RtspUrl, c.qrToken, c.streamEnabled,
          c.streamRtmpUrl, c.streamWatchUrl, c.streamLayout, c.snapshotPath, c.snapshotAt,
          c.snapshot2Path, c.snapshot2At, ${COURT_DRIVE_COLUMNS("c")},
          c.status, c.dateCreated, c.dateUpdated,
@@ -102,20 +102,6 @@ const liveCameras = async (db, venueIds) => {
 
 const liveKey = (courtId, camera = 1) => `${courtId}#${camera}`;
 
-/** Button codes are unique across every court (one press must reach one court). */
-const buttonCodeTaken = async (conn, buttonCode, exceptCourtId = null) => {
-  if (!buttonCode) return false;
-  const [rows] = exceptCourtId
-    ? await conn.execute(
-        `SELECT courtId FROM courts WHERE buttonCode = ? AND courtId != ? LIMIT 1 FOR UPDATE`,
-        [buttonCode, exceptCourtId]
-      )
-    : await conn.execute(`SELECT courtId FROM courts WHERE buttonCode = ? LIMIT 1 FOR UPDATE`, [
-        buttonCode,
-      ]);
-  return rows.length > 0;
-};
-
 /**
  * Camera 2 needs camera 1, and a layout showing camera 2 needs camera 2.
  * @returns {string|null} the problem, for a 400
@@ -165,6 +151,7 @@ const toCourt = (row, live = new Map(), queue = null) => {
     ...court,
     venueLogoUrl: signUploadUrl(row.venueLogoUrl),
     recorderOnline: Boolean(row.recorderOnline),
+    // The court's QR sign — CR-027: players start their own game there
     qrUrl: courtQrUrl(row.qrToken),
     camera: toCamera(cameraRtspUrl, live.get(liveKey(row.courtId, 1)), snapshotPath, snapshotAt),
     // PLAN-002 Phase H: the optional second camera
@@ -317,7 +304,6 @@ router.post(
       name,
       cameraRtspUrl,
       camera2RtspUrl,
-      buttonCode,
       streamEnabled,
       streamRtmpUrl,
       streamWatchUrl,
@@ -357,10 +343,6 @@ router.post(
         await req.db.rollback(conn);
         return res.sendError("This venue already has a court with this name", 409);
       }
-      if (await buttonCodeTaken(conn, buttonCode)) {
-        await req.db.rollback(conn);
-        return res.sendError("Another court already uses this button code", 409);
-      }
 
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
       const courtId = uuidRow[0].id;
@@ -368,10 +350,10 @@ router.post(
 
       await conn.execute(
         `INSERT INTO courts
-           (courtId, venueId, name, cameraRtspUrl, camera2RtspUrl, qrToken, buttonCode,
+           (courtId, venueId, name, cameraRtspUrl, camera2RtspUrl, qrToken,
             streamEnabled, streamRtmpUrl, streamWatchUrl, streamLayout, status, dateCreated,
             dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           courtId,
           venueId,
@@ -379,7 +361,6 @@ router.post(
           encryptSecret(cameraRtspUrl),
           encryptSecret(camera2RtspUrl),
           qrToken,
-          buttonCode || null,
           streamEnabled ? 1 : 0,
           encryptSecret(streamRtmpUrl),
           streamWatchUrl || null,
@@ -419,7 +400,6 @@ router.put(
       removeCamera,
       camera2RtspUrl,
       removeCamera2,
-      buttonCode,
       streamEnabled,
       streamRtmpUrl,
       removeStream,
@@ -457,10 +437,6 @@ router.put(
         await req.db.rollback(conn);
         return res.sendError("This venue already has a court with this name", 409);
       }
-      if (await buttonCodeTaken(conn, buttonCode, courtId)) {
-        await req.db.rollback(conn);
-        return res.sendError("Another court already uses this button code", 409);
-      }
 
       let storedCamera = target[0].cameraRtspUrl;
       if (removeCamera) storedCamera = null;
@@ -493,14 +469,13 @@ router.put(
 
       await conn.execute(
         `UPDATE courts
-         SET name = ?, cameraRtspUrl = ?, camera2RtspUrl = ?, buttonCode = ?, streamEnabled = ?,
+         SET name = ?, cameraRtspUrl = ?, camera2RtspUrl = ?, streamEnabled = ?,
              streamRtmpUrl = ?, streamWatchUrl = ?, streamLayout = ?, status = ?, dateUpdated = ?
          WHERE courtId = ?`,
         [
           name,
           storedCamera,
           storedCamera2,
-          buttonCode || null,
           streamEnabled && !removeStream ? 1 : 0,
           storedStream,
           streamWatchUrl || null,
@@ -643,8 +618,7 @@ router.delete(
   checkPermission("venues", "courts", "write"),
   catchAsync(async (req, res) => {
     const result = await req.db.query(
-      // The button code is freed so a new court can take over the button
-      `UPDATE courts SET status = 'Deleted', buttonCode = NULL, dateUpdated = ?
+      `UPDATE courts SET status = 'Deleted', dateUpdated = ?
        WHERE courtId = ? AND status != 'Deleted'`,
       [getCurrentTimestampLocal(), req.params.courtId]
     );

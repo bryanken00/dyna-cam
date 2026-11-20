@@ -54,17 +54,51 @@ export const CAPTURE_REFUSALS = {
     status: 409,
     message: `This game already has its saves — delete one to save another.`,
   },
+  // CR-029: a stretch that isn't a minute of the game played so far
+  BAD_RANGE: {
+    status: 400,
+    message: "Pick at least a minute of the game played so far.",
+  },
 };
 
 /**
- * Save the last `seconds` of the paired device's game.
+ * CR-029: the stretch to save as Manila times, or null when it isn't at least
+ * CAPTURE_MIN_SECONDS of the game played so far. `fromSeconds`/`toSeconds` are
+ * seconds into the game; an end a moment past "now" (the page's clock) is
+ * pulled back to now. Without them: the last `seconds`, ending now.
+ */
+const stretchOf = ({ gameStart, nowM, played, seconds, fromSeconds, toSeconds }) => {
+  if (fromSeconds === undefined || toSeconds === undefined) {
+    const length = Math.min(Math.max(seconds, CAPTURE_MIN_SECONDS), played);
+    return {
+      startAt: nowM.clone().subtract(length, "seconds").format(FORMAT),
+      endAt: nowM.format(FORMAT),
+      seconds,
+    };
+  }
+  const to = Math.min(toSeconds, played);
+  if (fromSeconds < 0 || to - fromSeconds < CAPTURE_MIN_SECONDS) return null;
+  return {
+    startAt: gameStart.clone().add(fromSeconds, "seconds").format(FORMAT),
+    endAt: gameStart.clone().add(to, "seconds").format(FORMAT),
+    seconds: to - fromSeconds,
+  };
+};
+
+/**
+ * Save the last `seconds` of the paired device's game — or (CR-029) the
+ * stretch `fromSeconds` → `toSeconds` of it.
  *
  * @param {import("../../config/database.js").default} db
- * @param {{ sessionId: string, pairedAppId: string|null, seconds: number }} input
+ * @param {{ sessionId: string, pairedAppId: string|null, seconds?: number,
+ *   fromSeconds?: number, toSeconds?: number }} input
  * @returns {Promise<{ ok: true, captureId: string, repeated: boolean }
  *   | { ok: false, reason: keyof CAPTURE_REFUSALS }>}
  */
-export const createCapture = async (db, { sessionId, pairedAppId, seconds }) => {
+export const createCapture = async (
+  db,
+  { sessionId, pairedAppId, seconds, fromSeconds, toSeconds }
+) => {
   let conn;
   try {
     conn = await db.beginTransaction();
@@ -87,20 +121,32 @@ export const createCapture = async (db, { sessionId, pairedAppId, seconds }) => 
       return refuse("NOT_RECORDING");
     }
     const nowM = moment.tz(now, FORMAT, TIMEZONE);
-    const played = nowM.diff(moment.tz(session.startAt, FORMAT, TIMEZONE), "seconds");
+    const gameStart = moment.tz(session.startAt, FORMAT, TIMEZONE);
+    const played = nowM.diff(gameStart, "seconds");
     if (played < CAPTURE_MIN_SECONDS) return refuse("TOO_EARLY");
+    const stretch = stretchOf({ gameStart, nowM, played, seconds, fromSeconds, toSeconds });
+    if (!stretch) return refuse("BAD_RANGE");
 
-    // A double tap: the same length again within a few seconds is the same save
+    // A double tap: the same save again within a few seconds is the same save
+    // (the same length — and, for a picked stretch, the same start)
     const [recent] = await conn.execute(
-      `SELECT captureId, dateCreated FROM session_captures
+      `SELECT captureId, dateCreated, startAt FROM session_captures
        WHERE sessionId = ? AND status = 'Active' AND seconds = ?
        ORDER BY dateCreated DESC, id DESC LIMIT 1`,
-      [sessionId, seconds]
+      [sessionId, stretch.seconds]
     );
+    const picked = fromSeconds !== undefined;
     if (
       recent[0] &&
       nowM.diff(moment.tz(recent[0].dateCreated, FORMAT, TIMEZONE), "seconds") <
-        CAPTURE_REPEAT_SECONDS
+        CAPTURE_REPEAT_SECONDS &&
+      (!picked ||
+        Math.abs(
+          moment.tz(recent[0].startAt, FORMAT, TIMEZONE).diff(
+            moment.tz(stretch.startAt, FORMAT, TIMEZONE),
+            "seconds"
+          )
+        ) <= CAPTURE_REPEAT_SECONDS)
     ) {
       await db.commit(conn);
       conn = null;
@@ -113,15 +159,23 @@ export const createCapture = async (db, { sessionId, pairedAppId, seconds }) => 
     );
     if (Number(counts[0].total) >= captureLimits(session).maxPerGame) return refuse("TOO_MANY");
 
-    const length = Math.min(Math.max(seconds, CAPTURE_MIN_SECONDS), played);
-    const startAt = nowM.clone().subtract(length, "seconds").format(FORMAT);
     const [[{ id: captureId }]] = await conn.execute(`SELECT UUID() AS id`);
     await conn.execute(
       `INSERT INTO session_captures
          (captureId, sessionId, venueId, startAt, endAt, seconds, pairedAppId, status,
           dateCreated, dateUpdated)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
-      [captureId, sessionId, session.venueId, startAt, now, seconds, pairedAppId, now, now]
+      [
+        captureId,
+        sessionId,
+        session.venueId,
+        stretch.startAt,
+        stretch.endAt,
+        stretch.seconds,
+        pairedAppId,
+        now,
+        now,
+      ]
     );
     // One video per camera, made by the box like the whole game's
     for (const camera of await gameVideoCameras(db, session.courtId)) {

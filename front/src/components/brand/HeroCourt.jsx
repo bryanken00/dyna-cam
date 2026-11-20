@@ -4,7 +4,7 @@
  * deep-blue playing area, white lines, a lime ball. Cam 1 and Cam 2 sit behind
  * the baselines. A rally is drawn once on load (a shot from the far baseline
  * that lands in the kitchen, with a speed trail like the venue's wall art),
- * and under it the 60-second replay that rally ends up in.
+ * and under it the game it ends up in (CR-027: the whole game, from Start game).
  *
  * Brand colours (index.css `--color-brand-*`) are constant across light and
  * dark: the band is always blue. Motion is CSS (`.landing-*`), so the
@@ -140,7 +140,7 @@ const HeroCourt = () => (
   </svg>
 );
 
-/** The 60 seconds the rally ends up in: a lime bar that fills up to "now". */
+/** The game the rally ends up in: a lime bar that fills from Start game up to "now". */
 export const ReplayBar = () => (
   <div>
     <div
@@ -153,8 +153,8 @@ export const ReplayBar = () => (
       />
     </div>
     <div className="flex justify-between mt-2" style={{ fontSize: 13 }}>
-      <span style={{ color: WHITE, opacity: 0.7 }}>60 seconds ago</span>
-      <span style={{ color: WHITE, fontWeight: 600 }}>Saved now</span>
+      <span style={{ color: WHITE, opacity: 0.7 }}>Game started</span>
+      <span style={{ color: WHITE, fontWeight: 600 }}>Recording now</span>
     </div>
   </div>
 );

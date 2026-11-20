@@ -9,8 +9,7 @@ A paired staff phone can now record a **whole game**, not just the last 60 secon
 and tap **Start recording**; a timer runs on the court until you tap **End recording**, and then a
 QR code for the whole game appears for the players to photograph. The link works at once, and the
 video fills in over the next few minutes. A forgotten recording stops by itself after 3 hours, or
-before the court's next booking. "Save last 60 s" is still there as a smaller button, and the
-court's QR sign and button work as before. Games started from a phone show on the Sessions page as
+before the court's next booking. Games started from a phone show on the Sessions page as
 "Started by <phone> (phone)".
 
 ## Dev notes

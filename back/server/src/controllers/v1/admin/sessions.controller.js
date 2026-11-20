@@ -33,6 +33,7 @@ import {
 } from "../../../validators/sessions.validator.js";
 import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
 import { captureLimits, loadCaptures } from "../../../utils/sessionCaptures.js";
+import { bookCourt } from "../../../utils/gameStart.js";
 import {
   DRIVE_EMAIL_COLUMNS,
   driveEmailState,
@@ -81,7 +82,8 @@ const SESSION_SELECT = `
                    AND dv.driveStatus = 'Uploaded') AS driveReady,
          (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
            AS paidAmount,
-         COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)')) AS startedBy,
+         COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'),
+                  IF(s.startedByPlayer = 1, 'Player (QR)', NULL)) AS startedBy,
          (SELECT COUNT(*) FROM session_videos sv
           WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL AND sv.status = 'Ready')
            AS videosReady,
@@ -459,36 +461,33 @@ router.post(
     const endLocal = start.clone().add(durationMinutes, "minutes").format(FORMAT);
     const now = getCurrentTimestampLocal();
 
+    // CR-016: a game started now records at once — no device needed — and
+    // stops by itself at endLocal (advanceSessions)
+    const status = startNow ? "Recording" : "Scheduled";
     let conn;
     try {
       conn = await req.db.beginTransaction();
-
-      const [courts] = await conn.execute(
-        `SELECT c.courtId, c.venueId, c.cameraRtspUrl IS NOT NULL AS hasCamera
-         FROM courts c JOIN venues v ON v.venueId = c.venueId
-         WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
-         LIMIT 1 FOR UPDATE`,
-        [courtId]
-      );
-      if (courts.length === 0) {
+      const booked = await bookCourt(conn, {
+        courtId,
+        startLocal,
+        endLocal,
+        status,
+        now,
+        playerName,
+        phone,
+        email,
+        maxCaptures,
+        free: Boolean(req.body.free),
+        createdByAccountId: req.user.accountId,
+      });
+      if (!booked.ok) {
         await req.db.rollback(conn);
-        return res.sendError("Court not found or not active", 404);
-      }
-      if (!courts[0].hasCamera) {
-        await req.db.rollback(conn);
-        return res.sendError("This court has no camera configured", 400);
-      }
-
-      // The court row is locked, so concurrent bookings are serialised
-      const [overlap] = await conn.execute(
-        `SELECT sessionId FROM recording_sessions
-         WHERE courtId = ? AND status NOT IN ('Cancelled', 'Failed')
-           AND startAt < ? AND endAt > ?
-         LIMIT 1`,
-        [courtId, endLocal, startLocal]
-      );
-      if (overlap.length > 0) {
-        await req.db.rollback(conn);
+        if (booked.reason === "COURT_NOT_FOUND") {
+          return res.sendError("Court not found or not active", 404);
+        }
+        if (booked.reason === "NO_CAMERA") {
+          return res.sendError("This court has no camera configured", 400);
+        }
         return res.sendError(
           startNow
             ? "This court already has a game — end it before starting a new one"
@@ -496,41 +495,7 @@ router.post(
           409
         );
       }
-
-      const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
-      const sessionId = uuidRow[0].id;
-      const shareToken = randomToken();
-      // CR-016: a game started now records at once — no device needed — and
-      // stops by itself at endLocal (advanceSessions)
-      const status = startNow ? "Recording" : "Scheduled";
-      const payCode = await insertWithPayCode((code) =>
-        conn.execute(
-          `INSERT INTO recording_sessions
-             (sessionId, venueId, courtId, startAt, endAt, playerName, phone, email, shareToken,
-              createdByAccountId, maxCaptures, status, paymentStatus, payCode, dateCreated,
-              dateUpdated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            sessionId,
-            courts[0].venueId,
-            courtId,
-            startLocal,
-            endLocal,
-            playerName || null,
-            phone || null,
-            email || null,
-            shareToken,
-            req.user.accountId,
-            maxCaptures ?? null,
-            status,
-            code ? "Unpaid" : "Free",
-            code,
-            now,
-            now,
-          ]
-        ),
-        { conn, free: Boolean(req.body.free) }
-      );
+      const { sessionId, shareToken, payCode } = booked;
 
       await req.db.commit(conn);
       return res.sendSuccess(

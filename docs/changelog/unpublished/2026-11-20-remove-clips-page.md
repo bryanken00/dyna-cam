@@ -5,8 +5,8 @@ audience: user
 ref: CR-024
 ---
 
-The Clips page is gone from the Admin portal; Dyna Cam now has Sessions and Payments. Players can
-still save 60-second replays, and staff still take their payments in Payments.
+The Clips page is gone from the Admin portal; Dyna Cam now has Sessions and Payments. Staff still
+take payments in Payments.
 
 ## Dev notes
 

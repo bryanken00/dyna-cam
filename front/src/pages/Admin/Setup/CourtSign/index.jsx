@@ -115,7 +115,7 @@ const CourtSignPage = () => {
         <div className="mt-6 flex items-center gap-2.5 justify-center">
           <ScanLine className="w-6 h-6 shrink-0" style={{ color: "var(--color-text-dark)" }} />
           <p className="m-0 font-semibold" style={{ fontSize: 19, letterSpacing: "-0.2px" }}>
-            Scan to save the last 60 seconds of your rally
+            Scan to start recording your game
           </p>
         </div>
         <p className="m-0 mt-1.5" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
@@ -125,7 +125,7 @@ const CourtSignPage = () => {
         {/* Privacy + brand */}
         <div className="mt-auto pt-4 w-full" style={{ borderTop: "1px solid var(--color-line)" }}>
           <p className="m-0" style={{ fontSize: 11.5, color: "var(--color-text-secondary)" }}>
-            This court is recorded. Only moments players choose to save are kept.
+            Your game is recorded from Start game until its time is up.
           </p>
           <p
             className="m-0 mt-1 uppercase"

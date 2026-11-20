@@ -21,3 +21,21 @@ export const liveUrlFor = (live, camera) =>
   live?.cameras?.find((link) => link.camera === camera)?.hlsUrl ??
   live?.hlsUrl ??
   null;
+
+/**
+ * A plain-HTTP box link can't play on an HTTPS page (the browser blocks it as
+ * mixed content) — the box needs its certificate (CERT_PATH) for that.
+ */
+export const blockedByPage = (url) =>
+  window.location.protocol === "https:" && String(url).startsWith("http:");
+
+/**
+ * True only where hls.js can't run (no Media Source — older iPhones), so the
+ * browser's own HLS is the one way to play. Not `canPlayType()` alone: Edge
+ * and Chrome on Windows answer "maybe" for HLS and then fail the box's stream
+ * (BUG-005), so hls.js goes first wherever it works.
+ */
+export const nativeHlsOnly = (video) =>
+  !("MediaSource" in window) &&
+  !("ManagedMediaSource" in window) &&
+  Boolean(video.canPlayType("application/vnd.apple.mpegurl"));

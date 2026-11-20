@@ -6,9 +6,8 @@ ref: CR-011
 ---
 
 The website has a new pickleball look in deep navy, blue and lime. The home page opens on a navy
-hero with a court drawn on a tilted card, then shows how a game is recorded in four steps (ask
-the front desk, get your pairing key, pair and play, get your video), what players can do during
-it (save a 60-second replay, go live, watch from the bench), what venues get, and the privacy
+hero with a court drawn on a tilted card, then shows how a game is recorded step by step, what players can do during it (save their
+best rallies, go live, watch from the bench), what venues get, and the privacy
 note, exactly as the product works today. Staff sign-in has the same navy look, and across the Admin portal
 buttons are navy, links and icons blue, and the Dashboard draws each court as a blue court. The
 browser tab now reads "Dyna Cam".

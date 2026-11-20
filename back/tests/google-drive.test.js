@@ -12,6 +12,7 @@ import { after, before, describe, it } from "node:test";
 
 import { gameJobs, sendGame } from "./helpers/gameUpload.js";
 import { JPEG, startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip } from "./helpers/legacyClip.js";
 
 const MP4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
@@ -221,17 +222,9 @@ describe("Google Drive per court", () => {
     return new URL(res.headers.get("location"));
   };
 
-  /** A replay saved from the court QR, cut and uploaded by the box. @returns {{ clipId, shareToken }} */
-  const replay = async (courtId = home.courtId, qrToken = home.qrToken) => {
-    await ctx.sql.query(
-      `UPDATE clips SET requestedAt = DATE_SUB(requestedAt, INTERVAL 1 MINUTE) WHERE courtId = ?`,
-      [courtId]
-    );
-    const saved = await ctx.api("POST", `/public/courts/${qrToken}/clips`);
-    assert.equal(saved.status, 201, JSON.stringify(saved.body));
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      saved.data.shareToken,
-    ]);
+  /** A replay saved before CR-027, cut and uploaded by the box. @returns {{ clipId, shareToken }} */
+  const replay = async (courtId = home.courtId) => {
+    const row = await insertLegacyClip(ctx.sql, { courtId });
     const uploaded = await home.device("POST", `/device/clips/${row.clipId}/upload`, {
       form: [
         ["video", MP4, "video/mp4", "clip.mp4"],
@@ -239,7 +232,7 @@ describe("Google Drive per court", () => {
       ],
     });
     assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
-    return { clipId: row.clipId, shareToken: saved.data.shareToken };
+    return { clipId: row.clipId, shareToken: row.shareToken };
   };
   const clipRow = async (clipId) =>
     (

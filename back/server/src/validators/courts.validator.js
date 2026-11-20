@@ -58,19 +58,6 @@ const optionalWatchUrl = () =>
       .optional()
   );
 
-/**
- * The code a court's physical button sends to the recorder box
- * (http://<box>:<port>/press/<code>). Letters, digits, - and _.
- */
-const optionalButtonCode = () =>
-  emptyToUndefined(
-    z
-      .string()
-      .trim()
-      .regex(/^[A-Za-z0-9_-]{3,32}$/, "Use 3–32 letters, digits, - or _")
-      .optional()
-  );
-
 /** What a court's stream shows (PLAN-002 Phase H). CAM2/STACKED need camera 2. */
 export const STREAM_LAYOUTS = ["CAM1", "CAM2", "STACKED"];
 const optionalLayout = () => emptyToUndefined(z.enum(STREAM_LAYOUTS).optional());
@@ -82,7 +69,6 @@ export const createCourtSchema = z.object({
   cameraRtspUrl: optionalRtspUrl(),
   // PLAN-002 Phase H: an optional second camera (needs camera 1)
   camera2RtspUrl: optionalRtspUrl(),
-  buttonCode: optionalButtonCode(),
   streamEnabled: z.boolean().optional().default(false),
   streamRtmpUrl: optionalRtmpUrl(),
   streamWatchUrl: optionalWatchUrl(),
@@ -101,8 +87,6 @@ export const updateCourtSchema = z.object({
   removeCamera2: z.boolean().optional().default(false),
   // Omitted keeps the stored layout
   streamLayout: optionalLayout(),
-  // Full update like the other fields: omitted/"" clears the button
-  buttonCode: optionalButtonCode(),
   // Live stream: the RTMP address is write-only — omitted/"" keeps the stored
   // one, removeStream clears it (and turns streaming off)
   streamEnabled: z.boolean().optional().default(false),

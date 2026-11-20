@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pipeline, Transform } from "node:stream";
 import {
+  buildTimeline,
   mergeSegmentList,
   parseSegmentList,
   RUN_FILE,
@@ -23,6 +24,12 @@ import { cameraDirName, readJson, writeJsonAtomic } from "./util.js";
  *   GET /live/:courtId/index.m3u8?exp=<unix s>&sig=<hex>   → the last 5 closed segments
  *   GET /live/:courtId/<epoch>.ts?exp=…&sig=…             → one segment of that court
  *   GET /live/:courtId/cam2/index.m3u8 · /live/:courtId/cam2/<epoch>.ts   → camera 2, same signature
+ *   GET /live/:courtId/[cam2/]replay.m3u8?from=<s>&to=<s>&exp=…&sig=…
+ *       → CR-029: a finished (VOD) playlist of the stretch from → to (epoch
+ *       seconds) — the game page's Preview before a save. Its `sig` =
+ *       HMAC(liveKey, `replay.${courtId}.${from}.${to}.${exp}`), so a link
+ *       replays only the stretch the API signed; its segment URIs carry the
+ *       same query and are served only inside that stretch.
  *
  * No camera connection and no encoding: the files are the recorder's own.
  * `sig` = hex HMAC-SHA256(liveKey, `${courtId}.${exp}`), made by the API with
@@ -77,6 +84,44 @@ const TS_WRAP = 2 ** 33;
 export const signLive = (key, courtId, exp) =>
   crypto.createHmac("sha256", key).update(`${courtId}.${exp}`).digest("hex");
 
+/** CR-029: the longest stretch a replay link may cover (a game is at most 6 h). */
+export const REPLAY_MAX_SECONDS = 6 * 3600;
+/**
+ * A replay segment's name (when its file opened) may be this far before the
+ * stretch — a segment that started earlier still holds its first seconds, and
+ * Windows names lag the clock (BUG-004).
+ */
+const REPLAY_NAME_SLACK_MS = 120_000;
+const EPOCH_S = /^\d{9,11}$/;
+
+/** CR-029: hex HMAC-SHA256(key, `replay.${courtId}.${from}.${to}.${exp}`) — must match the API. */
+export const signReplay = (key, courtId, from, to, exp) =>
+  crypto.createHmac("sha256", key).update(`replay.${courtId}.${from}.${to}.${exp}`).digest("hex");
+
+/** CR-029: → "ok" | "bad" | "expired" for a replay link. Constant-time; malformed values are "bad". */
+export function checkReplaySignature({ key, courtId, from, to, exp, sig, nowMs }) {
+  if (!key || !EXP.test(exp ?? "") || !SIG.test(sig ?? "")) return "bad";
+  if (!EPOCH_S.test(from ?? "") || !EPOCH_S.test(to ?? "")) return "bad";
+  const length = Number(to) - Number(from);
+  if (length <= 0 || length > REPLAY_MAX_SECONDS) return "bad";
+  const expected = crypto
+    .createHmac("sha256", key)
+    .update(`replay.${courtId}.${from}.${to}.${exp}`)
+    .digest();
+  if (!crypto.timingSafeEqual(expected, Buffer.from(sig, "hex"))) return "bad";
+  return Number(exp) * 1000 <= nowMs ? "expired" : "ok";
+}
+
+/** CR-029: may this segment (by its name) be served for the stretch from → to? */
+export const segmentInReplay = (file, from, to) => {
+  const startMs = segmentStartMs(file);
+  return (
+    startMs !== null &&
+    startMs >= Number(from) * 1000 - REPLAY_NAME_SLACK_MS &&
+    startMs <= Number(to) * 1000
+  );
+};
+
 /** → "ok" | "bad" | "expired". Constant-time; malformed values are "bad". */
 export function checkSignature({ key, courtId, exp, sig, nowMs }) {
   if (!key || !EXP.test(exp ?? "") || !SIG.test(sig ?? "")) return "bad";
@@ -110,7 +155,14 @@ export function routeLive(method, rawUrl) {
     courtId = "";
   }
   const file = parts.at(-1);
-  const kind = file === "index.m3u8" ? "playlist" : SEGMENT_FILE.test(file) ? "segment" : null;
+  const kind =
+    file === "index.m3u8"
+      ? "playlist"
+      : file === "replay.m3u8"
+        ? "replay"
+        : SEGMENT_FILE.test(file)
+          ? "segment"
+          : null;
   if (!COURT_ID.test(courtId) || !kind) return { status: 404, error: "Not found" };
   return {
     kind,
@@ -119,6 +171,9 @@ export function routeLive(method, rawUrl) {
     file,
     exp: url.searchParams.get("exp"),
     sig: url.searchParams.get("sig"),
+    // CR-029: a replay link (and its segments) carries the stretch it was signed for
+    from: url.searchParams.get("from"),
+    to: url.searchParams.get("to"),
   };
 }
 
@@ -246,6 +301,74 @@ export function buildPlaylist(listed, query) {
     lines.push(`#EXTINF:${seg.duration.toFixed(3)},`, `${seg.name}?${query}`);
   });
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * CR-029: a finished (VOD) playlist of the time-line segments `chosen` (oldest
+ * first, from segments.js buildTimeline) that cover a stretch starting at
+ * `fromMs`. It starts playing at `fromMs` (EXT-X-START into the first
+ * segment), counts discontinuities from 0, and marks one wherever the wall
+ * clock jumps or a segment's timing is a guess. `query` goes on every URI.
+ */
+export function buildReplayPlaylist(chosen, fromMs, query) {
+  const durations = chosen.map((s) => Math.max(0.001, (s.endMs - s.startMs) / 1000));
+  const target = Math.max(1, ...durations.map((d) => Math.ceil(Number(d.toFixed(3)))));
+  const startOffset = Math.max(0, (fromMs - chosen[0].startMs) / 1000);
+  const lines = [
+    "#EXTM3U",
+    "#EXT-X-VERSION:6",
+    "#EXT-X-PLAYLIST-TYPE:VOD",
+    `#EXT-X-TARGETDURATION:${target}`,
+    "#EXT-X-MEDIA-SEQUENCE:0",
+    "#EXT-X-DISCONTINUITY-SEQUENCE:0",
+    `#EXT-X-START:TIME-OFFSET=${startOffset.toFixed(3)},PRECISE=YES`,
+  ];
+  chosen.forEach((seg, i) => {
+    const prev = chosen[i - 1];
+    if (prev && (!prev.exact || !seg.exact || Math.abs(seg.startMs - prev.endMs) > GAP_MS)) {
+      lines.push("#EXT-X-DISCONTINUITY");
+    }
+    lines.push(`#EXTINF:${durations[i].toFixed(3)},`, `${seg.name}?${query}`);
+  });
+  lines.push("#EXT-X-ENDLIST");
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * CR-029: the CLOSED segments of a court folder overlapping fromMs → toMs, on
+ * the wall-clock time line (segments.js), oldest first; null when the folder
+ * doesn't exist. Only files whose name is near the stretch are stat'ed, and
+ * the timing files are read, never moved (like readCourtSegments).
+ */
+export async function readReplaySegments(dir, fromMs, toMs) {
+  let names;
+  try {
+    names = await fsp.readdir(dir);
+  } catch (err) {
+    if (err.code === "ENOENT" || err.code === "ENOTDIR") return null;
+    throw err;
+  }
+  const nearby = names.filter((name) => {
+    const startMs = SEGMENT_FILE.test(name) ? segmentStartMs(name) : null;
+    return startMs !== null && startMs >= fromMs - REPLAY_NAME_SLACK_MS && startMs <= toMs;
+  });
+  // The folder's newest file is still being written — buildTimeline must see it to skip it
+  const newest = names
+    .filter((name) => SEGMENT_FILE.test(name))
+    .reduce((a, b) => (a && segmentStartMs(a) > segmentStartMs(b) ? a : b), null);
+  if (newest && !nearby.includes(newest)) nearby.push(newest);
+  const entries = (
+    await Promise.all(
+      nearby.map((name) =>
+        fsp
+          .stat(path.join(dir, name))
+          .then((stat) => ({ name, path: path.join(dir, name), mtimeMs: stat.mtimeMs }))
+          .catch(() => null)
+      )
+    )
+  ).filter(Boolean);
+  const index = await readTimingIndex(dir, new Map(entries.map((e) => [e.name, e.mtimeMs])));
+  return buildTimeline(entries, index).filter((s) => s.startMs < toMs && s.endMs > fromMs);
 }
 
 /** A 33-bit PES timestamp (PTS/DTS) at `o`. */
@@ -506,6 +629,22 @@ export function createLiveHandler({
     return res.end(req.method === "HEAD" ? undefined : body);
   }
 
+  /** CR-029: the stretch the link was signed for, as a finished playlist. */
+  async function serveReplay(req, res, route, dir) {
+    const segments = await readReplaySegments(dir, Number(route.from) * 1000, Number(route.to) * 1000);
+    if (!segments?.length) {
+      return sendText(req, res, 404, "Nothing recorded in that stretch yet");
+    }
+    const query = `from=${route.from}&to=${route.to}&exp=${route.exp}&sig=${route.sig}`;
+    const body = buildReplayPlaylist(segments, Number(route.from) * 1000, query);
+    res.writeHead(200, {
+      ...BASE_HEADERS,
+      "Content-Type": "application/vnd.apple.mpegurl",
+      "Content-Length": Buffer.byteLength(body),
+    });
+    return res.end(req.method === "HEAD" ? undefined : body);
+  }
+
   /** The clock offset of a segment: as numbered for the playlist, else from the timing files. */
   async function offsetOf(dir, name) {
     const numbered = court(dir).sequencer.byName.get(name);
@@ -557,13 +696,21 @@ export function createLiveHandler({
       const extra = route.status === 405 ? { Allow: "GET, HEAD" } : {};
       return sendText(req, res, route.status, route.error, extra);
     }
-    const check = checkSignature({ key, ...route, nowMs: now() });
+    // CR-029: a replay playlist, or a segment asked for with a replay link's query
+    const replay = route.kind === "replay" || route.from !== null || route.to !== null;
+    const check = replay
+      ? checkReplaySignature({ key, ...route, nowMs: now() })
+      : checkSignature({ key, ...route, nowMs: now() });
     if (check !== "ok") {
       log.debug(`live ${route.kind} for ${route.courtId} refused: ${check} link`);
       return sendText(req, res, 403, check === "expired" ? "Link expired" : "Bad signature");
     }
+    if (replay && route.kind === "segment" && !segmentInReplay(route.file, route.from, route.to)) {
+      return sendText(req, res, 404, "No such segment");
+    }
     const dir = path.join(bufferDir, cameraDirName(route.courtId, route.camera));
-    const serve = route.kind === "playlist" ? servePlaylist : serveSegment;
+    const serve =
+      route.kind === "playlist" ? servePlaylist : route.kind === "replay" ? serveReplay : serveSegment;
     return serve(req, res, route, dir).catch((err) => {
       log.warn(`live ${route.kind} for ${route.courtId} failed`, err);
       if (!res.headersSent) sendText(req, res, 500, "Live view error");

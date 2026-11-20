@@ -11,8 +11,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 
-import { formatMinutes } from "../../../../../utils/dynaCam";
-import { fromGameMinutes, toGameMinutes } from "../../../../../utils/gameTime";
+import { formatMinutes } from "../utils/dynaCam";
+import { fromGameMinutes, toGameMinutes } from "../utils/gameTime";
 
 const iconPrefix =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";

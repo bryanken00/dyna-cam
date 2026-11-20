@@ -1,7 +1,13 @@
+import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  deletePublicCaptureApi,
+  endPublicGameApi,
+  getPublicPreviewApi,
   getPublicSessionApi,
+  getPublicStreamLinkApi,
   savePublicCaptureApi,
+  stopPublicStreamApi,
 } from "../../api/public/sessions";
 
 const LIVE = ["Scheduled", "Recording", "Processing"];
@@ -36,7 +42,8 @@ export const useGetPublicSession = (shareToken) => {
 export const useSavePublicCapture = (shareToken) => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (seconds) => savePublicCaptureApi({ shareToken, seconds }),
+    // CR-029: { seconds } or { fromSeconds, toSeconds }
+    mutationFn: (body) => savePublicCaptureApi({ shareToken, body }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["publicSession", shareToken],
@@ -44,3 +51,55 @@ export const useSavePublicCapture = (shareToken) => {
     },
   });
 };
+
+/** The API's sentence for a failed control, or a fallback. */
+const failText = (error, fallback) =>
+  !error?.response
+    ? "Can't reach Dyna Cam — check your connection and try again."
+    : error.response.data?.message || fallback;
+
+/** A control on the game's page (CR-028): toast the answer, then re-read the game. */
+const useGameControl = (shareToken, mutationFn, fallback) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (response) => {
+      if (response?.message) toast.success(response.message);
+    },
+    onError: (error) => toast.error(failText(error, fallback)),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["publicSession", shareToken] }),
+  });
+};
+
+// Mutation: CR-028 — End game
+export const useEndPublicGame = (shareToken) =>
+  useGameControl(shareToken, () => endPublicGameApi(shareToken), "Couldn't end the game — try again.");
+
+// Mutation: CR-028 — delete a save ({ number, savedAt })
+export const useDeletePublicCapture = (shareToken) =>
+  useGameControl(
+    shareToken,
+    ({ number, savedAt }) => deletePublicCaptureApi({ shareToken, number, savedAt }),
+    "Couldn't delete the save — try again.",
+  );
+
+// Mutation: CR-028 — stop the player's own stream
+export const useStopPublicStream = (shareToken) =>
+  useGameControl(shareToken, () => stopPublicStreamApi(shareToken), "Couldn't stop the stream — try again.");
+
+// Mutation: CR-028 — a setup link for the player's own stream. The caller opens
+// the link; errors are toasted.
+export const usePublicStreamLink = (shareToken) =>
+  useMutation({
+    mutationFn: () => getPublicStreamLinkApi(shareToken),
+    onError: (error) => toast.error(failText(error, "Couldn't open stream setup — try again.")),
+  });
+
+// Mutation: CR-029 — a replay link for a stretch ({ from, to }), for Preview.
+// A fresh signed link each time (it expires), so a mutation, not a cached
+// query. The Save card shows failures itself.
+export const usePublicPreview = (shareToken) =>
+  useMutation({
+    mutationFn: ({ from, to }) => getPublicPreviewApi({ shareToken, from, to }),
+  });

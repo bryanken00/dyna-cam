@@ -9,12 +9,14 @@ import {
   Radio,
   RotateCcw,
   Share2,
+  Square,
+  Trash2,
 } from "lucide-react";
 import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
 import { useSessionPageHooks } from "./hooks";
 import LivePanel from "./components/LivePanel";
-import SaveLastMinutes from "./components/SaveLastMinutes";
+import SaveStretch from "./components/SaveStretch";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import PayCode from "../../../components/PayCode";
 import ResultState from "../../../components/ResultState";
@@ -323,8 +325,9 @@ const clockOf = (seconds) =>
 /**
  * CR-013: a stretch saved from the courtside device — "Save 1 · 8:00 – 10:00",
  * then its video (one per camera on a two-camera court) once it's in.
+ * CR-028: with a delete button, as on the device.
  */
-const CaptureCard = ({ capture }) => {
+const CaptureCard = ({ capture, onDelete, deleting }) => {
   const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
   const ready = capture.videos.filter(
     (video) => video.status === "Ready" && video.videoUrl,
@@ -357,6 +360,22 @@ const CaptureCard = ({ capture }) => {
                 ? `Saving ${capture.uploadPercent}%`
                 : capture.status}
         </StatusDot>
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 -mr-2"
+            onClick={() => onDelete(capture)}
+            disabled={deleting}
+            aria-label={`Delete Save ${capture.number}`}
+          >
+            {deleting ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <Trash2 style={{ color: "var(--color-text-muted)" }} />
+            )}
+          </Button>
+        )}
       </div>
 
       {ready.map((video) => {
@@ -596,6 +615,72 @@ const LockedGame = ({ session, videos, captures }) => {
   );
 };
 
+/** "YouTube", "Facebook" or "your stream" for the player's stream. */
+const STREAM_NAME = { YOUTUBE: "YouTube", FACEBOOK: "Facebook" };
+const STREAM_STATE = {
+  live: "live now",
+  starting: "starting…",
+  waiting: "starts with the game",
+  error: "not reaching the platform",
+};
+
+/**
+ * CR-028: the player's own Facebook / YouTube stream, as on the court device —
+ * add it (the stream setup page), or change / stop the one set.
+ */
+const StreamBlock = ({ stream, onOpen, opening, onStop, stopping }) => {
+  if (!stream) {
+    return (
+      <Button
+        variant="outline"
+        size="lg"
+        className="h-12 w-full mt-4"
+        onClick={onOpen}
+        disabled={opening}
+      >
+        {opening ? <Loader2 className="animate-spin" /> : <Radio />}
+        Stream to your Facebook / YouTube
+      </Button>
+    );
+  }
+  return (
+    <div className="mt-4 p-4" style={cardStyle}>
+      <div className="flex items-center gap-2" style={{ fontSize: 14 }}>
+        <Radio
+          className="w-4 h-4 shrink-0"
+          style={{
+            color: stream.status === "live" ? "var(--color-error)" : "var(--color-text-muted)",
+          }}
+        />
+        <span style={{ color: "var(--color-text-dark)" }}>
+          <span className="font-semibold">
+            Streaming to {STREAM_NAME[stream.platform] || "your stream"}
+          </span>{" "}
+          · {STREAM_STATE[stream.status] || stream.status}
+        </span>
+      </div>
+      {stream.message && (
+        <p className="m-0 mt-1.5" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+          {stream.message}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        <Button variant="outline" className="h-11" onClick={onOpen} disabled={opening}>
+          {opening && <Loader2 className="animate-spin" />}
+          Change stream
+        </Button>
+        <Button variant="outline" className="h-11" onClick={onStop} disabled={stopping}>
+          {stopping ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            <span style={{ color: "var(--color-error)" }}>Stop streaming</span>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 const SessionPage = () => {
   const {
     session,
@@ -604,6 +689,17 @@ const SessionPage = () => {
     isRecording,
     since,
     saveCapture,
+    previewStretch,
+    stream,
+    canStream,
+    handleEndGame,
+    isEnding,
+    handleDeleteCapture,
+    deletingNumber,
+    handleOpenStream,
+    isOpeningStream,
+    handleStopStream,
+    isStoppingStream,
     parts,
     videos,
     captures,
@@ -725,12 +821,44 @@ const SessionPage = () => {
       {saving && <SavingProgress percent={saving.percent} />}
 
       {/* CR-025: what the court device shows while recording — paid or not.
-          End game stays on the court device and in Admin. */}
+          CR-028: with the device's other controls — the player's own
+          stream and End game. */}
       {isRecording && (
         <>
           <LivePanel live={live} />
-          <SaveLastMinutes capture={capture} since={since} save={saveCapture} />
+          <SaveStretch
+            capture={capture}
+            since={since}
+            save={saveCapture}
+            preview={previewStretch}
+          />
         </>
+      )}
+      {isRecording && (
+        <Button
+          variant="destructive"
+          size="lg"
+          className="h-16 w-full mt-4 text-lg font-bold rounded-(--radius-card)"
+          onClick={handleEndGame}
+          disabled={isEnding}
+        >
+          {isEnding ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : (
+            <Square className="size-5" fill="currentColor" />
+          )}
+          End game
+        </Button>
+      )}
+      {/* Secondary, below End game — as on the device */}
+      {canStream && (
+        <StreamBlock
+          stream={stream}
+          onOpen={handleOpenStream}
+          opening={isOpeningStream}
+          onStop={handleStopStream}
+          stopping={isStoppingStream}
+        />
       )}
 
       {session.locked && (
@@ -781,7 +909,12 @@ const SessionPage = () => {
               </h2>
               <div className="space-y-3">
                 {captures.map((capture) => (
-                  <CaptureCard key={capture.number} capture={capture} />
+                  <CaptureCard
+                    key={`${capture.number}-${capture.savedAt}`}
+                    capture={capture}
+                    onDelete={handleDeleteCapture}
+                    deleting={deletingNumber === capture.number}
+                  />
                 ))}
               </div>
             </div>

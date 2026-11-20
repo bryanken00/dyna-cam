@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
 import { JPEG, startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip } from "./helpers/legacyClip.js";
 
 const MP4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
@@ -42,20 +43,11 @@ describe("clip payments (cash)", () => {
     await target.device("GET", "/device/config"); // online
   };
 
-  const ageClips = (courtId) =>
-    ctx.sql.query(
-      `UPDATE clips SET requestedAt = DATE_SUB(requestedAt, INTERVAL 1 MINUTE) WHERE courtId = ?`,
-      [courtId]
-    );
 
-  /** Save a clip by QR, have the box upload it; returns { shareToken, clipId }. */
+  /** A clip saved before CR-027, uploaded by the box; returns { shareToken, clipId }. */
   const readyClip = async (target) => {
-    await ageClips(target.courtId);
-    const save = await ctx.api("POST", `/public/courts/${target.qrToken}/clips`);
-    assert.equal(save.status, 201, JSON.stringify(save.body));
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      save.data.shareToken,
-    ]);
+    const save = await insertLegacyClip(ctx.sql, { courtId: target.courtId });
+    const row = { clipId: save.clipId };
     const upload = await target.device("POST", `/device/clips/${row.clipId}/upload`, {
       form: [
         ["video", MP4, "video/mp4", "c.mp4"],
@@ -63,7 +55,7 @@ describe("clip payments (cash)", () => {
       ],
     });
     assert.equal(upload.status, 200);
-    return { shareToken: save.data.shareToken, clipId: row.clipId };
+    return { shareToken: save.shareToken, clipId: row.clipId };
   };
 
   before(async () => {
@@ -161,11 +153,7 @@ describe("clip payments (cash)", () => {
   });
 
   it("won't take payment for a clip that failed", async () => {
-    await ageClips(paid.courtId);
-    const save = await ctx.api("POST", `/public/courts/${paid.qrToken}/clips`);
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      save.data.shareToken,
-    ]);
+    const row = await insertLegacyClip(ctx.sql, { courtId: paid.courtId });
     await paid.device("POST", `/device/clips/${row.clipId}/fail`, { body: { reason: "x" } });
     assert.equal((await call("POST", "/admin/payments", { clipId: row.clipId })).status, 409);
   });

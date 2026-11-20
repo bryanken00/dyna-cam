@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalEmail, optionalPhone, optionalString } from "./_helpers.js";
 
 /** Validators for the no-login player routes (controllers/v1/public/). */
 
@@ -9,11 +10,49 @@ const token = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid link");
 // /courts/:qrToken
 export const courtTokenParamsSchema = z.object({ qrToken: token });
 
+// POST /courts/:qrToken/games — CR-027: the player's own game. The game time has
+// the same bounds as Admin's New game; no payment and no save limit here (the
+// game is free and allows PLAYER_MAX_CAPTURES saves).
+export const startGameSchema = z.object({
+  durationMinutes: z.coerce
+    .number()
+    .int("Use whole minutes")
+    .min(5, "A game is at least 5 minutes")
+    .max(180, "A game is at most 3 hours"),
+  playerName: optionalString(100),
+  phone: optionalPhone(),
+  email: optionalEmail(255),
+});
+
 // /clips/:shareToken
 export const clipTokenParamsSchema = z.object({ shareToken: token });
 
 // /sessions/:shareToken
 export const sessionTokenParamsSchema = z.object({ shareToken: token });
+
+// DELETE /sessions/:shareToken/captures/:number — CR-028: a save by its number on
+// the page ("Save 2"); public routes carry no business IDs
+export const captureNumberParamsSchema = z.object({
+  shareToken: token,
+  number: z.coerce.number().int().min(1).max(1000),
+});
+// GET /sessions/:shareToken/preview?from=&to= — CR-029: a stretch of the game
+// (seconds into it) to replay before saving it
+export const previewQuerySchema = z
+  .object({
+    from: z.coerce.number().int().min(0).max(6 * 3600),
+    to: z.coerce.number().int().min(1).max(6 * 3600),
+  })
+  .refine((q) => q.to > q.from, { message: "Pick where the stretch ends", path: ["to"] });
+
+// …?savedAt= — the save's savedAt as the page showed it, so a number that
+// shifted (another phone deleted an earlier save) deletes nothing
+export const captureSavedAtQuerySchema = z.object({
+  savedAt: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "Reload the page and try again"),
+});
 
 // /games/:payCode — CR-015: a game's code as typed on the device ("k7qm 2p" works)
 export const gameCodeParamsSchema = z.object({

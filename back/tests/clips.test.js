@@ -1,6 +1,7 @@
-// PLAN-001 — the clip pipeline end to end:
-// player scans the court QR → clip Pending → recorder box picks it up, cuts it,
-// uploads it → player's share link plays it → it expires.
+// PLAN-001 — the clip pipeline end to end, for 60-second clips saved before
+// CR-027 (the court QR now starts a game; nothing saves a new clip):
+// clip Pending → recorder box picks it up, cuts it, uploads it → player's
+// share link plays it → it expires.
 // Also: a box can only ever touch its own venue's clips.
 
 import assert from "node:assert/strict";
@@ -9,6 +10,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { JPEG, PNG, startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip } from "./helpers/legacyClip.js";
 
 // The smallest buffer that passes the API's mp4 content check (an ISO media "ftyp" box)
 const MP4 = Buffer.concat([
@@ -54,13 +56,6 @@ describe("clips", () => {
     ["thumbnail", thumbnail, thumbType, thumbName],
   ];
 
-  /** Make the court's last clip old enough that a new save is not merged into it. */
-  const ageClips = (courtId) =>
-    ctx.sql.query(
-      `UPDATE clips SET requestedAt = DATE_SUB(requestedAt, INTERVAL 1 MINUTE) WHERE courtId = ?`,
-      [courtId]
-    );
-
   before(async () => {
     ctx = await startTestApp();
     admin = await ctx.createStaff("Admin", { access: "write" });
@@ -69,7 +64,7 @@ describe("clips", () => {
   });
   after(() => ctx?.stop());
 
-  it("won't save a clip while the court's recorder box is offline", async () => {
+  it("shows the court page as not ready while the recorder box is offline; no clip saves", async () => {
     // A box is online from the moment it pairs; this one hasn't been heard from since
     await ctx.sql.query(`UPDATE devices SET lastSeenAt = NULL WHERE venueId = ?`, [home.venueId]);
     const court = await ctx.api("GET", `/public/courts/${home.qrToken}`);
@@ -78,9 +73,11 @@ describe("clips", () => {
     assert.equal(court.data.court.venueName, "Home Courts");
     assert.equal(court.data.court.courtId, undefined, "no IDs on the public page");
 
+    // CR-027: the court QR no longer saves the last 60 seconds
     const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    assert.equal(save.status, 503);
-    assert.equal(save.body.code, "CAMERA_OFFLINE");
+    assert.equal(save.status, 404);
+    const [[{ n }]] = await ctx.sql.query(`SELECT COUNT(*) AS n FROM clips`);
+    assert.equal(Number(n), 0);
   });
 
   it("gives the box its own courts, with the camera URL decrypted", async () => {
@@ -120,26 +117,10 @@ describe("clips", () => {
   let shareToken;
   let clipId;
 
-  it("saves a clip from the court QR, and merges a second tap into it", async () => {
-    const court = await ctx.api("GET", `/public/courts/${home.qrToken}`);
-    assert.equal(court.data.court.cameraReady, true);
-
-    const first = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    assert.equal(first.status, 201, JSON.stringify(first.body));
-    assert.equal(first.data.merged, false);
-    shareToken = first.data.shareToken;
-    assert.ok(first.data.shareUrl.endsWith(`/clip/${shareToken}`));
-
-    const second = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    assert.equal(second.status, 200);
-    assert.equal(second.data.merged, true);
-    assert.equal(second.data.shareToken, shareToken);
-
-    const [rows] = await ctx.sql.query(`SELECT clipId FROM clips WHERE courtId = ?`, [
-      home.courtId,
-    ]);
-    assert.equal(rows.length, 1);
-    clipId = rows[0].clipId;
+  it("shows a clip saved before CR-027 as saving on its page", async () => {
+    const saved = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+    shareToken = saved.shareToken;
+    clipId = saved.clipId;
 
     const page = await ctx.api("GET", `/public/clips/${shareToken}`);
     assert.equal(page.status, 200);
@@ -252,11 +233,8 @@ describe("clips", () => {
   it("lets only one box at a venue make a clip", async () => {
     const second = await ctx.pairBox(admin.token, home.venueId, "Box 2");
     const box2 = asDevice(second.data.token);
-    await ageClips(home.courtId);
-    const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      save.data.shareToken,
-    ]);
+    const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+    const row = save;
 
     assert.equal((await home.device("POST", `/device/clips/${row.clipId}/processing`)).status, 200);
     assert.equal(
@@ -281,18 +259,14 @@ describe("clips", () => {
   });
 
   it("records a clip the box could not make as failed", async () => {
-    await ageClips(home.courtId);
-    const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    assert.equal(save.status, 201);
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      save.data.shareToken,
-    ]);
+    const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+    const row = save;
 
     const failed = await home.device("POST", `/device/clips/${row.clipId}/fail`, {
       body: { reason: "Camera stream dropped" },
     });
     assert.equal(failed.status, 200);
-    const page = await ctx.api("GET", `/public/clips/${save.data.shareToken}`);
+    const page = await ctx.api("GET", `/public/clips/${save.shareToken}`);
     assert.equal(page.data.clip.status, "Failed");
   });
 
@@ -308,11 +282,10 @@ describe("clips", () => {
       [clipId]
     );
 
-    await ageClips(home.courtId);
-    const stale = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
+    const stale = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
     await ctx.sql.query(
       `UPDATE clips SET requestedAt = DATE_SUB(requestedAt, INTERVAL 2 HOUR) WHERE shareToken = ?`,
-      [stale.data.shareToken]
+      [stale.shareToken]
     );
 
     const result = await runClipMaintenance(ctx.db);
@@ -324,16 +297,13 @@ describe("clips", () => {
     assert.equal(page.data.clip.status, "Expired");
     assert.equal(page.data.clip.videoUrl, null);
 
-    const stalePage = await ctx.api("GET", `/public/clips/${stale.data.shareToken}`);
+    const stalePage = await ctx.api("GET", `/public/clips/${stale.shareToken}`);
     assert.equal(stalePage.data.clip.status, "Failed");
   });
 
   it("treats a deleted clip as missing everywhere", async () => {
-    await ageClips(home.courtId);
-    const save = await ctx.api("POST", `/public/courts/${home.qrToken}/clips`);
-    const [[row]] = await ctx.sql.query(`SELECT clipId FROM clips WHERE shareToken = ?`, [
-      save.data.shareToken,
-    ]);
+    const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+    const row = save;
     const upload = await home.device("POST", `/device/clips/${row.clipId}/upload`, {
       form: uploadForm(),
     });
@@ -353,7 +323,7 @@ describe("clips", () => {
     );
 
     assert.equal((await call("GET", `/admin/clips/${row.clipId}`)).status, 404);
-    assert.equal((await ctx.api("GET", `/public/clips/${save.data.shareToken}`)).status, 404);
+    assert.equal((await ctx.api("GET", `/public/clips/${save.shareToken}`)).status, 404);
     assert.equal(
       (await home.device("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() }))
         .status,

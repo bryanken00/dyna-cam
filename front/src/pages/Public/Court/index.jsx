@@ -1,20 +1,39 @@
 import {
   CircleAlert,
   Loader2,
+  Mail,
+  Phone,
+  Play,
   Radio,
   RotateCcw,
-  Timer,
+  User,
   VideoOff,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+
 import { useCourtPageHooks } from "./hooks";
+import GameTimeFields from "../../../components/GameTimeFields";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
+import SectionLabel from "../../../components/SectionLabel";
 import Spinner from "../../../components/Spinner";
 import { getImageUrl } from "../../../utils/upload";
+import { PHONE_MAX_LENGTH, PHONE_PLACEHOLDER, formatPhoneOnChange } from "../../../utils/phoneFormat";
 
-const PRIVACY_NOTE =
-  "This court is recorded. Only moments players choose to save are kept.";
+const PRIVACY_NOTE = "Your game is recorded from Start game until its time is up.";
+
+/** One-tap game times, in minutes. */
+const GAME_TIME_PRESETS = [30, 60, 90, 120];
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -22,26 +41,53 @@ const cardStyle = {
   borderRadius: "var(--radius-card)",
 };
 
+const iconPrefix = "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
+const mutedIcon = { color: "var(--color-text-muted)" };
+
+/** A notice under the court name: the court is busy, or its camera is offline. */
+const Notice = ({ icon: Icon, children }) => (
+  <div
+    role="status"
+    className="mt-5 flex items-start gap-2.5 p-3 text-left"
+    style={{
+      background: "var(--color-surface-sunken)",
+      border: "1px solid var(--color-line)",
+      borderRadius: 12,
+      fontSize: 13.5,
+      color: "var(--color-text-dark)",
+    }}
+  >
+    <Icon className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-secondary)" }} />
+    <span>{children}</span>
+  </div>
+);
+
 /**
- * `/court/:qrToken` — what a player sees after scanning the court's QR sign:
- * the venue and court, and one big button that saves the last 60 seconds.
+ * `/court/:qrToken` (CR-027) — what a player sees after scanning the court's
+ * QR sign: the venue and court, how long they'll play and who's playing, and
+ * Start game. The game records the whole time and the player lands on its
+ * page (`/session/:shareToken`). Until CR-027 this page saved the last 60
+ * seconds instead.
  */
 const CourtPage = () => {
   const {
+    form,
     court,
     venueName,
     courtName,
-    clipSeconds,
     cameraReady,
+    busy,
+    busyUntilText,
+    maxSaves,
     liveWatchUrl,
     isLoading,
     isFetching,
     notFound,
     loadError,
     refetch,
-    handleSave,
-    isSaving,
-    saveError,
+    handleStart,
+    isStarting,
+    startError,
   } = useCourtPageHooks();
 
   if (isLoading) {
@@ -57,8 +103,8 @@ const CourtPage = () => {
       <PublicLayout footer={PRIVACY_NOTE}>
         <ResultState
           status="404"
-          title="This court code isn't valid"
-          description="The QR code may be out of date, or this court isn't in use right now. Ask the front desk for help."
+          title="This code isn't valid"
+          description="The QR code may be out of date, or this court isn't taking games right now. Ask the front desk for help."
         />
       </PublicLayout>
     );
@@ -83,12 +129,13 @@ const CourtPage = () => {
   }
 
   const logo = getImageUrl(court.venueLogoUrl);
+  const canStart = cameraReady && !busy;
 
   return (
     <PublicLayout footer={PRIVACY_NOTE}>
-      <div className="p-6 text-center" style={cardStyle}>
-        {/* Venue */}
-        <div className="flex flex-col items-center gap-2.5">
+      <div className="p-6" style={cardStyle}>
+        {/* Venue + court */}
+        <div className="flex flex-col items-center gap-2.5 text-center">
           {logo && (
             <img
               src={logo}
@@ -103,30 +150,139 @@ const CourtPage = () => {
           >
             {venueName}
           </p>
+          <h1
+            className="m-0 font-semibold leading-tight"
+            style={{ fontSize: 32, letterSpacing: "-0.6px", color: "var(--color-text-dark)" }}
+          >
+            {courtName}
+          </h1>
+          <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+            Start recording your game — up to {maxSaves} saves of your best moments.
+          </p>
         </div>
 
-        {/* Court */}
-        <h1
-          className="m-0 mt-1 font-semibold leading-tight"
-          style={{ fontSize: 32, letterSpacing: "-0.6px", color: "var(--color-text-dark)" }}
-        >
-          {courtName}
-        </h1>
+        {busy && (
+          <Notice icon={CircleAlert}>
+            This court has a game going
+            {busyUntilText ? ` until ${busyUntilText}` : ""}. You can start yours once it ends.
+          </Notice>
+        )}
+        {!busy && !cameraReady && (
+          <Notice icon={VideoOff}>
+            The camera is offline right now, so a game can&apos;t start. Please tell the front
+            desk.
+          </Notice>
+        )}
 
-        {/* The one action */}
-        <Button
-          size="lg"
-          className="mt-7 w-full h-16 text-base font-semibold rounded-(--radius-card)"
-          disabled={!cameraReady || isSaving}
-          onClick={handleSave}
-        >
-          {isSaving ? (
-            <Loader2 className="size-5 animate-spin" />
-          ) : (
-            <Timer className="size-5" />
-          )}
-          {isSaving ? "Saving…" : `Save the last ${clipSeconds} seconds`}
-        </Button>
+        <Form {...form}>
+          <form onSubmit={handleStart} noValidate className="mt-6">
+            <SectionLabel>How long you&apos;ll play</SectionLabel>
+            <GameTimeFields form={form} presets={GAME_TIME_PRESETS} />
+            <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+              5 minutes to 3 hours. Recording stops by itself at the end.
+            </p>
+
+            <div className="mt-6">
+              <SectionLabel>Who&apos;s playing (optional)</SectionLabel>
+              <div className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="playerName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Name</FormLabel>
+                      <div className="relative">
+                        <User className={iconPrefix} style={mutedIcon} />
+                        <FormControl>
+                          <Input
+                            placeholder="e.g., Juan dela Cruz"
+                            className="h-11 pl-9"
+                            autoComplete="name"
+                            maxLength={100}
+                            {...field}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Phone number</FormLabel>
+                      <div className="relative">
+                        <Phone className={iconPrefix} style={mutedIcon} />
+                        <FormControl>
+                          <Input
+                            placeholder={PHONE_PLACEHOLDER}
+                            className="h-11 pl-9"
+                            maxLength={PHONE_MAX_LENGTH}
+                            inputMode="tel"
+                            autoComplete="tel"
+                            {...field}
+                            onChange={(e) => field.onChange(formatPhoneOnChange(e.target.value))}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <div className="relative">
+                        <Mail className={iconPrefix} style={mutedIcon} />
+                        <FormControl>
+                          <Input
+                            type="email"
+                            inputMode="email"
+                            autoCapitalize="none"
+                            autoComplete="email"
+                            placeholder="e.g., juan@gmail.com"
+                            className="h-11 pl-9"
+                            maxLength={255}
+                            {...field}
+                          />
+                        </FormControl>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                The email gets your game&apos;s Google Drive link once the videos are in Drive.
+              </p>
+            </div>
+
+            <Button
+              type="submit"
+              size="lg"
+              className="mt-7 w-full h-16 text-base font-semibold rounded-(--radius-card)"
+              disabled={!canStart || isStarting}
+            >
+              {isStarting ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
+              {isStarting ? "Starting…" : "Start game"}
+            </Button>
+
+            {startError && (
+              <p
+                role="alert"
+                className="m-0 mt-3 text-center"
+                style={{ fontSize: 13.5, color: "var(--color-error)" }}
+              >
+                {startError}
+              </p>
+            )}
+          </form>
+        </Form>
 
         {/* The venue streams this court — the API only sends the link while
             streaming is on and the recorder box is online */}
@@ -142,56 +298,6 @@ const CourtPage = () => {
               Watch live
             </a>
           </Button>
-        )}
-
-        {cameraReady ? (
-          <p
-            className="m-0 mt-3"
-            style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
-          >
-            Tap right after a great rally — the camera has been rolling.
-          </p>
-        ) : (
-          <div
-            role="status"
-            className="flex items-start gap-2.5 mt-4 px-3.5 py-3 text-left"
-            style={{
-              border: "1px solid var(--color-line)",
-              borderRadius: 10,
-              background: "var(--color-surface-sunken)",
-              fontSize: 13.5,
-              color: "var(--color-text-dark)",
-            }}
-          >
-            <VideoOff
-              className="w-4 h-4 mt-0.5 shrink-0"
-              style={{ color: "var(--color-warning)" }}
-            />
-            <span>
-              <strong className="font-semibold">The camera is offline.</strong>{" "}
-              Nothing can be saved on this court right now — please tell the
-              front desk. This page checks again on its own.
-            </span>
-          </div>
-        )}
-
-        {saveError && (
-          <div
-            role="alert"
-            className="flex items-start gap-2.5 mt-4 px-3.5 py-3 text-left"
-            style={{
-              border: "1px solid var(--color-error)",
-              borderRadius: 10,
-              fontSize: 13.5,
-              color: "var(--color-text-dark)",
-            }}
-          >
-            <CircleAlert
-              className="w-4 h-4 mt-0.5 shrink-0"
-              style={{ color: "var(--color-error)" }}
-            />
-            <span>{saveError}</span>
-          </div>
         )}
       </div>
     </PublicLayout>

@@ -10,8 +10,10 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { loadConfig } from "../src/config.js";
 import {
   buildPlaylist,
+  buildReplayPlaylist,
   CERT_FILES,
   certificateProblems,
+  checkReplaySignature,
   checkSignature,
   createLiveServer,
   lanAddress,
@@ -25,9 +27,12 @@ import {
   readCourtSegments,
   readPcrBase,
   readPts,
+  REPLAY_MAX_SECONDS,
   routeLive,
+  segmentInReplay,
   shiftTimestamps,
   signLive,
+  signReplay,
   TimestampShift,
   writePts,
 } from "../src/live.js";
@@ -134,6 +139,8 @@ describe("routeLive", () => {
       file: "index.m3u8",
       exp: "1",
       sig: "ab",
+      from: null,
+      to: null,
     });
     assert.equal(routeLive("HEAD", `/live/c_2/${T0}.ts`).kind, "segment");
   });
@@ -146,6 +153,8 @@ describe("routeLive", () => {
       file: "index.m3u8",
       exp: "1",
       sig: "ab",
+      from: null,
+      to: null,
     });
     const seg = routeLive("GET", `/live/court-1/cam2/${T0}.ts`);
     assert.equal(seg.kind, "segment");
@@ -390,6 +399,72 @@ describe("shiftTimestamps", () => {
   });
 });
 
+describe("CR-029 replay links", () => {
+  const exp = String(T0 + 3600);
+  const from = String(T0 + 3);
+  const to = String(T0 + 7);
+  const sig = signReplay(KEY, "court-1", from, to, exp);
+  const nowMs = (T0 + 20) * 1000;
+  const check = (over = {}) =>
+    checkReplaySignature({ key: KEY, courtId: "court-1", from, to, exp, sig, nowMs, ...over });
+
+  it("accepts HMAC(key, `replay.courtId.from.to.exp`) for exactly that stretch", () => {
+    assert.equal(check(), "ok");
+    assert.equal(check({ to: String(T0 + 8) }), "bad", "another stretch");
+    assert.equal(check({ from: String(T0 + 2) }), "bad");
+    assert.equal(check({ courtId: "court-2" }), "bad");
+    assert.equal(check({ sig: signLive(KEY, "court-1", exp) }), "bad", "a live link is not a replay link");
+    assert.equal(check({ from: null }), "bad");
+    assert.equal(check({ from: "abc" }), "bad");
+  });
+
+  it("refuses an empty or backwards stretch, one over the maximum, and an expired link", () => {
+    assert.equal(check({ to: from, sig: signReplay(KEY, "court-1", from, from, exp) }), "bad");
+    const far = String(Number(from) + REPLAY_MAX_SECONDS + 1);
+    assert.equal(check({ to: far, sig: signReplay(KEY, "court-1", from, far, exp) }), "bad");
+    const old = String(T0 + 10);
+    assert.equal(check({ exp: old, sig: signReplay(KEY, "court-1", from, to, old) }), "expired");
+  });
+
+  it("serves only segments named near the stretch", () => {
+    assert.equal(segmentInReplay(`${T0 + 2}.ts`, from, to), true);
+    assert.equal(segmentInReplay(`${T0 + 7}.ts`, from, to), true);
+    assert.equal(segmentInReplay(`${T0 + 8}.ts`, from, to), false);
+    assert.equal(segmentInReplay(`${T0 - 200}.ts`, from, to), false);
+  });
+
+  it("routes replay.m3u8 with its stretch", () => {
+    const r = routeLive("GET", `/live/court-1/cam2/replay.m3u8?from=${from}&to=${to}&exp=${exp}&sig=${sig}`);
+    assert.equal(r.kind, "replay");
+    assert.equal(r.camera, 2);
+    assert.equal(r.from, from);
+    assert.equal(r.to, to);
+  });
+
+  it("builds a finished playlist that starts at the stretch, with breaks marked", () => {
+    const seg = (start, end, exact = true) => ({
+      name: `${start}.ts`,
+      startMs: start * 1000,
+      endMs: end * 1000,
+      exact,
+    });
+    const text = buildReplayPlaylist(
+      [seg(T0, T0 + 2), seg(T0 + 2, T0 + 4), seg(T0 + 10, T0 + 12)],
+      (T0 + 1.5) * 1000,
+      "q=1"
+    );
+    assert.match(
+      text,
+      /^#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:2\n/
+    );
+    assert.ok(text.includes("#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-DISCONTINUITY-SEQUENCE:0\n"));
+    assert.ok(text.includes("#EXT-X-START:TIME-OFFSET=1.500,PRECISE=YES\n"));
+    assert.equal(text.match(/#EXT-X-DISCONTINUITY\n/g).length, 1, "one 6 s gap");
+    assert.ok(text.includes(`#EXTINF:2.000,\n${T0 + 2}.ts?q=1\n`));
+    assert.ok(text.endsWith("#EXT-X-ENDLIST\n"));
+  });
+});
+
 describe("live server", () => {
   let server;
   let port;
@@ -492,6 +567,39 @@ describe("live server", () => {
     const post = await rawGet(port, `/live/court-1/index.m3u8?${q}`, "POST");
     assert.equal(post.status, 405);
     assert.equal(post.headers.allow, "GET, HEAD");
+  });
+
+  it("CR-029: serves a replay of the signed stretch, and its segments only inside it", async () => {
+    const from = String(T0 + 3);
+    const to = String(T0 + 7);
+    const rq = `from=${from}&to=${to}&exp=${exp}&sig=${signReplay(KEY, "court-1", from, to, exp)}`;
+    const res = await rawGet(port, `/live/court-1/replay.m3u8?${rq}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers["content-type"], "application/vnd.apple.mpegurl");
+    const text = res.body.toString();
+    assert.ok(text.includes("#EXT-X-PLAYLIST-TYPE:VOD"));
+    assert.ok(text.includes("#EXT-X-START:TIME-OFFSET=1.000,PRECISE=YES"));
+    const uris = text.split("\n").filter((line) => line && !line.startsWith("#"));
+    assert.deepEqual(
+      uris,
+      [T0 + 2, T0 + 4, T0 + 6].map((sec) => `${sec}.ts?${rq}`)
+    );
+
+    const inside = await rawGet(port, `/live/court-1/${T0 + 4}.ts?${rq}`);
+    assert.equal(inside.status, 200);
+    assert.equal(readPts(inside.body, 21), 135_000 + 4000 * 90);
+    assert.equal((await rawGet(port, `/live/court-1/${T0 + 12}.ts?${rq}`)).status, 404);
+
+    // A live link can't ask for a replay, nor a replay link for another stretch
+    assert.equal((await rawGet(port, `/live/court-1/replay.m3u8?${q}`)).status, 403);
+    const wider = rq.replace(`to=${to}`, `to=${T0 + 13}`);
+    assert.equal((await rawGet(port, `/live/court-1/replay.m3u8?${wider}`)).status, 403);
+
+    // Nothing recorded in a stretch → 404
+    const lateFrom = String(T0 + 100);
+    const lateTo = String(T0 + 160);
+    const late = `from=${lateFrom}&to=${lateTo}&exp=${exp}&sig=${signReplay(KEY, "court-1", lateFrom, lateTo, exp)}`;
+    assert.equal((await rawGet(port, `/live/court-1/replay.m3u8?${late}`)).status, 404);
   });
 
   it("404s a court with no segments yet, and one that stopped recording", async () => {

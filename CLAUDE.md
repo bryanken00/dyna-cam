@@ -1,8 +1,9 @@
 # Dyna Cam
 
 A court-camera service for pickleball venues, built on this repo's admin platform. Players scan a
-court QR or press a button to save the last 60 seconds as a replay clip and get it on their phone.
-Staff run venues, courts, cameras, clips and payments from the web Admin portal and the mobile
+court QR to start recording their game, then watch it live, save their best rallies, and get the
+whole game on their phone (CR-027; the old 60-second clips and court buttons are gone — clips saved
+before only expire). Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
 staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
 
 The platform is single-organisation with one portal, **Admin** (`/admin/*` in the client,
@@ -130,7 +131,11 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
   stored encrypted and never returned; CR-025: while a game records, its page also gets the box's signed
-  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`). CR-015: a game's videos open only once staff record its
+  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-027:
+  the court QR's `/public/courts/:qrToken` is the Start a game page, and `POST …/games` (rate-limited)
+  starts a timed game that is Free with 5 saves, `startedByPlayer = 1`; CR-028: the game page also has
+  the device's End game, delete a save and own-stream controls under `/public/sessions/:shareToken/…` —
+  anyone holding the link can use them). CR-015: a game's videos open only once staff record its
   payment (Admin → Sessions → Record payment, Payments permission); until then the session device
   and the player's page show its pay code, and `/public/games/:payCode` (rate-limited) gives a paid
   game's link to Find a game on the device; `/api/v1/oauth/google/callback` is where Google sends staff

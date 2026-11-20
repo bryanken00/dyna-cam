@@ -9,6 +9,7 @@ import { after, before, describe, it } from "node:test";
 
 import { GAME_MP4, gameJobs, putChunk, sendGame } from "./helpers/gameUpload.js";
 import { startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip } from "./helpers/legacyClip.js";
 
 const CAM1 = "rtsp://cam-one:Pass1@192.168.1.50:554/stream1";
 const CAM2 = "rtsp://cam-two:Pass2@192.168.1.51:554/stream1";
@@ -323,11 +324,8 @@ describe("game videos", () => {
   });
 
   it("keeps replays as they were: clip jobs, never game jobs", async () => {
-    const [[court]] = await ctx.sql.query(`SELECT qrToken FROM courts WHERE courtId = ?`, [
-      home.courtId,
-    ]);
-    const saved = await ctx.api("POST", `/public/courts/${court.qrToken}/clips`);
-    assert.equal(saved.status, 201, JSON.stringify(saved.body));
+    // A replay saved before CR-027 (nothing saves new ones)
+    await insertLegacyClip(ctx.sql, { courtId: home.courtId });
     const jobs = (
       await ctx.api("GET", "/device/jobs?wait=0", { headers: asBox(home.token) })
     ).data.jobs.filter((job) => job.type === "clip");

@@ -7,7 +7,7 @@ ref: PLAN-002
 
 The Admin portal is reorganised: a **Setup** section for Venues and Recorder Boxes, and a
 **Dyna Cam** section for Clips, Sessions and Payments. Open a venue to see its courts, and open a
-court to set it up step by step — the camera (with the Tapo helper), its QR sign, its button and
+court to set it up step by step — the camera (with the Tapo helper), its QR sign and
 its live stream. After you save a camera, the page shows whether the recorder box can see it,
 the picture size, frame rate and sound, and a live preview picture so you can aim the camera.
 

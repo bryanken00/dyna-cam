@@ -5,10 +5,9 @@ audience: user
 ref: PLAN-001
 ---
 
-Players can save the last 60 seconds of their rally by scanning the QR code on their court, and
-get a link to watch, download or share the clip — with the venue's logo on it. In the Admin
-portal, staff set up venues, courts (including Tapo cameras), the recorder box at each venue,
-print each court's QR sign, and browse, play and delete saved clips.
+In the Admin portal, staff set up venues, courts (including Tapo cameras) and the recorder box
+at each venue, and print each court's QR sign. (What the QR sign does for players is in the
+CR-027 entry: it starts their game.)
 
 ## Dev notes
 

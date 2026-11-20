@@ -3,17 +3,16 @@ import {
   ArrowRight,
   Bell,
   Camera,
+  Clock,
   CloudUpload,
-  ConciergeBell,
   HandCoins,
   Image as ImageIcon,
-  KeyRound,
   MonitorPlay,
+  QrCode,
   Radio,
   RadioTower,
   ShieldCheck,
   Smartphone,
-  SquareMousePointer,
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,27 +22,27 @@ import HeroCourt, { ReplayBar } from "@/components/brand/HeroCourt";
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
-/** A player's game, in the order it happens: the staff-led flow (CR-005/006). */
+/** A player's game, in the order it happens: the player starts it from the court's QR (CR-027). */
 const STEPS = [
   {
-    icon: ConciergeBell,
-    title: "Ask the front desk",
-    body: "Tell the staff which court you're playing on. They set up your game in seconds.",
+    icon: QrCode,
+    title: "Scan the court's code",
+    body: "Point your phone at the QR sign by your court. Nothing to install.",
   },
   {
-    icon: KeyRound,
-    title: "Get your pairing key",
-    body: "Staff give you a 6-digit key for your game. It works once, for your game only.",
+    icon: Clock,
+    title: "Pick your game time",
+    body: "Choose how long you'll play and add your name if you like. Tap Start game and the cameras roll.",
   },
   {
     icon: Smartphone,
-    title: "Pair and play",
-    body: "Enter the key on a phone or tablet courtside. Recording starts the moment it pairs.",
+    title: "Play, watch, save",
+    body: "Your game's page shows the court live, and saves your best rallies as you play.",
   },
   {
     icon: Video,
-    title: "End game, get your video",
-    body: "Tap End game when you're done. The whole game, one video per camera, is ready on your game's link.",
+    title: "Get the whole game",
+    body: "When the time is up, the whole game, one video per camera, is ready on your game's page.",
   },
 ];
 
@@ -52,7 +51,7 @@ const DURING_GAME = [
   {
     icon: Camera,
     title: "Save a great rally",
-    body: "Scan the court's code or press the court button, and the last 60 seconds become a replay on your phone.",
+    body: "Tap Save on your game's page, and the last few minutes are kept as their own video, up to 5 per game.",
   },
   {
     icon: Radio,
@@ -79,14 +78,14 @@ const VENUE_FEATURES = [
     body: "Each clip a player shares carries your venue's logo.",
   },
   {
-    icon: SquareMousePointer,
-    title: "A button on the fence",
-    body: "Players without a phone in hand press the court button to save a replay.",
+    icon: QrCode,
+    title: "Players start their own games",
+    body: "A QR sign on each court lets players start recording themselves, so the front desk doesn't have to.",
   },
   {
     icon: HandCoins,
-    title: "Replays free or paid",
-    body: "Set a price per replay, or none. Players pay at the front desk with the code on their replay.",
+    title: "Games free or paid",
+    body: "Games players start from the court QR are free. For a game staff set up, unlock its videos when the player pays at the front desk.",
   },
   {
     icon: CloudUpload,
@@ -280,9 +279,9 @@ const LandingPage = () => {
                 className="m-0 mt-6 max-w-md"
                 style={{ ...bodyStyle, fontSize: 16.5, color: "rgb(255 255 255 / 0.74)" }}
               >
-                Ask the front desk to record your game, and get the whole thing on your phone.
-                Saw a great rally? Scan the court&apos;s code to keep the last 60 seconds. Nothing
-                to install.
+                Scan the court&apos;s code, pick your game time, and the whole game records. Watch
+                it live, save your best rallies, and get every minute on your phone. Nothing to
+                install.
               </p>
               <div className="flex items-center gap-2.5 mt-9 flex-wrap">
                 <Button size="lg" className="btn-on-navy" asChild>
