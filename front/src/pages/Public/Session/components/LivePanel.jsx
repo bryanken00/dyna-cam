@@ -75,6 +75,37 @@ const nativeHlsOnly = (video) =>
   Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
 
 /**
+ * BUG-006: the box numbers the live playlist's discontinuities from the epoch
+ * second (`#EXT-X-DISCONTINUITY-SEQUENCE:1795176505`). hls.js keeps
+ * per-discontinuity state in arrays indexed by that number, so each array is
+ * ~1.8 billion entries long and every playlist reload / fragment froze the
+ * page for seconds. This playlist loader rebases the number to count from 0
+ * for one player (the first value it sees is 0) — the same breaks, small
+ * numbers. Any box works with it; none needs an update.
+ */
+const rebasedPlaylistLoader = (Hls) => {
+  let base = null;
+  const rebase = (text) =>
+    text.replace(/^#EXT-X-DISCONTINUITY-SEQUENCE:(\d+)/m, (_match, n) => {
+      if (base === null) base = Number(n);
+      return `#EXT-X-DISCONTINUITY-SEQUENCE:${Math.max(0, Number(n) - base)}`;
+    });
+  return class extends Hls.DefaultConfig.loader {
+    load(context, config, callbacks) {
+      super.load(context, config, {
+        ...callbacks,
+        onSuccess: (response, stats, ctx, networkDetails) => {
+          if (typeof response.data === "string") {
+            response.data = rebase(response.data);
+          }
+          callbacks.onSuccess(response, stats, ctx, networkDetails);
+        },
+      });
+    }
+  };
+};
+
+/**
  * Plays `link` in `videoRef`: hls.js, loaded on first use, wherever Media
  * Source exists (Chrome, Edge, Firefox, Safari); the browser's own HLS only
  * where it doesn't (older iPhones). Returns the player's state and `reload()`
@@ -111,7 +142,12 @@ const useHlsPlayer = (videoRef, link) => {
             onError();
             return;
           }
-          hls = new Hls({ lowLatencyMode: false, liveSyncDurationCount: 3 });
+          hls = new Hls({
+            lowLatencyMode: false,
+            liveSyncDurationCount: 3,
+            // BUG-006: small discontinuity numbers, or hls.js freezes the page
+            pLoader: rebasedPlaylistLoader(Hls),
+          });
           hls.on(Hls.Events.ERROR, (_event, data) => {
             // ⚠️ `data` can hold the signed link — never log it
             if (data.fatal) onError();

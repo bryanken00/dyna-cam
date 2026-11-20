@@ -20,6 +20,8 @@ plays on the venue Wi-Fi. Ending the game stays on the court device and in Admin
 - front/: new dependency `hls.js` — run `npm install`. It plays the live view on every browser
   with Media Source; the browser's own HLS is used only where Media Source is missing (older
   iPhones). Edge/Chrome on Windows claim built-in HLS but fail the box's stream (BUG-005).
+  hls.js reads the box's playlist through a loader that rebases `#EXT-X-DISCONTINUITY-SEQUENCE`
+  to count from 0 — the box's epoch-sized number froze the page for seconds at a time (BUG-006).
 - edge/: no recorder box update. If the web app is served over HTTPS, browsers block the box's
   plain-HTTP live video: give the box its certificate (`CERT_PATH`, with `LIVE_HOST` a name the
   certificate covers) for the live view to play on the game page.
