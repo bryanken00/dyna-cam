@@ -47,17 +47,6 @@ export const CLIP_STATUS_TONE = {
   Deleted: "muted",
 };
 
-/** CR-001: a clip's Google Drive copy (clips.driveStatus) → the label staff read. */
-export const CLIP_DRIVE_LABEL = {
-  Pending: "Drive: waiting",
-  Uploading: "Drive: uploading",
-  Uploaded: "In Google Drive",
-  Failed: "Drive: couldn't upload",
-  Skipped: "Drive: skipped",
-  // CR-017: moved to the Drive's trash when the server's copy expired
-  Deleted: "Drive: moved to trash",
-};
-
 /**
  * CR-018: where a game's "your game is in Google Drive" email stands
  * (session.driveEmail from the API) → the line staff read.
@@ -120,14 +109,6 @@ export const driveEmailActionLabel = (status) =>
 
 /** CR-018: Send Drive link (again) is possible in these states. */
 export const DRIVE_EMAIL_SENDABLE = ["Queued", "Sent", "Failed"];
-
-/** Clip source → the label staff read. */
-export const CLIP_SOURCE_LABEL = {
-  QR: "QR scan",
-  BUTTON: "Button",
-  SESSION: "Session",
-  STAFF: "Staff",
-};
 
 /* ── Court buttons ───────────────────────────────────────────────────────── */
 

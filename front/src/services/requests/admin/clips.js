@@ -1,24 +1,7 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { getClipsApi, getClipOptionsApi } from "../../api/admin/clips";
+import { useQuery } from "@tanstack/react-query";
+import { getClipOptionsApi } from "../../api/admin/clips";
 
-/** Clips are view only (PLAN-002 Phase E): no staff save, no delete. */
-
-// Query: Get all clips (filters: venueId, courtId, source, status, dateFrom, dateTo)
-export const useGetClips = (filters = {}) => {
-  return useQuery({
-    queryKey: ["clips", filters],
-    queryFn: () => getClipsApi(filters),
-    staleTime: 60 * 1000,
-    placeholderData: keepPreviousData,
-    // Pending clips turn Ready within a minute or two — keep the list moving
-    refetchInterval: (query) =>
-      query.state.data?.data?.clips?.some((c) =>
-        ["Pending", "Processing"].includes(c.status),
-      )
-        ? 15 * 1000
-        : false,
-  });
-};
+/** CR-024: the Clips page is gone; Sessions still uses the venue/court options. */
 
 // Query: venues + courts for the filters → { venues, courts }
 export const useGetClipOptions = (options = {}) => {
