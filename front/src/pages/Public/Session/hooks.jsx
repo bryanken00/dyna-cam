@@ -3,14 +3,23 @@ import { useParams } from "react-router";
 import { toast } from "sonner";
 import { decodeHTML } from "../../../utils/decode-html";
 import { copyText } from "../../../utils/clipboard";
-import { useGetPublicSession } from "../../../services/requests/public/sessions";
+import {
+  useGetPublicSession,
+  useSavePublicCapture,
+} from "../../../services/requests/public/sessions";
 
 export const useSessionPageHooks = () => {
   const { shareToken } = useParams();
-  const { data, isLoading, error, refetch, isFetching } =
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
     useGetPublicSession(shareToken);
+  // CR-025: Save the last … from this page
+  const saveCapture = useSavePublicCapture(shareToken);
 
   const session = data?.data?.session || null;
+  // CR-025: the court's live video (null unless recording) and the save limits
+  const live = data?.data?.live || null;
+  const capture = data?.data?.capture || null;
+  const isRecording = session?.status === "Recording";
   const notFound = error?.response?.status === 404;
   const parts = useMemo(() => session?.parts || [], [session]);
   // CR-003: the whole game, one video per camera (Cam 1 / Cam 2 tabs)
@@ -68,6 +77,11 @@ export const useSessionPageHooks = () => {
 
   return {
     session,
+    live,
+    capture,
+    isRecording,
+    since: dataUpdatedAt,
+    saveCapture,
     parts,
     videos,
     captures,

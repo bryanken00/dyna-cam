@@ -1,5 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { getPublicSessionApi } from "../../api/public/sessions";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getPublicSessionApi,
+  savePublicCaptureApi,
+} from "../../api/public/sessions";
 
 const LIVE = ["Scheduled", "Recording", "Processing"];
 
@@ -24,5 +27,20 @@ export const useGetPublicSession = (shareToken) => {
     // A refetch re-signs the video links; don't swap them under a playing
     // video just because the tab regained focus
     refetchOnWindowFocus: false,
+  });
+};
+
+// Mutation: CR-025 — Save the last N minutes from the game's page. The page
+// shows refusals itself (too early, at the limit), so no toast here; on
+// success the game is re-read so the save shows under "Your saves".
+export const useSavePublicCapture = (shareToken) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (seconds) => savePublicCaptureApi({ shareToken, seconds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["publicSession", shareToken],
+      });
+    },
   });
 };
