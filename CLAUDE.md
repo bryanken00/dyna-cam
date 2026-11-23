@@ -143,6 +143,26 @@ back after connecting a court's Google Drive (CR-001) — its encrypted, 10-minu
 credential, and the court's Drive refresh token is stored encrypted and never returned. The app keeps its token
   in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
   only — staff work, including payments, happens on the web.
+- **Court booking (PLAN-003):** players reserve court time ahead; a `bookings` row reserves it and
+  only **check-in** creates its game (`utils/bookingCheckIn.js`). Games, live bookings (incl.
+  unexpired `Pending` holds), closures and opening hours share one overlap rule,
+  `utils/courtTimeline.js` `findConflict()` — every writer locks the **court row** `FOR UPDATE`
+  first (then the booking), and Start a game / New game refuse booked time. Two more
+  no-login credentials: a venue's **booking link** (`venues.bookingToken`, `/book/:bookingToken`,
+  API `/public/book/:bookingToken/*`; NULL = online booking off) and a booking's **own link**
+  (`bookings.manageToken`, `/booking/:manageToken`, API `/public/bookings/:manageToken/*`: pay,
+  check in, and until the venue's cut-off cancel / move once); both come from `randomToken()`, and
+  their replies name courts by a hashed key, never a business ID. A booking must be `Paid` or
+  `Free` to check in. **Online payment** goes through Dyna Cam's one Xendit account
+  (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
+  `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the
+  credential, and a payment is believed only after reading the invoice back from Xendit, never
+  from the webhook body or the checkout redirect (`utils/bookingPayments.js`). Refunds are queued
+  in the cancel's transaction and sent after commit; a refused one shows **Refund failed**.
+  Booking emails (`utils/bookingEmails.js`) are sent after the commit of the request that causes
+  them and never fail it; once-only ones are claimed on their `…SentAt` column. Staff work is under
+  the `bookings` permission (money still needs `payments` write); the job is
+  `jobs/bookingMaintenance.js` (every minute).
 - **Backend changes are tested:** `cd back && npm test` (throwaway database, never touches
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run

@@ -254,14 +254,16 @@
 
 ## Wrap-up
 
-- [ ] `cd back && npm run lint && npm test` passes
-- [ ] `cd front && npm run lint && npm run build` passes
-- [ ] Migrations `030`–`034` applied, or noted as pending for deploy (Phase A: written and run by
-      `npm test`; not applied to the dev database yet)
+- [x] `cd back && npm run lint && npm test` passes (437/437; lint 0 errors, only older warnings)
+- [x] `cd front && npm run lint && npm run build` passes (0 errors, only older warnings)
+- [x] Migrations `030`–`034` applied to the dev database `dyna-cam` on 2026-11-23 (with the
+      earlier `027`–`029`); noted for deploy in the changelog entry's Dev notes
 - [ ] Tried in the browser: set hours and rates → book online (desk pay) → staff record cash →
       scan court QR, enter booking code → game records the booked time → video on the game page;
       plus an online-paid booking in Xendit test mode, a cancel with refund and a move
-- [ ] `CLAUDE.md` cross-cutting facts updated (booking routes, webhook route family, booking
+- [x] `CLAUDE.md` cross-cutting facts updated (booking routes, webhook route family, booking
       tokens as credentials) and `back/CLAUDE.md` stack paragraph
-- [ ] Changelog entry added in `docs/changelog/unpublished/` (`ref: PLAN-003`)
+- [x] Changelog entry added in `docs/changelog/unpublished/2026-11-23-court-booking.md`
+      (`ref: PLAN-003`), plus `2026-11-23-email-text-payments-order.md` for the two fixes found
+      on the way
 - [ ] `plan.md` status set to `Done`

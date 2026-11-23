@@ -554,3 +554,7 @@ check-in endpoints:
   `cancelBooking` (`asPlayer`), not only in the handler. A moved desk hold's pay-by time follows
   the new start. The Book page's chips, date strip and court/time grid moved to `src/components/`
   so Move reuses them.
+- 2026-11-23: Wrap-up: lint, tests (437) and build pass; `CLAUDE.md` / `back/CLAUDE.md` updated;
+  changelog queued; migrations `027`–`034` applied to the dev database. Still open before `Done`:
+  the end-to-end browser check (desk flow, an online payment in Xendit test mode, a cancel with
+  refund, a move).

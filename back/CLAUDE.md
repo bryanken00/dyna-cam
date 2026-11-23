@@ -29,7 +29,13 @@ a court's "Connect Google Drive"; the encrypted `state` is the credential — se
 CR-006: a finished game travels as one file per camera — the box gets a `type: "game"` job and
 uploads it in resumable chunks to `/api/v1/device/game-videos/:id/{start,chunk,finish,fail}`
 (`controllers/v1/device/game-videos.controller.js`, `session_videos`); no 5-minute pieces, no
-joining, no ffmpeg on the server. Queries see the whole database (soft deletes aside); the seeded
+joining, no ffmpeg on the server. PLAN-003 (court booking) adds the player's booking pages under
+`/api/v1/public/book/:bookingToken/*` and `/api/v1/public/bookings/:manageToken/*`
+(`controllers/v1/public/booking.controller.js`; the venue's booking link / the booking's own link is
+the credential) and a fifth no-login family, `/api/v1/webhooks/xendit` (`x-callback-token`; the
+invoice is read back from Xendit before anything changes — `lib/payments/xendit.js`,
+`utils/bookingPayments.js`). Booking writes live in `utils/bookings.js` and lock the court row
+before `utils/courtTimeline.js` `findConflict()`. Queries see the whole database (soft deletes aside); the seeded
 **Owner** role and its accounts are the only records hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.
