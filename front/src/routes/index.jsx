@@ -13,6 +13,9 @@ const PublicSession = lazy(() => import("../pages/Public/Session"));
 // A player streams their session to their own Facebook / YouTube (PLAN-002
 // Phase G) — the setup code from the session device's QR is the credential.
 const PublicStream = lazy(() => import("../pages/Public/Stream"));
+// Court booking (PLAN-003) — the venue's booking link / a booking's own link
+const PublicBook = lazy(() => import("../pages/Public/Book"));
+const PublicBooking = lazy(() => import("../pages/Public/Booking"));
 
 const RootRoutes = () => {
   return (
@@ -63,6 +66,22 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicStream />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/book/:bookingToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBook />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/booking/:manageToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBooking />
             </Suspense>
           }
         />

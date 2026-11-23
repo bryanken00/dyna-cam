@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { optionalEmail, optionalPhone, optionalString } from "./_helpers.js";
+import { bookingDate, bookingLength, startTime } from "./bookings.validator.js";
 
 /** Validators for the no-login player routes (controllers/v1/public/). */
 
@@ -99,3 +100,37 @@ export const saveStreamSchema = z.discriminatedUnion("platform", [
 
 // …or only a new layout for the stream already saved
 export const streamLayoutSchema = z.object({ layout: z.enum(["CAM1", "CAM2", "STACKED"]) });
+
+/* ── PLAN-003 Phase C: the public booking page ──────────────────────────────
+ * /book/:bookingToken is a venue's online booking link; /bookings/:manageToken
+ * is one booking's own link. Courts are named by a key from the page's reply
+ * (courtKey), never by their business ID.
+ */
+
+// /book/:bookingToken
+export const bookingTokenParamsSchema = z.object({ bookingToken: token });
+
+// /bookings/:manageToken
+export const manageTokenParamsSchema = z.object({ manageToken: token });
+
+const courtKey = z.string().regex(/^[a-f0-9]{16}$/, "Pick a court");
+
+// GET /book/:bookingToken/availability?date=&durationMinutes=
+export const availabilityQuerySchema = z.object({
+  date: bookingDate(),
+  durationMinutes: bookingLength(360),
+});
+
+// POST /book/:bookingToken/bookings
+export const publicBookingSchema = z.object({
+  courtKey,
+  date: bookingDate(),
+  startTime: startTime(),
+  durationMinutes: bookingLength(360),
+  playerName: z.string().trim().min(1, "Enter your name").max(100),
+  phone: optionalPhone(),
+  // Required online: it's how the player gets their booking link back
+  email: z.string().trim().email("Enter a valid email").max(255),
+  // Phase F adds "Online" (Xendit)
+  payMethod: z.enum(["Desk"]),
+});

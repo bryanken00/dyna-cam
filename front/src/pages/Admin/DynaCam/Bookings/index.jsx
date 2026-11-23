@@ -103,7 +103,7 @@ const BookingsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Bookings"
-        subtitle="Court bookings at the desk — walk-ins and phone calls."
+        subtitle="Court bookings — at the desk and from the venue's online booking link."
         actions={
           canWrite &&
           hasVenues && (

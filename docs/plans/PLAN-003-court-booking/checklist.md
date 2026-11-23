@@ -104,23 +104,27 @@
 
 ### Backend
 
-- [ ] `controllers/v1/public/booking.controller.js`: `GET /book/:bookingToken`,
+- [x] `controllers/v1/public/booking.controller.js`: `GET /book/:bookingToken`,
       `GET /book/:bookingToken/availability?date=` (no names, no business IDs),
       `POST /book/:bookingToken/bookings` (rate-limited; `payMethod: "Desk"` → `Pending` hold to
       `startAt − deskHoldMinutes`, reply `{ manageUrl }`)
-- [ ] `GET /bookings/:manageToken` (status, code, allowed actions)
-- [ ] Mount under `/v1/public` in `routes/route.js`; params validated with `validateParams`
-- [ ] Tests: turned-off link → 404; date beyond `bookingDaysAhead` / past / closed → 400;
-      availability hides names; hold blocks the slot until it expires
+- [x] `GET /bookings/:manageToken` (status, code, allowed actions)
+- [x] Mount under `/v1/public` in `routes/route.js`; params validated with `validateParams`
+- [x] Tests (`tests/public-booking.test.js`): turned-off / replaced link → 404; past, beyond
+      `bookingDaysAhead`, too long, too soon for a desk hold → 400; outside opening hours → 409;
+      availability hides names, codes and business IDs; hold blocks the slot until it expires
+- [x] Courts are named by a `courtKey` (hash of the booking link + court), never their ID;
+      `utils/bookingAvailability.js` works a day's free slots out in one pass; the desk's booking
+      detail gets the player's `manageUrl` (Copy the player's link)
 
 ### Frontend
 
-- [ ] `services/api/public/bookings.js` + requests
-- [ ] `pages/Public/Book/` (`/book/:bookingToken`): date strip, length, court time chips with
+- [x] `services/api/public/bookings.js` + requests
+- [x] `pages/Public/Book/` (`/book/:bookingToken`): date strip, length, court time chips with
       prices, details form, Pay at the desk
-- [ ] `pages/Public/Booking/` (`/booking/:manageToken`): status card, booking code, details,
+- [x] `pages/Public/Booking/` (`/booking/:manageToken`): status card, booking code, details,
       allowed actions
-- [ ] Register both routes in `routes/index.jsx`
+- [x] Register both routes in `routes/index.jsx`
 
 ## Phase D — Check in → recorded game
 

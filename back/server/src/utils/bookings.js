@@ -93,6 +93,25 @@ const lockCourt = async (conn, courtId) => {
   return rows[0] || null;
 };
 
+/** The rules only a player's own booking keeps (staff may book past them). */
+const onlineRules = (court, { startLocal, durationMinutes, now }) => {
+  if (startLocal <= now) return fail(400, "That time has already started — pick a later one");
+  if (durationMinutes > court.maxBookingMinutes) {
+    return fail(400, `Bookings here are at most ${court.maxBookingMinutes / 60} hours`);
+  }
+  const lastDay = moment().tz(TIMEZONE).add(court.bookingDaysAhead, "days").format("YYYY-MM-DD");
+  if (startLocal.slice(0, 10) > lastDay) {
+    return fail(400, `Book at most ${court.bookingDaysAhead} days ahead`);
+  }
+  return null;
+};
+
+/** A player never sees another booking's code or a game's details. */
+const playerConflictMessage = (conflict) =>
+  conflict.type === "CLOSED"
+    ? "That's outside the venue's opening hours"
+    : "That time was just taken — pick another";
+
 /** Insert a row that needs a fresh bookingCode, retrying on the (rare) collision. */
 const insertWithBookingCode = async (insert) => {
   for (let attempt = 0; ; attempt += 1) {
@@ -162,29 +181,24 @@ export const createBooking = async (
 
   const endLocal = addMinutesTo(startLocal, durationMinutes);
   if (endLocal <= now) return fail(400, "That time has already passed");
-  if (source === "Online") {
-    if (startLocal <= now) return fail(400, "That time has already started — pick a later one");
-    if (durationMinutes > court.maxBookingMinutes) {
-      return fail(400, `Bookings here are at most ${court.maxBookingMinutes / 60} hours`);
-    }
-    const lastDay = moment().tz(TIMEZONE).add(court.bookingDaysAhead, "days").format("YYYY-MM-DD");
-    if (startLocal.slice(0, 10) > lastDay) {
-      return fail(400, `Book at most ${court.bookingDaysAhead} days ahead`);
-    }
+  const online = source === "Online";
+  if (online) {
+    const refused = onlineRules(court, { startLocal, durationMinutes, now });
+    if (refused) return refused;
   }
 
   const conflict = await findConflict(conn, {
     courtId,
     startLocal,
     endLocal,
-    checkHours: !(ignoreHours && source === "Desk"),
+    checkHours: online || !ignoreHours,
     now,
   });
-  if (conflict) return fail(409, conflictMessage(conflict));
+  if (conflict) return fail(409, online ? playerConflictMessage(conflict) : conflictMessage(conflict));
 
   const q = await quote(conn, { venueId: court.venueId, courtId, startLocal, durationMinutes });
   if (!q.bookable && !(payment === "Free" && q.reason === "NO_RATE")) {
-    return fail(400, quoteMessage(q));
+    return fail(400, online ? "That time can't be booked online — please call the desk" : quoteMessage(q));
   }
   const price = q.bookable ? q.price : 0;
   // Nothing to pay: a "paid now" or "hold" of ₱0 is simply free
@@ -200,7 +214,9 @@ export const createBooking = async (
     if (holdExpiresAt <= now) {
       return fail(
         400,
-        `It starts in less than ${court.deskHoldMinutes} minutes — take the payment now instead of holding it`
+        online
+          ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
+          : `It starts in less than ${court.deskHoldMinutes} minutes — take the payment now instead of holding it`
       );
     }
   }

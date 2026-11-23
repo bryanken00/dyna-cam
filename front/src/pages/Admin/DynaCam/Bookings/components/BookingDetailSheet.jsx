@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Ban, Banknote, CalendarCheck, CalendarClock, CircleAlert, Trash2, UserX, X } from "lucide-react";
+import { Ban, Banknote, CalendarCheck, CalendarClock, CircleAlert, Copy, Trash2, UserX, X } from "lucide-react";
+import { toast } from "sonner";
 import dayjs from "dayjs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import Spinner from "../../../../../components/Spinner";
 import StatusDot from "../../../../../components/StatusDot";
 import { usePermissions } from "../../../../../hooks/usePermissions";
 import { confirm } from "../../../../../store/confirmStore";
+import { copyText } from "../../../../../utils/clipboard";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../../../utils/phoneFormat";
 import {
@@ -71,6 +73,13 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
       cancelText: "Cancel",
     });
     if (ok) payMutation.mutate({ bookingId: booking.bookingId, payment: {} });
+  };
+
+  // The player's own booking page — for a phone booking, send it to them
+  const handleCopyLink = async () => {
+    const ok = await copyText(booking.manageUrl);
+    if (ok) toast.success("Link copied — send it to the player");
+    else toast.error("Couldn't copy the link");
   };
 
   const handleNoShow = async () => {
@@ -237,6 +246,20 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                       { label: "Name", value: decodeHTML(booking.playerName) },
                       { label: "Phone", value: booking.phone ? formatPhoneDisplay(booking.phone) : "—" },
                       { label: "Email", value: booking.email || "—" },
+                      {
+                        label: "Booking page",
+                        value: (
+                          <button
+                            type="button"
+                            onClick={handleCopyLink}
+                            className="inline-flex items-center gap-1.5 cursor-pointer hover:underline"
+                            style={{ color: "var(--color-link)" }}
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            Copy the player&apos;s link
+                          </button>
+                        ),
+                      },
                     ]}
                   />
                 </div>

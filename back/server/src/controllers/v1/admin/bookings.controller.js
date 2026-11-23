@@ -4,6 +4,7 @@ import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../ut
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { minutesToTime, quote } from "../../../utils/bookingPrice.js";
 import { findConflict, loadVenueHours } from "../../../utils/courtTimeline.js";
+import { bookingManageUrl } from "../../../utils/clips.js";
 import {
   addMinutesTo,
   cancelBooking,
@@ -335,7 +336,7 @@ router.get(
     }
     const booking = rows[0];
 
-    const [payments, games] = await Promise.all([
+    const [payments, games, tokens] = await Promise.all([
       req.db.query(
         `SELECT p.paymentId, p.amount, p.method, p.status, p.note, p.paidAt, p.refundedAt,
                 p.refundError, CONCAT(u.firstName, ' ', u.lastName) AS receivedBy
@@ -351,11 +352,14 @@ router.get(
             [booking.sessionId]
           )
         : Promise.resolve([]),
+      req.db.query(`SELECT manageToken FROM bookings WHERE bookingId = ?`, [booking.bookingId]),
     ]);
 
     return res.sendSuccess("Booking retrieved successfully", {
       booking: {
         ...toBooking(booking),
+        // The player's own booking page, for the desk to share
+        manageUrl: bookingManageUrl(tokens[0].manageToken),
         payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
         game: games[0] || null,
       },

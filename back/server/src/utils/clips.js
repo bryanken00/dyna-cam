@@ -64,6 +64,9 @@ export const courtQrUrl = (qrToken) => `${appUrl()}/court/${qrToken}`;
 /** PLAN-003: a venue's public booking page (its online booking link). */
 export const bookingPageUrl = (bookingToken) => `${appUrl()}/book/${bookingToken}`;
 
+/** PLAN-003: one booking's own page (its manage link). */
+export const bookingManageUrl = (manageToken) => `${appUrl()}/booking/${manageToken}`;
+
 /** Public page for a clip's share link. */
 export const clipShareUrl = (shareToken) => `${appUrl()}/clip/${shareToken}`;
 

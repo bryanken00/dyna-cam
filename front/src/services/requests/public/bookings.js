@@ -1,0 +1,53 @@
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import {
+  createPublicBookingApi,
+  getAvailabilityApi,
+  getBookingPageApi,
+  getMyBookingApi,
+} from "../../api/public/bookings";
+
+// A 404 means the link isn't valid (turned off, replaced) — don't retry it
+const retryUnless404 = (count, error) => error?.response?.status !== 404 && count < 2;
+
+// Query: the venue's booking page
+export const useGetBookingPage = (bookingToken) => {
+  return useQuery({
+    queryKey: ["publicBookingPage", bookingToken],
+    queryFn: () => getBookingPageApi(bookingToken),
+    enabled: !!bookingToken,
+    staleTime: 5 * 60 * 1000,
+    retry: retryUnless404,
+  });
+};
+
+// Query: free hours for a date and length — refreshed now and then while open
+export const useGetAvailability = ({ bookingToken, date, durationMinutes }) => {
+  return useQuery({
+    queryKey: ["publicAvailability", bookingToken, date, durationMinutes],
+    queryFn: () => getAvailabilityApi({ bookingToken, date, durationMinutes }),
+    enabled: !!bookingToken && !!date && !!durationMinutes,
+    staleTime: 20 * 1000,
+    refetchInterval: 60 * 1000,
+    placeholderData: keepPreviousData,
+    retry: retryUnless404,
+  });
+};
+
+// Mutation: book a slot. The page shows errors itself, so no toast here.
+export const useCreatePublicBooking = () => {
+  return useMutation({ mutationFn: createPublicBookingApi });
+};
+
+// Query: one booking by its own link. While it's waiting for payment, check
+// again now and then so the page flips to Confirmed once the desk takes it.
+export const useGetMyBooking = (manageToken) => {
+  return useQuery({
+    queryKey: ["publicBooking", manageToken],
+    queryFn: () => getMyBookingApi(manageToken),
+    enabled: !!manageToken,
+    staleTime: 15 * 1000,
+    retry: retryUnless404,
+    refetchInterval: (query) =>
+      query.state.data?.data?.booking?.status === "Pending" ? 30 * 1000 : false,
+  });
+};

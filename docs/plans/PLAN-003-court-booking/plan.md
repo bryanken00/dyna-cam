@@ -498,3 +498,8 @@ check-in endpoints:
   venue page stays limited to venues / courts permissions: desk staff work from Bookings, and
   whoever edits booking settings also manages the venue. Open games (no game time) now check the
   next 6 hours for bookings and closures, and Add time locks the court row and checks the timeline.
+- 2026-11-23: Phase C built. Courts on the public pages are named by a key derived from the venue's
+  booking link (no business IDs). A player's booking refuses the past, beyond bookingDaysAhead,
+  longer than maxBookingMinutes and too soon for a desk hold; its error messages never name another
+  booking. Email is required online. The booking page tells the player to call the venue to cancel
+  or change until Phase H adds those.
