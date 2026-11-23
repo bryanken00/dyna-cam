@@ -72,19 +72,22 @@ router.get(
     const [countRows, payments, totals] = await Promise.all([
       req.db.query(`SELECT COUNT(*) AS total FROM payments p ${whereClause}`, params),
       req.db.query(
-        `SELECT p.paymentId, p.clipId, p.sessionId,
-                CASE WHEN p.sessionId IS NOT NULL THEN 'Game' ELSE 'Clip' END AS kind,
+        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId,
+                CASE WHEN p.sessionId IS NOT NULL THEN 'Game'
+                     WHEN p.bookingId IS NOT NULL THEN 'Booking'
+                     ELSE 'Clip' END AS kind,
                 p.venueId, v.name AS venueName, c.name AS courtName,
-                COALESCE(cl.payCode, s.payCode) AS payCode,
-                COALESCE(cl.requestedAt, s.startAt) AS requestedAt,
-                p.amount, p.method, p.status, p.note, p.paidAt, p.refundedAt,
+                COALESCE(cl.payCode, s.payCode, bk.bookingCode) AS payCode,
+                COALESCE(cl.requestedAt, s.startAt, bk.startAt) AS requestedAt,
+                p.amount, p.method, p.status, p.note, p.paidAt, p.refundedAt, p.refundError,
                 COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'))
                   AS receivedBy
          FROM payments p
          JOIN venues v ON v.venueId = p.venueId
          LEFT JOIN clips cl ON cl.clipId = p.clipId
          LEFT JOIN recording_sessions s ON s.sessionId = p.sessionId
-         JOIN courts c ON c.courtId = COALESCE(cl.courtId, s.courtId)
+         LEFT JOIN bookings bk ON bk.bookingId = p.bookingId
+         JOIN courts c ON c.courtId = COALESCE(cl.courtId, s.courtId, bk.courtId)
          LEFT JOIN users u ON u.accountId = p.receivedByAccountId
          LEFT JOIN paired_apps pa ON pa.pairedAppId = p.pairedAppId
          ${whereClause}
@@ -256,13 +259,21 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
       const [rows] = await conn.execute(
-        `SELECT paymentId, clipId, sessionId, status FROM payments
+        `SELECT paymentId, clipId, sessionId, bookingId, status FROM payments
          WHERE paymentId = ? LIMIT 1 FOR UPDATE`,
         [req.params.paymentId]
       );
       if (rows.length === 0) {
         await req.db.rollback(conn);
         return res.sendError("Payment not found", 404);
+      }
+      // PLAN-003: a booking is refunded by cancelling it, which frees its slot too
+      if (rows[0].bookingId) {
+        await req.db.rollback(conn);
+        return res.sendError(
+          "This is a court booking — refund it by cancelling the booking in Bookings",
+          409
+        );
       }
       if (rows[0].status !== "Paid") {
         await req.db.rollback(conn);

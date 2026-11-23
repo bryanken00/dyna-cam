@@ -236,14 +236,24 @@ router.post(
 
     if (!booked.ok) {
       if (booked.reason === "BUSY") {
-        // A game on now, or one booked later inside the chosen game time
+        // A game on now, or a game / booking / closure (PLAN-003) later inside
+        // the chosen game time
         const later = booked.busyFrom && booked.busyFrom > startLocal;
-        return res.sendError(
-          later
-            ? `This court is booked from ${clockTime(booked.busyFrom)} — pick a shorter game time`
-            : "This court already has a game going",
-          409
-        );
+        const type = booked.conflict?.type;
+        let message;
+        if (later) {
+          message =
+            type === "CLOSURE"
+              ? `This court is closed from ${clockTime(booked.busyFrom)} — pick a shorter game time`
+              : `This court is booked from ${clockTime(booked.busyFrom)} — pick a shorter game time`;
+        } else if (type === "CLOSURE") {
+          message = "This court is closed right now";
+        } else if (type === "BOOKING") {
+          message = "This court is booked right now";
+        } else {
+          message = "This court already has a game going";
+        }
+        return res.sendError(message, 409);
       }
       return res.sendError("This court code is not valid", 404);
     }

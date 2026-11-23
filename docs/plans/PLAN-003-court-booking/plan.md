@@ -253,7 +253,7 @@ retrying events we've already handled.
 | `GET /bookings/:bookingId` | `bookings` read | One booking with its payments and game |
 | `POST /bookings` | `bookings` write | Desk booking: court, date, start, length, name, phone, email, and one of **Paid now (cash)** · **Hold, pay at desk** (released `deskHoldMinutes` before the start, like online desk holds) · **Free**. "Paid now" records the cash payment in the same transaction. That needs `payments` write too, otherwise the option is hidden and the API refuses it with 403 |
 | `PUT /bookings/:bookingId/move` | `bookings` write | Any time before it starts, any number of times (the one-move limit is for players); price kept unless staff tick "Reprice" |
-| `POST /bookings/:bookingId/cancel` | `bookings` write | Any time before check-in, even after the player's cut-off. Reason required, and **Refund** (on by default when paid, full or a typed amount). Online refund goes through Xendit; a cash refund is a `Refunded` payment row (reuses the CR-015 refund) |
+| `POST /bookings/:bookingId/cancel` | `bookings` write | Any time before check-in, even after the player's cut-off. Reason required, and **Refund** (on by default when paid; all of it or nothing). Online refund goes through Xendit; a cash refund is a `Refunded` payment row (reuses the CR-015 refund) |
 | `POST /bookings/:bookingId/check-in` | `bookings` write | Staff check the player in (the player has no phone, the QR is damaged…) |
 | `POST /bookings/:bookingId/no-show` | `bookings` write | Mark early. The job also does it after the end |
 | `POST /bookings/:bookingId/payments` | `payments` write | Record a cash payment → `Paid` (+ `Confirmed` if `Pending`) |
@@ -286,8 +286,8 @@ gets a test.
 - Money from every venue lands in the one Dyna Cam balance. Settling with venues is done outside
   the system. The Payments page's per-venue totals (method Online) are the statement to settle
   from.
-- **Refunds:** player cancels before the cut-off → full refund. Staff cancel → full or partial,
-  their choice. A late webhook on a lost slot → full refund. Each refund is recorded on the payment
+- **Refunds:** player cancels before the cut-off → full refund. Staff cancel → full refund or
+  none, their choice. A late webhook on a lost slot → full refund. Each refund is recorded on the payment
   row (`Refunded`, `refundedAt`). If Xendit refuses one (e.g. a method that can't be refunded),
   the booking is still cancelled and the payment is flagged **Refund failed** so staff can repay
   by hand.
@@ -492,3 +492,9 @@ check-in endpoints:
   instead of under `/admin/venues`, since one route group keeps one permission. A closure's
   `cancelConflicts` only marks bookings `Cancelled` for now; refunds and emails join in Phase B,
   F and G.
+- 2026-11-23: Phase B built. Staff refunds are all-or-nothing (no partial refunds — the payments
+  table has no refund amount, and partial refunds weren't asked for). A booking payment is refunded
+  only by cancelling the booking (Payments → Refund refuses it), so the slot is freed with it. The
+  venue page stays limited to venues / courts permissions: desk staff work from Bookings, and
+  whoever edits booking settings also manages the venue. Open games (no game time) now check the
+  next 6 hours for bookings and closures, and Add time locks the court row and checks the timeline.

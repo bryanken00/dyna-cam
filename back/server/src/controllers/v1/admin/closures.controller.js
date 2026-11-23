@@ -4,6 +4,7 @@ import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { LIVE_BOOKING } from "../../../utils/courtTimeline.js";
+import { cancelBooking } from "../../../utils/bookings.js";
 import {
   createClosureSchema,
   listClosuresQuerySchema,
@@ -74,7 +75,10 @@ const findInTheWay = async (conn, { venueId, courtId, startAt, endAt, now }) => 
  * error reply to send, or null when the closure may be saved (having
  * cancelled the bookings in the way if asked to).
  */
-const checkWindow = async (conn, { venueId, courtId, startAt, endAt, reason, cancelConflicts, now }) => {
+const checkWindow = async (
+  conn,
+  { venueId, courtId, startAt, endAt, reason, cancelConflicts, now, accountId }
+) => {
   if (endAt <= now) {
     return { message: "The closure must end in the future", status: 400 };
   }
@@ -120,17 +124,17 @@ const checkWindow = async (conn, { venueId, courtId, startAt, endAt, reason, can
     };
   }
 
-  if (bookings.length > 0) {
-    const cancelReason = (reason ? `Court closed: ${reason}` : "Court closed").slice(0, 255);
-    for (const booking of bookings) {
-      await conn.execute(
-        `UPDATE bookings
-         SET status = 'Cancelled', cancelledAt = ?, cancelledBy = 'Staff', cancelReason = ?,
-             holdExpiresAt = NULL, dateUpdated = ?
-         WHERE bookingId = ?`,
-        [now, cancelReason, now, booking.bookingId]
-      );
-    }
+  // The court is closed on them: cancelled and, if paid, refunded in full
+  const cancelReason = reason ? `Court closed: ${reason}` : "Court closed";
+  for (const booking of bookings) {
+    const cancelled = await cancelBooking(conn, {
+      bookingId: booking.bookingId,
+      by: "Staff",
+      reason: cancelReason,
+      refund: true,
+      accountId,
+    });
+    if (!cancelled.ok) return { message: cancelled.message, status: cancelled.status };
   }
   return null;
 };
@@ -235,6 +239,7 @@ router.post(
         endAt,
         reason,
         cancelConflicts,
+        accountId: req.user.accountId,
         now,
       });
       if (refusal) {
@@ -296,6 +301,7 @@ router.put(
         endAt,
         reason,
         cancelConflicts,
+        accountId: req.user.accountId,
         now,
       });
       if (refusal) {

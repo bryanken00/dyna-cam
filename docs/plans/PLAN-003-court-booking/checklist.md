@@ -51,30 +51,33 @@
 
 ### Backend
 
-- [ ] `validators/bookings.validator.js`: create (court, date, start, length, name, phone via
+- [x] `validators/bookings.validator.js`: create (court, date, start, length, name, phone via
       `optionalPhone()`, email, payment option), move, cancel (reason, refund), list query
       (`queryEnum` status, date range, venue, search)
-- [ ] `controllers/v1/admin/bookings.controller.js`: `GET /` (list + pagination), `GET /day`
+- [x] `controllers/v1/admin/bookings.controller.js`: `GET /` (list + pagination), `GET /day`
       (courts × hours for one date: bookings, games, closures), `GET /:bookingId`
-- [ ] `POST /admin/bookings`: one transaction, court row `FOR UPDATE` → `findConflict` → price
+- [x] `POST /admin/bookings`: one transaction, court row `FOR UPDATE` → `findConflict` → price
       quote → insert with `bookingCode` (via `insertWithPayCode`-style retry) and `manageToken`;
       options **Paid now (cash)** (inserts the payment; needs `payments` write, 403 otherwise) ·
       **Hold, pay at desk** (`Pending`, `holdExpiresAt = startAt − deskHoldMinutes`) · **Free**
-- [ ] Closures that cancel bookings (`cancelConflicts`, Phase A) go through the shared
+- [x] Closures that cancel bookings (`cancelConflicts`, Phase A) go through the shared
       cancel helper, so paid ones are refunded (cash now, Xendit in F) and emailed (G) — Phase A
       only sets them `Cancelled`, since no booking can be paid before Phase B
-- [ ] A user with only `bookings` read can reach the venue page's booking sections (today the
-      venue page needs `venues/list` or `venues/courts`)
-- [ ] `PUT /:bookingId/move` (staff: unlimited, price kept unless "Reprice"),
-      `POST /:bookingId/cancel` (any time before check-in; full or partial refund; cash refund =
+- [x] ~~A user with only `bookings` read can reach the venue page's booking sections~~ —
+      decided not needed: desk staff work from Bookings; whoever edits a venue's booking
+      settings also has a venues permission (see plan Revisions)
+- [x] `PUT /:bookingId/move` (staff: unlimited, price kept unless "Reprice" — only while unpaid),
+      `POST /:bookingId/cancel` (any time before check-in; refund in full or not at all; cash refund =
       `Refunded` payment row),
       `POST /:bookingId/no-show`, `DELETE /:bookingId` (soft delete, no payments only)
-- [ ] `POST /admin/bookings/:bookingId/payments` behind `checkPermission("payments", null, "write")`
-- [ ] Mount `/bookings` in `routes/v1/admin/index.js` with `requireAuth` + `auditTrail("bookings")`
-- [ ] `utils/gameStart.js` `bookCourt()`: use `findConflict` so Admin New game and the court QR's
-      Start a game refuse booked time (`BUSY` + `busyFrom`); New game's error names the booking
-- [ ] Payments list/detail and Sessions list/detail include booking payments / "Booking <code>"
-- [ ] Tests: create → conflict on overlap (booking vs booking, booking vs game, game vs booking,
+- [x] `POST /admin/bookings/:bookingId/payments` behind `checkPermission("payments", null, "write")`
+- [x] Mount `/bookings` in `routes/v1/admin/index.js` with `requireAuth` + `auditTrail("bookings")`
+- [x] `utils/gameStart.js` `bookCourt()`: use `findConflict` so Admin New game and the court QR's
+      Start a game refuse booked time (`BUSY` + `busyFrom`); New game's error names the booking.
+      Also: open games (no game time) check the next 6 h, and Add time locks the court row and
+      checks the timeline
+- [x] Payments list/detail and Sessions list/detail include booking payments / "Booking <code>"
+- [x] Tests: create → conflict on overlap (booking vs booking, booking vs game, game vs booking,
       closure, outside hours); two concurrent creates on one slot → exactly one succeeds; move and
       cancel rules; cash payment confirms a Pending booking; `payments` write required for
       "Paid now"; Deleted booking → 404 and unchanged on every by-ID route; CR-027 Start a game
@@ -82,17 +85,19 @@
 
 ### Frontend
 
-- [ ] `services/api/admin/bookings.js` + `services/requests/admin/bookings.js`
-- [ ] `pages/Admin/DynaCam/Bookings/hooks.jsx` + `index.jsx`: Day view (courts × hours grid) and
+- [x] `services/api/admin/bookings.js` + `services/requests/admin/bookings.js` (+ `GET /options`,
+      `GET /quote` for the live price)
+- [x] `pages/Admin/DynaCam/Bookings/hooks.jsx` + `index.jsx`: Day view (courts × hours grid) and
       List view (`DataTable`, filters, stat cards)
-- [ ] `components/BookingFormDrawer.jsx` (owns its `<Sheet>`; live price quote; phone with
+- [x] `components/BookingFormDrawer.jsx` (owns its `<Sheet>`; live price quote; phone with
       `zPhone` / `formatPhoneOnChange` / `PHONE_PLACEHOLDER`; email optional; payment option)
-- [ ] `components/BookingDetailDrawer.jsx`: timeline + Record payment, Move, Cancel/Refund,
-      Check in, No-show, Resend (each hidden without its permission)
-- [ ] Register **Bookings** in `AdminRoute.jsx` (Dyna Cam group, first child,
+- [x] `components/BookingDetailSheet.jsx` (+ `MoveBookingFormModal`, `CancelBookingFormModal`):
+      details, payments, game + Record payment, Move, Cancel/Refund, No-show, Delete (each hidden
+      without its permission). Check in → Phase D, Resend → Phase G
+- [x] Register **Bookings** in `AdminRoute.jsx` (Dyna Cam group, first child,
       `<ProtectedRoute module="bookings" accessLevel="read">`); add `bookings` read to the group's
       `anyOf`
-- [ ] Sessions: Started by "Booking <code>" links to the booking; Payments: method column and
+- [x] Sessions: Started by "Booking <code>" links to the booking; Payments: method column and
       booking items
 
 ## Phase C — Public booking page (pay at the desk)

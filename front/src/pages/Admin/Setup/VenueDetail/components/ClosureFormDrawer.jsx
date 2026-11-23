@@ -314,7 +314,8 @@ const ClosureFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                       ))}
                     </ul>
                     <p className="m-0 mt-2">
-                      Closing anyway cancels them. Refund paid ones from Bookings.
+                      Closing anyway cancels them and refunds the paid ones in full — hand
+                      the cash back to those players.
                     </p>
                   </AlertDescription>
                 </Alert>

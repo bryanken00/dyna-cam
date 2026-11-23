@@ -16,6 +16,7 @@ import sessionsController from "../../../controllers/v1/admin/sessions.controlle
 import paymentsController from "../../../controllers/v1/admin/payments.controller.js";
 import bookingSettingsController from "../../../controllers/v1/admin/booking-settings.controller.js";
 import closuresController from "../../../controllers/v1/admin/closures.controller.js";
+import bookingsController from "../../../controllers/v1/admin/bookings.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -59,6 +60,7 @@ router.use(
   bookingSettingsController
 );
 router.use("/closures", requireAuth, auditTrail("closures"), closuresController);
+router.use("/bookings", requireAuth, auditTrail("bookings"), bookingsController);
 
 
 export default router;

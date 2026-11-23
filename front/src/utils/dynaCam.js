@@ -228,6 +228,39 @@ export const bookingSignPath = (venueId) => `${venuePath(venueId)}/booking-sign`
 
 /* ── Court booking (PLAN-003) ────────────────────────────────────────────── */
 
+/** Dyna Cam → Bookings; `?booking=<id>` opens that booking. */
+export const BOOKINGS_PATH = "/admin/bookings";
+export const bookingPath = (bookingId) => `${BOOKINGS_PATH}?booking=${bookingId}`;
+
+/** Booking status → what staff read, and its StatusDot tone. */
+export const BOOKING_STATUS_LABEL = {
+  Pending: "Unpaid hold",
+  Confirmed: "Confirmed",
+  CheckedIn: "Checked in",
+  Completed: "Played",
+  NoShow: "No-show",
+  Cancelled: "Cancelled",
+  Expired: "Hold expired",
+  Deleted: "Deleted",
+};
+export const BOOKING_STATUS_TONE = {
+  Pending: "warning",
+  Confirmed: "success",
+  CheckedIn: "success",
+  Completed: "muted",
+  NoShow: "error",
+  Cancelled: "muted",
+  Expired: "muted",
+  Deleted: "muted",
+};
+/** paymentStatus → label. */
+export const BOOKING_PAYMENT_LABEL = {
+  Unpaid: "Unpaid",
+  Paid: "Paid",
+  Refunded: "Refunded",
+  Free: "Free",
+};
+
 /** dayOfWeek 0 = Sunday … 6 = Saturday, as the API stores it. */
 export const WEEKDAY_NAMES = [
   "Sunday",

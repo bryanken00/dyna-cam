@@ -1,12 +1,15 @@
 import { insertWithPayCode } from "./payments.js";
 import { randomToken } from "./crypto/tokens.js";
+import { findConflict } from "./courtTimeline.js";
 
 /**
  * Book a court for a fixed window — Admin's New game (startNow / startAt,
  * CR-016) and the player's Start a game page (CR-027) share this.
  *
  * Locks the court row, so two bookings on one court can't both pass the
- * overlap check. Run it inside a transaction.
+ * overlap check. Run it inside a transaction. PLAN-003: the check is the court
+ * timeline — games, live bookings and closures (not opening hours: a game may
+ * run outside them) — so a walk-in can't take booked time.
  *
  * @param {import("mysql2/promise").PoolConnection} conn - inside a transaction
  * @param {Object} game
@@ -22,9 +25,12 @@ import { randomToken } from "./crypto/tokens.js";
  * @param {boolean} [game.free] - CR-015: no pay code, videos open at once
  * @param {string|null} [game.createdByAccountId] - the staff account, or null
  * @param {boolean} [game.startedByPlayer] - CR-027: started from the court's QR
+ * @param {string|null} [game.bookingId] - PLAN-003: the booking being checked in (its own
+ *   slot doesn't block it, and the game is linked to it)
  * @returns {Promise<{ ok: true, sessionId: string, shareToken: string, payCode: string|null }
- *   | { ok: false, reason: "COURT_NOT_FOUND"|"NO_CAMERA"|"BUSY", busyFrom?: string }>}
- *   busyFrom: the start of the earliest game in the way (BUSY only)
+ *   | { ok: false, reason: "COURT_NOT_FOUND"|"NO_CAMERA"|"BUSY", busyFrom?: string,
+ *       conflict?: { type: "GAME"|"BOOKING"|"CLOSURE", from, until, id, code? } }>}
+ *   busyFrom: the start of the earliest thing in the way (BUSY only)
  */
 export const bookCourt = async (
   conn,
@@ -41,6 +47,7 @@ export const bookCourt = async (
     free = false,
     createdByAccountId = null,
     startedByPlayer = false,
+    bookingId = null,
   }
 ) => {
   const [courts] = await conn.execute(
@@ -55,15 +62,14 @@ export const bookCourt = async (
 
   // An open game waiting for a device has a rolling endAt ahead of now, so it
   // overlaps too
-  const [overlap] = await conn.execute(
-    `SELECT sessionId, startAt FROM recording_sessions
-     WHERE courtId = ? AND status NOT IN ('Cancelled', 'Failed')
-       AND startAt < ? AND endAt > ?
-     ORDER BY startAt ASC
-     LIMIT 1`,
-    [courtId, endLocal, startLocal]
-  );
-  if (overlap.length > 0) return { ok: false, reason: "BUSY", busyFrom: overlap[0].startAt };
+  const conflict = await findConflict(conn, {
+    courtId,
+    startLocal,
+    endLocal,
+    ignoreBookingId: bookingId,
+    now,
+  });
+  if (conflict) return { ok: false, reason: "BUSY", busyFrom: conflict.from, conflict };
 
   const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
   const sessionId = uuidRow[0].id;
@@ -73,9 +79,9 @@ export const bookCourt = async (
       conn.execute(
         `INSERT INTO recording_sessions
            (sessionId, venueId, courtId, startAt, endAt, playerName, phone, email, shareToken,
-            createdByAccountId, startedByPlayer, maxCaptures, status, paymentStatus, payCode,
-            dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            createdByAccountId, startedByPlayer, bookingId, maxCaptures, status, paymentStatus,
+            payCode, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           sessionId,
           courts[0].venueId,
@@ -88,6 +94,7 @@ export const bookCourt = async (
           shareToken,
           createdByAccountId,
           startedByPlayer ? 1 : 0,
+          bookingId,
           maxCaptures ?? null,
           status,
           code ? "Unpaid" : "Free",

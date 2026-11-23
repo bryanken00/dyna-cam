@@ -19,7 +19,10 @@ import {
 
 const EMPTY_FILTERS = { venueId: "", status: "", dateFrom: "", dateTo: "" };
 
-const METHOD_LABEL = { CASH: "Cash" };
+const METHOD_LABEL = { CASH: "Cash", ONLINE: "Online" };
+
+/** What was paid for: a replay, a whole game (CR-015) or a court booking (PLAN-003). */
+const KIND_LABEL = { Clip: "Replay", Game: "Game", Booking: "Court booking" };
 
 export const usePaymentHooks = () => {
   const { hasPermission } = usePermissions();
@@ -99,7 +102,8 @@ export const usePaymentHooks = () => {
 
   const getActionItems = useCallback(
     (record) => {
-      if (!canWrite || record.status !== "Paid") return [];
+      // PLAN-003: a booking is refunded by cancelling it in Bookings
+      if (!canWrite || record.status !== "Paid" || record.kind === "Booking") return [];
       return [
         {
           key: "refund",
@@ -169,7 +173,7 @@ export const usePaymentHooks = () => {
               {decodeHTML(record.venueName)}
               {/* CR-015: a whole game, or a single replay */}
               {" · "}
-              {record.kind === "Game" ? "Game" : "Replay"}
+              {KIND_LABEL[record.kind] || "Replay"}
             </div>
           </div>
         ),

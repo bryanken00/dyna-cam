@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import dayjs from "dayjs";
 import {
@@ -35,6 +35,7 @@ import {
   driveEmailActionLabel,
   driveEmailText,
   driveUploadText,
+  bookingPath,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import { useGetClipOptions } from "../../../../services/requests/admin/clips";
@@ -61,6 +62,7 @@ export const useSessionHooks = () => {
   const { hasPermission } = usePermissions();
   // Sessions deliver their footage as clips — same permission
   const canWrite = hasPermission("clips", null, "write");
+  const canReadBookings = hasPermission("bookings", null, "read");
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   // CR-023: the Dashboard's "Not paid yet" opens this page with ?payment=Unpaid
@@ -500,7 +502,19 @@ export const useSessionHooks = () => {
                 className="truncate"
                 style={{ fontSize: 12, color: "var(--color-text-muted)" }}
               >
-                Started by {decodeHTML(record.startedBy)}
+                Started by{" "}
+                {/* PLAN-003: a booked game links to its booking */}
+                {record.bookingId && canReadBookings ? (
+                  <Link
+                    to={bookingPath(record.bookingId)}
+                    className="hover:underline"
+                    style={{ color: "var(--color-link)" }}
+                  >
+                    {decodeHTML(record.startedBy)}
+                  </Link>
+                ) : (
+                  decodeHTML(record.startedBy)
+                )}
               </div>
             )}
           </div>
@@ -598,7 +612,7 @@ export const useSessionHooks = () => {
         render: (_, record) => <RowActions items={getActionItems(record)} />,
       },
     ],
-    [getActionItems, current, pageSize],
+    [getActionItems, current, pageSize, canReadBookings],
   );
 
   const sessions = apiData?.data?.sessions || [];

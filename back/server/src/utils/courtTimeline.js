@@ -76,7 +76,8 @@ export const withinHours = (hours, startLocal, endLocal) => {
  * @param {boolean} [window.checkHours] - also refuse outside opening hours (bookings)
  * @param {string} [window.now] - getCurrentTimestampLocal() (tests pass a fixed one)
  * @returns {Promise<null | { type: "GAME"|"BOOKING"|"CLOSURE"|"CLOSED", from: string|null,
- *   until: string|null, id: string|null }>} the earliest-starting conflict
+ *   until: string|null, id: string|null, code?: string }>} the earliest-starting conflict
+ *   (code: a booking's bookingCode)
  *   (CLOSED — outside opening hours — has no window or id)
  */
 export const findConflict = async (
@@ -98,7 +99,8 @@ export const findConflict = async (
     ),
     selectRows(
       db,
-      `SELECT b.bookingId AS id, b.startAt AS \`from\`, b.endAt AS \`until\`
+      `SELECT b.bookingId AS id, b.bookingCode AS code, b.startAt AS \`from\`,
+              b.endAt AS \`until\`
        FROM bookings b
        WHERE b.courtId = ? AND ${LIVE_BOOKING} AND b.startAt < ? AND b.endAt > ?
          AND (? IS NULL OR b.bookingId != ?)
