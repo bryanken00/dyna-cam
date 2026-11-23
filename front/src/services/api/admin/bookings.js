@@ -64,3 +64,10 @@ export const checkInBookingAdminApi = async (bookingId) => {
   const response = await api.post(`/api/v1/admin/bookings/${bookingId}/check-in`);
   return response.data;
 };
+
+// Phase F: send a cancelled booking's failed online refund to Xendit again →
+// { refundedOnline, refundFailed } · 502 when Xendit refuses it again
+export const retryBookingRefundApi = async (bookingId) => {
+  const response = await api.post(`/api/v1/admin/bookings/${bookingId}/retry-refund`);
+  return response.data;
+};

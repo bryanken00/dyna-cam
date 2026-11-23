@@ -20,7 +20,8 @@ export const getAvailabilityApi = async ({ bookingToken, date, durationMinutes }
 };
 
 // Book a slot. body: { courtKey, date, startTime, durationMinutes, playerName, phone?, email, payMethod }
-// 201 { bookingCode, manageToken, manageUrl }
+// 201 { bookingCode, manageToken, manageUrl, checkoutUrl } — checkoutUrl (Phase F) when
+// payMethod is "Online": the Xendit checkout to send the player to
 export const createPublicBookingApi = async ({ bookingToken, body }) => {
   const response = await axiosInstance.post(`/api/v1/public/book/${bookingToken}/bookings`, body);
   return response.data;
@@ -35,5 +36,12 @@ export const getMyBookingApi = async (manageToken) => {
 // Phase D: check this booking in → 201 (or 200 if already in) { shareToken, shareUrl }
 export const checkInBookingApi = async (manageToken) => {
   const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/check-in`);
+  return response.data;
+};
+
+// Phase F: the booking's Xendit checkout → { paid, checkoutUrl } (paid: it turned out to be
+// paid already, nothing to open)
+export const payBookingOnlineApi = async (manageToken) => {
+  const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/pay`);
   return response.data;
 };

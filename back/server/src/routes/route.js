@@ -57,5 +57,10 @@ router.use("/v1/app", requirePairedApp, appRoute);
 import googleOAuthRoute from "../controllers/v1/oauth/google.controller.js";
 router.use("/v1/oauth/google", googleOAuthRoute);
 
+// PLAN-003 Phase F: Xendit's payment webhooks — its x-callback-token is the
+// credential (no login); the invoice is then read back from Xendit's API
+import xenditWebhookRoute from "../controllers/v1/webhooks/xendit.controller.js";
+router.use("/v1/webhooks/xendit", xenditWebhookRoute);
+
 // Exporting the router to be used in the main app
 export default router;

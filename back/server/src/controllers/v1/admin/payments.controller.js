@@ -9,7 +9,9 @@ import {
   listPaymentsQuerySchema,
   lookupPaymentQuerySchema,
   refundPaymentSchema,
+  settlementQuerySchema,
 } from "../../../validators/payments.validator.js";
+import { REFUND_SENDING } from "../../../utils/bookingPayments.js";
 
 /**
  * Payments — cash taken at the front desk for players' clips (PLAN-001
@@ -91,7 +93,7 @@ router.get(
          LEFT JOIN users u ON u.accountId = p.receivedByAccountId
          LEFT JOIN paired_apps pa ON pa.pairedAppId = p.pairedAppId
          ${whereClause}
-         ORDER BY p.paidAt DESC
+         ORDER BY p.paidAt DESC, p.id DESC
          LIMIT ? OFFSET ?`,
         [...params, Number(pageSize), Number(offset)]
       ),
@@ -124,6 +126,70 @@ router.get(
         pageSize: Number(pageSize),
         total,
         totalPages: Math.ceil(total / pageSize),
+      },
+    });
+  })
+);
+
+/**
+ * GET /settlement?dateFrom&dateTo
+ * PLAN-003 Phase F: every venue's online (Xendit) booking money paid in the
+ * range — all of it lands in Dyna Cam's one Xendit balance, and this is the
+ * statement Dyna Cam settles with each venue from. Defaults to this month.
+ *   collected: every online payment; refunded: given back through Xendit (or by
+ *   hand); refundFailed: still owed back to a player; net = collected − refunded − refundFailed
+ */
+router.get(
+  "/settlement",
+  checkPermission("payments", null, "read"),
+  validateQuery(settlementQuerySchema),
+  catchAsync(async (req, res) => {
+    const today = getTodayDateLocal();
+    const dateFrom = req.query.dateFrom || `${today.slice(0, 8)}01`;
+    const dateTo = req.query.dateTo || today;
+
+    const rows = await req.db.query(
+      `SELECT v.venueId, v.name AS venueName,
+              COUNT(*) AS payments,
+              COALESCE(SUM(p.amount), 0) AS collected,
+              COALESCE(SUM(CASE WHEN p.status = 'Refunded' THEN p.amount END), 0) AS refunded,
+              COALESCE(SUM(CASE WHEN p.status = 'Paid' AND p.refundError IS NOT NULL
+                                THEN p.amount END), 0) AS refundFailed,
+              SUM(p.status = 'Paid' AND p.refundError IS NOT NULL) AS refundFailedCount
+       FROM payments p
+       JOIN venues v ON v.venueId = p.venueId
+       WHERE p.method = 'ONLINE' AND p.paidAt >= ? AND p.paidAt <= ?
+       GROUP BY v.venueId, v.name
+       ORDER BY v.name ASC`,
+      [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]
+    );
+
+    const venues = rows.map((r) => {
+      const collected = Number(r.collected);
+      const refunded = Number(r.refunded);
+      const refundFailed = Number(r.refundFailed);
+      return {
+        venueId: r.venueId,
+        venueName: r.venueName,
+        payments: Number(r.payments),
+        collected,
+        refunded,
+        refundFailed,
+        refundFailedCount: Number(r.refundFailedCount || 0),
+        net: Math.round((collected - refunded - refundFailed) * 100) / 100,
+      };
+    });
+    const sum = (key) => Math.round(venues.reduce((t, v) => t + v[key], 0) * 100) / 100;
+    return res.sendSuccess("Online settlement", {
+      dateFrom,
+      dateTo,
+      venues,
+      totals: {
+        payments: sum("payments"),
+        collected: sum("collected"),
+        refunded: sum("refunded"),
+        refundFailed: sum("refundFailed"),
+        net: sum("net"),
       },
     });
   })
@@ -259,13 +325,46 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
       const [rows] = await conn.execute(
-        `SELECT paymentId, clipId, sessionId, bookingId, status FROM payments
+        `SELECT paymentId, clipId, sessionId, bookingId, status, refundError FROM payments
          WHERE paymentId = ? LIMIT 1 FOR UPDATE`,
         [req.params.paymentId]
       );
       if (rows.length === 0) {
         await req.db.rollback(conn);
         return res.sendError("Payment not found", 404);
+      }
+      // Phase F: an online refund Xendit refused — staff repaid the player by hand
+      if (rows[0].bookingId && rows[0].status === "Paid" && rows[0].refundError) {
+        if (rows[0].refundError === REFUND_SENDING) {
+          await req.db.rollback(conn);
+          return res.sendError(
+            "The online refund is being sent right now — check again in a minute",
+            409
+          );
+        }
+        await conn.execute(
+          `UPDATE payments
+           SET status = 'Refunded', refundedAt = ?, refundedByAccountId = ?, refundError = NULL,
+               note = ?, dateUpdated = ?
+           WHERE paymentId = ?`,
+          [
+            now,
+            req.user.accountId,
+            (
+              req.body.note || `Repaid by hand — online refund failed: ${rows[0].refundError}`
+            ).slice(0, 255),
+            now,
+            rows[0].paymentId,
+          ]
+        );
+        await conn.execute(
+          `UPDATE bookings SET paymentStatus = 'Refunded', dateUpdated = ?
+           WHERE bookingId = ? AND paymentStatus = 'Paid' AND status = 'Cancelled'
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE bookingId = ? AND status = 'Paid')`,
+          [now, rows[0].bookingId, rows[0].bookingId]
+        );
+        await req.db.commit(conn);
+        return res.sendSuccess("Marked as repaid by hand");
       }
       // PLAN-003: a booking is refunded by cancelling it, which frees its slot too
       if (rows[0].bookingId) {

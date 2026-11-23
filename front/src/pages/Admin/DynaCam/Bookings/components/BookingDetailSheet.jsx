@@ -7,6 +7,7 @@ import {
   CircleAlert,
   Copy,
   Play,
+  RotateCcw,
   Trash2,
   UserX,
   X,
@@ -46,6 +47,7 @@ import {
   useGetBookingById,
   useMarkNoShow,
   useRecordBookingPayment,
+  useRetryBookingRefund,
 } from "../../../../../services/requests/admin/bookings";
 
 const OPEN_STATUSES = ["Pending", "Confirmed"];
@@ -70,6 +72,7 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
   const noShowMutation = useMarkNoShow();
   const deleteMutation = useDeleteBooking();
   const checkInMutation = useCheckInBooking();
+  const retryRefundMutation = useRetryBookingRefund();
 
   const now = manilaNow();
   const nowLocal = `${now.date} ${now.time}:00`;
@@ -288,25 +291,57 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                     </p>
                   ) : (
                     <ul className="m-0 p-0 list-none space-y-2">
-                      {booking.payments.map((p) => (
-                        <li
-                          key={p.paymentId}
-                          className="flex items-center justify-between gap-3 px-3.5 py-2.5"
-                          style={{ border: "1px solid var(--color-line)", borderRadius: 10 }}
-                        >
-                          <div className="min-w-0">
-                            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-dark)" }}>
-                              {formatPeso(p.amount)} · {p.method === "ONLINE" ? "Online" : "Cash"}
+                      {booking.payments.map((p) => {
+                        // Phase F: Xendit refused (or hasn't yet taken) an online refund
+                        const refundFailed = p.status === "Paid" && !!p.refundError;
+                        return (
+                          <li
+                            key={p.paymentId}
+                            className="px-3.5 py-2.5"
+                            style={{ border: "1px solid var(--color-line)", borderRadius: 10 }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div style={{ fontSize: 14, fontWeight: 500, color: "var(--color-text-dark)" }}>
+                                  {formatPeso(p.amount)} · {p.method === "ONLINE" ? "Online" : "Cash"}
+                                </div>
+                                <div className="truncate" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                                  {formatDateTime(p.paidAt)}
+                                  {p.receivedBy ? ` · ${decodeHTML(p.receivedBy)}` : ""}
+                                  {p.status === "Refunded" && p.refundedAt
+                                    ? ` · refunded ${formatDateTime(p.refundedAt)}`
+                                    : ""}
+                                </div>
+                              </div>
+                              {refundFailed ? (
+                                <StatusDot tone="error">Refund failed</StatusDot>
+                              ) : (
+                                <StatusDot tone={PAYMENT_STATUS_TONE[p.status] || "muted"}>{p.status}</StatusDot>
+                              )}
                             </div>
-                            <div className="truncate" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-                              {formatDateTime(p.paidAt)}
-                              {p.receivedBy ? ` · ${decodeHTML(p.receivedBy)}` : ""}
-                              {p.status === "Refunded" && p.refundedAt ? ` · refunded ${formatDateTime(p.refundedAt)}` : ""}
-                            </div>
-                          </div>
-                          <StatusDot tone={PAYMENT_STATUS_TONE[p.status] || "muted"}>{p.status}</StatusDot>
-                        </li>
-                      ))}
+                            {refundFailed && (
+                              <div className="mt-2" style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                                {decodeHTML(p.refundError)}. Try again, or repay the player by hand and mark it in
+                                Payments.
+                                {canTakePayments && (
+                                  <div className="mt-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => retryRefundMutation.mutate(booking.bookingId)}
+                                      disabled={retryRefundMutation.isPending}
+                                    >
+                                      <RotateCcw />
+                                      Try the refund again
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

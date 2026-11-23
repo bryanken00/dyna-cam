@@ -1,4 +1,14 @@
-import { CalendarCheck, CircleAlert, Loader2, Mail, Phone, RotateCcw, Store, User } from "lucide-react";
+import {
+  CalendarCheck,
+  CircleAlert,
+  CreditCard,
+  Loader2,
+  Mail,
+  Phone,
+  RotateCcw,
+  Store,
+  User,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -60,8 +70,9 @@ const Chip = ({ selected, disabled, onClick, children, label, className = "" }) 
 
 /**
  * `/book/:bookingToken` (PLAN-003 Phase C) — a venue's online booking page:
- * date → length → court and start time → who's playing → Book. Paid at the
- * desk for now; the player lands on their booking's own page.
+ * date → length → court and start time → who's playing → Book. Phase F: Pay
+ * now sends the player to Xendit's checkout (GCash, Maya, card…); Pay at the
+ * desk holds the court and lands them on their booking's own page.
  */
 const BookPage = () => {
   const {
@@ -86,6 +97,9 @@ const BookPage = () => {
     handlePickSlot,
     form,
     handleBook,
+    payOnline,
+    payMethod,
+    handlePickPayMethod,
     isBooking,
     bookError,
   } = useBookPageHooks();
@@ -374,8 +388,34 @@ const BookPage = () => {
                   />
                 </div>
 
+                {payOnline && (
+                  <>
+                    <div className="mt-5">
+                      <SectionLabel>How you&apos;ll pay</SectionLabel>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2" role="group" aria-label="How you'll pay">
+                      <Chip
+                        selected={payMethod === "Online"}
+                        onClick={() => handlePickPayMethod("Online")}
+                        className="flex items-center gap-2 px-3 py-3 text-left"
+                      >
+                        <CreditCard className="size-4.5 shrink-0" />
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>Pay now</span>
+                      </Chip>
+                      <Chip
+                        selected={payMethod === "Desk"}
+                        onClick={() => handlePickPayMethod("Desk")}
+                        className="flex items-center gap-2 px-3 py-3 text-left"
+                      >
+                        <Store className="size-4.5 shrink-0" />
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>At the desk</span>
+                      </Chip>
+                    </div>
+                  </>
+                )}
+
                 <div
-                  className="mt-5 flex items-start gap-2.5 p-3"
+                  className="mt-3 flex items-start gap-2.5 p-3"
                   style={{
                     background: "var(--color-surface-sunken)",
                     border: "1px solid var(--color-line)",
@@ -384,18 +424,39 @@ const BookPage = () => {
                     color: "var(--color-text-dark)",
                   }}
                 >
-                  <Store className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-secondary)" }} />
-                  <span>
-                    Pay {formatPeso(picked.price)} at the front desk to confirm. We hold the court for you until{" "}
-                    {picked.start.subtract(holdMinutes, "minute").format("h:mm A")}
-                    {picked.start.isSame(dates[0]?.day, "day") ? " today" : ` on ${picked.start.format("MMM D")}`}
-                    ; after that it&apos;s released.
-                  </span>
+                  {payMethod === "Online" ? (
+                    <>
+                      <CreditCard
+                        className="size-4.5 shrink-0 mt-0.5"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      />
+                      <span>
+                        Pay {formatPeso(picked.price)} with GCash, Maya or a card on Xendit&apos;s secure page. We
+                        hold the court for {page.rules.onlineHoldMinutes} minutes while you pay. Cancel up to{" "}
+                        {page.rules.cancelCutoffHours} hours before for a full refund.
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Store
+                        className="size-4.5 shrink-0 mt-0.5"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      />
+                      <span>
+                        Pay {formatPeso(picked.price)} at the front desk to confirm. We hold the court for you
+                        until {picked.start.subtract(holdMinutes, "minute").format("h:mm A")}
+                        {picked.start.isSame(dates[0]?.day, "day") ? " today" : ` on ${picked.start.format("MMM D")}`}
+                        ; after that it&apos;s released.
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <Button type="submit" size="lg" className="w-full mt-5 h-12" disabled={isBooking}>
                   {isBooking ? <Loader2 className="animate-spin" /> : <CalendarCheck />}
-                  Book {picked.courtName}, pay at the desk
+                  {payMethod === "Online"
+                    ? `Book ${picked.courtName}, pay ${formatPeso(picked.price)} now`
+                    : `Book ${picked.courtName}, pay at the desk`}
                 </Button>
               </form>
             </Form>

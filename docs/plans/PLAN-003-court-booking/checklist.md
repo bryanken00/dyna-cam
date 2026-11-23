@@ -160,36 +160,50 @@
 
 ## Phase F — Online payment (Xendit, one Dyna Cam account)
 
-- [ ] Confirm with the account owner which methods are enabled and refundable (open question;
-      only blocks going live — build and test in Xendit test mode)
-- [ ] `lib/payments/xendit.js`: `createInvoice(booking)` (`external_id` = bookingId, amount =
-      `bookings.price`, `invoice_duration` = `onlineHoldMinutes`, success/failure redirect →
-      `/booking/<manageToken>`, payer email), `getInvoice(id)`, `expireInvoice(id)`,
-      `refund({ invoiceId, amount, reason })`, `checkCallbackToken(header)` (constant-time);
-      online payment off when `XENDIT_SECRET_KEY` or `XENDIT_CALLBACK_TOKEN` is empty
-- [ ] `back/.env.example`: `XENDIT_SECRET_KEY`, `XENDIT_CALLBACK_TOKEN` (test-mode keys for dev)
-- [ ] `POST /public/book/:bookingToken/bookings` with `payMethod: "Online"` → `Pending` hold of
-      `onlineHoldMinutes`, `checkoutId` + `checkoutUrl` saved, reply `{ checkoutUrl }`;
+- [ ] Confirm with the account owner which methods are enabled and refundable, and check the
+      refund call in Xendit test mode (open question; only blocks going live — built and tested
+      against a fake Xendit)
+- [x] `lib/payments/xendit.js`: `createInvoice()` (`external_id` = `booking-<bookingCode>`, amount =
+      `bookings.price`, `invoice_duration` = the hold, success/failure redirect →
+      `/booking/<manageToken>?checkout=done`, payer email), `getInvoice(id)` (PAID or SETTLED =
+      paid), `expireInvoice(id)`, `refund({ invoiceId, amount, referenceId, reason })`,
+      `getRefund(id)`, `checkCallbackToken(header)` (constant-time); online payment off when
+      `XENDIT_SECRET_KEY` or `XENDIT_CALLBACK_TOKEN` is empty; `XENDIT_API_URL` for tests
+- [x] `back/.env.example`: `XENDIT_SECRET_KEY`, `XENDIT_CALLBACK_TOKEN` (test-mode keys for dev),
+      `RATE_LIMIT_PUBLIC_BOOK_POINTS`, `RATE_LIMIT_PUBLIC_PAY_POINTS`; the test harness blanks the
+      Xendit keys so a developer's `.env` never reaches Xendit
+- [x] `POST /public/book/:bookingToken/bookings` with `payMethod: "Online"` → `Pending` hold of
+      `onlineHoldMinutes` (never past the start), `checkoutId` + `checkoutUrl` saved, reply
+      `{ checkoutUrl }`; if the checkout can't be opened the hold is let go (502);
       `POST /public/bookings/:manageToken/pay` reopens the open invoice or makes a new one while
-      the hold is live
-- [ ] `controllers/v1/webhooks/xendit.controller.js` mounted at `/v1/webhooks/xendit` in
+      the hold is live (a desk hold can be paid online too)
+- [x] `controllers/v1/webhooks/xendit.controller.js` mounted at `/v1/webhooks/xendit` in
       `routes/route.js`: `x-callback-token` check → 401 on mismatch; re-read the invoice with
-      `getInvoice()` and act only on `PAID` + amount equal to `bookings.price`; `payments` row
+      `getInvoice()` and act only on paid + amount equal to `bookings.price`; `payments` row
       (`ONLINE`, `provider 'xendit'`, unique `providerRef`) + booking `Paid`/`Confirmed` in one
-      transaction; paid after the slot was lost → automatic full refund + email; always 200 once
-      the token is valid
-- [ ] Refunds through `refund()`: player cancel before cut-off (full), staff cancel (full or
-      partial), lost slot (full); Xendit refusal → booking still cancelled, payment `refundError`
-      set and shown as **Refund failed** in Admin Payments and the booking drawer
-- [ ] Cancel / move of an unpaid online booking calls `expireInvoice()` so the old checkout can't
-      be paid
-- [ ] Payments page: per-venue online totals for a date range (the settlement statement)
-- [ ] Tests (Xendit client mocked): wrong / missing callback token → 401 and nothing changes;
-      payload says PAID but `getInvoice()` doesn't → nothing changes; amount mismatch → nothing
-      changes; replayed webhook → one payment row; late payment on a taken slot → refunded;
-      refund refusal → `refundError` set, booking cancelled
-- [ ] Frontend: Pay now option on `Public/Book/` (hidden when online is off); `Public/Booking/`
-      polls after checkout return and offers Pay again while `Pending`
+      transaction (`utils/bookingPayments.js` `settleInvoice()`); paid after the slot was lost →
+      automatic full refund (the email joins in Phase G); 200 for every handled or ignored event,
+      503 only when Xendit's API can't be reached (so Xendit retries); `refund.failed` events too
+- [x] Refunds through `refund()`: staff cancel (full or none — Phase B decision), closures that
+      cancel bookings, lost slot (full); player cancel joins in Phase H. Queued inside the
+      cancel's transaction (`refundError` = "Refund not sent yet"), sent after commit; Xendit
+      refusal → booking still cancelled, payment `refundError` set and shown as **Refund failed**
+      in Admin Payments and the booking drawer, with **Try the refund again** (booking drawer) and
+      **Mark repaid by hand** (Payments)
+- [x] Cancel / move / desk cash payment of an unpaid online booking calls `expireInvoice()` so the
+      old checkout can't be paid
+- [x] Payments page: **Online settlement** sheet — per-venue online totals for a date range
+      (`GET /admin/payments/settlement`: collected, refunded, refund failed, net)
+- [x] Tests (`tests/online-payment.test.js`, Xendit faked): wrong / missing callback token → 401
+      and nothing changes; payload says PAID but `getInvoice()` doesn't → nothing changes; amount
+      mismatch → not confirmed, money refunded; replayed (and concurrent) webhook → one payment
+      row; late payment on a free slot → confirmed, on a taken slot → refunded; refund refusal →
+      `refundError` set, booking cancelled, retry and mark-repaid; `refund.failed` → Refund
+      failed; cancel / move / cash close the checkout; Pay reopens or renews; the booking page
+      settles a paid checkout before the webhook; Deleted booking → 404; settlement totals
+- [x] Frontend: Pay now / At the desk choice on `Public/Book/` (hidden when online is off; sends
+      the player to Xendit); `Public/Booking/` polls every 5 s after the checkout return and
+      offers Pay now / Pay again while `Pending`
 
 ## Phase G — Notifications
 

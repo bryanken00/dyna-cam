@@ -11,6 +11,7 @@ import {
   lookupPaymentApi,
   createPaymentApi,
   refundPaymentApi,
+  getSettlementApi,
 } from "../../api/admin/payments";
 
 // Query: Get payments (+ totals)
@@ -121,5 +122,16 @@ export const useRecordGamePayment = () => {
         queryClient.invalidateQueries({ queryKey: ["sessions"] });
       }
     },
+  });
+};
+
+// Query: PLAN-003 Phase F — the online settlement statement for a date range
+export const useGetSettlement = ({ dateFrom, dateTo }, options = {}) => {
+  return useQuery({
+    queryKey: ["payments", "settlement", dateFrom, dateTo],
+    queryFn: () => getSettlementApi({ dateFrom, dateTo }),
+    staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
+    ...options,
   });
 };

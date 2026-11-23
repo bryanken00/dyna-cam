@@ -5,6 +5,7 @@ import { ERROR_CODES } from "../../../utils/APIError.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { LIVE_BOOKING } from "../../../utils/courtTimeline.js";
 import { cancelBooking } from "../../../utils/bookings.js";
+import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
 import {
   createClosureSchema,
   listClosuresQuerySchema,
@@ -73,11 +74,13 @@ const findInTheWay = async (conn, { venueId, courtId, startAt, endAt, now }) => 
 /**
  * The shared checks of POST and PUT, inside their transaction. Returns an
  * error reply to send, or null when the closure may be saved (having
- * cancelled the bookings in the way if asked to).
+ * cancelled the bookings in the way if asked to). Each cancelled booking's
+ * payment follow-up (Phase F: online refunds, open checkouts) is pushed onto
+ * followUps, to run after the commit.
  */
 const checkWindow = async (
   conn,
-  { venueId, courtId, startAt, endAt, reason, cancelConflicts, now, accountId }
+  { venueId, courtId, startAt, endAt, reason, cancelConflicts, now, accountId, followUps }
 ) => {
   if (endAt <= now) {
     return { message: "The closure must end in the future", status: 400 };
@@ -135,8 +138,19 @@ const checkWindow = async (
       accountId,
     });
     if (!cancelled.ok) return { message: cancelled.message, status: cancelled.status };
+    followUps.push(cancelled.followUp);
   }
   return null;
+};
+
+/** After commit: refund the cancelled bookings' online payments, close their checkouts. */
+const refundCancelled = async (req, followUps) => {
+  for (const followUp of followUps) {
+    await runPaymentFollowUps(req.db, followUp, {
+      accountId: req.user.accountId,
+      reason: "CANCELLATION",
+    });
+  }
 };
 
 /**
@@ -218,6 +232,7 @@ router.post(
   catchAsync(async (req, res) => {
     const { venueId, courtId = null, startAt, endAt, reason, cancelConflicts } = req.body;
     const now = getCurrentTimestampLocal();
+    const followUps = [];
 
     let conn;
     try {
@@ -241,6 +256,7 @@ router.post(
         cancelConflicts,
         accountId: req.user.accountId,
         now,
+        followUps,
       });
       if (refusal) {
         await req.db.rollback(conn);
@@ -258,6 +274,7 @@ router.post(
       );
 
       await req.db.commit(conn);
+      await refundCancelled(req, followUps);
       return res.sendSuccess("Closure added", { closureId }, 201);
     } catch (err) {
       await req.db.rollback(conn);
@@ -278,6 +295,7 @@ router.put(
     const { closureId } = req.params;
     const { courtId = null, startAt, endAt, reason, cancelConflicts } = req.body;
     const now = getCurrentTimestampLocal();
+    const followUps = [];
 
     let conn;
     try {
@@ -303,6 +321,7 @@ router.put(
         cancelConflicts,
         accountId: req.user.accountId,
         now,
+        followUps,
       });
       if (refusal) {
         await req.db.rollback(conn);
@@ -317,6 +336,7 @@ router.put(
       );
 
       await req.db.commit(conn);
+      await refundCancelled(req, followUps);
       return res.sendSuccess("Closure updated");
     } catch (err) {
       await req.db.rollback(conn);

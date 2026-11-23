@@ -477,6 +477,12 @@ check-in endpoints:
 - [ ] **Xendit account setup:** which payment methods are enabled on the account (decides what
       the checkout shows), and are refunds enabled for them? Needed before Phase F goes live, not
       before building it in test mode.
+- [ ] **Xendit refund call:** Phase F refunds an invoice with `POST /refunds` + `invoice_id`.
+      Xendit's current docs (checked 2026-11-23) describe a v3 Refunds API (`POST /v3/refunds`,
+      `api-version: 2024-11-11`) that takes a `payment_id` (`py-…`) instead, and call Invoices
+      "legacy" next to a Sessions API. Check in test mode that the invoice refund still works on
+      this account; if not, switching is contained in `lib/payments/xendit.js` (store the paid
+      invoice's payment ID and call v3).
 
 ## Revisions
 
@@ -511,3 +517,19 @@ check-in endpoints:
 - 2026-11-23: Phase E built. jobs/bookingMaintenance.js runs every minute: expired holds →
   Expired, Confirmed past their end → NoShow, CheckedIn whose game ended → Completed. Each step is one
   idempotent UPDATE; holds are also expired on reads, so pages never show a stale hold.
+- 2026-11-23: Phase F built (tested against a fake Xendit; going live waits on the open questions).
+  Changes from the plan: the invoice's `external_id` is `booking-<bookingCode>`, not the
+  bookingId, so no business ID reaches Xendit and its dashboard shows the code the player has; the
+  webhook finds the booking by that (read back from Xendit), so an older checkout of the same
+  booking still lands. An invoice for the wrong amount (a checkout from before a reprice) never
+  confirms the booking, and its money is refunded rather than left unrecorded. The webhook answers
+  503 when Xendit's own API can't be reached, so Xendit retries rather than the payment being lost;
+  everything else is 200. Refunds are queued inside the cancel's transaction and sent after commit
+  (a crash leaves them showing Refund failed, never silently lost); staff can **Try the refund
+  again** or **Mark repaid by hand** (Payments). Staff refunds stay full-or-none (Phase B). A desk
+  hold can also be paid online from the booking page. The booking page asks Xendit (at most every
+  15 s per booking) while a checkout is open, so a late webhook — or none, on a development machine
+  — doesn't leave a paid booking looking unpaid. Xendit's `refund.failed` event turns an accepted
+  refund back into Refund failed. The lost-slot email waits for Phase G. Also fixed: Admin Payments
+  sorted rows paid in the same second in no fixed order, so pages could skip a payment (now
+  `paidAt DESC, id DESC`; it made a Phase B test flaky).

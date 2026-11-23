@@ -37,7 +37,8 @@ const bookErrorMessage = (error) => {
 
 /**
  * `/book/:bookingToken` (PLAN-003 Phase C): pick a date, a length, a court and
- * a start time, add who's playing, and book — paid at the desk for now.
+ * a start time, add who's playing, and book. Phase F: pay now online (the
+ * player is sent to Xendit's checkout) or at the desk.
  */
 export const useBookPageHooks = () => {
   const { bookingToken } = useParams();
@@ -52,8 +53,13 @@ export const useBookPageHooks = () => {
   // { courtKey, startTime } — cleared whenever the date or length changes
   const [slot, setSlot] = useState(null);
   const [bookError, setBookError] = useState("");
+  // "Online" | "Desk" — null until the player picks (Online first when it's on)
+  const [pickedPayMethod, setPickedPayMethod] = useState(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const date = pickedDate || pageData?.today || null;
+  const payOnline = !!pageData?.payOnline;
+  const payMethod = payOnline ? pickedPayMethod || "Online" : "Desk";
 
   // Every date from today to the last bookable one, and whether the venue opens then
   const dates = useMemo(() => {
@@ -104,6 +110,11 @@ export const useBookPageHooks = () => {
     setBookError("");
   }, []);
 
+  const handlePickPayMethod = useCallback((method) => {
+    setPickedPayMethod(method);
+    setBookError("");
+  }, []);
+
   const handlePickSlot = useCallback((courtKey, startTime) => {
     setSlot({ courtKey, startTime });
     setBookError("");
@@ -139,7 +150,7 @@ export const useBookPageHooks = () => {
             playerName: values.playerName.trim(),
             email: values.email.trim(),
             phone: values.phone.trim() || null,
-            payMethod: "Desk",
+            payMethod,
           },
         },
         {
@@ -147,6 +158,14 @@ export const useBookPageHooks = () => {
             const token = response?.data?.manageToken;
             if (!token) {
               setBookError("Something went wrong. Please try again.");
+              return;
+            }
+            // Phase F: off to Xendit's checkout; it sends the player back to the
+            // booking's page, which waits for the payment to land
+            const checkoutUrl = response?.data?.checkoutUrl;
+            if (checkoutUrl) {
+              setIsRedirecting(true);
+              window.location.assign(checkoutUrl);
               return;
             }
             // replace: Back shouldn't land on a form that would book again
@@ -164,7 +183,7 @@ export const useBookPageHooks = () => {
         },
       );
     },
-    [slot, bookMutation, bookingToken, date, durationMinutes, navigate, refetchAvailability, refetch],
+    [slot, bookMutation, bookingToken, date, durationMinutes, payMethod, navigate, refetchAvailability, refetch],
   );
 
   return {
@@ -190,7 +209,10 @@ export const useBookPageHooks = () => {
     handlePickSlot,
     form,
     handleBook: form.handleSubmit(handleBook),
-    isBooking: bookMutation.isPending,
+    payOnline,
+    payMethod,
+    handlePickPayMethod,
+    isBooking: bookMutation.isPending || isRedirecting,
     bookError,
   };
 };

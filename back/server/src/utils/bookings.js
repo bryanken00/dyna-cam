@@ -3,6 +3,7 @@ import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { selectRows } from "./dbRows.js";
 import { BOOKING_SLOT_MINUTES, quote } from "./bookingPrice.js";
 import { findConflict } from "./courtTimeline.js";
+import { MIN_CHECKOUT_SECONDS, onlineHoldUntil, REFUND_QUEUED } from "./bookingPayments.js";
 
 /**
  * PLAN-003: court bookings — the writes the desk (Admin) and, from Phase C,
@@ -143,6 +144,34 @@ const insertCashPayment = async (conn, { booking, accountId, note, now }) => {
 };
 
 /**
+ * A new booking's status, payment status and hold for how it's paid:
+ * Cash / Free → Confirmed; Hold → Pending until deskHoldMinutes before the
+ * start; Online → Pending for the checkout (onlineHoldMinutes, never past the start).
+ */
+const paymentTerms = ({ kind, court, startLocal, now, online }) => {
+  if (kind === "Hold") {
+    const holdExpiresAt = addMinutesTo(startLocal, -court.deskHoldMinutes);
+    if (holdExpiresAt <= now) {
+      return fail(
+        400,
+        online
+          ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
+          : `It starts in less than ${court.deskHoldMinutes} minutes — take the payment now instead of holding it`
+      );
+    }
+    return { ok: true, status: "Pending", paymentStatus: "Unpaid", holdExpiresAt };
+  }
+  if (kind === "Online") {
+    const holdExpiresAt = onlineHoldUntil({ startLocal, onlineHoldMinutes: court.onlineHoldMinutes, now });
+    if (minutesBetween(now, holdExpiresAt) * 60 < MIN_CHECKOUT_SECONDS) {
+      return fail(400, "That's too soon to pay online — pick a later time");
+    }
+    return { ok: true, status: "Pending", paymentStatus: "Unpaid", holdExpiresAt };
+  }
+  return { ok: true, status: "Confirmed", paymentStatus: kind === "Free" ? "Free" : "Paid", holdExpiresAt: null };
+};
+
+/**
  * Create a booking. Inside a transaction.
  *
  * @param {import("mysql2/promise").PoolConnection} conn
@@ -153,8 +182,9 @@ const insertCashPayment = async (conn, { booking, accountId, note, now }) => {
  * @param {string} b.playerName
  * @param {string|null} [b.phone]
  * @param {string|null} [b.email]
- * @param {"Cash"|"Hold"|"Free"} b.payment - Cash = paid now at the desk; Hold = pay at the
- *   desk by startAt − deskHoldMinutes; Free = staff comp
+ * @param {"Cash"|"Hold"|"Online"|"Free"} b.payment - Cash = paid now at the desk; Hold = pay
+ *   at the desk by startAt − deskHoldMinutes; Online = a Xendit checkout holds the slot for
+ *   onlineHoldMinutes (Phase F — the caller opens the checkout after commit); Free = staff comp
  * @param {"Desk"|"Online"} [b.source]
  * @param {boolean} [b.ignoreHours] - staff booking outside opening hours
  * @param {string|null} [b.accountId] - the staff account (desk)
@@ -207,22 +237,9 @@ export const createBooking = async (
   // Nothing to pay: a "paid now" or "hold" of ₱0 is simply free
   const kind = price === 0 ? "Free" : payment;
 
-  let status = "Confirmed";
-  let paymentStatus = kind === "Free" ? "Free" : "Paid";
-  let holdExpiresAt = null;
-  if (kind === "Hold") {
-    status = "Pending";
-    paymentStatus = "Unpaid";
-    holdExpiresAt = addMinutesTo(startLocal, -court.deskHoldMinutes);
-    if (holdExpiresAt <= now) {
-      return fail(
-        400,
-        online
-          ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
-          : `It starts in less than ${court.deskHoldMinutes} minutes — take the payment now instead of holding it`
-      );
-    }
-  }
+  const terms = paymentTerms({ kind, court, startLocal, now, online });
+  if (!terms.ok) return terms;
+  const { status, paymentStatus, holdExpiresAt } = terms;
 
   const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
   const bookingId = uuidRow[0].id;
@@ -233,7 +250,7 @@ export const createBooking = async (
          (bookingId, venueId, courtId, startAt, endAt, playerName, phone, email, price,
           paymentStatus, payMethod, source, bookingCode, manageToken, holdExpiresAt,
           createdByAccountId, status, dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Desk', ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         bookingId,
         court.venueId,
@@ -245,6 +262,7 @@ export const createBooking = async (
         email || null,
         price,
         paymentStatus,
+        kind === "Online" ? "Online" : "Desk",
         source,
         code,
         manageToken,
@@ -320,17 +338,25 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
   await conn.execute(
     `UPDATE bookings
      SET paymentStatus = 'Paid', payMethod = 'Desk', status = 'Confirmed', holdExpiresAt = NULL,
-         dateUpdated = ?
+         checkoutId = NULL, checkoutUrl = NULL, dateUpdated = ?
      WHERE bookingId = ?`,
     [now, booking.bookingId]
   );
-  return { ok: true, paymentId, amount: Number(booking.price) };
+  // Phase F: a checkout the player opened can't be paid on top of the cash
+  return {
+    ok: true,
+    paymentId,
+    amount: Number(booking.price),
+    followUp: { closeCheckoutId: booking.checkoutId || null },
+  };
 };
 
 /**
  * Cancel a booking that hasn't been played. With refund, every paid payment
- * is refunded (cash: marked Refunded — the desk hands the money back; online
- * refunds go through Xendit from Phase F) and the booking becomes Refunded.
+ * is refunded: cash is marked Refunded (the desk hands the money back); an
+ * online payment is queued (refundError = REFUND_QUEUED) and sent to Xendit by
+ * runPaymentFollowUps() after the caller commits. The booking reads Refunded
+ * once all of it is back. An unpaid booking's open checkout is closed too.
  *
  * @param {Object} options
  * @param {string} options.bookingId
@@ -338,7 +364,9 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
  * @param {string} options.reason
  * @param {boolean} options.refund
  * @param {string|null} [options.accountId]
- * @returns {Promise<{ ok: true, refunded: number } | { ok: false, status, message }>}
+ * @returns {Promise<{ ok: true, refunded: number, refundingOnline: number,
+ *   followUp: { closeCheckoutId, refundPaymentIds } } | { ok: false, status, message }>}
+ *   refunded = cash handed back; refundingOnline = queued for Xendit
  */
 export const cancelBooking = async (conn, { bookingId, by, reason, refund, accountId = null }) => {
   const now = getCurrentTimestampLocal();
@@ -354,13 +382,26 @@ export const cancelBooking = async (conn, { bookingId, by, reason, refund, accou
   }
 
   let refunded = 0;
+  let refundingOnline = 0;
+  const refundPaymentIds = [];
   if (refund && booking.paymentStatus === "Paid") {
     const [payments] = await conn.execute(
-      `SELECT paymentId, amount, method FROM payments
+      `SELECT paymentId, amount, method, provider FROM payments
        WHERE bookingId = ? AND status = 'Paid' FOR UPDATE`,
       [booking.bookingId]
     );
     for (const p of payments) {
+      if (p.method === "ONLINE") {
+        // Sent to Xendit after commit; flagged now so a crash can't lose it
+        await conn.execute(`UPDATE payments SET refundError = ?, dateUpdated = ? WHERE paymentId = ?`, [
+          REFUND_QUEUED,
+          now,
+          p.paymentId,
+        ]);
+        refundPaymentIds.push(p.paymentId);
+        refundingOnline += Number(p.amount);
+        continue;
+      }
       await conn.execute(
         `UPDATE payments
          SET status = 'Refunded', refundedAt = ?, refundedByAccountId = ?, dateUpdated = ?
@@ -375,11 +416,16 @@ export const cancelBooking = async (conn, { bookingId, by, reason, refund, accou
     `UPDATE bookings
      SET status = 'Cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ?,
          paymentStatus = IF(? AND paymentStatus = 'Paid', 'Refunded', paymentStatus),
-         holdExpiresAt = NULL, dateUpdated = ?
+         holdExpiresAt = NULL, checkoutId = NULL, checkoutUrl = NULL, dateUpdated = ?
      WHERE bookingId = ?`,
-    [now, by, reason.slice(0, 255), refund ? 1 : 0, now, booking.bookingId]
+    [now, by, reason.slice(0, 255), refund && refundPaymentIds.length === 0 ? 1 : 0, now, booking.bookingId]
   );
-  return { ok: true, refunded };
+  return {
+    ok: true,
+    refunded,
+    refundingOnline,
+    followUp: { closeCheckoutId: booking.checkoutId || null, refundPaymentIds },
+  };
 };
 
 /**
@@ -454,13 +500,27 @@ export const moveBooking = async (
     }
   }
 
+  // Phase F: an unpaid booking's open checkout is closed — the player pays
+  // the moved booking (perhaps at a new price) with a fresh one
+  const closeCheckoutId = booking.paymentStatus === "Unpaid" ? booking.checkoutId || null : null;
   await conn.execute(
     `UPDATE bookings
-     SET courtId = ?, startAt = ?, endAt = ?, price = ?, holdExpiresAt = ?, dateUpdated = ?
+     SET courtId = ?, startAt = ?, endAt = ?, price = ?, holdExpiresAt = ?,
+         checkoutId = IF(?, NULL, checkoutId), checkoutUrl = IF(?, NULL, checkoutUrl), dateUpdated = ?
      WHERE bookingId = ?`,
-    [courtId, startLocal, endLocal, price, holdExpiresAt, now, booking.bookingId]
+    [
+      courtId,
+      startLocal,
+      endLocal,
+      price,
+      holdExpiresAt,
+      closeCheckoutId ? 1 : 0,
+      closeCheckoutId ? 1 : 0,
+      now,
+      booking.bookingId,
+    ]
   );
-  return { ok: true, startAt: startLocal, endAt: endLocal, price };
+  return { ok: true, startAt: startLocal, endAt: endLocal, price, followUp: { closeCheckoutId } };
 };
 
 /** Staff mark a Confirmed booking as a no-show once it has started. */

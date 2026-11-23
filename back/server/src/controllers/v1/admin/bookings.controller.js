@@ -7,6 +7,7 @@ import { findConflict, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { bookingManageUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
+import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
 import {
   addMinutesTo,
   cancelBooking,
@@ -63,6 +64,19 @@ const toBooking = (row) => ({
 /** Only "Paid now (cash)" takes money — that also needs payments write. */
 const paymentsWriteForCash = (req, res, next) =>
   req.body?.payment === "Cash" ? checkPermission("payments", null, "write")(req, res, next) : next();
+
+const peso = (amount) => `₱${amount.toLocaleString("en-PH")}`;
+
+/** What a cancel did with the money: cash to hand back, online refunds sent or failed. */
+const cancelMessage = (cash, online) => {
+  const parts = [];
+  if (cash > 0) parts.push(`refund ${peso(cash)} cash to the player`);
+  if (online.refunded > 0) parts.push(`${peso(online.refunded)} refunded online through Xendit`);
+  if (online.failed > 0) {
+    parts.push(`the online refund of ${peso(online.failed)} failed — try it again or repay by hand`);
+  }
+  return parts.length ? `Booking cancelled — ${parts.join("; ")}` : "Booking cancelled";
+};
 
 /** Run one utils/bookings.js write in a transaction and answer with its result. */
 const inTransaction = async (req, write) => {
@@ -445,6 +459,7 @@ router.put(
     if (!result.ok) {
       return res.sendError(result.message, result.status);
     }
+    await runPaymentFollowUps(req.db, result.followUp);
     return res.sendSuccess("Booking moved", {
       startAt: result.startAt,
       endAt: result.endAt,
@@ -475,12 +490,58 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, result.status);
     }
-    return res.sendSuccess(
-      result.refunded > 0
-        ? `Booking cancelled — refund ₱${result.refunded.toLocaleString("en-PH")} to the player`
-        : "Booking cancelled",
-      { refunded: result.refunded }
+    const online = await runPaymentFollowUps(req.db, result.followUp, {
+      accountId: req.user.accountId,
+      reason: "CANCELLATION",
+    });
+    return res.sendSuccess(cancelMessage(result.refunded, online), {
+      refunded: result.refunded,
+      refundedOnline: online.refunded,
+      refundFailed: online.failed,
+    });
+  })
+);
+
+/**
+ * POST /:bookingId/retry-refund
+ * Phase F: send a cancelled booking's failed online refunds to Xendit again.
+ * Taking money back is a payments action, like refunds everywhere else.
+ */
+router.post(
+  "/:bookingId/retry-refund",
+  checkPermission("payments", null, "write"),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT b.bookingId FROM bookings b
+       JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
+       WHERE b.bookingId = ? AND b.status != 'Deleted' LIMIT 1`,
+      [req.params.bookingId]
     );
+    if (rows.length === 0) {
+      return res.sendError("Booking not found", 404);
+    }
+    const failed = await req.db.query(
+      `SELECT paymentId FROM payments
+       WHERE bookingId = ? AND status = 'Paid' AND method = 'ONLINE' AND refundError IS NOT NULL`,
+      [rows[0].bookingId]
+    );
+    if (failed.length === 0) {
+      return res.sendError("No refund of this booking is waiting to be sent", 409);
+    }
+    // sendRefunds() claims each one, so a refund being sent right now is left to finish
+    const online = await runPaymentFollowUps(
+      req.db,
+      { refundPaymentIds: failed.map((p) => p.paymentId) },
+      { accountId: req.user.accountId, reason: "CANCELLATION" }
+    );
+    if (online.refunded === 0) {
+      const error = online.refunds.find((r) => !r.ok)?.error || "The refund didn't go through";
+      return res.sendError(`Refund failed again — ${error}. Repay the player by hand.`, 502);
+    }
+    return res.sendSuccess(cancelMessage(0, online), {
+      refundedOnline: online.refunded,
+      refundFailed: online.failed,
+    });
   })
 );
 
@@ -552,6 +613,7 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, result.status);
     }
+    await runPaymentFollowUps(req.db, result.followUp);
     return res.sendSuccess(
       "Payment recorded — the booking is confirmed",
       { paymentId: result.paymentId, amount: result.amount },

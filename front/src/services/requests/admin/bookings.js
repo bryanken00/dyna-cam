@@ -18,6 +18,7 @@ import {
   markNoShowApi,
   moveBookingApi,
   recordBookingPaymentApi,
+  retryBookingRefundApi,
 } from "../../api/admin/bookings";
 
 /**
@@ -180,5 +181,21 @@ export const useCheckInBooking = () => {
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
     onError: errorToast("Failed to check the booking in"),
+  });
+};
+
+// Mutation: Phase F — try a failed online refund again
+export const useRetryBookingRefund = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: retryBookingRefundApi,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Refunded online");
+      invalidateBookings(queryClient);
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "The refund failed again");
+      invalidateBookings(queryClient);
+    },
   });
 };

@@ -1,13 +1,17 @@
 import { useCallback, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import { copyText } from "../../../utils/clipboard";
 import { decodeHTML } from "../../../utils/decode-html";
-import { useCheckInBooking, useGetMyBooking } from "../../../services/requests/public/bookings";
+import {
+  useCheckInBooking,
+  useGetMyBooking,
+  usePayBookingOnline,
+} from "../../../services/requests/public/bookings";
 
-/** A failed check-in → the sentence under the button. */
-const checkInErrorMessage = (error) => {
+/** A failed check-in or Pay → the sentence under the button. */
+const actionErrorMessage = (error) => {
   const apiMessage = error?.response?.data?.message;
   if (!error?.response) return "Couldn't reach Dyna Cam — check your connection and try again.";
   return apiMessage || "Something went wrong. Please try again.";
@@ -16,8 +20,10 @@ const checkInErrorMessage = (error) => {
 /**
  * `/booking/:manageToken` (PLAN-003): the player's own booking — its code,
  * where and when, what's owed and by when; during its time, Check in starts
- * the recorded game (Phase D). Pay online, cancel and move come in later
- * phases (the API's `actions` says which are on).
+ * the recorded game (Phase D). Phase F: Pay now opens Xendit's checkout; back
+ * from it (?checkout=done) the page polls until the payment lands — only the
+ * webhook (or the API asking Xendit) confirms it, never the redirect. Cancel
+ * and move come in Phase H (the API's `actions` says which are on).
  */
 export const useBookingPageHooks = () => {
   const { manageToken } = useParams();
@@ -27,6 +33,32 @@ export const useBookingPageHooks = () => {
 
   const checkInMutation = useCheckInBooking();
   const [checkInError, setCheckInError] = useState("");
+
+  const [searchParams] = useSearchParams();
+  const backFromCheckout = searchParams.get("checkout") === "done";
+  const payMutation = usePayBookingOnline();
+  const [payError, setPayError] = useState("");
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  const handlePay = useCallback(() => {
+    setPayError("");
+    payMutation.mutate(manageToken, {
+      onSuccess: (response) => {
+        const checkoutUrl = response?.data?.checkoutUrl;
+        if (response?.data?.paid || !checkoutUrl) {
+          toast.success(response?.message || "Payment received");
+          refetch();
+          return;
+        }
+        setIsRedirecting(true);
+        window.location.assign(checkoutUrl);
+      },
+      onError: (err) => {
+        setPayError(actionErrorMessage(err));
+        refetch();
+      },
+    });
+  }, [payMutation, manageToken, refetch]);
 
   const handleCopyCode = useCallback(async () => {
     if (!booking) return;
@@ -49,7 +81,7 @@ export const useBookingPageHooks = () => {
         if (shareToken) navigate(`/session/${shareToken}`);
       },
       onError: (err) => {
-        setCheckInError(checkInErrorMessage(err));
+        setCheckInError(actionErrorMessage(err));
         refetch();
       },
     });
@@ -69,5 +101,10 @@ export const useBookingPageHooks = () => {
     handleCheckIn,
     isCheckingIn: checkInMutation.isPending,
     checkInError,
+    // Waiting for an online payment to land (back from the checkout)
+    awaitingPayment: backFromCheckout && booking?.status === "Pending" && !!booking?.checkoutOpen,
+    handlePay,
+    isPaying: payMutation.isPending || isRedirecting,
+    payError,
   };
 };

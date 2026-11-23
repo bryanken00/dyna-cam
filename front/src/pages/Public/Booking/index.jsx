@@ -4,6 +4,7 @@ import {
   CircleAlert,
   Clock,
   Copy,
+  CreditCard,
   Link2,
   Loader2,
   Play,
@@ -73,6 +74,10 @@ const BookingPage = () => {
     handleCheckIn,
     isCheckingIn,
     checkInError,
+    awaitingPayment,
+    handlePay,
+    isPaying,
+    payError,
   } = useBookingPageHooks();
 
   if (isLoading) {
@@ -113,7 +118,11 @@ const BookingPage = () => {
     );
   }
 
-  const status = STATUS[booking.status] || STATUS.Confirmed;
+  // Phase F: a booking made to pay online waits on its checkout, not the desk
+  const status =
+    booking.status === "Pending" && booking.payMethod === "Online"
+      ? { icon: CreditCard, title: awaitingPayment ? "Checking your payment…" : "Pay now to confirm", tone: "var(--color-warning)" }
+      : STATUS[booking.status] || STATUS.Confirmed;
   const StatusIcon = status.icon;
   const start = dayjs(booking.startAt);
   const end = dayjs(booking.endAt);
@@ -145,9 +154,21 @@ const BookingPage = () => {
             {courtName} · {venueName}
           </p>
 
-          {booking.status === "Pending" && booking.payBy && (
+          {booking.status === "Pending" && awaitingPayment && (
+            <p
+              className="m-0 mt-3 inline-flex items-center gap-2"
+              role="status"
+              style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
+            >
+              <Loader2 className="size-4 animate-spin" />
+              This page updates by itself once Xendit tells us it&apos;s paid.
+            </p>
+          )}
+          {booking.status === "Pending" && booking.payBy && !awaitingPayment && (
             <p className="m-0 mt-3" style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
-              Pay {formatPeso(booking.price)} at the front desk by{" "}
+              {booking.payMethod === "Online"
+                ? `Pay ${formatPeso(booking.price)} online by `
+                : `Pay ${formatPeso(booking.price)} at the front desk${booking.actions.payOnline ? " or online" : ""} by `}
               <strong>{dayjs(booking.payBy).format("h:mm A, ddd MMM D")}</strong>, or the court is released.
             </p>
           )}
@@ -164,6 +185,32 @@ const BookingPage = () => {
             </p>
           )}
         </div>
+
+        {/* Phase F: pay online — first time, or again after a checkout was closed */}
+        {booking.actions.payOnline && (
+          <div className="p-5" style={cardStyle}>
+            <Button
+              type="button"
+              size="lg"
+              variant={booking.payMethod === "Online" ? "default" : "outline"}
+              className="w-full h-12 text-base font-semibold"
+              onClick={handlePay}
+              disabled={isPaying}
+            >
+              {isPaying ? <Loader2 className="size-5 animate-spin" /> : <CreditCard className="size-5" />}
+              {booking.checkoutOpen ? `Pay again — ${formatPeso(booking.price)}` : `Pay ${formatPeso(booking.price)} now`}
+            </Button>
+            {payError && (
+              <p role="alert" className="m-0 mt-3 text-center" style={{ fontSize: 13.5, color: "var(--color-error)" }}>
+                {payError}
+              </p>
+            )}
+            <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+              GCash, Maya or a card, on Xendit&apos;s secure page.
+              {booking.checkoutOpen && " Already paid? It shows here within a minute."}
+            </p>
+          </div>
+        )}
 
         {/* Phase D: the booked game — check in during its time, then watch it */}
         {booking.actions.checkIn && (
@@ -250,10 +297,14 @@ const BookingPage = () => {
             {formatPeso(booking.price)}
             {" · "}
             {booking.paymentStatus === "Unpaid"
-              ? "to pay at the desk"
+              ? booking.payMethod === "Online"
+                ? "to pay online"
+                : "to pay at the desk"
               : booking.paymentStatus === "Free"
                 ? "free"
-                : booking.paymentStatus.toLowerCase()}
+                : booking.paymentStatus === "Paid" && booking.payMethod === "Online"
+                  ? "paid online"
+                  : booking.paymentStatus.toLowerCase()}
           </Row>
           {booking.venue.address && <Row label="Where">{decodeHTML(booking.venue.address)}</Row>}
         </div>

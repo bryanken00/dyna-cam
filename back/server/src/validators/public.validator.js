@@ -132,7 +132,8 @@ export const publicBookingSchema = z.object({
   // Required online: it's how the player gets their booking link back
   email: z.string().trim().email("Enter a valid email").max(255),
   // Phase F adds "Online" (Xendit)
-  payMethod: z.enum(["Desk"]),
+  // Phase F: Online = a Xendit checkout (refused with 409 while online payment is off)
+  payMethod: z.enum(["Desk", "Online"]),
 });
 
 // POST /courts/:qrToken/check-in — PLAN-003 Phase D: the booking code the

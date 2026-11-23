@@ -120,6 +120,10 @@ export const loadTestEnv = (overrides = {}) => {
     // Recorder boxes enrol with this (PLAN-002 Phase I); ctx.pairBox() uses it
     RECORDER_ENROLL_KEY: TEST_ENROLL_KEY,
     SENDGRID_API_KEY: "", // never send real email (a test that wants SendGrid fakes it)
+    // Never reach Xendit (a test that wants online payment points XENDIT_API_URL at a fake)
+    XENDIT_SECRET_KEY: "",
+    XENDIT_CALLBACK_TOKEN: "",
+    XENDIT_API_URL: "http://127.0.0.1:9",
     OWNER_EMAIL: OWNER.email,
     OWNER_PASSWORD: OWNER.password,
     // The app runs from a temp directory, so key paths must be absolute
