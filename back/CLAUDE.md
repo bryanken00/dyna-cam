@@ -50,6 +50,11 @@ column, index, ENUM value, FK, backfill) is a **new numbered migration** in
 renumber or delete it, even to fix it — write a new migration. The real schema is `schema.sql` +
 every migration in order. Details: `schema-conventions.md` in the `backend-conventions` skill.
 
+`npm run db:data` (`scripts/seed-demo-data.js`, PLAN-004) **empties the database** (every table
+except `_migrations` and `permissions`; the Owner role and account are kept) and loads demo data for
+development, with no video. It refuses `NODE_ENV=production`. A new table or
+status the Admin pages show is worth a few demo rows there.
+
 ## Tests
 
 `npm test` runs the API tests in `tests/` against a throwaway database it creates and drops; it
