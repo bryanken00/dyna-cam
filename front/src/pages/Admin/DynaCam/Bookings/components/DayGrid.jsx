@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import dayjs from "dayjs";
 import { Plus } from "lucide-react";
 import { decodeHTML } from "../../../../../utils/decode-html";
@@ -13,6 +14,16 @@ const LABEL_WIDTH = 150;
 const HOUR_WIDTH = 72;
 const ROW_HEIGHT = 56;
 const DEFAULT_RANGE = { from: 6, to: 22 };
+// CR-031: today opens with this share of the visible hours before the now line
+const NOW_LEAD = 1 / 3;
+
+/** CR-031: the court column stays put while the hours scroll under it. */
+const stickyLabel = {
+  position: "sticky",
+  left: 0,
+  zIndex: 4, // above the blocks (2) and the now line (3)
+  background: "var(--color-surface)",
+};
 
 /** Booking status → the block's left bar. Tokens only. */
 const BAR = {
@@ -84,9 +95,15 @@ const Block = ({ left, width, bar, title, subtitle, onClick, hatched, tooltip })
 
 /**
  * One day at a venue: a row per court, a column per hour. Bookings, games and
- * closures are blocks; a free future hour opens New booking.
+ * closures are blocks; a free future hour opens New booking. CR-031: the court
+ * column is sticky, and each new day on screen (venue + date) scrolls today to
+ * the current time, other days to their first hour.
  */
 const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
+  const scrollRef = useRef(null);
+  // The day actually drawn — not the picked one: while the next day loads the
+  // previous stays on screen, and the scroll waits for the new one
+  const scrollKey = `${day.date}|${day.courts.map((c) => c.courtId).join(",")}`;
   const { from, to } = hourRange(day);
   const hours = Array.from({ length: to - from }, (_, i) => from + i);
   const span = (to - from) * 60;
@@ -94,6 +111,21 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
   const nowMinute =
     now.date === day.date ? hourOf(now.time) * 60 + Number(now.time.slice(3, 5)) : null;
   const isPastDay = day.date < now.date;
+
+  // Scroll once per venue + date — never on a refetch, so it doesn't move under the user
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (nowMinute === null || nowMinute < from * 60 || nowMinute > to * 60) {
+      el.scrollLeft = 0;
+      return;
+    }
+    const timeline = el.scrollWidth - LABEL_WIDTH;
+    const visible = el.clientWidth - LABEL_WIDTH;
+    const nowX = ((nowMinute - from * 60) / span) * timeline;
+    el.scrollLeft = Math.max(0, nowX - visible * NOW_LEAD);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new venue / date scrolls
+  }, [scrollKey]);
 
   const position = (startAt, endAt) => {
     const start = minuteOfDay(startAt, day.date);
@@ -105,11 +137,11 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
   };
 
   return (
-    <div className="overflow-x-auto">
+    <div ref={scrollRef} className="overflow-x-auto">
       <div style={{ minWidth: LABEL_WIDTH + hours.length * HOUR_WIDTH }}>
         {/* Hour labels */}
         <div className="flex" style={{ borderBottom: "1px solid var(--color-line)" }}>
-          <div className="shrink-0" style={{ width: LABEL_WIDTH }} />
+          <div className="shrink-0" style={{ width: LABEL_WIDTH, ...stickyLabel }} />
           <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${hours.length}, 1fr)` }}>
             {hours.map((h) => (
               <div
@@ -142,7 +174,7 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
             >
               <div
                 className="shrink-0 flex flex-col justify-center px-4"
-                style={{ width: LABEL_WIDTH, borderRight: "1px solid var(--color-line)" }}
+                style={{ width: LABEL_WIDTH, borderRight: "1px solid var(--color-line)", ...stickyLabel }}
               >
                 <span className="truncate" style={{ fontSize: 13.5, fontWeight: 500, color: "var(--color-text-dark)" }}>
                   {decodeHTML(court.name)}
