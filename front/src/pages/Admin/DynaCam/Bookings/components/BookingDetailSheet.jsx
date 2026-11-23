@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CircleAlert,
   Copy,
+  Mail,
   Play,
   RotateCcw,
   Trash2,
@@ -47,6 +48,7 @@ import {
   useGetBookingById,
   useMarkNoShow,
   useRecordBookingPayment,
+  useResendBookingEmail,
   useRetryBookingRefund,
 } from "../../../../../services/requests/admin/bookings";
 
@@ -73,6 +75,7 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
   const deleteMutation = useDeleteBooking();
   const checkInMutation = useCheckInBooking();
   const retryRefundMutation = useRetryBookingRefund();
+  const resendMutation = useResendBookingEmail();
 
   const now = manilaNow();
   const nowLocal = `${now.date} ${now.time}:00`;
@@ -128,6 +131,19 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
       console.error("Delete booking error:", err);
     }
   };
+
+  // Phase G: Resend sends the email that fits where the booking is now
+  const canResend =
+    booking?.email &&
+    (["Confirmed", "CheckedIn"].includes(booking.status) ||
+      (booking.status === "Pending" && booking.payMethod === "Desk"));
+  const emailsSent = booking
+    ? [
+        booking.confirmationSentAt && `Confirmation ${formatDateTime(booking.confirmationSentAt)}`,
+        booking.reminderSentAt && `Reminder ${formatDateTime(booking.reminderSentAt)}`,
+        booking.cancelledEmailSentAt && `Cancellation ${formatDateTime(booking.cancelledEmailSentAt)}`,
+      ].filter(Boolean)
+    : [];
 
   const holdLine =
     booking?.status === "Pending" && booking.holdExpiresAt
@@ -265,6 +281,9 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                       { label: "Name", value: decodeHTML(booking.playerName) },
                       { label: "Phone", value: booking.phone ? formatPhoneDisplay(booking.phone) : "—" },
                       { label: "Email", value: booking.email || "—" },
+                      ...(booking.email
+                        ? [{ label: "Emails sent", value: emailsSent.length ? emailsSent.join(" · ") : "—" }]
+                        : []),
                       {
                         label: "Booking page",
                         value: (
@@ -393,6 +412,17 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                     Delete
                   </Button>
                 )}
+              {canResend && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => resendMutation.mutate(booking.bookingId)}
+                  disabled={resendMutation.isPending}
+                >
+                  <Mail />
+                  Resend email
+                </Button>
+              )}
               {booking.status === "Confirmed" && started && (
                 <Button type="button" variant="outline" onClick={handleNoShow} disabled={noShowMutation.isPending}>
                   <UserX />

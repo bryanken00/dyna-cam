@@ -3,6 +3,7 @@ import * as xendit from "../lib/payments/xendit.js";
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { bookingManageUrl } from "./clips.js";
 import { findConflict } from "./courtTimeline.js";
+import { sendBookingEmail } from "./bookingEmails.js";
 
 /**
  * PLAN-003 Phase F — paying a booking online through Xendit, and giving the
@@ -256,6 +257,7 @@ export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
   let conn;
   let paymentId;
   let decision;
+  let bookingId;
   try {
     conn = await db.beginTransaction();
     const booking = await lockBookingByCode(conn, bookingCode);
@@ -273,6 +275,7 @@ export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
       return { outcome: "ALREADY_RECORDED" };
     }
 
+    bookingId = booking.bookingId;
     decision = await decide(conn, booking, invoice, now);
     const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
     paymentId = uuidRow[0].id;
@@ -324,14 +327,22 @@ export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
     throw err;
   }
 
-  if (decision.keep) return { outcome: "CONFIRMED" };
+  if (decision.keep) {
+    await sendBookingEmail(db, bookingId, "Confirmed");
+    return { outcome: "CONFIRMED" };
+  }
   logger.warn("Xendit: refunding a payment the booking can't keep", {
     paymentId,
     bookingCode,
     why: decision.why,
   });
   const [sent] = await sendRefunds(db, { paymentIds: [paymentId], reason: decision.reason });
-  // Phase G: the player is emailed that the slot was lost and the money is on its way back
+  // Phase G: tell the player why, and that the money is on its way back
+  await sendBookingEmail(db, bookingId, "PaymentRefunded", {
+    why: decision.why,
+    amount: Number(invoice.amount),
+    refunded: Boolean(sent?.ok),
+  });
   return { outcome: sent?.ok ? "REFUNDED" : "REFUND_FAILED", why: decision.why };
 };
 

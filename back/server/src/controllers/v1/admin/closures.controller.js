@@ -6,6 +6,7 @@ import { checkPermission } from "../../../middlewares/checkPermission.middleware
 import { LIVE_BOOKING } from "../../../utils/courtTimeline.js";
 import { cancelBooking } from "../../../utils/bookings.js";
 import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
+import { sendBookingEmail } from "../../../utils/bookingEmails.js";
 import {
   createClosureSchema,
   listClosuresQuerySchema,
@@ -143,13 +144,18 @@ const checkWindow = async (
   return null;
 };
 
-/** After commit: refund the cancelled bookings' online payments, close their checkouts. */
-const refundCancelled = async (req, followUps) => {
+/**
+ * After commit: refund the cancelled bookings' online payments, close their
+ * checkouts, then email each player (Phase G) why and what happens to the money.
+ */
+const refundCancelled = async (req, followUps, reason) => {
+  const why = `the venue closed the court then${reason ? ` (${reason})` : ""}, so your booking was cancelled.`;
   for (const followUp of followUps) {
     await runPaymentFollowUps(req.db, followUp, {
       accountId: req.user.accountId,
       reason: "CANCELLATION",
     });
+    await sendBookingEmail(req.db, followUp.bookingId, "Cancelled", { why });
   }
 };
 
@@ -274,7 +280,7 @@ router.post(
       );
 
       await req.db.commit(conn);
-      await refundCancelled(req, followUps);
+      await refundCancelled(req, followUps, reason);
       return res.sendSuccess("Closure added", { closureId }, 201);
     } catch (err) {
       await req.db.rollback(conn);
@@ -336,7 +342,7 @@ router.put(
       );
 
       await req.db.commit(conn);
-      await refundCancelled(req, followUps);
+      await refundCancelled(req, followUps, reason);
       return res.sendSuccess("Closure updated");
     } catch (err) {
       await req.db.rollback(conn);

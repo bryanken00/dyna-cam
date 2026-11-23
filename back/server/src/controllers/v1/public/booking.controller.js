@@ -11,6 +11,7 @@ import { loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import { cancelBooking, createBooking, expireHolds, toStartLocal } from "../../../utils/bookings.js";
 import { isOnlinePaymentOn } from "../../../lib/payments/xendit.js";
+import { sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
 import {
   MIN_CHECKOUT_SECONDS,
   openCheckout,
@@ -256,6 +257,8 @@ router.post(
       reply.checkoutUrl = checkout.checkoutUrl;
       return res.sendSuccess("Booked — pay now to confirm it", reply, 201);
     }
+    // Phase G: a desk hold → the pay-by email; free → the confirmation
+    await sendCreatedEmail(req.db, result);
     return res.sendSuccess(
       result.status === "Pending"
         ? "Booked — pay at the desk to confirm it"
@@ -496,6 +499,7 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, null, result.status, result.code);
     }
+    if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, rows[0].bookingId, "GameStarted");
     return res.sendSuccess(
       result.status === "Scheduled"
         ? "Checked in — recording starts at your booked time"

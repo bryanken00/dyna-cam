@@ -71,3 +71,11 @@ export const retryBookingRefundApi = async (bookingId) => {
   const response = await api.post(`/api/v1/admin/bookings/${bookingId}/retry-refund`);
   return response.data;
 };
+
+// Phase G: email the player again — the confirmation, the pay-by email (desk
+// hold) or the game link (checked in) → { kind, to } · 409 no email / nothing
+// to send · 503 email isn't set up on the server
+export const resendBookingEmailApi = async (bookingId) => {
+  const response = await api.post(`/api/v1/admin/bookings/${bookingId}/resend`);
+  return response.data;
+};

@@ -19,6 +19,7 @@ import {
   moveBookingApi,
   recordBookingPaymentApi,
   retryBookingRefundApi,
+  resendBookingEmailApi,
 } from "../../api/admin/bookings";
 
 /**
@@ -197,5 +198,18 @@ export const useRetryBookingRefund = () => {
       toast.error(error.response?.data?.message || "The refund failed again");
       invalidateBookings(queryClient);
     },
+  });
+};
+
+// Mutation: Phase G — email the player again
+export const useResendBookingEmail = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: resendBookingEmailApi,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Email sent");
+      invalidateBookings(queryClient);
+    },
+    onError: errorToast("Failed to send the email"),
   });
 };

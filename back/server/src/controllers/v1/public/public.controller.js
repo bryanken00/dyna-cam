@@ -13,6 +13,7 @@ import {
 } from "../../../utils/sessions.js";
 import { bookCourt } from "../../../utils/gameStart.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
+import { sendBookingEmail } from "../../../utils/bookingEmails.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
 import {
@@ -374,6 +375,8 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, null, result.status, result.code);
     }
+    // PLAN-003 Phase G: the game page link, by email
+    if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, booking.bookingId, "GameStarted");
     return res.sendSuccess(
       result.status === "Scheduled"
         ? "Checked in — recording starts at your booked time"

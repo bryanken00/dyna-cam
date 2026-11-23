@@ -207,14 +207,25 @@
 
 ## Phase G — Notifications
 
-- [ ] `lib/mailer/templates.js`: confirmed, pay-at-desk deadline, reminder, cancelled, moved,
-      game started
-- [ ] `utils/bookingEmails.js`: send + record (`confirmationSentAt`, `reminderSentAt`, …); no-op
-      without an email or without SendGrid
-- [ ] Hook sends into create/confirm, cancel (all sources), move, check-in; reminders in
-      `bookingMaintenance.js` (`BOOKING_REMINDER_MINUTES`, default 120)
-- [ ] Admin Resend confirmation (`POST /admin/bookings/:bookingId/resend`)
-- [ ] Tests: each email sent once; reminder not sent for cancelled / already-sent bookings
+- [x] `lib/mailer/templates.js`: confirmed, pay-at-desk deadline, reminder, cancelled (and "your
+      court was released"), moved, game started, and a payment refunded (paid after the slot
+      was lost, paid twice, wrong amount)
+- [x] Migration `034_booking_cancel_email.sql`: `bookings.cancelledEmailSentAt`, beside 033's
+      `confirmationSentAt` and `reminderSentAt`
+- [x] `utils/bookingEmails.js` `sendBookingEmail()`: send + record — once-only emails are
+      claimed on their column first; no-op without an email; without SendGrid only logged,
+      nothing recorded; never throws
+- [x] Hook sends into create (desk and online desk hold / free), confirm (desk cash, verified
+      online payment), cancel (staff, closures; player in Phase H), move, check-in (booking page,
+      court QR, Admin); reminders and released holds in `bookingMaintenance.js`
+      (`BOOKING_REMINDER_MINUTES`, default 120; skipped when the confirmation went out that close
+      to the start; released only for holds that ran out in the last hour)
+- [x] Admin **Resend email** (`POST /admin/bookings/:bookingId/resend`): the confirmation, the
+      pay-by email or the game link, whichever fits; the booking drawer shows which emails went out
+- [x] Tests (`tests/booking-emails.test.js`, SendGrid faked): each email sent once; none without
+      an email; reminder not sent for cancelled / already-sent / just-confirmed bookings, nor twice
+      when two job runs overlap; released only for recent holds; staff reason kept out of the
+      cancellation; Resend (409 no email / cancelled, 404 Deleted, 503 without SendGrid)
 
 ## Phase H — Player cancel and move
 
@@ -234,7 +245,7 @@
 
 - [ ] `cd back && npm run lint && npm test` passes
 - [ ] `cd front && npm run lint && npm run build` passes
-- [ ] Migrations `030`–`033` applied, or noted as pending for deploy (Phase A: written and run by
+- [ ] Migrations `030`–`034` applied, or noted as pending for deploy (Phase A: written and run by
       `npm test`; not applied to the dev database yet)
 - [ ] Tried in the browser: set hours and rates → book online (desk pay) → staff record cash →
       scan court QR, enter booking code → game records the booked time → video on the game page;

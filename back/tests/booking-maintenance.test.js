@@ -138,7 +138,7 @@ describe("booking maintenance job (PLAN-003 Phase E)", () => {
     assert.equal(await status(bookingId), "NoShow");
 
     const again = await runJob({ now: at(43) });
-    assert.deepEqual(again, { expired: 0, noShows: 0, completed: 0 });
+    assert.deepEqual(again, { expired: 0, noShows: 0, completed: 0, reminders: 0, released: 0 });
   });
 
   it("never touches cancelled or deleted bookings", async () => {

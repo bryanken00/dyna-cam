@@ -172,3 +172,167 @@ export const gameDriveEmail = ({ playerName, courtName, venueName, playedOn, dri
   };
 };
 
+
+// ── PLAN-003 Phase G: court bookings ─────────────────────────────────────────
+//
+// Every booking email shares one block: where and when, the booking code, and
+// the player's own booking page. Times arrive already formatted (venue time).
+// Built by utils/bookingEmails.js, which decides when each one is sent.
+
+/**
+ * @typedef {Object} BookingEmailFacts
+ * @property {string|null} playerName
+ * @property {string} venueName
+ * @property {string} courtName
+ * @property {string} day - "Tue, Nov 24, 2026"
+ * @property {string} time - "5:00 PM – 7:00 PM"
+ * @property {string} bookingCode
+ * @property {string} price - "₱800"
+ * @property {string} manageUrl - the player's booking page
+ */
+
+const p = (html, extra = "") =>
+  `<p style="font-size: 14px; line-height: 1.6; margin: 0 0 16px;${extra}">${html}</p>`;
+const muted = (html) =>
+  `<p style="font-size: 13px; color: #71717a; line-height: 1.6; margin: 0 0 16px;">${html}</p>`;
+const hi = (name) => (name ? `Hi ${escapeHtml(name)},` : "Hi,");
+
+/** Where, when and the code — the part every booking email repeats. */
+const bookingFacts = (b, { showCode = true } = {}) => `
+  <table role="presentation" style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 0 0 20px; border: 1px solid #e4e4e7; border-radius: 8px;">
+    <tr><td style="padding: 10px 14px; color: #71717a;">Where</td>
+        <td style="padding: 10px 14px; text-align: right;">${escapeHtml(b.courtName)} · ${escapeHtml(b.venueName)}</td></tr>
+    <tr><td style="padding: 10px 14px; color: #71717a; border-top: 1px solid #e4e4e7;">When</td>
+        <td style="padding: 10px 14px; text-align: right; border-top: 1px solid #e4e4e7;">${escapeHtml(b.day)}<br />${escapeHtml(b.time)}</td></tr>
+    ${
+      showCode
+        ? `<tr><td style="padding: 10px 14px; color: #71717a; border-top: 1px solid #e4e4e7;">Booking code</td>
+        <td style="padding: 10px 14px; text-align: right; border-top: 1px solid #e4e4e7; font-family: Menlo, Consolas, monospace; font-size: 16px; font-weight: 600; letter-spacing: 0.08em;">${escapeHtml(b.bookingCode)}</td></tr>`
+        : ""
+    }
+  </table>`;
+
+const manageLink = (b, label = "Open your booking") => `
+  <p style="margin: 0 0 20px;">${button(escapeHtml(b.manageUrl), label)}</p>
+  ${muted(`If the button doesn't work, copy this link into your browser:<br />
+    <span style="color: #2563eb; word-break: break-all;">${escapeHtml(b.manageUrl)}</span>`)}`;
+
+const howCheckInWorks = (b, checkInFrom) =>
+  muted(`When you arrive, scan the QR sign on ${escapeHtml(b.courtName)}${
+    checkInFrom ? ` from ${escapeHtml(checkInFrom)}` : ""
+  } and enter your booking code — your game is recorded for your booked time, and you get the video on your phone.`);
+
+/**
+ * Booking confirmed (paid or free).
+ * @param {BookingEmailFacts & { paidLine: string, checkInFrom?: string }} b
+ *   paidLine: "Paid ₱800 online" · "Paid ₱800 at the desk" · "Free"
+ */
+export const bookingConfirmedEmail = (b) => ({
+  subject: `Booked: ${b.courtName} at ${b.venueName}, ${b.day}`,
+  html: layout(
+    "You're booked",
+    `${p(`${hi(b.playerName)} your court is booked. ${escapeHtml(b.paidLine)}.`)}
+     ${bookingFacts(b)}
+     ${howCheckInWorks(b, b.checkInFrom)}
+     ${manageLink(b)}`
+  ),
+});
+
+/**
+ * Held, waiting for payment at the desk.
+ * @param {BookingEmailFacts & { payBy: string, payOnline?: boolean }} b
+ *   payBy: "4:30 PM, Tue Nov 24"
+ */
+export const bookingPayAtDeskEmail = (b) => ({
+  subject: `Pay by ${b.payBy} to keep your court — ${b.venueName}`,
+  html: layout(
+    "Pay to confirm your booking",
+    `${p(`${hi(b.playerName)} we're holding ${escapeHtml(b.courtName)} for you. Pay
+       <strong>${escapeHtml(b.price)}</strong> at the front desk${b.payOnline ? " (or online from your booking page)" : ""}
+       by <strong>${escapeHtml(b.payBy)}</strong> — after that the court is released.`)}
+     ${bookingFacts(b)}
+     ${muted("Show your booking code at the desk when you pay.")}
+     ${manageLink(b)}`
+  ),
+});
+
+/**
+ * Reminder, a couple of hours before.
+ * @param {BookingEmailFacts & { startsIn: string, checkInFrom?: string }} b
+ *   startsIn: "in 2 hours"
+ */
+export const bookingReminderEmail = (b) => ({
+  subject: `Reminder: ${b.courtName} at ${b.venueName}, ${b.time}`,
+  html: layout(
+    "See you on the court",
+    `${p(`${hi(b.playerName)} your booking starts ${escapeHtml(b.startsIn)}.`)}
+     ${bookingFacts(b)}
+     ${howCheckInWorks(b, b.checkInFrom)}
+     ${manageLink(b)}`
+  ),
+});
+
+/**
+ * Cancelled (by the venue, a closure, the player) or released unpaid.
+ * @param {BookingEmailFacts & { title: string, why: string, refundLines: string[] }} b
+ *   why: a sentence; refundLines: what happens to the money (may be empty)
+ */
+export const bookingCancelledEmail = (b) => ({
+  subject: `${b.title} — ${b.courtName}, ${b.day}`,
+  html: layout(
+    b.title,
+    `${p(`${hi(b.playerName)} ${escapeHtml(b.why)}`)}
+     ${bookingFacts(b, { showCode: false })}
+     ${b.refundLines.map((line) => p(escapeHtml(line))).join("")}
+     ${muted("Questions? Contact the venue. You're welcome to book another time.")}`
+  ),
+});
+
+/**
+ * Moved to another time and/or court.
+ * @param {BookingEmailFacts & { previous: string }} b - previous: "Court 1 · Tue, Nov 24, 5:00 PM – 6:00 PM"
+ */
+export const bookingMovedEmail = (b) => ({
+  subject: `Booking moved: ${b.courtName}, ${b.day} ${b.time}`,
+  html: layout(
+    "Your booking was moved",
+    `${p(`${hi(b.playerName)} your booking has a new time. It was ${escapeHtml(b.previous)}.`)}
+     ${bookingFacts(b)}
+     ${manageLink(b)}`
+  ),
+});
+
+/**
+ * Checked in: the game page.
+ * @param {BookingEmailFacts & { gameUrl: string, recordingFrom: string }} b
+ *   recordingFrom: "now" · "at 5:00 PM"
+ */
+export const bookingGameStartedEmail = (b) => ({
+  subject: `Your game at ${b.venueName} is recording`,
+  html: layout(
+    "You're checked in",
+    `${p(`${hi(b.playerName)} the camera on ${escapeHtml(b.courtName)} records your game ${escapeHtml(
+      b.recordingFrom
+    )} until ${escapeHtml(b.time.split("–").pop().trim())}. Watch it live, save your best rallies
+       and get the whole game from your game page.`)}
+     <p style="margin: 0 0 20px;">${button(escapeHtml(b.gameUrl), "Open your game")}</p>
+     ${muted(`If the button doesn't work, copy this link into your browser:<br />
+       <span style="color: #2563eb; word-break: break-all;">${escapeHtml(b.gameUrl)}</span>`)}`
+  ),
+});
+
+/**
+ * An online payment the booking couldn't keep (paid after the slot was lost,
+ * paid twice, …) — it's being given back.
+ * @param {BookingEmailFacts & { why: string, refundLine: string }} b
+ */
+export const bookingPaymentRefundedEmail = (b) => ({
+  subject: `Your payment to ${b.venueName} is being refunded`,
+  html: layout(
+    "We're refunding your payment",
+    `${p(`${hi(b.playerName)} ${escapeHtml(b.why)}`)}
+     ${bookingFacts(b, { showCode: false })}
+     ${p(escapeHtml(b.refundLine))}
+     ${manageLink(b, "Open your booking")}`
+  ),
+});

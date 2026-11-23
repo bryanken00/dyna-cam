@@ -9,6 +9,11 @@ import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
 import {
+  describeSlot,
+  sendBookingEmail,
+  sendCreatedEmail,
+} from "../../../utils/bookingEmails.js";
+import {
   addMinutesTo,
   cancelBooking,
   conflictMessage,
@@ -45,7 +50,7 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const BOOKING_COLUMNS = `b.bookingId, b.venueId, v.name AS venueName, b.courtId, c.name AS courtName,
   b.startAt, b.endAt, b.playerName, b.phone, b.email, b.price, b.paymentStatus, b.payMethod,
   b.source, b.bookingCode, b.holdExpiresAt, b.sessionId, b.rescheduledCount, b.cancelledAt,
-  b.cancelledBy, b.cancelReason, b.confirmationSentAt, b.reminderSentAt, b.status, b.dateCreated,
+  b.cancelledBy, b.cancelReason, b.confirmationSentAt, b.reminderSentAt, b.cancelledEmailSentAt, b.status, b.dateCreated,
   b.dateUpdated, CONCAT(u.firstName, ' ', u.lastName) AS createdBy`;
 
 const BOOKING_FROM = `bookings b
@@ -424,6 +429,7 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, result.status);
     }
+    await sendCreatedEmail(req.db, result);
     return res.sendSuccess(
       result.status === "Pending" ? "Booking held — waiting for payment at the desk" : "Booking confirmed",
       {
@@ -460,6 +466,9 @@ router.put(
       return res.sendError(result.message, result.status);
     }
     await runPaymentFollowUps(req.db, result.followUp);
+    await sendBookingEmail(req.db, req.params.bookingId, "Moved", {
+      previous: await describeSlot(req.db, result.from),
+    });
     return res.sendSuccess("Booking moved", {
       startAt: result.startAt,
       endAt: result.endAt,
@@ -494,6 +503,8 @@ router.post(
       accountId: req.user.accountId,
       reason: "CANCELLATION",
     });
+    // Phase G: after the refunds, so the email says what happened to the money
+    await sendBookingEmail(req.db, req.params.bookingId, "Cancelled");
     return res.sendSuccess(cancelMessage(result.refunded, online), {
       refunded: result.refunded,
       refundedOnline: online.refunded,
@@ -565,6 +576,7 @@ router.post(
     if (!result.ok) {
       return res.sendError(result.message, null, result.status, result.code);
     }
+    if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, req.params.bookingId, "GameStarted");
     return res.sendSuccess(
       result.alreadyCheckedIn
         ? "Already checked in"
@@ -574,6 +586,53 @@ router.post(
       { sessionId: result.sessionId, shareUrl: result.shareUrl },
       result.alreadyCheckedIn ? 200 : 201
     );
+  })
+);
+
+/** What Resend sends: the email that fits where the booking is now. */
+const RESEND_KIND = { Pending: "PayAtDesk", Confirmed: "Confirmed", CheckedIn: "GameStarted" };
+
+/**
+ * POST /:bookingId/resend
+ * Phase G: email the player again — the confirmation (Confirmed), the pay-by
+ * email (a desk hold) or the game link (checked in).
+ */
+router.post(
+  "/:bookingId/resend",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    await expireHolds(req.db);
+    const rows = await req.db.query(
+      `SELECT b.bookingId, b.email, b.status, b.payMethod FROM bookings b
+       JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
+       WHERE b.bookingId = ? AND b.status != 'Deleted' LIMIT 1`,
+      [req.params.bookingId]
+    );
+    if (rows.length === 0) {
+      return res.sendError("Booking not found", 404);
+    }
+    const booking = rows[0];
+    if (!booking.email) {
+      return res.sendError("This booking has no email — add one by booking again, or share the player's link", 409);
+    }
+    const kind = RESEND_KIND[booking.status];
+    if (!kind || (booking.status === "Pending" && booking.payMethod !== "Desk")) {
+      return res.sendError(
+        booking.status === "Pending"
+          ? "It's waiting for an online payment — share the player's link instead"
+          : `There's nothing to resend for a booking that's ${booking.status === "NoShow" ? "a no-show" : booking.status.toLowerCase()}`,
+        409
+      );
+    }
+
+    const result = await sendBookingEmail(req.db, booking.bookingId, kind, { force: true });
+    if (result.reason === "NOT_SET_UP") {
+      return res.sendError("Email isn't set up on this server (SENDGRID_API_KEY) — nothing was sent", 503);
+    }
+    if (!result.sent) {
+      return res.sendError("The email couldn't be sent — check the address and try again", 502);
+    }
+    return res.sendSuccess(`Email sent to ${booking.email}`, { kind, to: result.to });
   })
 );
 
@@ -614,6 +673,7 @@ router.post(
       return res.sendError(result.message, result.status);
     }
     await runPaymentFollowUps(req.db, result.followUp);
+    await sendBookingEmail(req.db, req.params.bookingId, "Confirmed");
     return res.sendSuccess(
       "Payment recorded — the booking is confirmed",
       { paymentId: result.paymentId, amount: result.amount },

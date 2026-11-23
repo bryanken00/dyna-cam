@@ -365,7 +365,7 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
  * @param {boolean} options.refund
  * @param {string|null} [options.accountId]
  * @returns {Promise<{ ok: true, refunded: number, refundingOnline: number,
- *   followUp: { closeCheckoutId, refundPaymentIds } } | { ok: false, status, message }>}
+ *   followUp: { bookingId, closeCheckoutId, refundPaymentIds } } | { ok: false, status, message }>}
  *   refunded = cash handed back; refundingOnline = queued for Xendit
  */
 export const cancelBooking = async (conn, { bookingId, by, reason, refund, accountId = null }) => {
@@ -424,7 +424,7 @@ export const cancelBooking = async (conn, { bookingId, by, reason, refund, accou
     ok: true,
     refunded,
     refundingOnline,
-    followUp: { closeCheckoutId: booking.checkoutId || null, refundPaymentIds },
+    followUp: { bookingId: booking.bookingId, closeCheckoutId: booking.checkoutId || null, refundPaymentIds },
   };
 };
 
@@ -520,7 +520,15 @@ export const moveBooking = async (
       booking.bookingId,
     ]
   );
-  return { ok: true, startAt: startLocal, endAt: endLocal, price, followUp: { closeCheckoutId } };
+  return {
+    ok: true,
+    startAt: startLocal,
+    endAt: endLocal,
+    price,
+    // Where it was — Phase G's Moved email says so
+    from: { courtId: booking.courtId, startAt: booking.startAt, endAt: booking.endAt },
+    followUp: { closeCheckoutId },
+  };
 };
 
 /** Staff mark a Confirmed booking as a no-show once it has started. */

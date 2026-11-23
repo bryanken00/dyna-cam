@@ -533,3 +533,15 @@ check-in endpoints:
   refund back into Refund failed. The lost-slot email waits for Phase G. Also fixed: Admin Payments
   sorted rows paid in the same second in no fixed order, so pages could skip a payment (now
   `paidAt DESC, id DESC`; it made a Phase B test flaky).
+- 2026-11-23: Phase G built. Emails are sent by the request that causes them, after its commit
+  (`utils/bookingEmails.js`); the booking job sends the reminders and "your court was released" for
+  holds that ran out in the last hour (not older ones, so a deploy doesn't mail old bookings). The
+  confirmation, reminder and cancellation are claimed on a column before sending
+  (`cancelledEmailSentAt` added in migration 034), so a request and the job never both send one; a
+  send SendGrid refuses isn't retried. The reminder is skipped when the confirmation itself went out
+  inside the reminder window. The cancellation never shows staff's own reason (a closure says the
+  court was closed, with its reason); it says what happens to the money, after the refunds ran.
+  A payment the booking can't keep (Phase F) gets its own email. Without SendGrid the emails are
+  only logged and nothing is recorded as sent. Admin's Resend sends whichever email fits the
+  booking now. Also fixed: the plain-text part of every email (password reset, Drive link, …)
+  showed HTML entities such as `&#39;` — they're decoded now.
