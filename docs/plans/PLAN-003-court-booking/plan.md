@@ -1,6 +1,6 @@
 # PLAN-003 · Court booking, end to end
 
-> **Status:** Draft · **Created:** 2026-11-23 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
+> **Status:** In progress · **Created:** 2026-11-23 · **Owner:** — · **Checklist:** [checklist.md](checklist.md)
 > **Related:** [PLAN-001](../PLAN-001-court-replay-cameras/plan.md) (venues, courts, games),
 > [CR-005](../../change-requests/CR-005-start-stop-from-device/request.md) (booking ahead removed),
 > [CR-015](../../change-requests/CR-015-pay-before-download/request.md) (desk payments, pay codes),
@@ -259,8 +259,8 @@ retrying events we've already handled.
 | `POST /bookings/:bookingId/payments` | `payments` write | Record a cash payment → `Paid` (+ `Confirmed` if `Pending`) |
 | `POST /bookings/:bookingId/resend` | `bookings` write | Resend the confirmation email |
 | `DELETE /bookings/:bookingId` | `bookings` write | Soft delete (a mistake with no payments) |
-| `GET/PUT /venues/:venueId/booking-settings` | `bookings` read / write | Rules, hours and rates for a venue (one form) |
-| `POST /venues/:venueId/booking-link` · `DELETE …` | `bookings` write | Issue a new link / turn online booking off |
+| `GET/PUT /booking-settings/:venueId` | `bookings` read / write | Rules, hours and rates for a venue (one form), plus its courts |
+| `POST /booking-settings/:venueId/link` · `DELETE …` | `bookings` write | Issue a new link / turn online booking off |
 | `GET/POST/PUT/DELETE /closures` | `bookings` read / write | Closures; the POST reply lists bookings in the way unless `cancelConflicts: true` |
 
 Every by-ID endpoint returns 404 for a `Deleted` booking or closure and leaves it unchanged, and
@@ -410,7 +410,7 @@ check-in endpoints:
 | Seed | `back/scripts/setup-database.js` | `bookings` permission |
 | API: shared | `utils/courtTimeline.js`, `utils/bookingPrice.js`, `utils/bookingCheckIn.js`, `utils/bookingEmails.js`, `utils/gameStart.js` (uses the timeline) | New overlap rule, pricing, check-in, emails |
 | API: public | `controllers/v1/public/booking.controller.js` (new), `public.controller.js` (court page + check-in) | Booking page, availability, create/pay/cancel/move/check-in |
-| API: admin | `controllers/v1/admin/bookings.controller.js`, `closures.controller.js` (new); `venues.controller.js` (booking settings, link); `sessions.controller.js`, `payments.controller.js` (booking columns) | Desk bookings, settings, closures |
+| API: admin | `controllers/v1/admin/bookings.controller.js`, `closures.controller.js`, `booking-settings.controller.js` (new); `sessions.controller.js`, `payments.controller.js` (booking columns) | Desk bookings, settings, closures |
 | API: payments | `lib/payments/xendit.js`, `controllers/v1/webhooks/xendit.controller.js`, `routes/route.js` | Invoices, webhook, refunds |
 | API: jobs / mail | `jobs/bookingMaintenance.js`, `lib/mailer/templates.js` | Holds, reminders, no-shows, completion; email templates |
 | Validators | `validators/bookings.validator.js`, `booking-settings.validator.js`, `closures.validator.js`, `public.validator.js` | Every new body/query/param |
@@ -487,3 +487,8 @@ check-in endpoints:
   one player move to a same-or-cheaper slot; no "pay later" (paid or Free to check in); desk holds
   released 30 min before the start; 60-minute grid only (`slotMinutes` dropped); 5 saves; no
   buffer.
+- 2026-11-23: Phase A built (status In progress). Booking settings live at
+  `/admin/booking-settings/:venueId` (their own route group with the `bookings` permission)
+  instead of under `/admin/venues`, since one route group keeps one permission. A closure's
+  `cancelConflicts` only marks bookings `Cancelled` for now; refunds and emails join in Phase B,
+  F and G.

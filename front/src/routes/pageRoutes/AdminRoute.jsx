@@ -24,6 +24,8 @@ const Venues = lazy(() => import("../../pages/Admin/Setup/Venues"));
 const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
 const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
 const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
+// PLAN-003: printable "Book a court" sign for a venue's online booking link
+const BookingSign = lazy(() => import("../../pages/Admin/Setup/BookingSign"));
 // Dyna Cam (PLAN-001): day-to-day work
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
@@ -269,6 +271,17 @@ const AdminRoute = () => {
                 accessLevel="read"
               >
                 <CourtSign />
+              </ProtectedRoute>
+            </Suspense>
+          }
+        />
+        {/* PLAN-003: printable A5 "Book a court" sign — full page, new tab */}
+        <Route
+          path="setup/venues/:venueId/booking-sign"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="bookings" accessLevel="read">
+                <BookingSign />
               </ProtectedRoute>
             </Suspense>
           }

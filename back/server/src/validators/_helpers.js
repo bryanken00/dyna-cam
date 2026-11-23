@@ -59,6 +59,25 @@ export const optionalUploadPath = (max = 255) =>
       .refine((v) => v === undefined || v.length <= max, `Must be at most ${max} characters`),
   );
 
+/**
+ * A Manila local date and time as sent by the Admin portal: "YYYY-MM-DD HH:mm"
+ * (or with seconds, or a "T" between), normalised to "YYYY-MM-DD HH:mm:ss".
+ */
+const LOCAL_MINUTES = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
+const LOCAL_SECONDS = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
+export const localDateTime = () =>
+  z
+    .string()
+    .trim()
+    .refine(
+      (value) => LOCAL_MINUTES.test(value) || LOCAL_SECONDS.test(value),
+      "Use a YYYY-MM-DD HH:mm date and time",
+    )
+    .transform((value) => {
+      const normalised = value.replace("T", " ");
+      return normalised.length === 16 ? `${normalised}:00` : normalised;
+    });
+
 /* ── Phone ──────────────────────────────────────────────────────────────────
  * Canonical stored format is `09XX XXXX XXX` (PH mobile, 11 digits grouped
  * 4-4-3). See the phone entry in the repo-root CLAUDE.md.

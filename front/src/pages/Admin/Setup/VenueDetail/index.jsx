@@ -3,7 +3,13 @@ import { ChevronLeft, CircleAlert, Pencil, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useVenueDetailHooks } from "./hooks";
+import { useVenueBookingHooks } from "./bookingHooks";
 import VenueInfoCard from "./components/VenueInfoCard";
+import BookingLinkSection from "./components/BookingLinkSection";
+import BookingRulesSection from "./components/BookingRulesSection";
+import BookingSettingsFormDrawer from "./components/BookingSettingsFormDrawer";
+import ClosuresSection from "./components/ClosuresSection";
+import ClosureFormDrawer from "./components/ClosureFormDrawer";
 import VenueFormDrawer from "../Venues/components/VenueFormDrawer";
 import CourtFormDrawer from "../components/CourtFormDrawer";
 import PageHeader from "../../../../components/PageHeader";
@@ -18,6 +24,7 @@ import { VENUES_PATH } from "../../../../utils/dynaCam";
 /** `/admin/setup/venues/:venueId` — a venue's info and its courts. */
 const VenueDetailPage = () => {
   const {
+    venueId,
     venue,
     venueName,
     venueLoading,
@@ -46,6 +53,9 @@ const VenueDetailPage = () => {
     handleCourtDrawerClose,
     handleCourtDrawerSuccess,
   } = useVenueDetailHooks();
+  const booking = useVenueBookingHooks(venueId, {
+    isDeleted: venue?.status === "Deleted",
+  });
 
   const backLink = (
     <Link
@@ -104,7 +114,7 @@ const VenueDetailPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title={venueName || "Venue"}
-        subtitle="Its courts, each court's camera, QR sign, button and live stream."
+        subtitle="Its courts and cameras, and how players book them."
         actions={
           <>
             {canEditVenue && !isDeleted && (
@@ -196,13 +206,76 @@ const VenueDetailPage = () => {
         </div>
       )}
 
-      {/* 4. DRAWERS */}
+      {/* 4. BOOKINGS (bookings) — PLAN-003 */}
+      {booking.canReadBookings &&
+        (booking.settingsError ? (
+          <Alert variant="destructive">
+            <CircleAlert />
+            <AlertTitle>Error loading the booking settings</AlertTitle>
+            <AlertDescription>
+              {booking.settingsError.message ||
+                "Failed to load the booking settings. Please try again."}
+            </AlertDescription>
+          </Alert>
+        ) : booking.settingsLoading || !booking.settings ? (
+          <Spinner className="py-10" tip="Loading booking settings…" />
+        ) : (
+          <>
+            <BookingLinkSection
+              settings={booking.settings}
+              canWrite={booking.canWriteBookings}
+              isIssuing={booking.isIssuingLink}
+              isTurningOff={booking.isTurningOffLink}
+              onIssue={booking.handleIssueLink}
+              onTurnOff={booking.handleTurnOffLink}
+              onCopy={booking.handleCopyLink}
+              onPrint={booking.handlePrintSign}
+            />
+            <BookingRulesSection
+              settings={booking.settings}
+              canWrite={booking.canWriteBookings}
+              onEdit={booking.handleEditSettings}
+            />
+            <ClosuresSection
+              closures={booking.closures}
+              columns={booking.closureColumns}
+              pagination={booking.closuresPagination}
+              when={booking.closuresWhen}
+              loading={booking.closuresLoading}
+              fetching={booking.closuresFetching}
+              error={booking.closuresError}
+              canWrite={booking.canWriteBookings}
+              onWhenChange={booking.handleClosuresWhenChange}
+              onTableChange={booking.handleClosuresTableChange}
+              onRefresh={booking.refetchClosures}
+              onAdd={booking.handleAddClosure}
+            />
+          </>
+        ))}
+
+      {/* 5. DRAWERS */}
       {canEditVenue && (
         <VenueFormDrawer
           open={venueDrawerOpen}
           entity={venue}
           onClose={handleVenueDrawerClose}
           onSuccess={handleVenueDrawerClose}
+        />
+      )}
+      {booking.canWriteBookings && (
+        <BookingSettingsFormDrawer
+          open={booking.settingsDrawerOpen}
+          entity={booking.settingsDrawerEntity}
+          onClose={booking.handleSettingsDrawerClose}
+          onSuccess={booking.handleSettingsDrawerClose}
+        />
+      )}
+      {booking.canWriteBookings && (
+        <ClosureFormDrawer
+          open={booking.closureDrawerOpen}
+          entity={booking.closureDrawerEntity}
+          onClose={booking.handleClosureDrawerClose}
+          onSuccess={booking.handleClosureDrawerClose}
         />
       )}
       {canWriteCourts && (

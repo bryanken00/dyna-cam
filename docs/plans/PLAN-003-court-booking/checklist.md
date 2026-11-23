@@ -9,39 +9,42 @@
 
 ### Backend
 
-- [ ] Migration `030_booking_settings.sql`: `venues` gains `bookingToken` (NULL, UNIQUE),
+- [x] Migration `030_booking_settings.sql`: `venues` gains `bookingToken` (NULL, UNIQUE),
       `maxBookingMinutes` (multiple of 60), `bookingDaysAhead`, `deskHoldMinutes`,
       `onlineHoldMinutes`, `cancelCutoffHours`, `checkInEarlyMinutes`; create `venue_hours`
-- [ ] Migration `031_court_rates.sql`: create `court_rates`
-- [ ] Migration `032_court_closures.sql`: create `court_closures`
-- [ ] Migration `033_create_bookings.sql`: create `bookings`; `recording_sessions.bookingId`
+- [x] Migration `031_court_rates.sql`: create `court_rates`
+- [x] Migration `032_court_closures.sql`: create `court_closures`
+- [x] Migration `033_create_bookings.sql`: create `bookings`; `recording_sessions.bookingId`
       (FK, unique); `payments.bookingId` (FK), `method ENUM('CASH','ONLINE')`, `provider`,
       `providerRef` (UNIQUE), `providerRefundRef`, `refundError`; `bookings` permission row +
       Owner grant (`WHERE NOT EXISTS`)
-- [ ] Add `bookings` to the permission seed array in `back/scripts/setup-database.js`
-- [ ] `utils/bookingPrice.js`: `BOOKING_SLOT_MINUTES = 60`; `quote(db, { venueId, courtId,
+- [x] Add `bookings` to the permission seed array in `back/scripts/setup-database.js`
+- [x] `utils/bookingPrice.js`: `BOOKING_SLOT_MINUTES = 60`; `quote(db, { venueId, courtId,
       startLocal, durationMinutes })` → `{ price, bookable, reason }` (sum of each hour's rate;
       court rate beats venue rate; gap in rates → not bookable; start not on the hour → 400)
-- [ ] `utils/courtTimeline.js`: `findConflict(conn, { courtId, startLocal, endLocal,
-      ignoreBookingId?, ignoreHours? })` covering games, live bookings (incl. unexpired holds),
+- [x] `utils/courtTimeline.js`: `findConflict(db, { courtId, startLocal, endLocal,
+      ignoreBookingId?, checkHours? })` (works with `req.db` or a transaction `conn`, via
+      `utils/dbRows.js`) covering games, live bookings (incl. unexpired holds),
       closures and opening hours
-- [ ] `validators/booking-settings.validator.js` + `closures.validator.js`
-- [ ] `GET/PUT /admin/venues/:venueId/booking-settings` (rules + hours + rates in one body) behind
-      `checkPermission("bookings", null, "read"|"write")`
-- [ ] `POST /admin/venues/:venueId/booking-link` (issue new `randomToken()`) and `DELETE` (turn off)
-- [ ] `controllers/v1/admin/closures.controller.js`: list / create / update / delete; create
+- [x] `validators/booking-settings.validator.js` + `closures.validator.js`
+- [x] `GET/PUT /admin/booking-settings/:venueId` (rules + hours + rates in one body; also returns
+      the venue's courts) behind `checkPermission("bookings", null, "read"|"write")` — its own
+      route group, not under `/venues`, so one route group keeps one permission
+- [x] `POST /admin/booking-settings/:venueId/link` (issue new `randomToken()`) and `DELETE` (turn off)
+- [x] `controllers/v1/admin/closures.controller.js`: list / create / update / delete; create
       returns conflicting bookings unless `cancelConflicts: true`; mounted with `requireAuth` +
       `auditTrail("closures")`
-- [ ] Tests: settings round-trip; price quote (peak/off-peak, court override, rate gap);
+- [x] Tests: settings round-trip; price quote (peak/off-peak, court override, rate gap);
       closure over a booking refused without `cancelConflicts`; Deleted closure → 404, unchanged
 
 ### Frontend
 
-- [ ] `services/api/admin/bookingSettings.js` + `services/requests/admin/bookingSettings.js`
+- [x] `services/api/admin/bookingSettings.js` + `services/requests/admin/bookingSettings.js`
       (query keys, invalidation, toasts); same for closures
-- [ ] VenueDetail → **Bookings** section: online link (copy, QR, print sign via the CourtSign
-      layout, Issue new link, Turn off), rules form, weekly hours editor, rates table
-- [ ] VenueDetail → **Closures** list + Add closure drawer (court or whole venue, from/to,
+- [x] VenueDetail → **Online booking** section (copy, QR, Issue new link, Turn off, Print sign →
+      `Setup/BookingSign/` at `/admin/setup/venues/:venueId/booking-sign`) and **Booking rules,
+      hours and prices** summary + `BookingSettingsFormDrawer` (rules, weekly hours editor, rates)
+- [x] VenueDetail → **Closures** list + Add closure drawer (court or whole venue, from/to,
       reason; shows bookings in the way and the "cancel them" confirmation)
 
 ## Phase B — Bookings core and the desk
@@ -57,6 +60,11 @@
       quote → insert with `bookingCode` (via `insertWithPayCode`-style retry) and `manageToken`;
       options **Paid now (cash)** (inserts the payment; needs `payments` write, 403 otherwise) ·
       **Hold, pay at desk** (`Pending`, `holdExpiresAt = startAt − deskHoldMinutes`) · **Free**
+- [ ] Closures that cancel bookings (`cancelConflicts`, Phase A) go through the shared
+      cancel helper, so paid ones are refunded (cash now, Xendit in F) and emailed (G) — Phase A
+      only sets them `Cancelled`, since no booking can be paid before Phase B
+- [ ] A user with only `bookings` read can reach the venue page's booking sections (today the
+      venue page needs `venues/list` or `venues/courts`)
 - [ ] `PUT /:bookingId/move` (staff: unlimited, price kept unless "Reprice"),
       `POST /:bookingId/cancel` (any time before check-in; full or partial refund; cash refund =
       `Refunded` payment row),
@@ -200,7 +208,8 @@
 
 - [ ] `cd back && npm run lint && npm test` passes
 - [ ] `cd front && npm run lint && npm run build` passes
-- [ ] Migrations `030`–`033` applied, or noted as pending for deploy
+- [ ] Migrations `030`–`033` applied, or noted as pending for deploy (Phase A: written and run by
+      `npm test`; not applied to the dev database yet)
 - [ ] Tried in the browser: set hours and rates → book online (desk pay) → staff record cash →
       scan court QR, enter booking code → game records the booked time → video on the game page;
       plus an online-paid booking in Xendit test mode, a cancel with refund and a move
