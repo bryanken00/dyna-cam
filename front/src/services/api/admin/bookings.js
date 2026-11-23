@@ -58,3 +58,9 @@ export const deleteBookingApi = async (bookingId) => {
   const response = await api.delete(`/api/v1/admin/bookings/${bookingId}`);
   return response.data;
 };
+
+// Phase D: staff check a booking in → its recorded game starts
+export const checkInBookingAdminApi = async (bookingId) => {
+  const response = await api.post(`/api/v1/admin/bookings/${bookingId}/check-in`);
+  return response.data;
+};

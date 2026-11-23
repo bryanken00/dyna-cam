@@ -134,3 +134,12 @@ export const publicBookingSchema = z.object({
   // Phase F adds "Online" (Xendit)
   payMethod: z.enum(["Desk"]),
 });
+
+// POST /courts/:qrToken/check-in — PLAN-003 Phase D: the booking code the
+// player was given ("k7q m2p" works), checked in at that court's QR
+export const checkInCodeSchema = z.object({
+  bookingCode: z
+    .string()
+    .transform((v) => v.replace(/\s+/g, "").toUpperCase())
+    .pipe(z.string().regex(/^[A-Z0-9]{4,12}$/, "Enter the code from your booking")),
+});

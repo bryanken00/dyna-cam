@@ -3,7 +3,9 @@ import { catchAsync, validateBody, validateParams, validateQuery } from "../../.
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { hashToken } from "../../../utils/crypto/tokens.js";
-import { bookingManageUrl } from "../../../utils/clips.js";
+import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
+import { checkInBooking } from "../../../utils/bookingCheckIn.js";
+import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
@@ -250,10 +252,11 @@ router.get(
       `SELECT b.bookingCode, b.startAt, b.endAt, b.playerName, b.email, b.price, b.paymentStatus,
               b.payMethod, b.holdExpiresAt, b.status, b.cancelledAt, b.cancelledBy,
               c.name AS courtName, v.name, v.address, v.phone, v.logoUrl, v.cancelCutoffHours,
-              v.checkInEarlyMinutes
+              v.checkInEarlyMinutes, s.shareToken AS gameShareToken
        FROM bookings b
        JOIN courts c ON c.courtId = b.courtId
        JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
+       LEFT JOIN recording_sessions s ON s.sessionId = b.sessionId
        WHERE b.manageToken = ? AND b.status != 'Deleted'
        LIMIT 1`,
       [req.params.manageToken]
@@ -264,6 +267,7 @@ router.get(
     const b = rows[0];
     const start = moment.tz(b.startAt, FORMAT, TIMEZONE);
     const now = getCurrentTimestampLocal();
+    const checkInFrom = start.clone().subtract(b.checkInEarlyMinutes, "minutes").format(FORMAT);
 
     return res.sendSuccess("Booking", {
       booking: {
@@ -284,12 +288,75 @@ router.get(
         cancelledAt: b.cancelledAt,
         cancelledBy: b.cancelledBy,
         cancelCutoffAt: start.clone().subtract(b.cancelCutoffHours, "hours").format(FORMAT),
-        checkInFrom: start.clone().subtract(b.checkInEarlyMinutes, "minutes").format(FORMAT),
+        checkInFrom,
         hasEnded: b.endAt <= now,
-        // Filled in by later phases: D check in, F pay online, H cancel / move
-        actions: { checkIn: false, payOnline: false, cancel: false, move: false },
+        // Phase D: the game's page once checked in
+        gameUrl: b.gameShareToken ? sessionShareUrl(b.gameShareToken) : null,
+        gameShareToken: b.gameShareToken || null,
+        // Later phases fill in the rest: F pay online, H cancel / move
+        actions: {
+          checkIn: b.status === "Confirmed" && now >= checkInFrom && now < b.endAt,
+          payOnline: false,
+          cancel: false,
+          move: false,
+        },
       },
     });
+  })
+);
+
+// Per IP: checking in is once a booking; a few taps a minute covers retries
+const checkInLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CHECKIN_POINTS || "10", 10),
+  duration: 60,
+  keyGenerator: (req) => `public-checkin:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
+});
+
+/**
+ * POST /bookings/:manageToken/check-in
+ * Phase D: start the booking's recorded game from its own page, during the
+ * check-in window. 201 { shareUrl, shareToken } (200 when already checked in).
+ */
+router.post(
+  "/bookings/:manageToken/check-in",
+  checkInLimiter,
+  validateParams(manageTokenParamsSchema),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT bookingId FROM bookings WHERE manageToken = ? AND status != 'Deleted' LIMIT 1`,
+      [req.params.manageToken]
+    );
+    if (rows.length === 0) {
+      return res.sendError("This booking link isn't valid", 404);
+    }
+    await advanceSessions(req.db);
+
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      result = await checkInBooking(conn, {
+        bookingId: rows[0].bookingId,
+        requireRecorderOnline: true,
+      });
+      if (result.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok) {
+      return res.sendError(result.message, null, result.status, result.code);
+    }
+    return res.sendSuccess(
+      result.status === "Scheduled"
+        ? "Checked in — recording starts at your booked time"
+        : "Checked in — the camera is recording",
+      { shareToken: result.shareToken, shareUrl: result.shareUrl },
+      result.alreadyCheckedIn ? 200 : 201
+    );
   })
 );
 

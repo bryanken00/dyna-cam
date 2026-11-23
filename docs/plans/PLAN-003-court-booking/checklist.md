@@ -130,23 +130,25 @@
 
 ### Backend
 
-- [ ] `utils/bookingCheckIn.js` `checkInBooking(conn, booking)`: lock booking `FOR UPDATE`, check
+- [x] `utils/bookingCheckIn.js` `checkInBooking(conn, booking)`: lock booking `FOR UPDATE`, check
       window/status/payment, `bookCourt()` with the booking window (`Scheduled` if early),
       `free: true`, `maxCaptures: PLAYER_MAX_CAPTURES`, `bookingId`; set `sessionId` + `CheckedIn`
-- [ ] `POST /public/bookings/:manageToken/check-in`, `POST /public/courts/:qrToken/check-in`
+- [x] `POST /public/bookings/:manageToken/check-in`, `POST /public/courts/:qrToken/check-in`
       (`{ bookingCode }`, strict per-IP + per-court limiter), `POST /admin/bookings/:bookingId/check-in`
-- [ ] `GET /public/courts/:qrToken` returns `booking: { from, until }` when booked now / within
+- [x] `GET /public/courts/:qrToken` returns `booking: { from, until }` when booked now / within
       the early window, and caps Start a game's length at the next booking
-- [ ] Tests: check-in before window / after end / unpaid `Pending` ("Pay at the desk first") /
+- [x] Tests: check-in before window / after end / unpaid `Pending` ("Pay at the desk first") /
       wrong court code → refused; booked game gets 5 saves and is free; early
       check-in → `Scheduled` then `Recording` at `startAt`; game ends at booking end; camera
       offline → 503 and booking stays `Confirmed`; second check-in → same game, no duplicate
 
 ### Frontend
 
-- [ ] `Public/Court/`: booked state with booking-code input → redirect to `/session/:shareToken`;
+- [x] `Public/Court/`: booked state with booking-code input → redirect to `/session/:shareToken`;
       Start a game form shows "until <time> (booked after that)"
-- [ ] `Public/Booking/`: Start game button during the window; Watch your game after check-in
+- [x] `Public/Booking/`: Start game button during the window; Watch your game after check-in
+- [x] Admin booking detail: **Check in** during the window (staff don't need the recorder box
+      online, like New game); the API sends `checkInFrom`
 
 ## Phase E — Booking job
 

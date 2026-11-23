@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Ban, Banknote, CalendarCheck, CalendarClock, CircleAlert, Copy, Trash2, UserX, X } from "lucide-react";
+import {
+  Ban,
+  Banknote,
+  CalendarCheck,
+  CalendarClock,
+  CircleAlert,
+  Copy,
+  Play,
+  Trash2,
+  UserX,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import dayjs from "dayjs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -30,6 +41,7 @@ import {
   manilaNow,
 } from "../../../../../utils/dynaCam";
 import {
+  useCheckInBooking,
   useDeleteBooking,
   useGetBookingById,
   useMarkNoShow,
@@ -57,11 +69,15 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
   const payMutation = useRecordBookingPayment();
   const noShowMutation = useMarkNoShow();
   const deleteMutation = useDeleteBooking();
+  const checkInMutation = useCheckInBooking();
 
   const now = manilaNow();
   const nowLocal = `${now.date} ${now.time}:00`;
   const isOpen = booking && OPEN_STATUSES.includes(booking.status);
   const started = booking && booking.startAt <= nowLocal;
+  // Phase D: Check in is open from checkInFrom until the booking ends
+  const canCheckIn =
+    booking?.status === "Confirmed" && booking.checkInFrom <= nowLocal && nowLocal < booking.endAt;
 
   const handleRecordPayment = async () => {
     const ok = await confirm({
@@ -359,6 +375,16 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                     Move
                   </Button>
                 </>
+              )}
+              {canCheckIn && (
+                <Button
+                  type="button"
+                  onClick={() => checkInMutation.mutate(booking.bookingId)}
+                  disabled={checkInMutation.isPending}
+                >
+                  <Play />
+                  Check in
+                </Button>
               )}
               {booking.status === "Pending" && booking.paymentStatus === "Unpaid" && canTakePayments && (
                 <Button type="button" onClick={handleRecordPayment} disabled={payMutation.isPending}>

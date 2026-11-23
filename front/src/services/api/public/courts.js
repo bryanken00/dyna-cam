@@ -20,3 +20,12 @@ export const startPublicGameApi = async ({ qrToken, body }) => {
   const response = await axiosInstance.post(`/api/v1/public/courts/${qrToken}/games`, body);
   return response.data;
 };
+
+// PLAN-003 Phase D: check a booking in at this court with its code.
+// body: { bookingCode } → 201 (or 200 if already in) { shareToken, shareUrl }
+export const checkInAtCourtApi = async ({ qrToken, bookingCode }) => {
+  const response = await axiosInstance.post(`/api/v1/public/courts/${qrToken}/check-in`, {
+    bookingCode,
+  });
+  return response.data;
+};

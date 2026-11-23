@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import {
   cancelBookingApi,
+  checkInBookingAdminApi,
   createBookingApi,
   deleteBookingApi,
   getBookingByIdApi,
@@ -165,5 +166,19 @@ export const useDeleteBooking = () => {
       invalidateBookings(queryClient);
     },
     onError: errorToast("Failed to delete the booking"),
+  });
+};
+
+// Mutation: Phase D — check the booking in (its game starts)
+export const useCheckInBooking = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: checkInBookingAdminApi,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Checked in");
+      invalidateBookings(queryClient);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: errorToast("Failed to check the booking in"),
   });
 };

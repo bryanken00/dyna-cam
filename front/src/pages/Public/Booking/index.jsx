@@ -5,11 +5,15 @@ import {
   Clock,
   Copy,
   Link2,
+  Loader2,
+  Play,
   QrCode,
   RotateCcw,
   Store,
   UserX,
+  Video,
 } from "lucide-react";
+import { Link } from "react-router";
 import dayjs from "dayjs";
 
 import { Button } from "@/components/ui/button";
@@ -66,6 +70,9 @@ const BookingPage = () => {
     refetch,
     handleCopyCode,
     handleCopyLink,
+    handleCheckIn,
+    isCheckingIn,
+    checkInError,
   } = useBookingPageHooks();
 
   if (isLoading) {
@@ -157,6 +164,38 @@ const BookingPage = () => {
             </p>
           )}
         </div>
+
+        {/* Phase D: the booked game — check in during its time, then watch it */}
+        {booking.actions.checkIn && (
+          <div className="p-5" style={cardStyle}>
+            <Button
+              type="button"
+              size="lg"
+              className="w-full h-14 text-base font-semibold"
+              onClick={handleCheckIn}
+              disabled={isCheckingIn}
+            >
+              {isCheckingIn ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
+              {isCheckingIn ? "Checking in…" : "I'm at the court — start recording"}
+            </Button>
+            {checkInError && (
+              <p role="alert" className="m-0 mt-3 text-center" style={{ fontSize: 13.5, color: "var(--color-error)" }}>
+                {checkInError}
+              </p>
+            )}
+            <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+              Or scan the QR sign on {courtName} and enter your code.
+            </p>
+          </div>
+        )}
+        {booking.gameShareToken && (
+          <Button asChild size="lg" className="w-full h-14 text-base font-semibold">
+            <Link to={`/session/${booking.gameShareToken}`}>
+              <Video className="size-5" />
+              {booking.status === "CheckedIn" ? "Go to your game" : "Watch your game"}
+            </Link>
+          </Button>
+        )}
 
         {/* Code */}
         {live && (

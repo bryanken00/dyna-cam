@@ -12,6 +12,7 @@ import {
   uploadPercent,
 } from "../../../utils/sessions.js";
 import { bookCourt } from "../../../utils/gameStart.js";
+import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
 import {
@@ -32,6 +33,7 @@ import { describeStream } from "../../../utils/sessionStreams.js";
 import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { captureSchema } from "../../../validators/app.validator.js";
 import {
+  checkInCodeSchema,
   clipTokenParamsSchema,
   courtTokenParamsSchema,
   gameCodeParamsSchema,
@@ -158,6 +160,36 @@ router.get(
       [court.courtId, now, now]
     );
 
+    // PLAN-003 Phase D: a booking that holds the court now (or opens for check-in
+    // soon) — the page asks for its code instead of offering Start a game
+    const [booked] = await req.db.query(
+      `SELECT b.startAt, b.endAt FROM bookings b
+       JOIN venues v ON v.venueId = b.venueId
+       WHERE b.courtId = ? AND b.status IN ('Confirmed', 'Pending')
+         AND (b.status = 'Confirmed' OR b.holdExpiresAt > ?)
+         AND b.startAt <= DATE_ADD(?, INTERVAL v.checkInEarlyMinutes MINUTE) AND b.endAt > ?
+       ORDER BY b.startAt ASC
+       LIMIT 1`,
+      [court.courtId, now, now, now]
+    );
+    // When the court is next taken (a booking or closure ahead) — Start a game
+    // can only run until then
+    const [next] = current
+      ? [null]
+      : await req.db.query(
+          `SELECT MIN(t.startAt) AS startAt FROM (
+             SELECT b.startAt FROM bookings b
+             WHERE b.courtId = ? AND b.startAt > ?
+               AND (b.status IN ('Confirmed', 'CheckedIn')
+                    OR (b.status = 'Pending' AND b.holdExpiresAt > ?))
+             UNION ALL
+             SELECT cl.startAt FROM court_closures cl
+             WHERE cl.venueId = ? AND (cl.courtId IS NULL OR cl.courtId = ?)
+               AND cl.status = 'Active' AND cl.startAt > ?
+           ) t`,
+          [court.courtId, now, now, court.venueId, court.courtId, now]
+        );
+
     return res.sendSuccess("Court", {
       court: {
         name: court.name,
@@ -171,6 +203,10 @@ router.get(
         busy: Boolean(current),
         busyUntil: current && Number(current.openEnded) !== 1 ? current.endAt : null,
         maxSaves: PLAYER_MAX_CAPTURES,
+        // PLAN-003: booked now → check in with the booking code (no names, no code)
+        booking: !current && booked ? { from: booked.startAt, until: booked.endAt } : null,
+        // A game started here must end by then (null: nothing booked ahead)
+        freeUntil: !current && !booked ? next?.startAt || null : null,
       },
     });
   })
@@ -262,6 +298,88 @@ router.post(
       "Game started — the camera is recording",
       { shareToken: booked.shareToken, shareUrl: sessionShareUrl(booked.shareToken) },
       201
+    );
+  })
+);
+
+// PLAN-003 Phase D: a booking code is 6 characters from 31, but one court has
+// only its current booking to match — a few tries per IP and per court are
+// plenty for a player and useless for guessing
+const checkInByCodeLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CHECKIN_POINTS || "10", 10),
+  duration: 60,
+  keyGenerator: (req) => `court-checkin:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
+});
+const checkInByCodeCourtLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_COURT_CHECKIN_POINTS || "20", 10),
+  duration: 600,
+  keyGenerator: (req) => `court-checkin-court:${req.params.qrToken}`,
+  message: "Too many tries on this court — ask the front desk to check you in.",
+});
+
+/**
+ * POST /courts/:qrToken/check-in
+ * PLAN-003 Phase D: the player scanned the court's QR and typed their booking
+ * code → the booking's recorded game starts (for its booked time only).
+ * Body: { bookingCode }. 201 { shareToken, shareUrl } (200 when already in).
+ * A wrong code says nothing about the court's bookings.
+ */
+router.post(
+  "/courts/:qrToken/check-in",
+  checkInByCodeLimiter,
+  checkInByCodeCourtLimiter,
+  validateParams(courtTokenParamsSchema),
+  validateBody(checkInCodeSchema),
+  catchAsync(async (req, res) => {
+    const court = await findCourt(req.db, req.params.qrToken);
+    if (!court) {
+      return res.sendError("This court code is not valid", 404);
+    }
+    await advanceSessions(req.db, { venueId: court.venueId });
+    const now = getCurrentTimestampLocal();
+
+    // The code must be this court's booking, in (or about to open) its time
+    const [booking] = await req.db.query(
+      `SELECT b.bookingId FROM bookings b
+       JOIN venues v ON v.venueId = b.venueId
+       WHERE b.courtId = ? AND b.bookingCode = ?
+         AND b.status IN ('Confirmed', 'CheckedIn', 'Pending')
+         AND b.startAt <= DATE_ADD(?, INTERVAL v.checkInEarlyMinutes MINUTE) AND b.endAt > ?
+       LIMIT 1`,
+      [court.courtId, req.body.bookingCode, now, now]
+    );
+    if (!booking) {
+      return res.sendError(
+        "That code doesn't match a booking on this court right now — check the code on your booking page",
+        404
+      );
+    }
+
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      result = await checkInBooking(conn, {
+        bookingId: booking.bookingId,
+        requireRecorderOnline: true,
+      });
+      if (result.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok) {
+      return res.sendError(result.message, null, result.status, result.code);
+    }
+    return res.sendSuccess(
+      result.status === "Scheduled"
+        ? "Checked in — recording starts at your booked time"
+        : "Checked in — the camera is recording",
+      { shareToken: result.shareToken, shareUrl: result.shareUrl },
+      result.alreadyCheckedIn ? 200 : 201
     );
   })
 );

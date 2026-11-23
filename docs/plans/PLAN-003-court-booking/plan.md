@@ -503,3 +503,8 @@ check-in endpoints:
   longer than maxBookingMinutes and too soon for a desk hold; its error messages never name another
   booking. Email is required online. The booking page tells the player to call the venue to cancel
   or change until Phase H adds those.
+- 2026-11-23: Phase D built. A player's check-in (booking page or court QR + code) needs the
+  recorder box online (503 otherwise; the booking stays Confirmed); staff check-in doesn't, like
+  New game. A second check-in returns the same game. The court QR page shows "booked now" with a
+  code box, or "free until …" when a booking or closure is coming, and never names the booking.
+  Booked games allow 5 saves (BOOKED_GAME_MAX_CAPTURES in utils/bookingCheckIn.js).

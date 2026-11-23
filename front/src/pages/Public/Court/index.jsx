@@ -1,5 +1,8 @@
 import {
+  CalendarCheck,
+  CalendarClock,
   CircleAlert,
+  KeyRound,
   Loader2,
   Mail,
   Phone,
@@ -88,6 +91,13 @@ const CourtPage = () => {
     handleStart,
     isStarting,
     startError,
+    checkInForm,
+    handleCheckIn,
+    isCheckingIn,
+    checkInError,
+    booking,
+    bookingText,
+    freeUntilText,
   } = useCourtPageHooks();
 
   if (isLoading) {
@@ -173,7 +183,78 @@ const CourtPage = () => {
             desk.
           </Notice>
         )}
+        {!busy && booking && (
+          <Notice icon={CalendarCheck}>
+            This court is booked {bookingText}. Booked it? Enter the code from your booking to
+            start your game.
+          </Notice>
+        )}
+        {!busy && !booking && freeUntilText && (
+          <Notice icon={CalendarClock}>
+            Free until {freeUntilText} — it&apos;s booked after that, so your game has to end by
+            then.
+          </Notice>
+        )}
 
+        {booking ? (
+          // PLAN-003 Phase D: booked now → check in with the booking code
+          <Form {...checkInForm}>
+            <form onSubmit={handleCheckIn} noValidate className="mt-6">
+              <FormField
+                control={checkInForm.control}
+                name="bookingCode"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Booking code</FormLabel>
+                    <div className="relative">
+                      <KeyRound className={iconPrefix} style={mutedIcon} />
+                      <FormControl>
+                        <Input
+                          placeholder="e.g., K7Q M2P"
+                          className="h-12 pl-9 font-mono uppercase"
+                          style={{ fontSize: 18, letterSpacing: "0.1em" }}
+                          autoCapitalize="characters"
+                          autoComplete="off"
+                          maxLength={20}
+                          {...field}
+                        />
+                      </FormControl>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button
+                type="submit"
+                size="lg"
+                className="mt-5 w-full h-16 text-base font-semibold rounded-(--radius-card)"
+                disabled={!cameraReady || isCheckingIn}
+              >
+                {isCheckingIn ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <Play className="size-5" />
+                )}
+                {isCheckingIn ? "Checking in…" : "Check in and start"}
+              </Button>
+              {checkInError && (
+                <p
+                  role="alert"
+                  className="m-0 mt-3 text-center"
+                  style={{ fontSize: 13.5, color: "var(--color-error)" }}
+                >
+                  {checkInError}
+                </p>
+              )}
+              <p
+                className="m-0 mt-3 text-center"
+                style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+              >
+                Your game records for your booked time and stops by itself at the end.
+              </p>
+            </form>
+          </Form>
+        ) : (
         <Form {...form}>
           <form onSubmit={handleStart} noValidate className="mt-6">
             <SectionLabel>How long you&apos;ll play</SectionLabel>
@@ -283,6 +364,7 @@ const CourtPage = () => {
             )}
           </form>
         </Form>
+        )}
 
         {/* The venue streams this court — the API only sends the link while
             streaming is on and the recorder box is online */}

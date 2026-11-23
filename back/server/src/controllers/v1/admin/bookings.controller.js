@@ -5,6 +5,8 @@ import { checkPermission } from "../../../middlewares/checkPermission.middleware
 import { minutesToTime, quote } from "../../../utils/bookingPrice.js";
 import { findConflict, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { bookingManageUrl } from "../../../utils/clips.js";
+import { checkInBooking } from "../../../utils/bookingCheckIn.js";
+import { advanceSessions } from "../../../utils/sessions.js";
 import {
   addMinutesTo,
   cancelBooking,
@@ -352,7 +354,12 @@ router.get(
             [booking.sessionId]
           )
         : Promise.resolve([]),
-      req.db.query(`SELECT manageToken FROM bookings WHERE bookingId = ?`, [booking.bookingId]),
+      req.db.query(
+        `SELECT b.manageToken, v.checkInEarlyMinutes FROM bookings b
+         JOIN venues v ON v.venueId = b.venueId
+         WHERE b.bookingId = ?`,
+        [booking.bookingId]
+      ),
     ]);
 
     return res.sendSuccess("Booking retrieved successfully", {
@@ -360,6 +367,11 @@ router.get(
         ...toBooking(booking),
         // The player's own booking page, for the desk to share
         manageUrl: bookingManageUrl(tokens[0].manageToken),
+        // Phase D: Check in is open from then until the booking ends
+        checkInFrom: moment
+          .tz(booking.startAt, FORMAT, TIMEZONE)
+          .subtract(tokens[0].checkInEarlyMinutes, "minutes")
+          .format(FORMAT),
         payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
         game: games[0] || null,
       },
@@ -468,6 +480,38 @@ router.post(
         ? `Booking cancelled — refund ₱${result.refunded.toLocaleString("en-PH")} to the player`
         : "Booking cancelled",
       { refunded: result.refunded }
+    );
+  })
+);
+
+/**
+ * POST /:bookingId/check-in
+ * Phase D: staff start the booking's recorded game (the player has no phone,
+ * the QR is damaged…). Same window and payment rules as the player's check-in;
+ * the recorder box needn't have reported in (like New game).
+ */
+router.post(
+  "/:bookingId/check-in",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    await advanceSessions(req.db);
+    const result = await inTransaction(req, (conn) =>
+      checkInBooking(conn, {
+        bookingId: req.params.bookingId,
+        accountId: req.user.accountId,
+      })
+    );
+    if (!result.ok) {
+      return res.sendError(result.message, null, result.status, result.code);
+    }
+    return res.sendSuccess(
+      result.alreadyCheckedIn
+        ? "Already checked in"
+        : result.status === "Scheduled"
+          ? "Checked in — recording starts at the booked time"
+          : "Checked in — recording now",
+      { sessionId: result.sessionId, shareUrl: result.shareUrl },
+      result.alreadyCheckedIn ? 200 : 201
     );
   })
 );

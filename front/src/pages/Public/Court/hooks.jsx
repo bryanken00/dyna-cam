@@ -14,9 +14,19 @@ import {
 import { fromGameMinutes, gameTimeFields, toGameMinutes } from "../../../utils/gameTime";
 import { zPhone } from "../../../utils/phoneFormat";
 import {
+  useCheckInAtCourt,
   useGetPublicCourt,
   useStartPublicGame,
 } from "../../../services/requests/public/courts";
+
+// PLAN-003 Phase D: the booking code from the player's booking page
+const checkInSchema = z.object({
+  bookingCode: z
+    .string()
+    .trim()
+    .min(4, "Enter the code from your booking")
+    .max(20, "That code is too long"),
+});
 
 // CR-027: the player's game — a game time and, optionally, who's playing. No
 // payment (the court was paid with its reservation) and no save limit to pick.
@@ -56,7 +66,7 @@ const defaultValues = () => ({
 const startErrorMessage = (error) => {
   const status = error?.response?.status;
   const apiMessage = error?.response?.data?.message;
-  if (status === 503 || status === 409) {
+  if (status === 503 || status === 409 || status === 404) {
     return apiMessage || "This court can't start a game right now.";
   }
   if (status === 429) {
@@ -75,6 +85,14 @@ export const useCourtPageHooks = () => {
   const { data, isLoading, error, refetch, isFetching } = useGetPublicCourt(qrToken);
   const startMutation = useStartPublicGame();
   const [startError, setStartError] = useState("");
+  const checkInMutation = useCheckInAtCourt();
+  const [checkInError, setCheckInError] = useState("");
+
+  const checkInForm = useForm({
+    resolver: zodResolver(checkInSchema),
+    defaultValues: { bookingCode: "" },
+    mode: "onTouched",
+  });
 
   const form = useForm({
     resolver: zodResolver(startSchema),
@@ -120,8 +138,43 @@ export const useCourtPageHooks = () => {
     [qrToken, startMutation, navigate, refetch]
   );
 
+  // PLAN-003 Phase D: booked now → the booking's code starts its game
+  const handleCheckIn = useCallback(
+    ({ bookingCode }) => {
+      setCheckInError("");
+      checkInMutation.mutate(
+        { qrToken, bookingCode },
+        {
+          onSuccess: (response) => {
+            const shareToken = response?.data?.shareToken;
+            if (!shareToken) {
+              setCheckInError("Something went wrong. Please try again.");
+              return;
+            }
+            navigate(`/session/${shareToken}`, { replace: true });
+          },
+          onError: (err) => {
+            setCheckInError(startErrorMessage(err));
+            if ([409, 503].includes(err?.response?.status)) refetch();
+          },
+        }
+      );
+    },
+    [qrToken, checkInMutation, navigate, refetch]
+  );
+
   return {
     form,
+    checkInForm,
+    handleCheckIn: checkInForm.handleSubmit(handleCheckIn),
+    isCheckingIn: checkInMutation.isPending,
+    checkInError,
+    // Booked now: { from, until }; freeUntil: when the next booking or closure starts
+    booking: court?.booking || null,
+    bookingText: court?.booking
+      ? `${dayjs(court.booking.from).format("h:mm A")} – ${dayjs(court.booking.until).format("h:mm A")}`
+      : null,
+    freeUntilText: court?.freeUntil ? dayjs(court.freeUntil).format("h:mm A") : null,
     court,
     venueName: decodeHTML(court?.venueName),
     courtName: decodeHTML(court?.name),

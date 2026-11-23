@@ -1,5 +1,6 @@
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  checkInBookingApi,
   createPublicBookingApi,
   getAvailabilityApi,
   getBookingPageApi,
@@ -49,5 +50,16 @@ export const useGetMyBooking = (manageToken) => {
     retry: retryUnless404,
     refetchInterval: (query) =>
       query.state.data?.data?.booking?.status === "Pending" ? 30 * 1000 : false,
+  });
+};
+
+// Mutation: Phase D — check the booking in. The page shows errors itself.
+export const useCheckInBooking = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: checkInBookingApi,
+    onSuccess: (_data, manageToken) => {
+      queryClient.invalidateQueries({ queryKey: ["publicBooking", manageToken] });
+    },
   });
 };

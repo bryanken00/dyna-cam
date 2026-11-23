@@ -31,3 +31,9 @@ export const getMyBookingApi = async (manageToken) => {
   const response = await axiosInstance.get(`/api/v1/public/bookings/${manageToken}`);
   return response.data;
 };
+
+// Phase D: check this booking in → 201 (or 200 if already in) { shareToken, shareUrl }
+export const checkInBookingApi = async (manageToken) => {
+  const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/check-in`);
+  return response.data;
+};
