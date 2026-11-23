@@ -508,3 +508,6 @@ check-in endpoints:
   New game. A second check-in returns the same game. The court QR page shows "booked now" with a
   code box, or "free until …" when a booking or closure is coming, and never names the booking.
   Booked games allow 5 saves (BOOKED_GAME_MAX_CAPTURES in utils/bookingCheckIn.js).
+- 2026-11-23: Phase E built. jobs/bookingMaintenance.js runs every minute: expired holds →
+  Expired, Confirmed past their end → NoShow, CheckedIn whose game ended → Completed. Each step is one
+  idempotent UPDATE; holds are also expired on reads, so pages never show a stale hold.

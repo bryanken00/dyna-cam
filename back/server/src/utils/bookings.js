@@ -62,22 +62,25 @@ const quoteMessage = (q) => {
 
 /**
  * Pending holds whose time ran out → Expired, so they stop showing as live.
- * Lazy (on reads and writes) until the Phase E job runs it on a timer.
+ * Run on reads (so a page never shows a stale hold) and every minute by
+ * jobs/bookingMaintenance.js.
+ *
+ * @returns {Promise<number>} how many holds expired
  */
-export const expireHolds = async (db, { venueId } = {}) => {
-  const now = getCurrentTimestampLocal();
+export const expireHolds = async (db, { venueId, now = getCurrentTimestampLocal() } = {}) => {
   const params = [now, now];
   let scope = "";
   if (venueId) {
     scope = " AND venueId = ?";
     params.push(venueId);
   }
-  await selectRows(
+  const result = await selectRows(
     db,
     `UPDATE bookings SET status = 'Expired', dateUpdated = ?
      WHERE status = 'Pending' AND holdExpiresAt IS NOT NULL AND holdExpiresAt <= ?${scope}`,
     params
   );
+  return Number(result?.affectedRows || 0);
 };
 
 /** Lock a court (Active, at an Active venue) and read its venue's booking rules. */

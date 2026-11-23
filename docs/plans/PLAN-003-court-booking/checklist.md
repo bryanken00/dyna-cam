@@ -152,10 +152,11 @@
 
 ## Phase E — Booking job
 
-- [ ] `jobs/bookingMaintenance.js` (60 s): expire holds → `Expired`; `NoShow` after end without
+- [x] `jobs/bookingMaintenance.js` (60 s): expire holds → `Expired`; `NoShow` after end without
       check-in; `CheckedIn` → `Completed` when its game has ended; registered where the other jobs
       start
-- [ ] Tests for each transition (driven by calling the job function with a fixed clock)
+- [x] Tests for each transition (driven by calling the job function with a fixed clock) —
+      `tests/booking-maintenance.test.js`; scheduled in `bin/www.js` beside the other jobs
 
 ## Phase F — Online payment (Xendit, one Dyna Cam account)
 
