@@ -6,6 +6,9 @@ import {
   getBookingPageApi,
   getMyBookingApi,
   payBookingOnlineApi,
+  cancelMyBookingApi,
+  getMoveOptionsApi,
+  moveMyBookingApi,
 } from "../../api/public/bookings";
 
 // A 404 means the link isn't valid (turned off, replaced) — don't retry it
@@ -78,6 +81,41 @@ export const useCheckInBooking = () => {
     mutationFn: checkInBookingApi,
     onSuccess: (_data, manageToken) => {
       queryClient.invalidateQueries({ queryKey: ["publicBooking", manageToken] });
+    },
+  });
+};
+
+// Mutation: Phase H — the player cancels. The page shows errors itself.
+export const useCancelMyBooking = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelMyBookingApi,
+    onSuccess: (_data, manageToken) => {
+      queryClient.invalidateQueries({ queryKey: ["publicBooking", manageToken] });
+    },
+  });
+};
+
+// Query: Phase H — the times a booking can move to on a date (only while the move picker is open)
+export const useGetMoveOptions = ({ manageToken, date }, options = {}) => {
+  return useQuery({
+    queryKey: ["publicMoveOptions", manageToken, date],
+    queryFn: () => getMoveOptionsApi({ manageToken, date }),
+    enabled: !!manageToken && !!date && options.enabled !== false,
+    staleTime: 20 * 1000,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+};
+
+// Mutation: Phase H — the player moves their booking (once). The page shows errors itself.
+export const useMoveMyBooking = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: moveMyBookingApi,
+    onSuccess: (_data, { manageToken }) => {
+      queryClient.invalidateQueries({ queryKey: ["publicBooking", manageToken] });
+      queryClient.invalidateQueries({ queryKey: ["publicMoveOptions", manageToken] });
     },
   });
 };

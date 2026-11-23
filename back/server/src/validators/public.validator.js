@@ -131,9 +131,19 @@ export const publicBookingSchema = z.object({
   phone: optionalPhone(),
   // Required online: it's how the player gets their booking link back
   email: z.string().trim().email("Enter a valid email").max(255),
-  // Phase F adds "Online" (Xendit)
   // Phase F: Online = a Xendit checkout (refused with 409 while online payment is off)
   payMethod: z.enum(["Desk", "Online"]),
+});
+
+// GET /bookings/:manageToken/move-options?date= — PLAN-003 Phase H
+export const moveOptionsQuerySchema = z.object({ date: bookingDate() });
+
+// POST /bookings/:manageToken/move — PLAN-003 Phase H: a court (by its key from
+// move-options; the booking's own court when left out), a date and a start
+export const playerMoveSchema = z.object({
+  courtKey: courtKey.optional(),
+  date: bookingDate(),
+  startTime: startTime(),
 });
 
 // POST /courts/:qrToken/check-in — PLAN-003 Phase D: the booking code the

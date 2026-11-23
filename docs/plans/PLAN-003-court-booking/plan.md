@@ -545,3 +545,12 @@ check-in endpoints:
   only logged and nothing is recorded as sent. Admin's Resend sends whichever email fits the
   booking now. Also fixed: the plain-text part of every email (password reset, Drive link, …)
   showed HTML entities such as `&#39;` — they're decoded now.
+- 2026-11-23: Phase H built. A player can't cancel online a booking paid in cash at the desk (the
+  desk hands that money back) — its page says to call the venue; Move still works for it. Move
+  takes an optional court (`courtKey`), so the picker is the same per-court grid as booking; its
+  free times come from a sibling endpoint, `GET /bookings/:manageToken/move-options`, with courts
+  keyed by the booking's own link (the venue's booking link may be off or replaced). The cut-off,
+  the one-move limit and the price rule are checked under the row locks inside `moveBooking` /
+  `cancelBooking` (`asPlayer`), not only in the handler. A moved desk hold's pay-by time follows
+  the new start. The Book page's chips, date strip and court/time grid moved to `src/components/`
+  so Move reuses them.

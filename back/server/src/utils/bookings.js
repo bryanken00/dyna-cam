@@ -351,6 +351,110 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
   };
 };
 
+const pesos = (amount) => `₱${Number(amount).toLocaleString("en-PH")}`;
+
+/**
+ * Phase H: a player may cancel or move their own booking only until the
+ * venue's cut-off (cancelCutoffHours before the start). After it, the desk can.
+ */
+const playerCutoffProblem = async (conn, booking, now, what) => {
+  const [venues] = await conn.execute(`SELECT cancelCutoffHours FROM venues WHERE venueId = ? LIMIT 1`, [
+    booking.venueId,
+  ]);
+  const cutoff = moment
+    .tz(booking.startAt, FORMAT, TIMEZONE)
+    .subtract(venues[0]?.cancelCutoffHours ?? 24, "hours")
+    .format(FORMAT);
+  if (now >= cutoff) {
+    return fail(
+      409,
+      `It's too close to the start to ${what} it online — call the venue`,
+      "PAST_CUTOFF"
+    );
+  }
+  return null;
+};
+
+/**
+ * Lock order is court(s) then booking, like closures and check-in, so two
+ * writers can't deadlock: peek at the booking's court, lock both courts (in a
+ * fixed order), then lock the booking. → { booking, court } (either may be null)
+ */
+const lockForMove = async (conn, { bookingId, courtId }) => {
+  const [peek] = await conn.execute(`SELECT courtId FROM bookings WHERE bookingId = ? LIMIT 1`, [
+    bookingId,
+  ]);
+  if (peek.length === 0) return { booking: null, court: null };
+  const courtIds = [...new Set([peek[0].courtId, courtId])].sort();
+  let court = null;
+  for (const id of courtIds) {
+    const locked = await lockCourt(conn, id);
+    if (id === courtId) court = locked;
+  }
+  return { booking: await lockBooking(conn, bookingId), court };
+};
+
+/** The moved booking's price: kept; staff may reprice an unpaid one; a player's may not rise. */
+const movedPrice = async (conn, { booking, courtId, startLocal, durationMinutes, reprice, asPlayer }) => {
+  if (asPlayer) {
+    const pricier = await playerMovePrice(conn, { booking, courtId, startLocal, durationMinutes });
+    if (pricier) return pricier;
+  }
+  if (!reprice) return { ok: true, price: Number(booking.price) };
+  if (booking.paymentStatus === "Paid") {
+    return fail(409, "It's already paid — move it at the same price, or cancel and rebook");
+  }
+  const q = await quote(conn, { venueId: booking.venueId, courtId, startLocal, durationMinutes });
+  if (!q.bookable) return fail(400, quoteMessage(q));
+  return { ok: true, price: q.price };
+};
+
+/** A desk hold follows the new start (deskHoldMinutes before it); other holds keep theirs. */
+const movedHold = ({ booking, court, startLocal, now, asPlayer }) => {
+  if (booking.status !== "Pending" || booking.payMethod !== "Desk") {
+    return { ok: true, holdExpiresAt: booking.holdExpiresAt };
+  }
+  const holdExpiresAt = addMinutesTo(startLocal, -court.deskHoldMinutes);
+  if (holdExpiresAt <= now) {
+    return fail(
+      400,
+      asPlayer
+        ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
+        : "That's too soon to keep it unpaid — take the payment first"
+    );
+  }
+  return { ok: true, holdExpiresAt };
+};
+
+/** A player's move: before the cut-off, only once, to a later time within bookingDaysAhead. */
+const playerMoveRules = async (conn, { booking, court, startLocal, now }) => {
+  const refused = await playerCutoffProblem(conn, booking, now, "move");
+  if (refused) return refused;
+  if (booking.rescheduledCount > 0) {
+    return fail(409, "You've already moved this booking once — call the venue to change it again");
+  }
+  if (startLocal <= now) return fail(400, "That time has already started — pick a later one");
+  const lastDay = moment().tz(TIMEZONE).add(court.bookingDaysAhead, "days").format("YYYY-MM-DD");
+  if (startLocal.slice(0, 10) > lastDay) {
+    return fail(400, `Book at most ${court.bookingDaysAhead} days ahead`);
+  }
+  return null;
+};
+
+/** The booking keeps its price; a player's new time may cost the same or less (no partial refunds). */
+const playerMovePrice = async (conn, { booking, courtId, startLocal, durationMinutes }) => {
+  const q = await quote(conn, { venueId: booking.venueId, courtId, startLocal, durationMinutes });
+  if (!q.bookable) return fail(400, "That time can't be booked online — pick another");
+  const price = Number(booking.price);
+  if (q.price > price) {
+    return fail(
+      409,
+      `That time costs ${pesos(q.price)}; you can move to one that costs ${pesos(price)} or less. For a pricier time, cancel and book again.`
+    );
+  }
+  return null;
+};
+
 /**
  * Cancel a booking that hasn't been played. With refund, every paid payment
  * is refunded: cash is marked Refunded (the desk hands the money back); an
@@ -364,11 +468,16 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
  * @param {string} options.reason
  * @param {boolean} options.refund
  * @param {string|null} [options.accountId]
+ * @param {boolean} [options.asPlayer] - Phase H: the player's own cancel — only before the
+ *   venue's cut-off, and not when it was paid in cash (the desk gives that back)
  * @returns {Promise<{ ok: true, refunded: number, refundingOnline: number,
  *   followUp: { bookingId, closeCheckoutId, refundPaymentIds } } | { ok: false, status, message }>}
  *   refunded = cash handed back; refundingOnline = queued for Xendit
  */
-export const cancelBooking = async (conn, { bookingId, by, reason, refund, accountId = null }) => {
+export const cancelBooking = async (
+  conn,
+  { bookingId, by, reason, refund, accountId = null, asPlayer = false }
+) => {
   const now = getCurrentTimestampLocal();
   const booking = await lockBooking(conn, bookingId);
   if (!booking) return fail(404, "Booking not found");
@@ -379,6 +488,19 @@ export const cancelBooking = async (conn, { bookingId, by, reason, refund, accou
         ? "This booking has been played — it can't be cancelled"
         : `This booking is already ${booking.status === "NoShow" ? "a no-show" : booking.status.toLowerCase()}`
     );
+  }
+  if (asPlayer) {
+    const refused = await playerCutoffProblem(conn, booking, now, "cancel");
+    if (refused) return refused;
+    if (booking.paymentStatus === "Paid") {
+      const [cash] = await conn.execute(
+        `SELECT 1 FROM payments WHERE bookingId = ? AND status = 'Paid' AND method = 'CASH' LIMIT 1`,
+        [booking.bookingId]
+      );
+      if (cash.length > 0) {
+        return fail(409, "It was paid at the desk — call the venue to cancel it and get your money back");
+      }
+    }
   }
 
   let refunded = 0;
@@ -431,30 +553,18 @@ export const cancelBooking = async (conn, { bookingId, by, reason, refund, accou
 /**
  * Move a booking to another time and/or court at the same venue, keeping its
  * length. Staff: any number of times, price kept unless reprice (only while
- * nothing has been paid). Players (Phase H) get their own rules.
+ * nothing has been paid). Players (Phase H, asPlayer): once, before the
+ * cut-off, within the online rules and opening hours, to a time that costs the
+ * same or less — the price is kept.
  *
  * @returns {Promise<{ ok: true, startAt, endAt, price } | { ok: false, status, message }>}
  */
 export const moveBooking = async (
   conn,
-  { bookingId, courtId, startLocal, reprice = false, ignoreHours = false }
+  { bookingId, courtId, startLocal, reprice = false, ignoreHours = false, asPlayer = false }
 ) => {
   const now = getCurrentTimestampLocal();
-  // Lock order is court(s) then booking, like closures and check-in, so two
-  // writers can't deadlock: peek at the booking's court, lock both courts
-  // (in a fixed order), then lock the booking
-  const [peek] = await conn.execute(`SELECT courtId FROM bookings WHERE bookingId = ? LIMIT 1`, [
-    bookingId,
-  ]);
-  if (peek.length === 0) return fail(404, "Booking not found");
-  const courtIds = [...new Set([peek[0].courtId, courtId])].sort();
-  let court = null;
-  for (const id of courtIds) {
-    const locked = await lockCourt(conn, id);
-    if (id === courtId) court = locked;
-  }
-
-  const booking = await lockBooking(conn, bookingId);
+  const { booking, court } = await lockForMove(conn, { bookingId, courtId });
   if (!booking) return fail(404, "Booking not found");
   const status = effectiveStatus(booking, now);
   if (!OPEN_BOOKING.includes(status)) {
@@ -462,6 +572,11 @@ export const moveBooking = async (
   }
   if (!court || court.venueId !== booking.venueId) {
     return fail(400, "Pick a court at this booking's venue");
+  }
+  // Phase H: a player moves their own booking once, before the cut-off
+  if (asPlayer) {
+    const refused = await playerMoveRules(conn, { booking, court, startLocal, now });
+    if (refused) return refused;
   }
 
   const durationMinutes = minutesBetween(booking.startAt, booking.endAt);
@@ -479,26 +594,14 @@ export const moveBooking = async (
     checkHours: !ignoreHours,
     now,
   });
-  if (conflict) return fail(409, conflictMessage(conflict));
+  if (conflict) return fail(409, asPlayer ? playerConflictMessage(conflict) : conflictMessage(conflict));
 
-  let price = Number(booking.price);
-  if (reprice) {
-    if (booking.paymentStatus === "Paid") {
-      return fail(409, "It's already paid — move it at the same price, or cancel and rebook");
-    }
-    const q = await quote(conn, { venueId: booking.venueId, courtId, startLocal, durationMinutes });
-    if (!q.bookable) return fail(400, quoteMessage(q));
-    price = q.price;
-  }
-
-  // A desk hold follows the new start
-  let holdExpiresAt = booking.holdExpiresAt;
-  if (booking.status === "Pending" && booking.payMethod === "Desk") {
-    holdExpiresAt = addMinutesTo(startLocal, -court.deskHoldMinutes);
-    if (holdExpiresAt <= now) {
-      return fail(400, "That's too soon to keep it unpaid — take the payment first");
-    }
-  }
+  const priced = await movedPrice(conn, { booking, courtId, startLocal, durationMinutes, reprice, asPlayer });
+  if (!priced.ok) return priced;
+  const { price } = priced;
+  const hold = movedHold({ booking, court, startLocal, now, asPlayer });
+  if (!hold.ok) return hold;
+  const { holdExpiresAt } = hold;
 
   // Phase F: an unpaid booking's open checkout is closed — the player pays
   // the moved booking (perhaps at a new price) with a fresh one
@@ -506,6 +609,7 @@ export const moveBooking = async (
   await conn.execute(
     `UPDATE bookings
      SET courtId = ?, startAt = ?, endAt = ?, price = ?, holdExpiresAt = ?,
+         rescheduledCount = rescheduledCount + ?,
          checkoutId = IF(?, NULL, checkoutId), checkoutUrl = IF(?, NULL, checkoutUrl), dateUpdated = ?
      WHERE bookingId = ?`,
     [
@@ -514,6 +618,7 @@ export const moveBooking = async (
       endLocal,
       price,
       holdExpiresAt,
+      asPlayer ? 1 : 0,
       closeCheckoutId ? 1 : 0,
       closeCheckoutId ? 1 : 0,
       now,

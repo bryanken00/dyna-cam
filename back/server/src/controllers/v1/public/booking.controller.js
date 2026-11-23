@@ -1,5 +1,10 @@
 import express from "express";
-import { catchAsync, validateBody, validateParams, validateQuery } from "../../../utils/catchAsync.js";
+import {
+  catchAsync,
+  validateBody,
+  validateParams,
+  validateQuery,
+} from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { hashToken } from "../../../utils/crypto/tokens.js";
@@ -9,19 +14,28 @@ import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
-import { cancelBooking, createBooking, expireHolds, toStartLocal } from "../../../utils/bookings.js";
+import {
+  cancelBooking,
+  createBooking,
+  expireHolds,
+  moveBooking,
+  toStartLocal,
+} from "../../../utils/bookings.js";
 import { isOnlinePaymentOn } from "../../../lib/payments/xendit.js";
-import { sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
+import { describeSlot, sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
 import {
   MIN_CHECKOUT_SECONDS,
   openCheckout,
   resumeCheckout,
+  runPaymentFollowUps,
   settleInvoice,
 } from "../../../utils/bookingPayments.js";
 import {
   availabilityQuerySchema,
   bookingTokenParamsSchema,
   manageTokenParamsSchema,
+  moveOptionsQuerySchema,
+  playerMoveSchema,
   publicBookingSchema,
 } from "../../../validators/public.validator.js";
 
@@ -38,6 +52,9 @@ import {
  *   GET  /bookings/:manageToken                  one booking: status, code, what can be done now
  *   POST /bookings/:manageToken/pay              Phase F: the booking's Xendit checkout
  *   POST /bookings/:manageToken/check-in         Phase D: start the booked game
+ *   POST /bookings/:manageToken/cancel           Phase H: cancel before the cut-off (full refund)
+ *   GET  /bookings/:manageToken/move-options     Phase H: free times at the same or a lower price
+ *   POST /bookings/:manageToken/move             Phase H: move it, once, before the cut-off
  */
 const router = express.Router();
 
@@ -55,6 +72,10 @@ const createBookingLimiter = dynamicLimiter({
 
 /** A court's public key: stable while the venue keeps its link, says nothing about the court. */
 const courtKey = (bookingToken, courtId) => hashToken(`${bookingToken}:${courtId}`).slice(0, 16);
+
+/** Phase H: a court's key on a booking's own page (the venue's link may be off or replaced). */
+const moveCourtKey = (manageToken, courtId) =>
+  hashToken(`move:${manageToken}:${courtId}`).slice(0, 16);
 
 /** The venue an online booking link belongs to (Active, online booking on), or null. */
 const findVenue = async (db, bookingToken) => {
@@ -124,7 +145,10 @@ router.get(
 
     return res.sendSuccess("Booking page", {
       venue: venueView(venue),
-      courts: courts.map((c) => ({ key: courtKey(req.params.bookingToken, c.courtId), name: c.name })),
+      courts: courts.map((c) => ({
+        key: courtKey(req.params.bookingToken, c.courtId),
+        name: c.name,
+      })),
       openDays: [...hours.keys()].sort((a, b) => a - b),
       today,
       lastDate,
@@ -212,7 +236,10 @@ router.post(
     const courts = await activeCourts(req.db, venue.venueId);
     const court = courts.find((c) => courtKey(bookingToken, c.courtId) === req.body.courtKey);
     if (!court) {
-      return res.sendError("That court isn't taking bookings — reload the page and pick again", 400);
+      return res.sendError(
+        "That court isn't taking bookings — reload the page and pick again",
+        400
+      );
     }
 
     let conn;
@@ -314,9 +341,12 @@ const syncCheckout = async (db, checkoutId) => {
 
 const BOOKING_PAGE_SELECT = `SELECT b.bookingId, b.bookingCode, b.startAt, b.endAt, b.playerName,
               b.email, b.price, b.paymentStatus, b.payMethod, b.holdExpiresAt, b.checkoutId,
-              b.status, b.cancelledAt, b.cancelledBy,
+              b.status, b.cancelledAt, b.cancelledBy, b.rescheduledCount, b.venueId, b.courtId,
               c.name AS courtName, v.name, v.address, v.phone, v.logoUrl, v.cancelCutoffHours,
-              v.checkInEarlyMinutes, s.shareToken AS gameShareToken
+              v.checkInEarlyMinutes, v.bookingDaysAhead, s.shareToken AS gameShareToken,
+              EXISTS (SELECT 1 FROM payments p
+                      WHERE p.bookingId = b.bookingId AND p.status = 'Paid' AND p.method = 'CASH')
+                AS paidCash
        FROM bookings b
        JOIN courts c ON c.courtId = b.courtId
        JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
@@ -334,9 +364,31 @@ const canPayOnline = (b, now) =>
     MIN_CHECKOUT_SECONDS;
 
 /**
+ * Phase H: what the player may change themselves, and why not. Only an
+ * unplayed booking, before the venue's cut-off; a cash payment is given back
+ * at the desk, so that one is cancelled there; a booking moves once.
+ */
+const playerChanges = (b, now) => {
+  const cutoffAt = moment
+    .tz(b.startAt, FORMAT, TIMEZONE)
+    .subtract(b.cancelCutoffHours, "hours")
+    .format(FORMAT);
+  const open = ["Pending", "Confirmed"].includes(b.status);
+  const beforeCutoff = now < cutoffAt;
+  return {
+    cutoffAt,
+    cutoffPassed: open && !beforeCutoff,
+    paidAtDesk: Number(b.paidCash) === 1,
+    movedOnce: Number(b.rescheduledCount) > 0,
+    cancel: open && beforeCutoff && Number(b.paidCash) !== 1,
+    move: open && beforeCutoff && Number(b.rescheduledCount) === 0,
+  };
+};
+
+/**
  * GET /bookings/:manageToken
  * The player's booking: where and when, its price and payment, its status, and
- * what they can do now (pay online, check in; cancel / move in Phase H).
+ * what they can do now (pay online, check in, cancel, move).
  */
 router.get(
   "/bookings/:manageToken",
@@ -360,6 +412,7 @@ router.get(
     const start = moment.tz(b.startAt, FORMAT, TIMEZONE);
     const now = getCurrentTimestampLocal();
     const checkInFrom = start.clone().subtract(b.checkInEarlyMinutes, "minutes").format(FORMAT);
+    const changes = playerChanges(b, now);
 
     return res.sendSuccess("Booking", {
       booking: {
@@ -381,21 +434,242 @@ router.get(
         checkoutOpen: b.status === "Pending" && Boolean(b.checkoutId),
         cancelledAt: b.cancelledAt,
         cancelledBy: b.cancelledBy,
-        cancelCutoffAt: start.clone().subtract(b.cancelCutoffHours, "hours").format(FORMAT),
+        cancelCutoffAt: changes.cutoffAt,
+        // Phase H: why Cancel / Move may be missing — past the cut-off, paid in cash, moved once
+        cutoffPassed: changes.cutoffPassed,
+        paidAtDesk: changes.paidAtDesk,
+        movedOnce: changes.movedOnce,
         checkInFrom,
         hasEnded: b.endAt <= now,
         // Phase D: the game's page once checked in
         gameUrl: b.gameShareToken ? sessionShareUrl(b.gameShareToken) : null,
         gameShareToken: b.gameShareToken || null,
-        // Phase H adds cancel / move
         actions: {
           checkIn: b.status === "Confirmed" && now >= checkInFrom && now < b.endAt,
           payOnline: canPayOnline(b, now),
-          cancel: false,
-          move: false,
+          cancel: changes.cancel,
+          move: changes.move,
         },
       },
     });
+  })
+);
+
+// Per IP: cancelling or moving is rare; a few taps a minute covers retries
+const changeLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CHANGE_POINTS || "10", 10),
+  duration: 60,
+  keyGenerator: (req) => `public-booking-change:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
+});
+
+/** The booking behind a manage link (with what playerChanges() needs), or null. */
+const findManagedBooking = async (db, manageToken) => {
+  await expireHolds(db);
+  const rows = await db.query(BOOKING_PAGE_SELECT, [manageToken]);
+  return rows[0] || null;
+};
+
+/** Why the player can't change it now, in their words — or null. */
+const changeRefusal = (b, changes, what) => {
+  if (!["Pending", "Confirmed"].includes(b.status)) {
+    return b.status === "CheckedIn" || b.status === "Completed"
+      ? "This booking has been played"
+      : `This booking is ${b.status === "NoShow" ? "a no-show" : b.status.toLowerCase()} — it can't be changed`;
+  }
+  if (changes.cutoffPassed)
+    return `It's too close to the start to ${what} it online — call the venue`;
+  if (what === "cancel" && changes.paidAtDesk) {
+    return "It was paid at the desk — call the venue to cancel it and get your money back";
+  }
+  if (what === "move" && changes.movedOnce) {
+    return "You've already moved this booking once — call the venue to change it again";
+  }
+  return null;
+};
+
+/** Run one utils/bookings.js write in a transaction. */
+const inTransaction = async (db, write) => {
+  let conn;
+  try {
+    conn = await db.beginTransaction();
+    const result = await write(conn);
+    if (result.ok) await db.commit(conn);
+    else await db.rollback(conn);
+    return result;
+  } catch (err) {
+    await db.rollback(conn);
+    throw err;
+  }
+};
+
+/**
+ * POST /bookings/:manageToken/cancel
+ * Phase H: the player cancels before the venue's cut-off — a full refund of
+ * an online payment (Xendit), an open checkout closed. After the cut-off, or
+ * when it was paid in cash at the desk, 409 "call the venue".
+ */
+router.post(
+  "/bookings/:manageToken/cancel",
+  changeLimiter,
+  validateParams(manageTokenParamsSchema),
+  catchAsync(async (req, res) => {
+    const b = await findManagedBooking(req.db, req.params.manageToken);
+    if (!b) {
+      return res.sendError("This booking link isn't valid", 404);
+    }
+    const refusal = changeRefusal(b, playerChanges(b, getCurrentTimestampLocal()), "cancel");
+    if (refusal) {
+      return res.sendError(refusal, 409);
+    }
+
+    const result = await inTransaction(req.db, (conn) =>
+      cancelBooking(conn, {
+        bookingId: b.bookingId,
+        by: "Player",
+        reason: "Cancelled by the player",
+        refund: true,
+        asPlayer: true,
+      })
+    );
+    if (!result.ok) {
+      return res.sendError(result.message, null, result.status, result.code);
+    }
+    const online = await runPaymentFollowUps(req.db, result.followUp, {
+      reason: "REQUESTED_BY_CUSTOMER",
+    });
+    await sendBookingEmail(req.db, b.bookingId, "Cancelled");
+
+    let message = "Booking cancelled";
+    if (online.refunded > 0) {
+      message = `Booking cancelled — ₱${online.refunded.toLocaleString("en-PH")} is on its way back to you`;
+    } else if (online.failed > 0) {
+      message =
+        "Booking cancelled — the refund didn't go through, so the venue will contact you about it";
+    }
+    return res.sendSuccess(message, { refunded: online.refunded, refundFailed: online.failed });
+  })
+);
+
+/**
+ * GET /bookings/:manageToken/move-options?date=
+ * Phase H: the times the player can move to that day — same length, free, and
+ * at the same or a lower price than they booked. Its own time doesn't count as
+ * taken (it's marked `current`). Courts are named by a key of this booking.
+ */
+router.get(
+  "/bookings/:manageToken/move-options",
+  validateParams(manageTokenParamsSchema),
+  validateQuery(moveOptionsQuerySchema),
+  catchAsync(async (req, res) => {
+    const { manageToken } = req.params;
+    const b = await findManagedBooking(req.db, manageToken);
+    if (!b) {
+      return res.sendError("This booking link isn't valid", 404);
+    }
+    const refusal = changeRefusal(b, playerChanges(b, getCurrentTimestampLocal()), "move");
+    if (refusal) {
+      return res.sendError(refusal, 409);
+    }
+    const { today, lastDate } = bookableDates(b);
+    const { date } = req.query;
+    if (date < today || date > lastDate) {
+      return res.sendError(
+        date < today
+          ? "That date has passed"
+          : `You can book up to ${b.bookingDaysAhead} days ahead`,
+        400
+      );
+    }
+
+    const durationMinutes = moment
+      .tz(b.endAt, FORMAT, TIMEZONE)
+      .diff(moment.tz(b.startAt, FORMAT, TIMEZONE), "minutes");
+    const [courts, hours] = await Promise.all([
+      activeCourts(req.db, b.venueId),
+      loadVenueHours(req.db, b.venueId),
+    ]);
+    const day = await dayAvailability(req.db, {
+      venueId: b.venueId,
+      courts,
+      date,
+      durationMinutes,
+      moving: {
+        bookingId: b.bookingId,
+        courtId: b.courtId,
+        startAt: b.startAt,
+        maxPrice: Number(b.price),
+      },
+    });
+
+    return res.sendSuccess("Move options", {
+      date,
+      today,
+      lastDate,
+      openDays: [...hours.keys()].sort((x, y) => x - y),
+      durationMinutes,
+      maxPrice: Number(b.price),
+      hours: day.hours,
+      courts: day.courts.map((c) => ({
+        key: moveCourtKey(manageToken, c.courtId),
+        name: c.name,
+        slots: c.slots,
+      })),
+    });
+  })
+);
+
+/**
+ * POST /bookings/:manageToken/move
+ * Body: { courtKey?, date, startTime }. Phase H: once, before the cut-off,
+ * same length, to a free time that costs the same or less — the booking keeps
+ * its price (no partial refunds). Locks, checks and moves in one transaction.
+ */
+router.post(
+  "/bookings/:manageToken/move",
+  changeLimiter,
+  validateParams(manageTokenParamsSchema),
+  validateBody(playerMoveSchema),
+  catchAsync(async (req, res) => {
+    const { manageToken } = req.params;
+    const b = await findManagedBooking(req.db, manageToken);
+    if (!b) {
+      return res.sendError("This booking link isn't valid", 404);
+    }
+    const refusal = changeRefusal(b, playerChanges(b, getCurrentTimestampLocal()), "move");
+    if (refusal) {
+      return res.sendError(refusal, 409);
+    }
+
+    let courtId = b.courtId;
+    if (req.body.courtKey) {
+      const courts = await activeCourts(req.db, b.venueId);
+      const court = courts.find((c) => moveCourtKey(manageToken, c.courtId) === req.body.courtKey);
+      if (!court) {
+        return res.sendError(
+          "That court isn't taking bookings — reload the page and pick again",
+          400
+        );
+      }
+      courtId = court.courtId;
+    }
+
+    const result = await inTransaction(req.db, (conn) =>
+      moveBooking(conn, {
+        bookingId: b.bookingId,
+        courtId,
+        startLocal: toStartLocal(req.body.date, req.body.startTime),
+        asPlayer: true,
+      })
+    );
+    if (!result.ok) {
+      return res.sendError(result.message, null, result.status, result.code);
+    }
+    await runPaymentFollowUps(req.db, result.followUp);
+    await sendBookingEmail(req.db, b.bookingId, "Moved", {
+      previous: await describeSlot(req.db, result.from),
+    });
+    return res.sendSuccess("Booking moved", { startAt: result.startAt, endAt: result.endAt });
   })
 );
 
@@ -448,7 +722,10 @@ router.post(
       return res.sendError(result.message, result.status);
     }
     if (result.paid) {
-      return res.sendSuccess("Payment received — your booking is confirmed", { paid: true, checkoutUrl: null });
+      return res.sendSuccess("Payment received — your booking is confirmed", {
+        paid: true,
+        checkoutUrl: null,
+      });
     }
     return res.sendSuccess("Checkout ready", { paid: false, checkoutUrl: result.checkoutUrl });
   })

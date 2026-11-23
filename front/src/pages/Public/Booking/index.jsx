@@ -1,6 +1,7 @@
 import {
   Ban,
   CalendarCheck,
+  CalendarClock,
   CircleAlert,
   Clock,
   Copy,
@@ -23,6 +24,9 @@ import { useBookingPageHooks } from "./hooks";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
+import SectionLabel from "../../../components/SectionLabel";
+import BookingDateStrip from "../../../components/BookingDateStrip";
+import CourtSlotPicker from "../../../components/CourtSlotPicker";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
 import { formatMinutes, formatPayCode, formatPeso } from "../../../utils/dynaCam";
@@ -78,6 +82,23 @@ const BookingPage = () => {
     handlePay,
     isPaying,
     payError,
+    handleCancel,
+    isCancelling,
+    changeError,
+    moveOpen,
+    handleOpenMove,
+    handleCloseMove,
+    moveOptions,
+    moveLoading,
+    moveError,
+    moveDates,
+    moveDate,
+    moveSlot,
+    movePicked,
+    handlePickMoveDate,
+    handlePickMoveSlot,
+    handleMove,
+    isMoving,
   } = useBookingPageHooks();
 
   if (isLoading) {
@@ -129,6 +150,15 @@ const BookingPage = () => {
   const logo = getImageUrl(booking.venue.logoUrl);
   const live = ["Pending", "Confirmed"].includes(booking.status) && !booking.hasEnded;
   const venuePhone = booking.venue.phone ? formatPhoneDisplay(booking.venue.phone) : null;
+  // Phase H: what the player can still change themselves, and until when
+  const canChange = booking.actions.cancel || booking.actions.move;
+  const cutoff = dayjs(booking.cancelCutoffAt).format("h:mm A, ddd MMM D");
+  const paidOnline = booking.paymentStatus === "Paid" && booking.payMethod === "Online";
+  const cutoffText = booking.actions.cancel
+    ? paidOnline
+      ? `Cancel by ${cutoff} for a full refund.`
+      : `You can cancel until ${cutoff}.`
+    : `You can change it until ${cutoff}.`;
 
   return (
     <PublicLayout footer="Keep this page's link — it's how you get back to your booking.">
@@ -309,11 +339,82 @@ const BookingPage = () => {
           {booking.venue.address && <Row label="Where">{decodeHTML(booking.venue.address)}</Row>}
         </div>
 
-        {live && (
+        {/* Phase H: cancel or move it yourself until the cut-off */}
+        {live && canChange && (
+          <div className="p-5" style={cardStyle}>
+            <SectionLabel>Change your booking</SectionLabel>
+            {moveOpen ? (
+              <div className="space-y-5">
+                <p className="m-0" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  Pick a new time for your {formatMinutes(booking.durationMinutes)}. You can move once, to a time that
+                  costs {formatPeso(booking.price)} or less — your price stays the same.
+                </p>
+                {moveDates.length > 0 && (
+                  <BookingDateStrip dates={moveDates} date={moveDate} today={moveOptions?.today} onPick={handlePickMoveDate} />
+                )}
+                <CourtSlotPicker
+                  availability={moveOptions}
+                  loading={moveLoading}
+                  error={moveError}
+                  durationMinutes={booking.durationMinutes}
+                  slot={moveSlot}
+                  onPick={handlePickMoveSlot}
+                  unavailableLabel="—"
+                  emptyHint="Nothing free at your price that day — try another date."
+                />
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" className="h-11" onClick={handleCloseMove}>
+                    Back
+                  </Button>
+                  <Button type="button" className="h-11 flex-1" onClick={handleMove} disabled={!movePicked || isMoving}>
+                    {isMoving ? <Loader2 className="animate-spin" /> : <CalendarClock />}
+                    {movePicked
+                      ? `Move to ${movePicked.courtName}, ${movePicked.start.format("ddd MMM D, h:mm A")}`
+                      : "Pick a new time"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {booking.actions.move ? (
+                    <Button type="button" variant="outline" className="h-11" onClick={handleOpenMove}>
+                      <CalendarClock />
+                      Move
+                    </Button>
+                  ) : (
+                    <span />
+                  )}
+                  {booking.actions.cancel && (
+                    <Button type="button" variant="outline" className="h-11" onClick={handleCancel} disabled={isCancelling}>
+                      {isCancelling ? <Loader2 className="animate-spin" /> : <Ban />}
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+                <p className="m-0 mt-3" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                  {cutoffText}
+                  {booking.actions.move
+                    ? " You can move it once, to a time that costs the same or less."
+                    : booking.movedOnce
+                      ? " You've already moved it once."
+                      : ""}
+                  {booking.paidAtDesk ? " It was paid at the desk, so call the venue to cancel it." : ""}
+                </p>
+              </>
+            )}
+            {changeError && (
+              <p role="alert" className="m-0 mt-3" style={{ fontSize: 13.5, color: "var(--color-error)" }}>
+                {changeError}
+              </p>
+            )}
+          </div>
+        )}
+        {live && !canChange && (
           <p className="m-0 flex items-start gap-2 px-1" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
             <CircleAlert className="size-4 shrink-0 mt-0.5" />
             <span>
-              Need to cancel or change it? Call the venue{venuePhone ? ` on ${venuePhone}` : ""}.
+              To cancel or change this booking, call the venue{venuePhone ? ` on ${venuePhone}` : ""}.
             </span>
           </p>
         )}

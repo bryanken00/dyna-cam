@@ -24,11 +24,18 @@ const overlaps = (item, startLocal, endLocal) => item.startAt < endLocal && item
  * @param {Array<{ courtId: string, name: string }>} q.courts - the venue's Active courts
  * @param {string} q.date - "YYYY-MM-DD"
  * @param {number} q.durationMinutes - whole hours
+ * @param {Object} [q.moving] - Phase H: a player moving their booking — its own
+ *   time doesn't count as taken, only slots priced at most `maxPrice` are offered,
+ *   and its current slot is marked `current`
+ * @param {string} q.moving.bookingId
+ * @param {string} q.moving.courtId
+ * @param {string} q.moving.startAt
+ * @param {number} q.moving.maxPrice
  * @returns {Promise<{ hours: { opensAt, closesAt } | null,
- *   courts: Array<{ courtId, name, slots: Array<{ startTime, available, price }> }> }>}
+ *   courts: Array<{ courtId, name, slots: Array<{ startTime, available, price, current? }> }> }>}
  *   price is null when the slot isn't available
  */
-export const dayAvailability = async (db, { venueId, courts, date, durationMinutes }) => {
+export const dayAvailability = async (db, { venueId, courts, date, durationMinutes, moving = null }) => {
   const now = getCurrentTimestampLocal();
   const dayStart = moment.tz(`${date} 00:00:00`, FORMAT, TIMEZONE);
   const hours = await loadVenueHours(db, venueId);
@@ -48,7 +55,7 @@ export const dayAvailability = async (db, { venueId, courts, date, durationMinut
     loadRates(db, venueId),
     selectRows(
       db,
-      `SELECT b.courtId, b.startAt, b.endAt FROM bookings b
+      `SELECT b.bookingId, b.courtId, b.startAt, b.endAt FROM bookings b
        WHERE b.venueId = ? AND ${LIVE_BOOKING} AND b.startAt < ? AND b.endAt > ?`,
       [venueId, now, to, from]
     ),
@@ -74,7 +81,7 @@ export const dayAvailability = async (db, { venueId, courts, date, durationMinut
     hours: { opensAt: minutesToTime(day.opensAt), closesAt: minutesToTime(day.closesAt) },
     courts: courts.map((court) => {
       const inTheWay = [
-        ...bookings.filter((b) => b.courtId === court.courtId),
+        ...bookings.filter((b) => b.courtId === court.courtId && b.bookingId !== moving?.bookingId),
         ...games.filter((g) => g.courtId === court.courtId),
         ...closures.filter((c) => !c.courtId || c.courtId === court.courtId),
       ];
@@ -87,11 +94,14 @@ export const dayAvailability = async (db, { venueId, courts, date, durationMinut
         const price = free
           ? quoteFromRates(rates, { courtId: court.courtId, startLocal, durationMinutes })
           : null;
-        const available = Boolean(price?.bookable);
+        const current = Boolean(moving) && court.courtId === moving.courtId && startLocal === moving.startAt;
+        const available =
+          Boolean(price?.bookable) && (!moving || (!current && price.price <= moving.maxPrice));
         slots.push({
           startTime: start.format("HH:mm"),
           available,
           price: available ? price.price : null,
+          ...(current ? { current: true } : {}),
         });
       }
       return { courtId: court.courtId, name: court.name, slots };

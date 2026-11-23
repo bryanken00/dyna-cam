@@ -229,17 +229,28 @@
 
 ## Phase H — Player cancel and move
 
-- [ ] `POST /public/bookings/:manageToken/cancel`: only before `cancelCutoffHours`; paid online →
-      full Xendit refund; unpaid → `expireInvoice()` if one is open; after cut-off → 409
-- [ ] `POST /public/bookings/:manageToken/move`: before the cut-off, only when
-      `rescheduledCount = 0`; locks the court row, `findConflict` with `ignoreBookingId`, same
-      length, new quote ≤ booking `price` (price kept, no partial refund), `rescheduledCount = 1`
-- [ ] Availability for a move (`?forBooking=<manageToken>` or a sibling endpoint) returns only
-      slots priced ≤ the booking's price
-- [ ] Tests: after cut-off → refused; second move → refused; pricier slot → refused; move into a
-      taken slot → 409 and unchanged; online cancel refunds in full through Xendit
-- [ ] Frontend: Cancel ("Full refund until <cut-off>") and Move ("You can move this booking
-      once", same picker as `Book/`) on `Public/Booking/`; past the cut-off, "call <venue phone>"
+- [x] `POST /public/bookings/:manageToken/cancel`: only before `cancelCutoffHours`; paid online →
+      full Xendit refund (`REQUESTED_BY_CUSTOMER`); unpaid → `expireInvoice()` if one is open;
+      after cut-off → 409 "call the venue"; paid in cash at the desk → 409 (the desk gives cash
+      back); the cancellation email follows
+- [x] `POST /public/bookings/:manageToken/move` (`{ courtKey?, date, startTime }`): before the
+      cut-off, only when `rescheduledCount = 0`; locks the court rows, `findConflict` with
+      `ignoreBookingId` and opening hours, same length, within `bookingDaysAhead`, new quote ≤
+      booking `price` (price kept, no partial refund), `rescheduledCount = 1`; a desk hold
+      follows the new start; an open checkout is closed; the Moved email follows
+- [x] `GET /public/bookings/:manageToken/move-options?date=` (sibling endpoint): only slots priced
+      ≤ the booking's price, its own time marked `current`, courts keyed by the booking's link
+      (`utils/bookingAvailability.js` `moving` option)
+- [x] The booking page's `actions.cancel` / `actions.move`, plus `cutoffPassed`, `paidAtDesk`,
+      `movedOnce` to say why one is missing
+- [x] Tests (`tests/player-cancel-move.test.js`, Xendit faked via `tests/helpers/fakeXendit.js`):
+      after cut-off → refused; cash-paid cancel → refused; unpaid hold cancel; online cancel
+      refunds in full through Xendit; unpaid online cancel closes the checkout; move options price
+      filter; second move → refused; pricier / taken / closed-hours / too-far slot → refused and
+      unchanged; move to another court; Deleted booking → 404
+- [x] Frontend: Cancel ("Cancel by <cut-off> for a full refund") and Move ("You can move it once",
+      same picker as `Book/` — `PickChip`, `BookingDateStrip`, `CourtSlotPicker` now shared in
+      `src/components/`) on `Public/Booking/`; past the cut-off, "call <venue phone>"
 
 ## Wrap-up
 

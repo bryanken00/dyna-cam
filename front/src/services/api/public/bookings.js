@@ -45,3 +45,26 @@ export const payBookingOnlineApi = async (manageToken) => {
   const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/pay`);
   return response.data;
 };
+
+// Phase H: cancel before the venue's cut-off → { refunded, refundFailed } (pesos);
+// 409 past the cut-off or paid in cash at the desk
+export const cancelMyBookingApi = async (manageToken) => {
+  const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/cancel`);
+  return response.data;
+};
+
+// Phase H: times this booking can move to on a date →
+// { date, today, lastDate, openDays, durationMinutes, maxPrice, hours,
+//   courts: [{ key, name, slots: [{ startTime, available, price, current? }] }] }
+export const getMoveOptionsApi = async ({ manageToken, date }) => {
+  const response = await axiosInstance.get(`/api/v1/public/bookings/${manageToken}/move-options`, {
+    params: { date },
+  });
+  return response.data;
+};
+
+// Phase H: move it (once) → { startAt, endAt }. body: { courtKey, date, startTime }
+export const moveMyBookingApi = async ({ manageToken, body }) => {
+  const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/move`, body);
+  return response.data;
+};

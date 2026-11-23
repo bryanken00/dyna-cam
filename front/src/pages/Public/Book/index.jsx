@@ -26,9 +26,12 @@ import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import SectionLabel from "../../../components/SectionLabel";
 import Spinner from "../../../components/Spinner";
+import PickChip from "../../../components/PickChip";
+import BookingDateStrip from "../../../components/BookingDateStrip";
+import CourtSlotPicker from "../../../components/CourtSlotPicker";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
-import { formatHour, formatMinutes, formatPeso } from "../../../utils/dynaCam";
+import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
 import {
   PHONE_MAX_LENGTH,
   PHONE_PLACEHOLDER,
@@ -46,27 +49,6 @@ const cardStyle = {
 
 const iconPrefix = "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
 const mutedIcon = { color: "var(--color-text-muted)" };
-
-/** A pickable chip: a date, a length or a start time. */
-const Chip = ({ selected, disabled, onClick, children, label, className = "" }) => (
-  <button
-    type="button"
-    aria-pressed={selected}
-    aria-label={label}
-    disabled={disabled}
-    onClick={onClick}
-    className={`shrink-0 transition-colors disabled:cursor-not-allowed ${className}`}
-    style={{
-      borderRadius: 10,
-      border: `1px solid ${selected ? "var(--color-text-dark)" : "var(--color-line)"}`,
-      background: selected ? "var(--color-surface-sunken)" : "var(--color-surface)",
-      color: disabled ? "var(--color-text-muted)" : "var(--color-text-dark)",
-      opacity: disabled ? 0.55 : 1,
-    }}
-  >
-    {children}
-  </button>
-);
 
 /**
  * `/book/:bookingToken` (PLAN-003 Phase C) — a venue's online booking page:
@@ -144,7 +126,6 @@ const BookPage = () => {
 
   const logo = getImageUrl(page.venue.logoUrl);
   const holdMinutes = page.rules.deskHoldMinutes;
-  const anyFree = availability?.courts.some((c) => c.slots.some((s) => s.available));
 
   return (
     <PublicLayout footer={FOOTER}>
@@ -181,26 +162,7 @@ const BookPage = () => {
             {/* Date */}
             <div>
               <SectionLabel>Date</SectionLabel>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                {dates.map((d) => (
-                  <Chip
-                    key={d.date}
-                    selected={d.date === date}
-                    disabled={!d.open}
-                    onClick={() => handlePickDate(d.date)}
-                    label={d.day.format("dddd, MMMM D")}
-                    className="w-15 py-2 flex flex-col items-center"
-                  >
-                    <span style={{ fontSize: 11.5, color: "var(--color-text-secondary)" }}>
-                      {d.date === page.today ? "Today" : d.day.format("ddd")}
-                    </span>
-                    <span style={{ fontSize: 17, fontWeight: 600 }}>{d.day.format("D")}</span>
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                      {d.open ? d.day.format("MMM") : "Closed"}
-                    </span>
-                  </Chip>
-                ))}
-              </div>
+              <BookingDateStrip dates={dates} date={date} today={page.today} onPick={handlePickDate} />
             </div>
 
             {/* Length */}
@@ -208,14 +170,14 @@ const BookPage = () => {
               <SectionLabel>How long</SectionLabel>
               <div className="flex gap-2 flex-wrap">
                 {lengths.map((m) => (
-                  <Chip
+                  <PickChip
                     key={m}
                     selected={m === durationMinutes}
                     onClick={() => handlePickLength(m)}
                     className="px-4 h-10"
                   >
                     <span style={{ fontSize: 14, fontWeight: 500 }}>{formatMinutes(m)}</span>
-                  </Chip>
+                  </PickChip>
                 ))}
               </div>
             </div>
@@ -223,63 +185,15 @@ const BookPage = () => {
             {/* Court + time */}
             <div>
               <SectionLabel>Court and start time</SectionLabel>
-              {availabilityError ? (
-                <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-error)" }}>
-                  {availabilityError.response?.data?.message || "Couldn't load the free times. Try again."}
-                </p>
-              ) : availabilityLoading || !availability ? (
-                <Spinner className="py-8" tip="Checking free times…" />
-              ) : !availability.hours ? (
-                <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
-                  Closed that day — pick another date.
-                </p>
-              ) : !anyFree ? (
-                <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
-                  Nothing free for {formatMinutes(durationMinutes)} that day — try a shorter time or
-                  another date.
-                </p>
-              ) : (
-                <div className="space-y-5">
-                  {availability.courts.map((court) => (
-                    <div key={court.key}>
-                      <div className="mb-2" style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
-                        {decodeHTML(court.name)}
-                      </div>
-                      {court.slots.some((s) => s.available) ? (
-                        <div className="grid grid-cols-3 gap-2">
-                          {court.slots.map((s) => (
-                            <Chip
-                              key={s.startTime}
-                              selected={slot?.courtKey === court.key && slot?.startTime === s.startTime}
-                              disabled={!s.available}
-                              onClick={() => handlePickSlot(court.key, s.startTime)}
-                              label={`${decodeHTML(court.name)} at ${formatHour(s.startTime)}${s.available ? "" : ", taken"}`}
-                              className="py-2 flex flex-col items-center"
-                            >
-                              <span
-                                style={{
-                                  fontSize: 14,
-                                  fontWeight: 500,
-                                  textDecoration: s.available ? "none" : "line-through",
-                                }}
-                              >
-                                {formatHour(s.startTime)}
-                              </span>
-                              <span style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}>
-                                {s.available ? formatPeso(s.price) : "Taken"}
-                              </span>
-                            </Chip>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="m-0" style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-                          Fully booked for {formatMinutes(durationMinutes)} that day.
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <CourtSlotPicker
+                availability={availability}
+                loading={availabilityLoading}
+                error={availabilityError}
+                durationMinutes={durationMinutes}
+                slot={slot}
+                onPick={handlePickSlot}
+                emptyHint={`Nothing free for ${formatMinutes(durationMinutes)} that day — try a shorter time or another date.`}
+              />
             </div>
           </div>
         )}
@@ -394,22 +308,22 @@ const BookPage = () => {
                       <SectionLabel>How you&apos;ll pay</SectionLabel>
                     </div>
                     <div className="grid grid-cols-2 gap-2" role="group" aria-label="How you'll pay">
-                      <Chip
+                      <PickChip
                         selected={payMethod === "Online"}
                         onClick={() => handlePickPayMethod("Online")}
                         className="flex items-center gap-2 px-3 py-3 text-left"
                       >
                         <CreditCard className="size-4.5 shrink-0" />
                         <span style={{ fontSize: 13.5, fontWeight: 600 }}>Pay now</span>
-                      </Chip>
-                      <Chip
+                      </PickChip>
+                      <PickChip
                         selected={payMethod === "Desk"}
                         onClick={() => handlePickPayMethod("Desk")}
                         className="flex items-center gap-2 px-3 py-3 text-left"
                       >
                         <Store className="size-4.5 shrink-0" />
                         <span style={{ fontSize: 13.5, fontWeight: 600 }}>At the desk</span>
-                      </Chip>
+                      </PickChip>
                     </div>
                   </>
                 )}
