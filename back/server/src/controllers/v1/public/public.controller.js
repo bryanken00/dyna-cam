@@ -191,6 +191,11 @@ router.get(
           [court.courtId, now, now, court.venueId, court.courtId, now]
         );
 
+    const [venue] = await req.db.query(
+      `SELECT bookingToken FROM venues WHERE venueId = ? LIMIT 1`,
+      [court.venueId]
+    );
+
     return res.sendSuccess("Court", {
       court: {
         name: court.name,
@@ -208,6 +213,8 @@ router.get(
         booking: !current && booked ? { from: booked.startAt, until: booked.endAt } : null,
         // A game started here must end by then (null: nothing booked ahead)
         freeUntil: !current && !booked ? next?.startAt || null : null,
+        // CR-030: "Book this court ahead" — the venue's booking link (null: booking off)
+        bookingToken: venue?.bookingToken || null,
       },
     });
   })

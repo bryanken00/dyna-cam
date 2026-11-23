@@ -33,6 +33,7 @@ import {
 import {
   availabilityQuerySchema,
   bookingTokenParamsSchema,
+  findBookingSchema,
   manageTokenParamsSchema,
   moveOptionsQuerySchema,
   playerMoveSchema,
@@ -46,6 +47,8 @@ import {
  * carry no business IDs: courts are named by a key derived from the link, and
  * availability never says who booked what.
  *
+ *   GET  /venues                                 CR-030: every venue taking online bookings
+ *   POST /bookings/find                          CR-030: a booking's own link from its code + phone/email
  *   GET  /book/:bookingToken                     the venue, its courts and booking rules
  *   GET  /book/:bookingToken/availability        free hours per court for a date and length
  *   POST /book/:bookingToken/bookings            book a slot: pay at the desk, or online (Phase F)
@@ -123,6 +126,86 @@ const venueView = (venue) => ({
   phone: venue.phone,
   logoUrl: signUploadUrl(venue.logoUrl),
 });
+
+/** "06:00:00" → "06:00"; "24:00:00" stays "24:00" (midnight). */
+const hhmm = (time) => (time ? String(time).slice(0, 5) : null);
+
+/**
+ * GET /venues
+ * CR-030: the public "Book a court" list — every Active venue with online
+ * booking on (it has a booking link) and at least one Active court, with
+ * today's hours. The link is what the venue already shares; no business IDs.
+ */
+router.get(
+  "/venues",
+  catchAsync(async (req, res) => {
+    const today = moment().tz(TIMEZONE).day();
+    const rows = await req.db.query(
+      `SELECT v.name, v.address, v.phone, v.logoUrl, v.bookingToken,
+              h.opensAt, h.closesAt,
+              (SELECT COUNT(*) FROM courts c
+               WHERE c.venueId = v.venueId AND c.status = 'Active') AS courtCount
+       FROM venues v
+       LEFT JOIN venue_hours h
+         ON h.venueId = v.venueId AND h.status = 'Active' AND h.dayOfWeek = ?
+       WHERE v.status = 'Active' AND v.bookingToken IS NOT NULL
+       HAVING courtCount > 0
+       ORDER BY v.name ASC`,
+      [today]
+    );
+    return res.sendSuccess("Venues", {
+      venues: rows.map((v) => ({
+        ...venueView(v),
+        bookingToken: v.bookingToken,
+        courtCount: Number(v.courtCount),
+        // null: closed today
+        todayHours: v.opensAt ? { opensAt: hhmm(v.opensAt), closesAt: hhmm(v.closesAt) } : null,
+      })),
+    });
+  })
+);
+
+// Per IP: a player looks a booking up once or twice; a few tries a minute
+// covers typos, and stops anyone guessing codes
+const findBookingLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_PUBLIC_FIND_POINTS || "5", 10),
+  duration: 60,
+  keyGenerator: (req) => `public-booking-find:${req.ip}`,
+  message: "Too many tries — wait a minute and try again.",
+});
+
+/**
+ * POST /bookings/find { bookingCode, contact }
+ * CR-030: "Find my booking" — the booking's own link, for its code plus the
+ * phone or email it was booked with. Every miss (no such code, wrong phone or
+ * email, a deleted booking) gets the same 404, so it says nothing about codes.
+ */
+router.post(
+  "/bookings/find",
+  findBookingLimiter,
+  validateBody(findBookingSchema),
+  catchAsync(async (req, res) => {
+    const { bookingCode, contact } = req.body;
+    const [booking] = await req.db.query(
+      `SELECT b.manageToken FROM bookings b
+       JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
+       WHERE b.bookingCode = ? AND b.status != 'Deleted'
+         AND ${contact.email ? "LOWER(b.email) = ?" : "b.phone = ?"}
+       LIMIT 1`,
+      [bookingCode, contact.email || contact.phone]
+    );
+    if (!booking) {
+      return res.sendError(
+        "No booking matches that code and phone number or email — check them, or ask the venue",
+        404
+      );
+    }
+    return res.sendSuccess("Booking found", {
+      manageToken: booking.manageToken,
+      manageUrl: bookingManageUrl(booking.manageToken),
+    });
+  })
+);
 
 /**
  * GET /book/:bookingToken

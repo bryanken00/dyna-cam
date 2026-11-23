@@ -84,7 +84,7 @@ export const localDateTime = () =>
  */
 
 /** Strip to digits and normalise the common PH prefixes to `09XXXXXXXXX`. */
-const toLocalDigits = (input) => {
+export const toLocalDigits = (input) => {
   const digits = String(input).replace(/\D/g, "");
   if (digits.startsWith("63") && digits.length === 12) return `0${digits.slice(2)}`; // 639…
   if (digits.startsWith("9") && digits.length === 10) return `0${digits}`; // 9…

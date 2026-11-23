@@ -9,6 +9,8 @@ import {
   cancelMyBookingApi,
   getMoveOptionsApi,
   moveMyBookingApi,
+  getPublicVenuesApi,
+  findMyBookingApi,
 } from "../../api/public/bookings";
 
 // A 404 means the link isn't valid (turned off, replaced) — don't retry it
@@ -118,4 +120,18 @@ export const useMoveMyBooking = () => {
       queryClient.invalidateQueries({ queryKey: ["publicMoveOptions", manageToken] });
     },
   });
+};
+
+// Query: CR-030 — the venues taking online bookings (the public "Book a court" list)
+export const useGetPublicVenues = () => {
+  return useQuery({
+    queryKey: ["publicVenues"],
+    queryFn: getPublicVenuesApi,
+    staleTime: 5 * 60 * 1000,
+  });
+};
+
+// Mutation: CR-030 — Find my booking (code + phone or email). The page shows errors itself.
+export const useFindMyBooking = () => {
+  return useMutation({ mutationFn: findMyBookingApi });
 };

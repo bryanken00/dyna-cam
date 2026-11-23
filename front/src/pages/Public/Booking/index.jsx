@@ -115,7 +115,12 @@ const BookingPage = () => {
         <ResultState
           status="404"
           title="This booking link isn't valid"
-          description="Check the link you were sent, or ask the venue's front desk."
+          description="Check the link you were sent, or find your booking with its code."
+          action={
+            <Button asChild>
+              <Link to="/booking">Find my booking</Link>
+            </Button>
+          }
         />
       </PublicLayout>
     );

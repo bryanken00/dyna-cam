@@ -1,7 +1,8 @@
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import {
   ArrowRight,
   Bell,
+  CalendarCheck,
   Camera,
   Clock,
   CloudUpload,
@@ -225,7 +226,8 @@ const NavLink = ({ href, children }) => (
  * Public home page (CR-011, after the "Improve UI and UX" design): a navy hero
  * with the brand court on a tilted card, how a game is recorded (ask the desk →
  * pairing key → pair and play → video), what players can do during it, a navy
- * call-out for venues, what venues get, and the privacy note.
+ * call-out for venues, what venues get, and the privacy note. CR-030: Book a
+ * court in the top bar and the hero opens /book.
  */
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -250,6 +252,10 @@ const LandingPage = () => {
               <NavLink href="#how-it-works">How it works</NavLink>
               <NavLink href="#during-your-game">During your game</NavLink>
               <NavLink href="#venues">For venues</NavLink>
+              {/* CR-030: the way in for players — on phones too */}
+              <Button size="sm" className="btn-on-navy ml-1.5" asChild>
+                <Link to="/book">Book a court</Link>
+              </Button>
               <span className="ml-1.5">
                 <ThemeToggle />
               </span>
@@ -285,10 +291,13 @@ const LandingPage = () => {
               </p>
               <div className="flex items-center gap-2.5 mt-9 flex-wrap">
                 <Button size="lg" className="btn-on-navy" asChild>
-                  <a href="#how-it-works">See how it works</a>
+                  <Link to="/book">
+                    <CalendarCheck />
+                    Book a court
+                  </Link>
                 </Button>
                 <Button size="lg" variant="outline" className="btn-on-court" asChild>
-                  <a href="#venues">For venues</a>
+                  <a href="#how-it-works">See how it works</a>
                 </Button>
               </div>
             </div>

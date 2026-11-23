@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import ThemeToggle from "../ThemeToggle";
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
@@ -5,7 +7,8 @@ const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 /**
  * Chrome for the player pages (`/court/:qrToken`, `/clip/:shareToken`):
  * a slim top bar (brand + theme picker), one narrow mobile-first column, and a
- * footer slot for the privacy note. No login, no sidebar.
+ * footer slot for the privacy note. No login, no sidebar. CR-030: the brand
+ * goes home.
  */
 const PublicLayout = ({ children, footer }) => (
   <div
@@ -17,12 +20,13 @@ const PublicLayout = ({ children, footer }) => (
       style={{ borderBottom: "1px solid var(--color-line)" }}
     >
       <div className="mx-auto max-w-md flex items-center justify-between gap-3">
-        <span
+        <Link
+          to="/"
           className="font-semibold"
-          style={{ fontSize: 15, color: "var(--color-text-dark)" }}
+          style={{ fontSize: 15, color: "var(--color-text-dark)", textDecoration: "none" }}
         >
           {APP_NAME}
-        </span>
+        </Link>
         <ThemeToggle />
       </div>
     </header>

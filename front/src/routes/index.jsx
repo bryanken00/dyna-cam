@@ -16,6 +16,9 @@ const PublicStream = lazy(() => import("../pages/Public/Stream"));
 // Court booking (PLAN-003) — the venue's booking link / a booking's own link
 const PublicBook = lazy(() => import("../pages/Public/Book"));
 const PublicBooking = lazy(() => import("../pages/Public/Booking"));
+// CR-030: the way in for players — every venue taking bookings, and Find my booking
+const PublicVenues = lazy(() => import("../pages/Public/Venues"));
+const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
 
 const RootRoutes = () => {
   return (
@@ -66,6 +69,22 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicStream />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/book"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicVenues />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/booking"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicFindBooking />
             </Suspense>
           }
         />

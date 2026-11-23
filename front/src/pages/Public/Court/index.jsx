@@ -1,6 +1,7 @@
 import {
   CalendarCheck,
   CalendarClock,
+  CalendarPlus,
   CircleAlert,
   KeyRound,
   Loader2,
@@ -12,6 +13,8 @@ import {
   User,
   VideoOff,
 } from "lucide-react";
+
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -83,6 +86,7 @@ const CourtPage = () => {
     busyUntilText,
     maxSaves,
     liveWatchUrl,
+    bookAheadUrl,
     isLoading,
     isFetching,
     notFound,
@@ -379,6 +383,21 @@ const CourtPage = () => {
               <Radio className="size-4.5" style={{ color: "var(--color-error)" }} />
               Watch live
             </a>
+          </Button>
+        )}
+
+        {/* CR-030: reserve this court for another day */}
+        {bookAheadUrl && (
+          <Button
+            asChild
+            variant="outline"
+            size="lg"
+            className="mt-3 w-full h-12 text-[15px] rounded-(--radius-card)"
+          >
+            <Link to={bookAheadUrl}>
+              <CalendarPlus className="size-4.5" />
+              Book this court ahead
+            </Link>
           </Button>
         )}
       </div>

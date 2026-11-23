@@ -68,3 +68,21 @@ export const moveMyBookingApi = async ({ manageToken, body }) => {
   const response = await axiosInstance.post(`/api/v1/public/bookings/${manageToken}/move`, body);
   return response.data;
 };
+
+// CR-030: every venue taking online bookings (the public "Book a court" list) →
+// { venues: [{ name, address, phone, logoUrl, bookingToken, courtCount,
+//              todayHours: { opensAt, closesAt } | null }] }
+export const getPublicVenuesApi = async () => {
+  const response = await axiosInstance.get("/api/v1/public/venues");
+  return response.data;
+};
+
+// CR-030: Find my booking — its code plus the phone or email it was booked with →
+// { manageToken, manageUrl }; 404 when nothing matches, 429 after too many tries
+export const findMyBookingApi = async ({ bookingCode, contact }) => {
+  const response = await axiosInstance.post("/api/v1/public/bookings/find", {
+    bookingCode,
+    contact,
+  });
+  return response.data;
+};

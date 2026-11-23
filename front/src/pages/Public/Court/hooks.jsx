@@ -184,6 +184,8 @@ export const useCourtPageHooks = () => {
     maxSaves: court?.maxSaves || 5,
     // The venue streams this court (only sent while streaming and the box is online)
     liveWatchUrl: court?.liveWatchUrl || null,
+    // CR-030: the venue's booking page, when it takes online bookings
+    bookAheadUrl: court?.bookingToken ? `/book/${court.bookingToken}` : null,
     isLoading,
     isFetching,
     notFound,

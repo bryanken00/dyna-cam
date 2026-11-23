@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { optionalEmail, optionalPhone, optionalString } from "./_helpers.js";
+import {
+  formatPhone,
+  optionalEmail,
+  optionalPhone,
+  optionalString,
+  toLocalDigits,
+} from "./_helpers.js";
 import { bookingDate, bookingLength, startTime } from "./bookings.validator.js";
 
 /** Validators for the no-login player routes (controllers/v1/public/). */
@@ -146,11 +152,40 @@ export const playerMoveSchema = z.object({
   startTime: startTime(),
 });
 
+// A booking code as the player types it ("k7q m2p" works)
+const bookingCode = z
+  .string()
+  .transform((v) => v.replace(/\s+/g, "").toUpperCase())
+  .pipe(z.string().regex(/^[A-Z0-9]{4,12}$/, "Enter the code from your booking"));
+
 // POST /courts/:qrToken/check-in — PLAN-003 Phase D: the booking code the
-// player was given ("k7q m2p" works), checked in at that court's QR
-export const checkInCodeSchema = z.object({
-  bookingCode: z
+// player was given, checked in at that court's QR
+export const checkInCodeSchema = z.object({ bookingCode });
+
+const CONTACT_MESSAGE = "Enter the phone number or email you booked with";
+
+// POST /bookings/find — CR-030: the booking code plus the phone (any accepted
+// format → 09XX XXXX XXX) or email the booking was made with
+export const findBookingSchema = z.object({
+  bookingCode,
+  contact: z
     .string()
-    .transform((v) => v.replace(/\s+/g, "").toUpperCase())
-    .pipe(z.string().regex(/^[A-Z0-9]{4,12}$/, "Enter the code from your booking")),
+    .trim()
+    .min(1, CONTACT_MESSAGE)
+    .max(255)
+    .transform((value, ctx) => {
+      if (value.includes("@")) {
+        if (!z.string().email().safeParse(value).success) {
+          ctx.addIssue({ code: "custom", message: CONTACT_MESSAGE });
+          return z.NEVER;
+        }
+        return { email: value.toLowerCase() };
+      }
+      const digits = toLocalDigits(value);
+      if (!/^09\d{9}$/.test(digits)) {
+        ctx.addIssue({ code: "custom", message: CONTACT_MESSAGE });
+        return z.NEVER;
+      }
+      return { phone: formatPhone(digits) };
+    }),
 });

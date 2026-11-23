@@ -152,7 +152,10 @@ credential, and the court's Drive refresh token is stored encrypted and never re
   API `/public/book/:bookingToken/*`; NULL = online booking off) and a booking's **own link**
   (`bookings.manageToken`, `/booking/:manageToken`, API `/public/bookings/:manageToken/*`: pay,
   check in, and until the venue's cut-off cancel / move once); both come from `randomToken()`, and
-  their replies name courts by a hashed key, never a business ID. A booking must be `Paid` or
+  their replies name courts by a hashed key, never a business ID. CR-030: players get in through
+  `/book` (every Active venue with a booking link and an Active court, from `GET /public/venues`)
+  and `/booking` (Find my booking: `POST /public/bookings/find`, booking code + the booking's phone
+  or email → its link; one 404 for every miss, rate-limited). A booking must be `Paid` or
   `Free` to check in. **Online payment** goes through Dyna Cam's one Xendit account
   (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
   `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the
