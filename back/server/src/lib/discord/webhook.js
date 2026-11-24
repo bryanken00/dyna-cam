@@ -44,7 +44,7 @@ export const postDiscord = async (
   if (!url) return { sent: false, reason: "not configured" };
 
   const body = JSON.stringify({
-    username: process.env.ALERT_DISCORD_USERNAME || "Dyna Cam",
+    username: process.env.ALERT_DISCORD_USERNAME || "DGSports",
     allowed_mentions: { parse: [] },
     ...(message.content ? { content: clip(message.content, 2000) } : {}),
     embeds: (message.embeds || []).slice(0, 10).map((embed) => ({

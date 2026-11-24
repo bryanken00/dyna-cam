@@ -1,10 +1,10 @@
 import dayjs from "dayjs";
 import { Link } from "react-router";
 
-import CourtMark from "./brand/CourtMark";
+import DGMark from "./brand/DGMark";
+import Wordmark from "./brand/Wordmark";
+import { APP_NAME } from "./brand/appName";
 import HeroCourt from "./brand/HeroCourt";
-
-const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
 /**
  * Shared chrome for every auth page — login, forgot-password and
@@ -30,13 +30,9 @@ const AuthLayout = ({ children }) => (
         className="inline-flex items-center gap-2.5 self-start"
         style={{ textDecoration: "none" }}
       >
-        <CourtMark />
-        <span
-          className="font-semibold"
-          style={{ fontSize: 15.5, color: "var(--color-brand-on-court)" }}
-        >
-          {APP_NAME}
-        </span>
+        {/* CR-036: the letters alone on the navy band, as the kit's dark lockup */}
+        <DGMark size={30} tile={false} />
+        <Wordmark size={18} onBrand />
       </Link>
 
       <div className="hidden lg:flex flex-1 flex-col justify-center py-10">

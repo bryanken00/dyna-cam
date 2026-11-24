@@ -5,8 +5,8 @@ import { useCourtSignHooks } from "./hooks";
 import ResultState from "../../../../components/ResultState";
 import Spinner from "../../../../components/Spinner";
 import { getImageUrl } from "../../../../utils/upload";
+import { APP_NAME } from "../../../../components/brand/appName";
 
-const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
 /**
  * A5 court sign (148 × 210 mm): venue logo + name, court name, a large QR code

@@ -9,7 +9,7 @@ import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
 import { formatPeso } from "../../../utils/dynaCam";
 
-const FOOTER = "Payment sandbox — for trying Dyna Cam out. No real money moves.";
+const FOOTER = "Payment sandbox — for trying DGSports out. No real money moves.";
 
 const cardStyle = {
   background: "var(--color-surface)",

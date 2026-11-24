@@ -19,7 +19,7 @@ import {
 /** A failed check-in or Pay → the sentence under the button. */
 const actionErrorMessage = (error) => {
   const apiMessage = error?.response?.data?.message;
-  if (!error?.response) return "Couldn't reach Dyna Cam — check your connection and try again.";
+  if (!error?.response) return "Couldn't reach DGSports — check your connection and try again.";
   return apiMessage || "Something went wrong. Please try again.";
 };
 

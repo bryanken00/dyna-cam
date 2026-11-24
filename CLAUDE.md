@@ -1,4 +1,8 @@
-# Dyna Cam
+# DGSports
+
+The product was called **Dyna Cam** until CR-036 (2026-11-24); the repository, folders and code
+names (`DynaCam/`, `dynaCam.js`, `dyna-cam-api`) keep the old name, and the mobile app and
+recorder box are still branded Dyna Cam until their own rebuild.
 
 A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
 court, then scan its QR and enter their booking code to start recording their game (CR-034), then watch it live, save their best rallies, and get the

@@ -12,7 +12,7 @@ import { logger } from "../../../config/logger.js";
  *
  * Env:
  *   SENDGRID_API_KEY, SENDGRID_API_URL
- *   MAIL_FROM   e.g.  "Dyna Cam <no-reply@dynacam.ph>"
+ *   MAIL_FROM   e.g.  "DGSports <no-reply@dgsports.ph>"
  */
 
 const DEFAULT_FROM = process.env.MAIL_FROM || "Template <no-reply@template.test>";
@@ -22,7 +22,7 @@ const SENDGRID_TIMEOUT_MS = 30 * 1000;
 /** True when emails go through SendGrid (CR-018). */
 export const sendgridConfigured = () => Boolean(process.env.SENDGRID_API_KEY);
 
-/** "Dyna Cam <no-reply@x.ph>" → { name, email }; a bare address → { email }. */
+/** "DGSports <no-reply@x.ph>" → { name, email }; a bare address → { email }. */
 const parseAddress = (value) => {
   const text = String(value || "").trim();
   const match = text.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);

@@ -44,8 +44,8 @@ export const requireSignedUpload = (req, res, next) => {
     // CR-003: a whole-game video is stored as game-cam<N>-… → dyna-cam-game(-camN)
     const game = storedPath.match(/\/game-cam(\d)-[^/]*$/);
     const name = game
-      ? `dyna-cam-game${game[1] === "0" ? "" : `-cam${game[1]}`}`
-      : "dyna-cam-replay";
+      ? `dgsports-game${game[1] === "0" ? "" : `-cam${game[1]}`}`
+      : "dgsports-replay";
     res.attachment(`${name}${extension}`);
   }
   next();

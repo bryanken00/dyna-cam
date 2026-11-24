@@ -18,7 +18,7 @@ React 19 (function components, hooks only) · JavaScript (no TypeScript) · Vite
 **shadcn/ui** (Radix primitives + Tailwind, in `src/components/ui/`) · Tailwind CSS v4 · Zustand ·
 TanStack React Query · **react-hook-form + zod** (forms) · **sonner** (toasts) ·
 **@tanstack/react-table** (tables, via the shared `DataTable`) · axios · react-router v8 ·
-lucide-react · dayjs. Type is **Onest** (UI) + **JetBrains Mono** (micro-data only), self-hosted
+lucide-react · dayjs. Type is **Onest** (UI) + **JetBrains Mono** (micro-data only) + **Space Grotesk** (the wordmark), self-hosted
 via `@fontsource-variable`.
 
 > All UI primitives are **shadcn/ui** — import them from `@/components/ui/*` (the `@/` alias →
@@ -26,10 +26,13 @@ via `@fontsource-variable`.
 
 ## Design system — "Modern"
 
-Cool neutral surfaces + hairline borders in the **pickleball brand** (CR-011): navy text, a light
-sidebar and top bar (court-logo tile, lime bar on the current page), **navy primary buttons with white text** (white with navy text in dark), court-blue links and charts, the lime accent for
-bars, ticks and focus rings. Structure comes from borders, **not shadows**; the primary button is
-the shadcn `<Button>` default variant, which the token bridge maps to navy/white (white/navy in dark) (never a gradient,
+Cool-white surfaces + hairline borders in the **DGSports brand** (CR-036, the DGPlay logo's blue
+`#174F8A`→`#4189C8` and its ball's lime `#E2F41F`): dark ink text, a light sidebar and top bar (the
+DGPlay logo, lime bar on the current page), **blue primary buttons with white text** (lime with
+dark text in dark), brighter-blue links and charts, the lime accent for bars, ticks and focus
+rings. The logo and every icon come from `node scripts/brand-icons.mjs`
+(`scripts/brand/dgplay.mjs`); the web splash is `index.html`'s `#dg-splash` + `components/splash/`. Structure comes from borders, **not shadows**; the primary button is
+the shadcn `<Button>` default variant, which the token bridge maps to blue/white (lime/dark in dark) (never a gradient,
 never an inline background). Every color is a token in `src/index.css` — **never hardcode a
 hex**.
 

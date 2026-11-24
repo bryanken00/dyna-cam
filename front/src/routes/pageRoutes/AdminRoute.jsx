@@ -26,7 +26,7 @@ const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
 const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
 // PLAN-003: printable "Book a court" sign for a venue's online booking link
 const BookingSign = lazy(() => import("../../pages/Admin/Setup/BookingSign"));
-// Dyna Cam (PLAN-001): day-to-day work
+// DGSports (PLAN-001; CR-036 renamed from Dyna Cam): day-to-day work
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
 // PLAN-003: court bookings at the desk
@@ -81,8 +81,8 @@ const AdminRoute = () => {
     },
     {
       key: "dyna-cam",
-      name: "Dyna Cam",
-      label: "Dyna Cam",
+      name: "DGSports",
+      label: "DGSports",
       icon: <Video className="h-5 w-5" />,
       permission: {
         anyOf: [

@@ -27,7 +27,7 @@ const clockOf = (total) => {
 /** What to say when a save or a preview is refused or can't be sent. */
 const errorText = (error, fallback) => {
   if (!error) return null;
-  if (!error.response) return "Can't reach Dyna Cam — check your connection and try again.";
+  if (!error.response) return "Can't reach DGSports — check your connection and try again.";
   return error.response?.data?.message || fallback;
 };
 

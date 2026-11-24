@@ -1,8 +1,8 @@
 import { Link } from "react-router";
 
 import ThemeToggle from "../ThemeToggle";
-
-const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
+import DGMark from "../brand/DGMark";
+import Wordmark from "../brand/Wordmark";
 
 /**
  * Chrome for the player pages (`/court/:qrToken`, `/clip/:shareToken`):
@@ -24,12 +24,10 @@ const PublicLayout = ({ children, footer, wide = false }) => {
         style={{ borderBottom: "1px solid var(--color-line)" }}
       >
         <div className={`mx-auto ${width} flex items-center justify-between gap-3`}>
-          <Link
-            to="/"
-            className="font-semibold"
-            style={{ fontSize: 15, color: "var(--color-text-dark)", textDecoration: "none" }}
-          >
-            {APP_NAME}
+          {/* CR-036: the DGSports mark and wordmark */}
+          <Link to="/" className="inline-flex items-center gap-2" style={{ textDecoration: "none" }}>
+            <DGMark size={22} />
+            <Wordmark size={15.5} />
           </Link>
           <ThemeToggle />
         </div>

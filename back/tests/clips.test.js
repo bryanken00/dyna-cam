@@ -209,7 +209,7 @@ describe("clips", () => {
     assert.equal(download.status, 200);
     assert.equal(
       download.headers.get("content-disposition"),
-      "attachment; filename=dyna-cam-replay.mp4"
+      "attachment; filename=dgsports-replay.mp4"
     );
 
     // The bare path is refused

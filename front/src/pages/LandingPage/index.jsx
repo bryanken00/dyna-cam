@@ -17,10 +17,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/ThemeToggle";
-import CourtMark from "@/components/brand/CourtMark";
+import DGMark from "@/components/brand/DGMark";
+import Wordmark from "@/components/brand/Wordmark";
+import { APP_NAME } from "@/components/brand/appName";
 import HeroCourt, { ReplayBar } from "@/components/brand/HeroCourt";
-
-const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
 /** A player's game, in the order it happens: book, then check in at the court's QR (CR-034). */
 const STEPS = [
@@ -242,10 +242,8 @@ const LandingPage = () => {
               className="inline-flex items-center gap-2.5"
               style={{ textDecoration: "none" }}
             >
-              <CourtMark />
-              <span className="font-semibold" style={{ fontSize: 15.5, color: ON_NAVY }}>
-                {APP_NAME}
-              </span>
+              <DGMark size={30} tile={false} />
+              <Wordmark size={18} onBrand />
             </a>
             <nav className="flex items-center gap-1">
               <NavLink href="#how-it-works">How it works</NavLink>
@@ -284,9 +282,9 @@ const LandingPage = () => {
                 className="m-0 mt-6 max-w-md"
                 style={{ ...bodyStyle, fontSize: 16.5, color: "rgb(255 255 255 / 0.74)" }}
               >
-                Scan the court&apos;s code, pick your game time, and the whole game records. Watch
-                it live, save your best rallies, and get every minute on your phone. Nothing to
-                install.
+                Book a court, scan its code and enter your booking code — the whole game records.
+                Watch it live, save your best rallies, and get every minute on your phone. Nothing
+                to install.
               </p>
               <div className="flex items-center gap-2.5 mt-9 flex-wrap">
                 <Button size="lg" className="btn-on-navy" asChild>
@@ -318,7 +316,7 @@ const LandingPage = () => {
             <SectionHead
               eyebrow="Four steps. That's it."
               title="Your whole game, without stopping play."
-              body="Ask the front desk and you're set. Dyna Cam records in the background so you can stay focused on the game, not the camera."
+              body="Ask the front desk and you're set. DGSports records in the background so you can stay focused on the game, not the camera."
             />
             <ItemRow items={STEPS} numbered />
           </div>
@@ -416,7 +414,7 @@ const LandingPage = () => {
           style={{ fontSize: 13, color: "rgb(255 255 255 / 0.7)" }}
         >
           <span className="inline-flex items-center gap-2">
-            <CourtMark />© {new Date().getFullYear()} {APP_NAME}
+            <DGMark size={20} tile={false} />© {new Date().getFullYear()} {APP_NAME}
           </span>
           <button
             type="button"

@@ -6,10 +6,12 @@ import App from "./App.jsx";
 // Google Fonts <link> is only a dev/CDN fallback.
 import "@fontsource-variable/onest";
 import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/space-grotesk";
 
 import "./index.css";
 import { initSentry } from "./config/sentry.js";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
+import { startSplash } from "./components/splash/startSplash.js";
 
 // Initialize Sentry before rendering
 initSentry();
@@ -21,3 +23,6 @@ createRoot(document.getElementById("root")).render(
     </ErrorBoundary>
   </StrictMode>,
 );
+
+// CR-036: the opening splash (the DGPlay logo bouncing in), once per browser tab
+startSplash();

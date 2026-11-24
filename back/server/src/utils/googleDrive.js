@@ -185,7 +185,7 @@ export const exchangeCode = async (code) => {
   const granted = String(body.scope || "").split(/\s+/);
   if (!granted.includes(DRIVE_SCOPE)) {
     throw new DriveError(
-      "Dyna Cam needs permission to add files to Google Drive. Connect again and tick it.",
+      "DGSports needs permission to add files to Google Drive. Connect again and tick it.",
       { retryable: false }
     );
   }
@@ -216,7 +216,7 @@ export const accessToken = async (refreshToken) => {
   const body = await readJson(res);
   if (res.ok && body.access_token) return body.access_token;
   if (body.error === "invalid_grant" || res.status === 401) {
-    throw new DriveAuthError("Google removed Dyna Cam's access to this account. Reconnect it.");
+    throw new DriveAuthError("Google removed DGSports' access to this account. Reconnect it.");
   }
   throw new DriveError(`Google sign-in failed (${body.error || res.status})`, {
     status: res.status,
@@ -225,7 +225,7 @@ export const accessToken = async (refreshToken) => {
 
 /**
  * Revoke a refresh token at Google. Best effort: never throws. Revoking ends
- * the whole grant of that Google account to Dyna Cam, so callers only revoke
+ * the whole grant of that Google account to DGSports, so callers only revoke
  * when no other court is connected to the same account.
  */
 export const revokeToken = async (refreshToken) => {
@@ -249,7 +249,7 @@ const driveFailure = async (res, what) => {
   const reason = body?.error?.errors?.[0]?.reason || body?.error?.status || "";
   const message = body?.error?.message || `HTTP ${res.status}`;
   if (res.status === 401) {
-    return new DriveAuthError("Google removed Dyna Cam's access to this account. Reconnect it.");
+    return new DriveAuthError("Google removed DGSports' access to this account. Reconnect it.");
   }
   if (res.status === 404) return new DriveNotFoundError(`${what}: not found`);
   if (reason === "storageQuotaExceeded") {
@@ -400,7 +400,7 @@ export const uploadFile = async (token, { filePath, name, parentId, mimeType = "
   }
 };
 
-/** The address players open for a file Dyna Cam shared. */
+/** The address players open for a file DGSports shared. */
 export const fileViewUrl = (fileId, webViewLink) =>
   webViewLink || `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`;
 

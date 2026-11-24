@@ -34,7 +34,7 @@ const findErrorMessage = (error) => {
   const status = error?.response?.status;
   const apiMessage = error?.response?.data?.message;
   if (status === 404 || status === 429) return apiMessage || "No booking matches — check the code.";
-  if (!error?.response) return "Couldn't reach Dyna Cam — check your connection and try again.";
+  if (!error?.response) return "Couldn't reach DGSports — check your connection and try again.";
   return apiMessage || "Something went wrong. Please try again.";
 };
 

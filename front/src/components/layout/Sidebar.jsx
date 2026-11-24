@@ -28,7 +28,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import CourtMark from "../brand/CourtMark";
+import DGMark from "../brand/DGMark";
+import Wordmark from "../brand/Wordmark";
 import { confirm } from "../../store/confirmStore";
 import { useWindowSize } from "../../hooks/useWindowSize";
 
@@ -85,7 +86,6 @@ const flattenLeaves = (navigations) =>
 
 // ── Brand ────────────────────────────────────────────────────────────────────
 const Brand = ({ collapsed }) => {
-  const name = import.meta.env.VITE_APP_NAME || "Dyna Cam";
   return (
     <div
       className={clsx(
@@ -93,25 +93,12 @@ const Brand = ({ collapsed }) => {
         collapsed && "justify-center px-0",
       )}
     >
-      {/* The brand court (CR-011) on a court-blue tile */}
-      <span
-        className="inline-flex items-center justify-center shrink-0"
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: 9,
-          background: "var(--color-brand-court)",
-        }}
-      >
-        <CourtMark />
-      </span>
+      {/* CR-036: the DGPlay logo, no tile (blue frame; white in dark) */}
+      <DGMark size={26} />
       {!collapsed && (
         <div className="min-w-0 leading-tight">
-          <div
-            className="truncate font-semibold"
-            style={{ fontSize: 14, color: "var(--color-text-dark)" }}
-          >
-            {name}
+          <div className="truncate">
+            <Wordmark size={15} />
           </div>
           <div
             className="truncate"

@@ -4,7 +4,7 @@
  * in any client and need no build step.
  */
 
-const APP_NAME = process.env.APP_NAME || "Template";
+const APP_NAME = process.env.APP_NAME || "DGSports";
 
 const layout = (title, bodyHtml) => `
   <div style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; color: #18181b;">

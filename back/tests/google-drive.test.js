@@ -428,7 +428,7 @@ describe("Google Drive per court", () => {
       assert.equal(file.size, MP4.length);
       assert.match(file.name, /Court 1 replay\.mp4$/);
       const folder = google.state.files.get(file.parents[0]);
-      assert.equal(folder.name, "Dyna Cam · Drive Courts · Court 1");
+      assert.equal(folder.name, "DGSports · Drive Courts · Court 1");
       assert.equal(folder.shared, false, "the court's folder itself stays private");
 
       const page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
@@ -885,7 +885,7 @@ describe("Google Drive per court", () => {
 
   describe("changing and losing the account", () => {
     it("waits for a reconnect when Google drops the sign-in, then uploads", async () => {
-      // Alice removes Dyna Cam's access in her Google account
+      // Alice removes DGSports' access in her Google account
       for (const refresh of google.state.refresh.keys()) google.state.revoked.add(refresh);
       const clip = await replay();
       assert.deepEqual(await runDriveUploads(db), { waiting: 1 });
