@@ -35,6 +35,8 @@ describe("game time (CR-016)", () => {
       ...body,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    // CR-039: New game is always free; this test is about an unpaid game (one made before)
+    res.data.payCode = await ctx.makeUnpaid(res.data.sessionId);
     return res.data;
   };
 

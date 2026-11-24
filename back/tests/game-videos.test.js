@@ -54,6 +54,8 @@ describe("game videos", () => {
       durationMinutes: 5,
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
+    // CR-039: New game is always free; this test is about an unpaid game (one made before)
+    await ctx.makeUnpaid(created.data.sessionId);
     await ctx.sql.query(
       `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
       [await manila(startMinutes), await manila(endMinutes), created.data.sessionId]

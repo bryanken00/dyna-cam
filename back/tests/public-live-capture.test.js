@@ -36,6 +36,8 @@ describe("live view and saves on the game page (CR-025)", () => {
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.ok(res.data.shareUrl);
+    // CR-039: New game is always free; this test is about an unpaid game (one made before)
+    res.data.payCode = await ctx.makeUnpaid(res.data.sessionId);
     return res.data;
   };
 

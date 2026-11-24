@@ -20,15 +20,6 @@ export const getSessionByIdApi = async (sessionId) => {
   return response.data;
 };
 
-// { courtId, startNow?: true, startAt?: "YYYY-MM-DD HH:mm" (Manila, unless startNow),
-//   durationMinutes, playerName?, phone?, free?, maxCaptures? }
-// CR-016: New game sends startNow + durationMinutes — it records at once.
-// → 201 { sessionId, status, startAt, endAt, payCode, shareUrl } · 409 court busy
-export const createSessionApi = async (sessionData) => {
-  const response = await api.post("/api/v1/admin/sessions", sessionData);
-  return response.data;
-};
-
 // Only before it starts — 409 otherwise
 export const cancelSessionApi = async (sessionId) => {
   const response = await api.post(`/api/v1/admin/sessions/${sessionId}/cancel`);

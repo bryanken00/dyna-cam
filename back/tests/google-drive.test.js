@@ -514,6 +514,8 @@ describe("Google Drive per court", () => {
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const { sessionId, shareUrl } = created.data;
+      // CR-039: New game is always free; this test is about an unpaid game (one made before)
+      await ctx.makeUnpaid(sessionId);
       // CR-015: the Drive link shows on the player's page once the game is paid
       assert.equal(
         (await call("POST", "/admin/payments", { sessionId, amount: 250 })).status,
@@ -789,6 +791,8 @@ describe("Google Drive per court", () => {
       });
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const { sessionId } = created.data;
+      // CR-039: New game is always free; this test is about an unpaid game (one made before)
+      await ctx.makeUnpaid(sessionId);
       await call("POST", "/admin/payments", { sessionId, amount: 250 });
       await ctx.sql.query(
         `UPDATE recording_sessions

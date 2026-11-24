@@ -416,8 +416,8 @@ const createOpenGame = async (req, res) => {
     const sessionId = uuidRow[0].id;
     const shareToken = randomToken();
     // startAt is a placeholder until a device pairs; endAt rolls (utils/sessions.js).
-    // CR-015: unpaid, with the code the player shows at the desk — or free
-    // (staff chose "Free game"): no code, open to the player at once
+    // CR-039: a staff game is always free — no pay code, open to the player at
+    // once (CR-015's unpaid games came from here; older ones keep their code)
     const payCode = await insertWithPayCode((code) =>
       conn.execute(
         `INSERT INTO recording_sessions
@@ -443,7 +443,7 @@ const createOpenGame = async (req, res) => {
           now,
         ]
       ),
-      { conn, free: Boolean(req.body.free) }
+      { conn, free: true }
     );
     await req.db.commit(conn);
     return res.sendSuccess(
@@ -501,7 +501,7 @@ router.post(
         phone,
         email,
         maxCaptures,
-        free: Boolean(req.body.free),
+        free: true, // CR-039: a staff game is always free
         createdByAccountId: req.user.accountId,
       });
       if (!booked.ok) {

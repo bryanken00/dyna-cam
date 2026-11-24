@@ -8,7 +8,6 @@ import {
 import {
   getSessionsApi,
   getSessionByIdApi,
-  createSessionApi,
   cancelSessionApi,
   endSessionApi,
   extendSessionApi,
@@ -56,26 +55,6 @@ export const useGetSessionById = (sessionId) => {
       if (SESSION_LIVE_STATUSES.includes(session?.status)) return 15 * 1000;
       // CR-003: the whole video is being joined
       return session?.wholeVideo === "Pending" ? 15 * 1000 : false;
-    },
-  });
-};
-
-// Mutation: New game (CR-016: `startNow: true` + durationMinutes — records at once)
-export const useCreateSession = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: createSessionApi,
-    onSuccess: (response) => {
-      toast.success(response?.message || "Game created");
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    },
-    onError: (error) => {
-      toast.error(
-        error.response?.status === 409
-          ? "This court already has a game — end it before starting a new one"
-          : error.response?.data?.message || "Failed to create the game",
-      );
     },
   });
 };
