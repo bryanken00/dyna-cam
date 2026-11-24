@@ -813,12 +813,20 @@ const SessionPage = () => {
     </>
   );
   // CR-013: the stretches saved from the courtside device
+  // CR-037: on a wide screen, a grid under the video (two per row); phones keep the list
   const savesBlock = !session.locked && captures.length > 0 && (
     <div className="mt-6">
-      <h2 className="m-0 mb-3 font-semibold" style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}>
-        Your saves
-      </h2>
-      <div className="space-y-3">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="m-0 font-semibold" style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}>
+          Your saves
+        </h2>
+        <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+          {capture?.maxPerGame
+            ? `${captures.length} of ${capture.maxPerGame}`
+            : `${captures.length} ${captures.length === 1 ? "save" : "saves"}`}
+        </span>
+      </div>
+      <div className={wide ? "grid grid-cols-2 gap-3 items-start" : "space-y-3"}>
         {captures.map((capture) => (
           <CaptureCard
             key={`${capture.number}-${capture.savedAt}`}
@@ -913,13 +921,15 @@ const SessionPage = () => {
       {saving && <SavingProgress percent={saving.percent} />}
 
       {/* CR-035: each part built once below; phones keep today's order,
-          wide screens put the video on the left and the rest on the right */}
-      {wide && (liveBlock || lockedBlock || videoBlock || partsBlock) ? (
+          wide screens put the video (CR-037: and the saves, as a grid) on the
+          left and the game's controls on the right */}
+      {wide && (liveBlock || lockedBlock || videoBlock || savesBlock || partsBlock) ? (
         <div className="mt-4 grid gap-6 grid-cols-[minmax(0,1fr)_380px] items-start">
           <div className={columnClass}>
             {liveBlock}
             {lockedBlock}
             {videoBlock}
+            {savesBlock}
             {partsBlock}
           </div>
           <div className={columnClass}>
@@ -927,7 +937,6 @@ const SessionPage = () => {
             {endBlock}
             {streamBlock}
             {driveBlock}
-            {savesBlock}
             {shareBlock}
           </div>
         </div>
