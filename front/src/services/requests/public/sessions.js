@@ -6,6 +6,7 @@ import {
   getPublicPreviewApi,
   getPublicSessionApi,
   getPublicStreamLinkApi,
+  resumePublicGameApi,
   savePublicCaptureApi,
   stopPublicStreamApi,
 } from "../../api/public/sessions";
@@ -75,6 +76,14 @@ const useGameControl = (shareToken, mutationFn, fallback) => {
 // Mutation: CR-028 — End game
 export const useEndPublicGame = (shareToken) =>
   useGameControl(shareToken, () => endPublicGameApi(shareToken), "Couldn't end the game — try again.");
+
+// Mutation: CR-041 — Resume recording (the page opens the new game on success)
+export const useResumePublicGame = (shareToken) =>
+  useGameControl(
+    shareToken,
+    () => resumePublicGameApi(shareToken),
+    "Couldn't resume the recording — try again.",
+  );
 
 // Mutation: CR-028 — delete a save ({ number, savedAt })
 export const useDeletePublicCapture = (shareToken) =>

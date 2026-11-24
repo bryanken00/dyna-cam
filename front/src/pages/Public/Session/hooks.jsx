@@ -11,6 +11,7 @@ import {
   useGetPublicSession,
   usePublicPreview,
   usePublicStreamLink,
+  useResumePublicGame,
   useSavePublicCapture,
   useStopPublicStream,
 } from "../../../services/requests/public/sessions";
@@ -31,6 +32,8 @@ export const useSessionPageHooks = () => {
   const deleteCapture = useDeletePublicCapture(shareToken);
   const streamLink = usePublicStreamLink(shareToken);
   const stopStream = useStopPublicStream(shareToken);
+  // CR-041: record the rest of the booked time after an early End game
+  const resumeGame = useResumePublicGame(shareToken);
 
   const session = data?.data?.session || null;
   // CR-025: the court's live video (null unless recording) and the save limits
@@ -39,6 +42,12 @@ export const useSessionPageHooks = () => {
   // CR-028: the player's own Facebook / YouTube stream
   const stream = data?.data?.stream || null;
   const canStream = !!data?.data?.canStream;
+  // CR-041: { canResume, until, continuedShareUrl } or null
+  const resume = session?.resume || null;
+  // The API builds links from APP_URL; open their path on this site
+  const continuedPath = resume?.continuedShareUrl
+    ? new URL(resume.continuedShareUrl, window.location.origin).pathname
+    : null;
   const isRecording = session?.status === "Recording";
   const notFound = error?.response?.status === 404;
   // CR-003: the whole game, one video per camera (Cam 1 / Cam 2 tabs)
@@ -106,6 +115,16 @@ export const useSessionPageHooks = () => {
     if (ok) endGame.mutate();
   }, [endGame]);
 
+  // CR-041: Resume recording → the new game's page
+  const handleResume = useCallback(() => {
+    resumeGame.mutate(undefined, {
+      onSuccess: (response) => {
+        const url = response?.data?.shareUrl;
+        if (url) navigate(new URL(url, window.location.origin).pathname);
+      },
+    });
+  }, [resumeGame, navigate]);
+
   // CR-028: delete a save — frees one of the game's saves
   const handleDeleteCapture = useCallback(
     async (item) => {
@@ -159,6 +178,10 @@ export const useSessionPageHooks = () => {
     canStream,
     handleEndGame,
     isEnding: endGame.isPending,
+    resume,
+    continuedPath,
+    handleResume,
+    isResuming: resumeGame.isPending,
     handleDeleteCapture,
     deletingNumber: deleteCapture.isPending ? deleteCapture.variables?.number : null,
     handleOpenStream,

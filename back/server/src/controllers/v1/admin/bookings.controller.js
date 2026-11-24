@@ -559,7 +559,8 @@ router.post(
 /**
  * POST /:bookingId/check-in
  * Phase D: staff start the booking's recorded game (the player has no phone,
- * the QR is damaged…). Same window and payment rules as the player's check-in;
+ * the QR is damaged…). CR-041: after the game was ended early, this resumes
+ * the rest of the booked time as a new game. Same window and payment rules as the player's check-in;
  * the recorder box needn't have reported in (like New game).
  */
 router.post(
@@ -580,7 +581,9 @@ router.post(
     return res.sendSuccess(
       result.alreadyCheckedIn
         ? "Already checked in"
-        : result.status === "Scheduled"
+        : result.resumed
+          ? "Recording resumed for the rest of the booking"
+          : result.status === "Scheduled"
           ? "Checked in — recording starts at the booked time"
           : "Checked in — recording now",
       { sessionId: result.sessionId, shareUrl: result.shareUrl },
