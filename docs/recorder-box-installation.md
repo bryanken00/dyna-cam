@@ -1,13 +1,13 @@
-# Recorder box installation — Windows and Mac
+# Recorder box installation — Mac
 
 Created: 2026-11-24 · Updated: 2026-11-24
 
-How to set up the **recorder box** at a venue and connect it to the DGSports cloud. The box is
-a Windows PC or a Mac at the venue that records the court cameras and sends each game to Google
-Drive.
+How to set up a **Mac** as the venue's **recorder box** and connect it to the DGSports cloud. The
+box records the court cameras and sends each game to Google Drive.
+(Windows PC: see [recorder-box-installation-windows.md](recorder-box-installation-windows.md).)
 
-Everything below is done **on the box**, except where it says *Cloud Admin* (a web browser).
-Nothing is installed on the server.
+Everything below is done **on the Mac**, in **Terminal**, except where it says *Cloud Admin* (a
+web browser). Nothing is installed on the server.
 
 ---
 
@@ -15,8 +15,8 @@ Nothing is installed on the server.
 
 ### A1. You need
 
-- [ ] A **Windows 10/11 PC** or a **Mac** that stays on at the venue, plugged in with a **network
-      cable** to the venue router.
+- [ ] A **Mac** that stays on at the venue, plugged in with a **network cable** to the venue
+      router.
 - [ ] The box's **fixed LAN IP** — ask for a DHCP reservation in the router
       (example used below: `192.168.254.121`).
 - [ ] The court **cameras** on the same network, each with a fixed IP and an RTSP account.
@@ -37,43 +37,16 @@ They connect the box to the cloud. They must be exact.
 
 ## Part B — Install the programs
 
-Do **either** the Windows steps **or** the Mac steps.
-
-### Windows
-
-1. Open **PowerShell as Administrator** (Start → type *PowerShell* → *Run as administrator*).
-2. Install Node.js, ffmpeg and Git:
-
-   ```powershell
-   winget install --id OpenJS.NodeJS.LTS -e
-   winget install --id Gyan.FFmpeg -e
-   winget install --id Git.Git -e
-   ```
-
-3. **Close PowerShell and open it again** (as Administrator).
-4. Install pm2 and check the versions:
-
-   ```powershell
-   npm install -g pm2
-   node -v        # must be v20.12 or newer
-   ffmpeg -version
-   ```
-
-5. Turn on automatic time: Settings → Time & language → Date & time → **Set time automatically**.
-6. Stop it from sleeping: `powercfg /change standby-timeout-ac 0`
-7. Mark the network as private: Settings → Network → your cable connection → **Private network**.
-
-### Mac
-
 1. Open **Terminal**. Install [Homebrew](https://brew.sh) if you don't have it.
 2. Install Node.js, ffmpeg, Git, pm2 and certbot:
 
    ```bash
    brew install node ffmpeg git certbot
    npm install -g pm2
-   node -v        # must be v20.12 or newer
+   node -v
    ```
 
+   `node -v` must say **v20.12 or newer**. ✅
 3. Turn on automatic time: System Settings → General → Date & Time → **Set time and date
    automatically**.
 4. Stop it from sleeping, and restart it after a power cut:
@@ -89,18 +62,6 @@ Do **either** the Windows steps **or** the Mac steps.
 
 ## Part C — Download the box program
 
-**Windows** (normal PowerShell):
-
-```powershell
-cd C:\
-git clone https://github.com/bryanken00/dyna-cam.git dgsports
-cd C:\dgsports\edge
-npm ci --omit=dev
-copy .env.example .env
-```
-
-**Mac:**
-
 ```bash
 git clone https://github.com/bryanken00/dyna-cam.git ~/dgsports
 cd ~/dgsports/edge
@@ -115,8 +76,11 @@ When Git asks you to sign in, use a GitHub account that can see the repo.
 ## Part D — Connect the box to the cloud
 
 1. Open the settings file:
-   - Windows: `notepad C:\dgsports\edge\.env`
-   - Mac: `open -e ~/dgsports/edge/.env`
+
+   ```bash
+   open -e ~/dgsports/edge/.env
+   ```
+
 2. Set these lines (use your values from **A2**), and save:
 
    ```ini
@@ -137,14 +101,9 @@ When Git asks you to sign in, use a GitHub account that can see the repo.
    ```
 
 4. Within a minute the log says **`Enrolled as bigpickle-box-1 for <venue>`**. ✅
-5. Open the live-view port:
-   - **Windows** (PowerShell as Administrator):
-
-     ```powershell
-     New-NetFirewallRule -DisplayName "DGSports live view" -Direction Inbound -Protocol TCP -LocalPort 8090 -Action Allow -Profile Private
-     ```
-
-   - **Mac:** when macOS asks *"Do you want node to accept incoming connections?"* → **Allow**.
+5. When macOS asks *"Do you want node to accept incoming connections?"* → **Allow** (the live
+   view needs it). Clicked Deny? System Settings → Network → Firewall → Options → **node** →
+   *Allow incoming connections*.
 
 > **This box was connected to another server before** (e.g. a local test)? Stop it first, and
 > move `device.json`, `config.json`, `queue.json` and the `videos` folder out of `edge/data/`
@@ -169,9 +128,6 @@ In a browser, at `https://office.dynamicglobalsoft.com:1343`:
 The website is `https://`, so browsers only show the box's live video if the box has its own
 **name and certificate**. We use a free **DuckDNS** name — no access to the website's domain or
 server is needed.
-
-> Windows box: do steps F1–F4 **on any Mac** (certbot isn't available for Windows), then copy the
-> files in F5.
 
 ### F1. Create the name
 
@@ -222,18 +178,14 @@ It prints `OK`, waits a minute, then **`Successfully received certificate`**. �
 
 ### F5. Point the box at the certificate
 
-Set these two lines in `edge/.env`:
+Set these two lines in `edge/.env` (`<you>` = your Mac user name, from `whoami`):
 
-| Box | `LIVE_HOST` | `CERT_PATH` |
-| --- | --- | --- |
-| **Mac** (certificate made on it) | `bigpickle-box1.duckdns.org` | `/Users/<you>/letsencrypt/config/live/bigpickle-box1.duckdns.org` |
-| **Windows** | `bigpickle-box1.duckdns.org` | `C:/dgsports-cert` (use forward slashes) |
+```ini
+LIVE_HOST=bigpickle-box1.duckdns.org
+CERT_PATH=/Users/<you>/letsencrypt/config/live/bigpickle-box1.duckdns.org
+```
 
-For **Windows**: copy `privkey.pem`, `cert.pem` and `chain.pem` from the Mac's
-`~/letsencrypt/config/live/bigpickle-box1.duckdns.org/` into `C:\dgsports-cert`. Copy the real
-files (`cp -L` on the Mac), not shortcuts.
-
-> Keep the certificate files **outside** the `dgsports` folder, so they can never be committed.
+Renewals update the files in that folder, and the box picks them up by itself.
 
 ### F6. Restart and test
 
@@ -257,24 +209,12 @@ If it still says *Live view needs the venue Wi-Fi*, see Part I.
    ```
 
 2. Start it automatically after a restart:
-   - **Mac:**
 
-     ```bash
-     pm2 startup
-     ```
+   ```bash
+   pm2 startup
+   ```
 
-     It prints one `sudo env PATH=…` line — copy it, run it, then `pm2 save` again.
-
-   - **Windows** (PowerShell as Administrator, signed in as the box's user):
-
-     ```powershell
-     $action  = New-ScheduledTaskAction -Execute "$env:APPDATA\npm\pm2.cmd" -Argument "resurrect"
-     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-     Register-ScheduledTask -TaskName "DGSports recorder box" -Action $action -Trigger $trigger -RunLevel Highest
-     ```
-
-     Then make Windows sign in by itself: Win+R → `netplwiz` → untick *Users must enter a user
-     name and password* → enter the password.
+   It prints one `sudo env PATH=…` line — copy it, run it, then `pm2 save` again.
 
 3. Useful commands:
 
@@ -290,7 +230,7 @@ If it still says *Live view needs the venue Wi-Fi*, see Part I.
 
 | When | What | How |
 | --- | --- | --- |
-| **Every ~60 days** | Renew the certificate (it lasts 90) | On the Mac: `certbot renew --config-dir ~/letsencrypt/config --work-dir ~/letsencrypt/work --logs-dir ~/letsencrypt/logs` — then, for a Windows box, copy the 3 files again (F5). The box picks them up within 6 hours. |
+| **Every ~60 days** | Renew the certificate (it lasts 90) | `certbot renew --config-dir ~/letsencrypt/config --work-dir ~/letsencrypt/work --logs-dir ~/letsencrypt/logs` — the box picks up the new files within 6 hours. |
 | **When the box's LAN IP changes** | Update the DuckDNS name | duckdns.org → type the new IP → **update ip**. (A router reservation avoids this.) |
 | **New version released** | Update the box | In the `dgsports` folder: `git pull`, then in `edge`: `npm ci --omit=dev` and `pm2 reload dyna-cam-edge` |
 
