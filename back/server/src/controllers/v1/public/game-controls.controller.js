@@ -2,7 +2,14 @@ import express from "express";
 import { catchAsync, validateParams, validateQuery } from "../../../utils/catchAsync.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
-import { endSessionNow, materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
+import {
+  advanceSessions,
+  endSessionNow,
+  materializeSessionParts,
+  settleSessions,
+} from "../../../utils/sessions.js";
+import { checkInBooking } from "../../../utils/bookingCheckIn.js";
+import { sendBookingEmail } from "../../../utils/bookingEmails.js";
 import { deleteCapture } from "../../../utils/sessionCaptures.js";
 import { toEpochMs } from "../../../utils/clips.js";
 import {
@@ -27,6 +34,7 @@ import {
  * Same rules as the device's /app/session routes; replies carry no IDs.
  *
  *   POST   /:shareToken/end                 End game (the game so far is saved)
+ *   POST   /:shareToken/resume              CR-041: record the rest of the booked time
  *   DELETE /:shareToken/captures/:number    delete Save N (?savedAt= as shown)
  *   POST   /:shareToken/stream-link         a setup link for the player's own stream
  *   POST   /:shareToken/stream/stop         stop the player's stream
@@ -76,6 +84,62 @@ router.post(
     const result = await endSessionNow(req.db, game.sessionId);
     if (!result.ok) return res.sendError("The game has ended", 409);
     return res.sendSuccess("Game ended — your whole game is being saved");
+  })
+);
+
+/**
+ * POST /:shareToken/resume — CR-041: a booked game ended early → a new game
+ * for the rest of the booked time (checkInBooking decides). 201 { shareToken,
+ * shareUrl } of the new game; 200 with the running one when it already
+ * resumed (a double tap, another phone); 409 while this game still records or
+ * once the booked time is over.
+ */
+router.post(
+  "/:shareToken/resume",
+  controlLimiter,
+  validateParams(sessionTokenParamsSchema),
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT bookingId, venueId FROM recording_sessions
+       WHERE shareToken = ? AND status != 'Cancelled' LIMIT 1`,
+      [req.params.shareToken]
+    );
+    if (rows.length === 0) return res.sendError(NOT_FOUND, 404);
+    if (!rows[0].bookingId) return res.sendError("Only a booked game can be resumed", 409);
+    await advanceSessions(req.db, { venueId: rows[0].venueId });
+
+    let conn;
+    let result;
+    try {
+      conn = await req.db.beginTransaction();
+      result = await checkInBooking(conn, {
+        bookingId: rows[0].bookingId,
+        requireRecorderOnline: true,
+      });
+      if (result.ok) await req.db.commit(conn);
+      else await req.db.rollback(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    if (!result.ok) return res.sendError(result.message, null, result.status, result.code);
+    if (result.alreadyCheckedIn) {
+      if (result.shareToken === req.params.shareToken) {
+        return res.sendError("The game is still recording", 409);
+      }
+      return res.sendSuccess(
+        "Recording already resumed",
+        { shareToken: result.shareToken, shareUrl: result.shareUrl },
+        200
+      );
+    }
+    await sendBookingEmail(req.db, rows[0].bookingId, "GameStarted");
+    return res.sendSuccess(
+      "Recording resumed",
+      { shareToken: result.shareToken, shareUrl: result.shareUrl },
+      201
+    );
   })
 );
 

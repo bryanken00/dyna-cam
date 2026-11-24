@@ -10,7 +10,11 @@ import {
   settleSessions,
   uploadPercent,
 } from "../../../utils/sessions.js";
-import { BOOKED_GAME_MAX_CAPTURES, checkInBooking } from "../../../utils/bookingCheckIn.js";
+import {
+  BOOKED_GAME_MAX_CAPTURES,
+  checkInBooking,
+  resumeOffer,
+} from "../../../utils/bookingCheckIn.js";
 import { sendBookingEmail } from "../../../utils/bookingEmails.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
@@ -268,12 +272,13 @@ router.post(
     await advanceSessions(req.db, { venueId: court.venueId });
     const now = getCurrentTimestampLocal();
 
-    // The code must be this court's booking, in (or about to open) its time
+    // The code must be this court's booking, in (or about to open) its time.
+    // CR-041: a Completed one (its game ended early) resumes the rest.
     const [booking] = await req.db.query(
       `SELECT b.bookingId FROM bookings b
        JOIN venues v ON v.venueId = b.venueId
        WHERE b.courtId = ? AND b.bookingCode = ?
-         AND b.status IN ('Confirmed', 'CheckedIn', 'Pending')
+         AND b.status IN ('Confirmed', 'CheckedIn', 'Completed', 'Pending')
          AND b.startAt <= DATE_ADD(?, INTERVAL v.checkInEarlyMinutes MINUTE) AND b.endAt > ?
        LIMIT 1`,
       [court.courtId, req.body.bookingCode, now, now]
@@ -305,9 +310,11 @@ router.post(
     // PLAN-003 Phase G: the game page link, by email
     if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, booking.bookingId, "GameStarted");
     return res.sendSuccess(
-      result.status === "Scheduled"
-        ? "Checked in — recording starts at your booked time"
-        : "Checked in — the camera is recording",
+      result.resumed
+        ? "Recording resumed — the camera is recording"
+        : result.status === "Scheduled"
+          ? "Checked in — recording starts at your booked time"
+          : "Checked in — the camera is recording",
       { shareToken: result.shareToken, shareUrl: result.shareUrl },
       result.alreadyCheckedIn ? 200 : 201
     );
@@ -395,9 +402,15 @@ router.get(
     await materializeSessionParts(req.db, { venueId: rows[0].venueId });
     await settleSessions(req.db, rows[0].sessionId);
     const [session] = await req.db.query(
-      `SELECT status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
+      `SELECT status, endAt FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
       [rows[0].sessionId]
     );
+    // CR-041: a booked game ended early can record the rest of the booked time
+    const resume = await resumeOffer(req.db, {
+      sessionId: rows[0].sessionId,
+      status: session.status,
+      endAt: session.endAt,
+    });
 
     // CR-015: until it's paid at the desk, the page shows the game but nothing plays
     const locked = !gameUnlocked(rows[0]);
@@ -463,6 +476,8 @@ router.get(
         savingWholeVideo:
           ["Processing", "Ready"].includes(session.status) &&
           (wholeVideo === null || wholeVideo === "Pending"),
+        // CR-041: { canResume, until, continuedShareUrl } or null
+        resume,
         // CR-040 Phase 4: a game from before whole videos no longer lists its
         // 5-minute parts (they were files on the server)
       },

@@ -5,6 +5,7 @@ import {
   Lock,
   Video,
   Loader2,
+  Play,
   Radio,
   RotateCcw,
   Share2,
@@ -12,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import dayjs from "dayjs";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useSessionPageHooks } from "./hooks";
 import DriveVideo from "./components/DriveVideo";
@@ -172,6 +174,47 @@ const SavingProgress = ({ percent }) => {
         The venue&apos;s recorder sends your game to Google Drive — a long game can take a
         while. This page updates on its own — keep it open or come back to this link later.
       </p>
+    </div>
+  );
+};
+
+/**
+ * CR-041: a booked game ended early — record the rest of the booked time as a
+ * new game, or (once that happened) a link to it.
+ */
+const ResumeCard = ({ resume, continuedPath, onResume, resuming }) => {
+  const until = dayjs(resume.until).format("h:mm A");
+  return (
+    <div className="p-4 mt-4" style={cardStyle}>
+      {continuedPath ? (
+        <>
+          <p className="m-0" style={{ fontSize: 14, color: "var(--color-text-dark)" }}>
+            <strong className="font-semibold">The recording continues in a new game</strong>{" "}
+            until {until}.
+          </p>
+          <Button asChild variant="outline" size="lg" className="h-12 w-full mt-3">
+            <Link to={continuedPath}>
+              <Play />
+              Open the new game
+            </Link>
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="m-0" style={{ fontSize: 14, color: "var(--color-text-dark)" }}>
+            <strong className="font-semibold">Ended early?</strong> Your booking runs until{" "}
+            {until}.
+          </p>
+          <Button size="lg" className="h-12 w-full mt-3" onClick={onResume} disabled={resuming}>
+            {resuming ? <Loader2 className="animate-spin" /> : <Play />}
+            Resume recording
+          </Button>
+          <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+            It records the rest of your booking as a new game. This game&apos;s video stays
+            here.
+          </p>
+        </>
+      )}
     </div>
   );
 };
@@ -523,6 +566,10 @@ const SessionPage = () => {
     canStream,
     handleEndGame,
     isEnding,
+    resume,
+    continuedPath,
+    handleResume,
+    isResuming,
     handleDeleteCapture,
     deletingNumber,
     handleOpenStream,
@@ -607,6 +654,15 @@ const SessionPage = () => {
       {isEnding ? <Loader2 className="size-5 animate-spin" /> : <Square className="size-5" fill="currentColor" />}
       End game
     </Button>
+  );
+  // CR-041: the rest of the booked time, after an early End game
+  const resumeBlock = resume && (
+    <ResumeCard
+      resume={resume}
+      continuedPath={continuedPath}
+      onResume={handleResume}
+      resuming={isResuming}
+    />
   );
   // Secondary, below End game — as on the device
   const streamBlock = canStream && (
@@ -752,6 +808,7 @@ const SessionPage = () => {
           <div className={columnClass}>
             {saveBlock}
             {endBlock}
+            {resumeBlock}
             {streamBlock}
             {driveBlock}
             {shareBlock}
@@ -764,6 +821,7 @@ const SessionPage = () => {
           {liveBlock}
           {saveBlock}
           {endBlock}
+          {resumeBlock}
           {streamBlock}
           {lockedBlock}
           {driveBlock}

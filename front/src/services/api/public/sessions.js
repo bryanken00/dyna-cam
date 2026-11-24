@@ -43,6 +43,16 @@ export const endPublicGameApi = async (shareToken) => {
   return response.data;
 };
 
+// CR-041: a booked game ended early → record the rest of the booked time as a
+// new game. 201 { shareToken, shareUrl } of the new game (200 when it already
+// resumed); 409 while this game records or once the booked time is over.
+export const resumePublicGameApi = async (shareToken) => {
+  const response = await axiosInstance.post(
+    `/api/v1/public/sessions/${shareToken}/resume`,
+  );
+  return response.data;
+};
+
 // Delete Save N. `savedAt` is the save's savedAt as the page shows it — a save
 // whose number moved (deleted elsewhere) answers 404 and nothing is deleted.
 export const deletePublicCaptureApi = async ({ shareToken, number, savedAt }) => {

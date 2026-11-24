@@ -84,6 +84,13 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
   // Phase D: Check in is open from checkInFrom until the booking ends
   const canCheckIn =
     booking?.status === "Confirmed" && booking.checkInFrom <= nowLocal && nowLocal < booking.endAt;
+  // CR-041: its game was ended early and booked time is left → record the rest
+  // (the same Check in; the API starts a new game until the booked end)
+  const canResume =
+    ["CheckedIn", "Completed"].includes(booking?.status) &&
+    !!booking.game &&
+    !["Waiting", "Scheduled", "Recording"].includes(booking.game.status) &&
+    nowLocal < booking.endAt;
 
   const handleRecordPayment = async () => {
     const ok = await confirm({
@@ -449,6 +456,16 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                 >
                   <Play />
                   Check in
+                </Button>
+              )}
+              {canResume && (
+                <Button
+                  type="button"
+                  onClick={() => checkInMutation.mutate(booking.bookingId)}
+                  disabled={checkInMutation.isPending}
+                >
+                  <Play />
+                  Resume recording
                 </Button>
               )}
               {booking.status === "Pending" && booking.paymentStatus === "Unpaid" && canTakePayments && (

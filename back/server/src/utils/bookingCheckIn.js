@@ -13,6 +13,11 @@ import { ERROR_CODES } from "./APIError.js";
  * end. It's free — the court was paid with the booking — and allows
  * BOOKED_GAME_MAX_CAPTURES saves, like a game started from the court QR.
  *
+ * CR-041: a booked game ended early (End game) leaves the rest of the booked
+ * time unrecorded. Checking the booking in again then resumes it: a NEW game
+ * (its own video) from the end of the last one to the booked end, linked to the
+ * same booking, which goes back to CheckedIn and points at the new game.
+ *
  * Lock order is court, then booking (like moves and closures), so two
  * writers can't deadlock.
  */
@@ -23,9 +28,53 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 /** Saves a booked game allows — the same 5 as a player-started game (decided 2026-11-23). */
 export const BOOKED_GAME_MAX_CAPTURES = 5;
 
+/** CR-041: the least booked time left that is worth resuming. */
+export const RESUME_MIN_SECONDS = 60;
+
 const fail = (status, message, code) => ({ ok: false, status, message, code });
 
+const secondsBetween = (from, to) =>
+  moment.tz(to, FORMAT, TIMEZONE).diff(moment.tz(from, FORMAT, TIMEZONE), "seconds");
+
+/** CR-041: a game that no longer records (ended, settled, or past its end). */
+const gameOver = (game, now) =>
+  !["Waiting", "Scheduled", "Recording"].includes(game.status) || game.endAt <= now;
+
 const clock = (local) => moment.tz(local, FORMAT, TIMEZONE).format("h:mm A");
+
+/**
+ * CR-041: a booking already checked in → { result } (its running game, or a
+ * refusal) or { resumeFrom } (where a resumed game starts; null = not checked in).
+ */
+const checkInAgain = async (conn, booking, now) => {
+  const none = { result: null, resumeFrom: null };
+  if (!["CheckedIn", "Completed"].includes(booking.status) || !booking.sessionId) return none;
+  const [games] = await conn.execute(
+    `SELECT sessionId, shareToken, status, endAt FROM recording_sessions
+     WHERE sessionId = ? LIMIT 1`,
+    [booking.sessionId]
+  );
+  const last = games[0];
+  if (!last) return none;
+  if (!gameOver(last, now)) {
+    const result = {
+      ok: true,
+      sessionId: last.sessionId,
+      shareToken: last.shareToken,
+      shareUrl: sessionShareUrl(last.shareToken),
+      alreadyCheckedIn: true,
+      resumed: false,
+      status: last.status,
+    };
+    return { result, resumeFrom: null };
+  }
+  // Never over the last game's window (it ends at End game, or 1 s after its start)
+  const from = last.endAt > now ? last.endAt : now;
+  if (secondsBetween(from, booking.endAt) < RESUME_MIN_SECONDS) {
+    return { result: fail(409, "This booking's time is over"), resumeFrom: null };
+  }
+  return { result: null, resumeFrom: from };
+};
 
 /**
  * @param {import("mysql2/promise").PoolConnection} conn - inside a transaction
@@ -35,7 +84,8 @@ const clock = (local) => moment.tz(local, FORMAT, TIMEZONE).format("h:mm A");
  *   recorder box is offline, since nothing would be recorded (staff may go ahead)
  * @param {string|null} [options.accountId] - the staff account checking it in
  * @returns {Promise<{ ok: true, sessionId, shareToken, shareUrl, alreadyCheckedIn: boolean,
- *   status: "Recording"|"Scheduled" } | { ok: false, status, message, code? }>}
+ *   resumed: boolean, status: "Recording"|"Scheduled" } | { ok: false, status, message, code? }>}
+ *   resumed (CR-041): a new game for the rest of the booked time, after one ended early
  */
 export const checkInBooking = async (
   conn,
@@ -71,23 +121,10 @@ export const checkInBooking = async (
   if (rows.length === 0) return fail(404, "Booking not found");
   const booking = rows[0];
 
-  // A second check-in (another phone, a double tap) lands on the same game
-  if (booking.status === "CheckedIn" && booking.sessionId) {
-    const [games] = await conn.execute(
-      `SELECT sessionId, shareToken, status FROM recording_sessions WHERE sessionId = ? LIMIT 1`,
-      [booking.sessionId]
-    );
-    if (games.length > 0) {
-      return {
-        ok: true,
-        sessionId: games[0].sessionId,
-        shareToken: games[0].shareToken,
-        shareUrl: sessionShareUrl(games[0].shareToken),
-        alreadyCheckedIn: true,
-        status: games[0].status,
-      };
-    }
-  }
+  // A second check-in (another phone, a double tap) lands on the same game while
+  // it still records. CR-041: once it has ended early, the rest is resumed.
+  const { result: again, resumeFrom } = await checkInAgain(conn, booking, now);
+  if (again) return again;
 
   if (booking.status === "Pending") {
     const expired = booking.holdExpiresAt && booking.holdExpiresAt <= now;
@@ -98,7 +135,7 @@ export const checkInBooking = async (
         : "This booking isn't paid yet — pay at the front desk first"
     );
   }
-  if (booking.status !== "Confirmed") {
+  if (booking.status !== "Confirmed" && !resumeFrom) {
     return fail(
       409,
       {
@@ -129,13 +166,15 @@ export const checkInBooking = async (
     );
   }
 
-  // Early: the game waits for the booked start (advanceSessions starts it)
-  const early = now < booking.startAt;
+  // Early: the game waits for the booked start (advanceSessions starts it).
+  // CR-041: a resumed game starts now (or the moment the last one ended).
+  const startLocal = resumeFrom || (now < booking.startAt ? booking.startAt : now);
+  const scheduled = startLocal > now;
   const game = await bookCourt(conn, {
     courtId: booking.courtId,
-    startLocal: early ? booking.startAt : now,
+    startLocal,
     endLocal: booking.endAt,
-    status: early ? "Scheduled" : "Recording",
+    status: scheduled ? "Scheduled" : "Recording",
     now,
     playerName: booking.playerName,
     phone: booking.phone,
@@ -164,6 +203,47 @@ export const checkInBooking = async (
     shareToken: game.shareToken,
     shareUrl: sessionShareUrl(game.shareToken),
     alreadyCheckedIn: false,
-    status: early ? "Scheduled" : "Recording",
+    resumed: !!resumeFrom,
+    status: scheduled ? "Scheduled" : "Recording",
   };
+};
+
+/**
+ * CR-041: what a booked game's page offers about the rest of the booking —
+ *   { canResume: true, until }            this game ended early, booked time is left
+ *   { canResume: false, until, continuedShareUrl }  a later game of the booking took over
+ * or null (not a booked game, still recording, or the booked time is over).
+ *
+ * @param {import("../../config/database.js").default} db
+ * @param {{ sessionId: string, status: string, endAt: string }} game - its settled status
+ */
+export const resumeOffer = async (db, game) => {
+  const rows = await db.query(
+    `SELECT b.status, b.endAt, b.sessionId AS currentSessionId,
+            cur.shareToken AS currentShareToken, cur.status AS currentStatus
+     FROM recording_sessions s
+     JOIN bookings b ON b.bookingId = s.bookingId AND b.status != 'Deleted'
+     LEFT JOIN recording_sessions cur ON cur.sessionId = b.sessionId
+     WHERE s.sessionId = ?
+     LIMIT 1`,
+    [game.sessionId]
+  );
+  const booking = rows[0];
+  if (!booking || !["CheckedIn", "Completed"].includes(booking.status)) return null;
+
+  if (booking.currentSessionId && booking.currentSessionId !== game.sessionId) {
+    return booking.currentShareToken && booking.currentStatus !== "Cancelled"
+      ? {
+          canResume: false,
+          until: booking.endAt,
+          continuedShareUrl: sessionShareUrl(booking.currentShareToken),
+        }
+      : null;
+  }
+
+  const now = getCurrentTimestampLocal();
+  if (!gameOver(game, now)) return null;
+  const from = game.endAt > now ? game.endAt : now;
+  if (secondsBetween(from, booking.endAt) < RESUME_MIN_SECONDS) return null;
+  return { canResume: true, until: booking.endAt, continuedShareUrl: null };
 };
