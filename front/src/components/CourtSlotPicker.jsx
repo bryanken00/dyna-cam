@@ -9,7 +9,7 @@ import { formatHour, formatMinutes, formatPeso } from "../utils/dynaCam";
  * booking's own time is marked "Yours").
  *
  * Props: `{ availability, loading, error, durationMinutes, slot, onPick,
- *   unavailableLabel?, emptyHint? }` — availability: `{ hours, courts: [{ key, name,
+ *   unavailableLabel?, emptyHint?, columnsClassName? }` — availability: `{ hours, courts: [{ key, name,
  *   slots: [{ startTime, available, price, current? }] }] }`; slot: `{ courtKey, startTime }`.
  */
 const CourtSlotPicker = ({
@@ -21,6 +21,7 @@ const CourtSlotPicker = ({
   onPick,
   unavailableLabel = "Taken",
   emptyHint,
+  columnsClassName = "grid-cols-3",
 }) => {
   if (error) {
     return (
@@ -72,7 +73,7 @@ const CourtSlotPicker = ({
             {decodeHTML(court.name)}
           </div>
           {court.slots.some((s) => s.available || s.current) ? (
-            <div className="grid grid-cols-3 gap-2">
+            <div className={`grid ${columnsClassName} gap-2`}>
               {court.slots.map((s) => (
                 <PickChip
                   key={s.startTime}
