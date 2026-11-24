@@ -1,6 +1,6 @@
 import express from "express";
 import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { sessionShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince } from "../../../utils/clipRequests.js";
@@ -197,6 +197,56 @@ const checkInByCodeCourtLimiter = dynamicLimiter({
   message: "Too many tries on this court — ask the front desk to check you in.",
 });
 
+const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
+const FORMAT = "YYYY-MM-DD HH:mm:ss";
+const WRONG_CODE =
+  "That code doesn't match a booking on this court — check the code on your booking page";
+
+/**
+ * BUG-007: a code that isn't this court's booking right now — is it a real
+ * booking at this venue that's just not checkable here and now (too early,
+ * over, cancelled, another court)? The player holds the code, so telling them
+ * about their own booking gives nothing away; a code that matches nothing at
+ * this venue still gets the one wrong-code message.
+ *
+ * @returns {Promise<string|null>} what to tell the player, or null (no such booking here)
+ */
+const explainCode = async (db, court, bookingCode, now) => {
+  const [b] = await db.query(
+    `SELECT b.courtId, b.status, b.startAt, b.endAt, c.name AS courtName, v.checkInEarlyMinutes
+     FROM bookings b
+     JOIN courts c ON c.courtId = b.courtId
+     JOIN venues v ON v.venueId = b.venueId
+     WHERE b.venueId = ? AND b.bookingCode = ? AND b.status != 'Deleted'
+     ORDER BY b.startAt DESC
+     LIMIT 1`,
+    [court.venueId, bookingCode]
+  );
+  if (!b) return null;
+
+  const start = moment.tz(b.startAt, FORMAT, TIMEZONE);
+  const end = moment.tz(b.endAt, FORMAT, TIMEZONE);
+  const opens = start.clone().subtract(b.checkInEarlyMinutes, "minutes");
+  const nowM = moment.tz(now, FORMAT, TIMEZONE);
+  const sameDay = start.isSame(nowM, "day");
+  const when = `${sameDay ? "" : `${start.format("ddd, MMM D")}, `}${start.format("h:mm A")} – ${end.format("h:mm A")}`;
+
+  if (b.status === "Cancelled") return "This booking was cancelled.";
+  if (b.status === "Expired") return "This booking wasn't paid in time, so the court was released.";
+  if (b.status === "NoShow" || b.status === "Completed" || b.endAt <= now) {
+    return `This booking (${when}) is over.`;
+  }
+  if (b.courtId !== court.courtId) {
+    return `This code is for ${b.courtName} — scan the QR sign on ${b.courtName}.`;
+  }
+  if (opens.isAfter(nowM)) {
+    return sameDay
+      ? `Too early — your booking is ${when}. Check in from ${opens.format("h:mm A")}.`
+      : `Your booking is on ${when}. Check in from ${opens.format("h:mm A")} that day.`;
+  }
+  return null;
+};
+
 /**
  * POST /courts/:qrToken/check-in
  * PLAN-003 Phase D: the player scanned the court's QR and typed their booking
@@ -229,10 +279,9 @@ router.post(
       [court.courtId, req.body.bookingCode, now, now]
     );
     if (!booking) {
-      return res.sendError(
-        "That code doesn't match a booking on this court right now — check the code on your booking page",
-        404
-      );
+      // BUG-007: a real booking that just can't check in here now says why
+      const reason = await explainCode(req.db, court, req.body.bookingCode, now);
+      return reason ? res.sendError(reason, 409) : res.sendError(WRONG_CODE, 404);
     }
 
     let conn;

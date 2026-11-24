@@ -31,3 +31,6 @@ Payments shows each venue's online money for settling up.
 - back/: `jobs/bookingMaintenance.js` runs every minute (holds, no-shows, completion, reminders).
 - front/: new pages `/book/:bookingToken`, `/booking/:manageToken`, Admin → Dyna Cam → Bookings;
   venue page sections for online booking, rules/hours/prices and closures.
+- back/ (BUG-007, before release): checking in at the court QR with a real code that can't be
+  used there now (too early, another day, over, cancelled, another court) says why (409) instead of
+  the wrong-code 404; a code matching nothing at the venue still gets the wrong-code 404.
