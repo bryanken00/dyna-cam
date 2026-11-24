@@ -67,7 +67,7 @@ const GoogleDriveSection = ({ court, canWrite }) => {
   const handleDisconnect = async () => {
     const ok = await confirm({
       title: "Disconnect Google Drive",
-      description: `New recordings on this court stop going to ${drive.email || "this Google account"}. Videos already in that Drive stay there and their links keep working — Dyna Cam can no longer delete them after the venue's keep time, so remove them in Drive yourself if needed.`,
+      description: `New recordings on this court stop going to ${drive.email || "this Google account"}. Videos already in that Drive stay there and their links keep working — DGSports can no longer delete them after the venue's keep time, so remove them in Drive yourself if needed.`,
       confirmText: "Disconnect",
       danger: true,
     });
@@ -95,7 +95,7 @@ const GoogleDriveSection = ({ court, canWrite }) => {
           </span>
         </StatusDot>
         <div className="mt-1" style={muted}>
-          It has to be turned on for Dyna Cam once. After that, a Connect Google
+          It has to be turned on for DGSports once. After that, a Connect Google
           Drive button appears here.
         </div>
         <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>

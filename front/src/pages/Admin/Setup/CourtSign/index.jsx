@@ -5,8 +5,8 @@ import { useCourtSignHooks } from "./hooks";
 import ResultState from "../../../../components/ResultState";
 import Spinner from "../../../../components/Spinner";
 import { getImageUrl } from "../../../../utils/upload";
+import { APP_NAME } from "../../../../components/brand/appName";
 
-const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
 /**
  * A5 court sign (148 × 210 mm): venue logo + name, court name, a large QR code
@@ -115,17 +115,17 @@ const CourtSignPage = () => {
         <div className="mt-6 flex items-center gap-2.5 justify-center">
           <ScanLine className="w-6 h-6 shrink-0" style={{ color: "var(--color-text-dark)" }} />
           <p className="m-0 font-semibold" style={{ fontSize: 19, letterSpacing: "-0.2px" }}>
-            Scan to start recording your game
+            Scan and enter your booking code
           </p>
         </div>
         <p className="m-0 mt-1.5" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-          Point your phone camera at the code — no app needed.
+          Point your phone camera at the code — no app needed. No booking? Ask the front desk.
         </p>
 
         {/* Privacy + brand */}
         <div className="mt-auto pt-4 w-full" style={{ borderTop: "1px solid var(--color-line)" }}>
           <p className="m-0" style={{ fontSize: 11.5, color: "var(--color-text-secondary)" }}>
-            Your game is recorded from Start game until its time is up.
+            Your game is recorded for your booked time, from when you check in.
           </p>
           <p
             className="m-0 mt-1 uppercase"

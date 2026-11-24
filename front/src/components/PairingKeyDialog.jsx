@@ -72,7 +72,7 @@ const PairingKeyDialog = ({ open, onClose, pairingKey }) => {
             Pairing key for {pairingKey?.name || "the device"}
           </DialogTitle>
           <DialogDescription>
-            Type this key into the Dyna Cam app on the device.
+            Type this key into the app on the court's device.
             {pairingKey?.courtName &&
               ` It pairs with this session on ${pairingKey.courtName}.`}
           </DialogDescription>

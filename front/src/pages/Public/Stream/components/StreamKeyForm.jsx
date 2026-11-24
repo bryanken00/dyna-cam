@@ -183,7 +183,7 @@ const StreamKeyForm = ({
       }
       let message = body?.message;
       if (!error?.response) {
-        message = "Couldn't reach Dyna Cam — check your connection and try again.";
+        message = "Couldn't reach DGSports — check your connection and try again.";
       } else if (status === 429) {
         message = message || "Too many tries — wait a moment and try again.";
       }
@@ -305,7 +305,7 @@ const StreamKeyForm = ({
             />
             <span>
               Keep your key private — anyone with it can stream to your
-              channel. Dyna Cam only uses it for this game.
+              channel. DGSports only uses it for this game.
             </span>
           </p>
         </div>

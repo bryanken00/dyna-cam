@@ -51,7 +51,7 @@ const StreamLayoutForm = ({ code, layout, onSuccess, onCancel, onGone }) => {
       }
       form.setError("root.server", {
         message: !error?.response
-          ? "Couldn't reach Dyna Cam — check your connection and try again."
+          ? "Couldn't reach DGSports — check your connection and try again."
           : error.response.data?.message || "Something went wrong. Please try again.",
       });
       if (status === 404 || status === 409) onGone?.();

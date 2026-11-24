@@ -38,6 +38,13 @@ import streamSetupRoute from "../controllers/v1/public/stream-setup.controller.j
 import gameControlsRoute from "../controllers/v1/public/game-controls.controller.js";
 router.use("/v1/public/stream-setup", streamSetupRoute); // PLAN-002 Phase G
 router.use("/v1/public/sessions", gameControlsRoute); // CR-028: End game, delete a save, stream
+// PLAN-003 Phase C: the booking pages — the venue's booking link / a booking's own link
+import bookingPublicRoute from "../controllers/v1/public/booking.controller.js";
+import paymentSandboxRoute from "../controllers/v1/public/payment-sandbox.controller.js";
+import courtBoardRoute from "../controllers/v1/public/board.controller.js";
+router.use("/v1/public/board", courtBoardRoute); // CR-038: a venue's TV court board (display link)
+router.use("/v1/public/payment-sandbox", paymentSandboxRoute); // CR-033: test checkout (PAYMENT_SANDBOX)
+router.use("/v1/public", bookingPublicRoute);
 router.use("/v1/public", publicRoute);
 
 // PLAN-002 pairing — a 6-digit key is the credential, once (no login)
@@ -53,6 +60,11 @@ router.use("/v1/app", requirePairedApp, appRoute);
 // its consent screen; the signed `state` is the credential (no login)
 import googleOAuthRoute from "../controllers/v1/oauth/google.controller.js";
 router.use("/v1/oauth/google", googleOAuthRoute);
+
+// PLAN-003 Phase F: Xendit's payment webhooks — its x-callback-token is the
+// credential (no login); the invoice is then read back from Xendit's API
+import xenditWebhookRoute from "../controllers/v1/webhooks/xendit.controller.js";
+router.use("/v1/webhooks/xendit", xenditWebhookRoute);
 
 // Exporting the router to be used in the main app
 export default router;

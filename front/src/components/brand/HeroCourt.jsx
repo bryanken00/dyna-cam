@@ -4,7 +4,7 @@
  * deep-blue playing area, white lines, a lime ball. Cam 1 and Cam 2 sit behind
  * the baselines. A rally is drawn once on load (a shot from the far baseline
  * that lands in the kitchen, with a speed trail like the venue's wall art),
- * and under it the game it ends up in (CR-027: the whole game, from Start game).
+ * and under it the game it ends up in (the whole game, from check-in).
  *
  * Brand colours (index.css `--color-brand-*`) are constant across light and
  * dark: the band is always blue. Motion is CSS (`.landing-*`), so the
@@ -140,7 +140,7 @@ const HeroCourt = () => (
   </svg>
 );
 
-/** The game the rally ends up in: a lime bar that fills from Start game up to "now". */
+/** The game the rally ends up in: a lime bar that fills from check-in up to "now". */
 export const ReplayBar = () => (
   <div>
     <div

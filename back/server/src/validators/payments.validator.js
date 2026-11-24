@@ -58,3 +58,15 @@ export const listPaymentsQuerySchema = z.object({
   dateFrom: optionalDate(),
   dateTo: optionalDate(),
 });
+
+// GET /settlement — PLAN-003 Phase F: each venue's online (Xendit) money for a
+// date range, the statement Dyna Cam settles with venues from
+export const settlementQuerySchema = z
+  .object({
+    dateFrom: optionalDate(),
+    dateTo: optionalDate(),
+  })
+  .refine((q) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo, {
+    message: "The start date must be before the end date",
+    path: ["dateTo"],
+  });

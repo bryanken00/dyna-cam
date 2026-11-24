@@ -1,14 +1,6 @@
-import {
-  CircleAlert,
-  Loader2,
-  Mail,
-  Phone,
-  Play,
-  Radio,
-  RotateCcw,
-  User,
-  VideoOff,
-} from "lucide-react";
+import { CalendarCheck, CalendarPlus, CircleAlert, KeyRound, Loader2, Play, Radio, RotateCcw, VideoOff } from "lucide-react";
+
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,18 +14,12 @@ import {
 import { Input } from "@/components/ui/input";
 
 import { useCourtPageHooks } from "./hooks";
-import GameTimeFields from "../../../components/GameTimeFields";
 import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
-import SectionLabel from "../../../components/SectionLabel";
 import Spinner from "../../../components/Spinner";
 import { getImageUrl } from "../../../utils/upload";
-import { PHONE_MAX_LENGTH, PHONE_PLACEHOLDER, formatPhoneOnChange } from "../../../utils/phoneFormat";
 
-const PRIVACY_NOTE = "Your game is recorded from Start game until its time is up.";
-
-/** One-tap game times, in minutes. */
-const GAME_TIME_PRESETS = [30, 60, 90, 120];
+const PRIVACY_NOTE = "Your game is recorded for your booked time, from when you check in.";
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -44,7 +30,7 @@ const cardStyle = {
 const iconPrefix = "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
 const mutedIcon = { color: "var(--color-text-muted)" };
 
-/** A notice under the court name: the court is busy, or its camera is offline. */
+/** A notice under the court name: a game is on, the camera is offline, or it's booked now. */
 const Notice = ({ icon: Icon, children }) => (
   <div
     role="status"
@@ -63,15 +49,14 @@ const Notice = ({ icon: Icon, children }) => (
 );
 
 /**
- * `/court/:qrToken` (CR-027) — what a player sees after scanning the court's
- * QR sign: the venue and court, how long they'll play and who's playing, and
- * Start game. The game records the whole time and the player lands on its
- * page (`/session/:shareToken`). Until CR-027 this page saved the last 60
- * seconds instead.
+ * `/court/:qrToken` — what a player sees after scanning the court's QR sign:
+ * the venue and court and a **Booking code** box. CR-034: the code is the only
+ * way to start a game here (PLAN-003 Phase D check-in); CR-027's walk-in Start
+ * game, with its game time and who's playing, is gone. No booking → Book this
+ * court, or the front desk.
  */
 const CourtPage = () => {
   const {
-    form,
     court,
     venueName,
     courtName,
@@ -80,14 +65,17 @@ const CourtPage = () => {
     busyUntilText,
     maxSaves,
     liveWatchUrl,
+    bookUrl,
     isLoading,
     isFetching,
     notFound,
     loadError,
     refetch,
-    handleStart,
-    isStarting,
-    startError,
+    checkInForm,
+    handleCheckIn,
+    isCheckingIn,
+    checkInError,
+    bookingText,
   } = useCourtPageHooks();
 
   if (isLoading) {
@@ -129,7 +117,6 @@ const CourtPage = () => {
   }
 
   const logo = getImageUrl(court.venueLogoUrl);
-  const canStart = cameraReady && !busy;
 
   return (
     <PublicLayout footer={PRIVACY_NOTE}>
@@ -157,14 +144,16 @@ const CourtPage = () => {
             {courtName}
           </h1>
           <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
-            Start recording your game — up to {maxSaves} saves of your best moments.
+            Enter your booking code to start recording your game — up to {maxSaves} saves of your
+            best moments.
           </p>
         </div>
 
         {busy && (
           <Notice icon={CircleAlert}>
             This court has a game going
-            {busyUntilText ? ` until ${busyUntilText}` : ""}. You can start yours once it ends.
+            {busyUntilText ? ` until ${busyUntilText}` : ""}. Booked after it? Check in once it
+            ends.
           </Notice>
         )}
         {!busy && !cameraReady && (
@@ -173,133 +162,103 @@ const CourtPage = () => {
             desk.
           </Notice>
         )}
+        {!busy && cameraReady && bookingText && (
+          <Notice icon={CalendarCheck}>This court is booked {bookingText}.</Notice>
+        )}
 
-        <Form {...form}>
-          <form onSubmit={handleStart} noValidate className="mt-6">
-            <SectionLabel>How long you&apos;ll play</SectionLabel>
-            <GameTimeFields form={form} presets={GAME_TIME_PRESETS} />
-            <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-              5 minutes to 3 hours. Recording stops by itself at the end.
-            </p>
-
-            <div className="mt-6">
-              <SectionLabel>Who&apos;s playing (optional)</SectionLabel>
-              <div className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="playerName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <div className="relative">
-                        <User className={iconPrefix} style={mutedIcon} />
-                        <FormControl>
-                          <Input
-                            placeholder="e.g., Juan dela Cruz"
-                            className="h-11 pl-9"
-                            autoComplete="name"
-                            maxLength={100}
-                            {...field}
-                          />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone number</FormLabel>
-                      <div className="relative">
-                        <Phone className={iconPrefix} style={mutedIcon} />
-                        <FormControl>
-                          <Input
-                            placeholder={PHONE_PLACEHOLDER}
-                            className="h-11 pl-9"
-                            maxLength={PHONE_MAX_LENGTH}
-                            inputMode="tel"
-                            autoComplete="tel"
-                            {...field}
-                            onChange={(e) => field.onChange(formatPhoneOnChange(e.target.value))}
-                          />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <div className="relative">
-                        <Mail className={iconPrefix} style={mutedIcon} />
-                        <FormControl>
-                          <Input
-                            type="email"
-                            inputMode="email"
-                            autoCapitalize="none"
-                            autoComplete="email"
-                            placeholder="e.g., juan@gmail.com"
-                            className="h-11 pl-9"
-                            maxLength={255}
-                            {...field}
-                          />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <p className="m-0 mt-2" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-                The email gets your game&apos;s Google Drive link once the videos are in Drive.
-              </p>
-            </div>
-
+        {/* PLAN-003 Phase D: the booking's code starts its game */}
+        <Form {...checkInForm}>
+          <form onSubmit={handleCheckIn} noValidate className="mt-6">
+            <FormField
+              control={checkInForm.control}
+              name="bookingCode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Booking code</FormLabel>
+                  <div className="relative">
+                    <KeyRound className={iconPrefix} style={mutedIcon} />
+                    <FormControl>
+                      <Input
+                        placeholder="e.g., K7Q M2P"
+                        className="h-12 pl-9 font-mono uppercase placeholder:normal-case"
+                        style={{ fontSize: 18, letterSpacing: "0.1em" }}
+                        autoCapitalize="characters"
+                        autoComplete="off"
+                        maxLength={20}
+                        {...field}
+                      />
+                    </FormControl>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <Button
               type="submit"
               size="lg"
-              className="mt-7 w-full h-16 text-base font-semibold rounded-(--radius-card)"
-              disabled={!canStart || isStarting}
+              className="mt-5 w-full h-16 text-base font-semibold rounded-(--radius-card)"
+              disabled={!cameraReady || isCheckingIn}
             >
-              {isStarting ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
-              {isStarting ? "Starting…" : "Start game"}
+              {isCheckingIn ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
+              {isCheckingIn ? "Checking in…" : "Check in and start"}
             </Button>
-
-            {startError && (
+            {checkInError && (
               <p
                 role="alert"
                 className="m-0 mt-3 text-center"
                 style={{ fontSize: 13.5, color: "var(--color-error)" }}
               >
-                {startError}
+                {checkInError}
               </p>
             )}
+            <p
+              className="m-0 mt-3 text-center"
+              style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+            >
+              The code is on your booking&apos;s page and in its email.{" "}
+              <Link to="/booking" style={{ color: "var(--color-link)" }}>
+                Find my booking
+              </Link>
+            </p>
           </form>
         </Form>
+      </div>
 
-        {/* The venue streams this court — the API only sends the link while
-            streaming is on and the recorder box is online */}
-        {liveWatchUrl && (
-          <Button
-            asChild
-            variant="outline"
-            size="lg"
-            className="mt-3 w-full h-12 text-[15px] rounded-(--radius-card)"
-          >
-            <a href={liveWatchUrl} target="_blank" rel="noopener noreferrer">
-              <Radio className="size-4.5" style={{ color: "var(--color-error)" }} />
-              Watch live
-            </a>
+      {/* No booking: book this court (CR-030), or ask the desk */}
+      <div className="mt-4 p-5 text-center" style={cardStyle}>
+        <p className="m-0" style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
+          No booking?
+        </p>
+        <p className="m-0 mt-1" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+          {bookUrl
+            ? "Book this court, then come back and enter your code."
+            : "Ask the front desk to book this court for you."}
+        </p>
+        {bookUrl && (
+          <Button asChild size="lg" variant="outline" className="mt-4 w-full h-12 text-[15px] rounded-(--radius-card)">
+            <Link to={bookUrl}>
+              <CalendarPlus className="size-4.5" />
+              Book this court
+            </Link>
           </Button>
         )}
       </div>
+
+      {/* The venue streams this court — the API only sends the link while
+          streaming is on and the recorder box is online */}
+      {liveWatchUrl && (
+        <Button
+          asChild
+          variant="outline"
+          size="lg"
+          className="mt-3 w-full h-12 text-[15px] rounded-(--radius-card)"
+        >
+          <a href={liveWatchUrl} target="_blank" rel="noopener noreferrer">
+            <Radio className="size-4.5" style={{ color: "var(--color-error)" }} />
+            Watch live
+          </a>
+        </Button>
+      )}
     </PublicLayout>
   );
 };

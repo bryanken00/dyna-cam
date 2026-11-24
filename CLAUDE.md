@@ -1,7 +1,11 @@
-# Dyna Cam
+# DGSports
 
-A court-camera service for pickleball venues, built on this repo's admin platform. Players scan a
-court QR to start recording their game, then watch it live, save their best rallies, and get the
+The product was called **Dyna Cam** until CR-036 (2026-11-24); the repository, folders and code
+names (`DynaCam/`, `dynaCam.js`, `dyna-cam-api`) keep the old name, and the mobile app and
+recorder box are still branded Dyna Cam until their own rebuild.
+
+A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
+court, then scan its QR and enter their booking code to start recording their game (CR-034), then watch it live, save their best rallies, and get the
 whole game on their phone (CR-027; the old 60-second clips and court buttons are gone — clips saved
 before only expire). Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
 staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
@@ -131,9 +135,10 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
   stored encrypted and never returned; CR-025: while a game records, its page also gets the box's signed
-  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-027:
-  the court QR's `/public/courts/:qrToken` is the Start a game page, and `POST …/games` (rate-limited)
-  starts a timed game that is Free with 5 saves, `startedByPlayer = 1`; CR-028: the game page also has
+  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-034:
+  the court QR's `/public/courts/:qrToken` only checks a booking in by its code
+  (`POST …/check-in`) — CR-027's walk-in `POST …/games` is gone, so the QR never starts a game
+  without a booking (`startedByPlayer = 1` marks the walk-in games made before); CR-028: the game page also has
   the device's End game, delete a save and own-stream controls under `/public/sessions/:shareToken/…` —
   anyone holding the link can use them). CR-015: a game's videos open only once staff record its
   payment (Admin → Sessions → Record payment, Payments permission); until then the session device
@@ -143,6 +148,31 @@ back after connecting a court's Google Drive (CR-001) — its encrypted, 10-minu
 credential, and the court's Drive refresh token is stored encrypted and never returned. The app keeps its token
   in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
   only — staff work, including payments, happens on the web.
+- **Court booking (PLAN-003):** players reserve court time ahead; a `bookings` row reserves it and
+  only **check-in** creates its game (`utils/bookingCheckIn.js`). Games, live bookings (incl.
+  unexpired `Pending` holds), closures and opening hours share one overlap rule,
+  `utils/courtTimeline.js` `findConflict()` — every writer locks the **court row** `FOR UPDATE`
+  first (then the booking), and Start a game / New game refuse booked time. Two more
+  no-login credentials: a venue's **booking link** (`venues.bookingToken`, `/book/:bookingToken`,
+  API `/public/book/:bookingToken/*`; NULL = online booking off) and a booking's **own link**
+  (`bookings.manageToken`, `/booking/:manageToken`, API `/public/bookings/:manageToken/*`: pay,
+  check in, and until the venue's cut-off cancel / move once); CR-038: a venue's **TV court board**
+  link (`venues.displayToken`, `/board/:displayToken`, API `/public/board/:displayToken`: today's
+  courts with no names, codes, reasons or IDs; NULL = off); all three come from `randomToken()`, and
+  their replies name courts by a hashed key, never a business ID. CR-030: players get in through
+  `/book` (every Active venue with a booking link and an Active court, from `GET /public/venues`)
+  and `/booking` (Find my booking: `POST /public/bookings/find`, booking code + the booking's phone
+  or email → its link; one 404 for every miss, rate-limited). A booking must be `Paid` or
+  `Free` to check in. **Online payment** goes through Dyna Cam's one Xendit account
+  (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
+  `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the
+  credential, and a payment is believed only after reading the invoice back from Xendit, never
+  from the webhook body or the checkout redirect (`utils/bookingPayments.js`). Refunds are queued
+  in the cancel's transaction and sent after commit; a refused one shows **Refund failed**.
+  Booking emails (`utils/bookingEmails.js`) are sent after the commit of the request that causes
+  them and never fail it; once-only ones are claimed on their `…SentAt` column. Staff work is under
+  the `bookings` permission (money still needs `payments` write); the job is
+  `jobs/bookingMaintenance.js` (every minute).
 - **Backend changes are tested:** `cd back && npm test` (throwaway database, never touches
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run

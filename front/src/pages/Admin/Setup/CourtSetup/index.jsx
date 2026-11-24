@@ -16,7 +16,7 @@ import { VENUES_PATH, venuePath } from "../../../../utils/dynaCam";
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — set up one court: its
  * camera and optional camera 2 (guided, with the live check), QR sign (where
- * players start a game, CR-027), live stream and Google Drive.
+ * players check in with a booking code, CR-034), live stream and Google Drive.
  * Each section saves on its own with the court's full PUT.
  */
 const CourtSetupPage = () => {

@@ -4,6 +4,7 @@ import {
   CalendarRange,
   CircleAlert,
   Filter,
+  Landmark,
   Receipt,
   Wallet,
 } from "lucide-react";
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { usePaymentHooks } from "./hooks";
 import TakePaymentFormModal from "./components/TakePaymentFormModal";
+import OnlineSettlementSheet from "./components/OnlineSettlementSheet";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -50,6 +52,9 @@ const PaymentsPage = () => {
     takePaymentOpen,
     handleOpenTakePayment,
     handleCloseTakePayment,
+    settlementOpen,
+    handleOpenSettlement,
+    handleCloseSettlement,
   } = usePaymentHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -79,14 +84,20 @@ const PaymentsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Payments"
-        subtitle="Cash taken at the front desk to unlock players' clips."
+        subtitle="Cash taken at the front desk, and court bookings paid online."
         actions={
-          canWrite && (
-            <Button onClick={handleOpenTakePayment}>
-              <Banknote />
-              Take payment
+          <>
+            <Button variant="outline" onClick={handleOpenSettlement}>
+              <Landmark />
+              Online settlement
             </Button>
-          )
+            {canWrite && (
+              <Button onClick={handleOpenTakePayment}>
+                <Banknote />
+                Take payment
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -246,6 +257,7 @@ const PaymentsPage = () => {
         onClose={handleCloseTakePayment}
         onSuccess={handleCloseTakePayment}
       />
+      <OnlineSettlementSheet open={settlementOpen} onClose={handleCloseSettlement} />
     </div>
   );
 };

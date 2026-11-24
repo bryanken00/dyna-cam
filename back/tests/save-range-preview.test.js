@@ -21,7 +21,7 @@ describe("save a picked stretch, and preview it (CR-029)", () => {
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
   const asBox = { Authorization: "" };
 
-  /** A player-started game on a fresh court → { token, courtId }. */
+  /** A free game recording now on a fresh court → { token, courtId }. */
   const newGame = async (venueId = home.venueId) => {
     courtNo += 1;
     const court = await call("POST", "/admin/courts", {
@@ -30,11 +30,21 @@ describe("save a picked stretch, and preview it (CR-029)", () => {
       cameraRtspUrl: `rtsp://u:p@10.0.5.${courtNo}:554/stream1`,
     });
     assert.equal(court.status, 201, JSON.stringify(court.body));
-    const res = await ctx.api("POST", `/public/courts/${court.data.qrToken}/games`, {
-      body: { durationMinutes: 60 },
+    const res = await call("POST", "/admin/sessions", {
+      courtId: court.data.courtId,
+      startNow: true,
+      durationMinutes: 60,
+      maxCaptures: 5,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    return { token: res.data.shareToken, courtId: court.data.courtId };
+    // A free game with 5 saves, as a booked game is (CR-034: the court QR no
+    // longer starts games, so it comes from Admin's New game)
+    const token = res.data.shareUrl.split("/").pop();
+    await ctx.sql.query(
+      `UPDATE recording_sessions SET paymentStatus = 'Free', payCode = NULL WHERE shareToken = ?`,
+      [token]
+    );
+    return { token, courtId: court.data.courtId };
   };
 
   /** Pretend the game started `minutes` ago. */
@@ -72,7 +82,6 @@ describe("save a picked stretch, and preview it (CR-029)", () => {
   before(async () => {
     ctx = await startTestApp({
       env: {
-        RATE_LIMIT_PUBLIC_START_POINTS: "1000",
         RATE_LIMIT_PUBLIC_CAPTURE_POINTS: "1000",
         RATE_LIMIT_PUBLIC_CONTROL_POINTS: "1000",
       },

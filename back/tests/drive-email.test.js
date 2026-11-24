@@ -126,7 +126,7 @@ describe("Google Drive link by email (CR-018)", () => {
       env: {
         SENDGRID_API_KEY: SENDGRID_KEY,
         SENDGRID_API_URL: `http://127.0.0.1:${sendgrid.server.address().port}`,
-        MAIL_FROM: "Dyna Cam <no-reply@dynacam.test>",
+        MAIL_FROM: "DGSports <no-reply@dgsports.test>",
       },
     });
     ({ runDriveEmails } = await ctx.importFromBack("server/src/jobs/driveEmails.js"));
@@ -167,7 +167,7 @@ describe("Google Drive link by email (CR-018)", () => {
     const [mail] = mailsTo(sessionId);
     assert.ok(mail, "SendGrid got the email");
     assert.deepEqual(mail.personalizations, [{ to: [{ email: "ana@player.test" }] }]);
-    assert.deepEqual(mail.from, { name: "Dyna Cam", email: "no-reply@dynacam.test" });
+    assert.deepEqual(mail.from, { name: "DGSports", email: "no-reply@dgsports.test" });
     assert.match(mail.subject, /Mail Courts/);
     const html = mail.content.find((c) => c.type === "text/html").value;
     assert.match(html, /Hi Ana Reyes/);

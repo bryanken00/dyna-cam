@@ -196,7 +196,7 @@ describe("game videos", () => {
       assert.equal(res.status, 200);
       assert.equal(
         res.headers.get("content-disposition"),
-        "attachment; filename=dyna-cam-game.mp4"
+        "attachment; filename=dgsports-game.mp4"
       );
 
       assert.equal((await start(home.token, id, { sizeBytes: 5, durationSeconds: 1 })).status, 409);
@@ -318,7 +318,7 @@ describe("game videos", () => {
       const dl = await ctx.get(shown.videos[1].downloadUrl);
       assert.equal(
         dl.headers.get("content-disposition"),
-        "attachment; filename=dyna-cam-game-cam2.mp4"
+        "attachment; filename=dgsports-game-cam2.mp4"
       );
     });
   });

@@ -58,7 +58,8 @@ const clock = (local) =>
     .replace(":", ".");
 
 /** The court's folder name in Drive. */
-const courtFolderName = (row) => `Dyna Cam · ${row.venueName} · ${row.courtName}`;
+// CR-036: new courts' folders; an existing folder keeps the name it was made with
+const courtFolderName = (row) => `DGSports · ${row.venueName} · ${row.courtName}`;
 
 /** A clip's file name in Drive. */
 const clipFileName = (row) => {

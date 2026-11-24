@@ -25,73 +25,74 @@
      CDN name from the index.html <link> fallback, then system stacks. */
   --font-sans: "Onest Variable", "Onest", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
+  /* CR-036: the brand typeface — the wordmark and display headings */
+  --font-display: "Space Grotesk Variable", "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
     SFMono-Regular, Menlo, monospace;
 
-  /* ── BRAND · pickleball (CR-011, "Improve UI and UX" design, 2026-11-19) ─
-     Deep navy bands, a lighter navy for cards on them, a clear blue for small
-     labels, numbers and icons (on a pale blue tile), a soft lime for the
-     replay bar and labels on navy, white. Constant across light and dark. */
-  --color-brand-court: #0f3264; /* deep navy — hero and CTA bands, sign-in panel */
-  --color-brand-court-raised: #214271; /* cards on the navy band */
-  --color-brand-court-deep: #17386c; /* a court's playing area */
-  --color-brand-court-light: #2f5ba8; /* a court's kitchens (at 55%) */
-  --color-brand-blue: #2f5ba8; /* labels, step numbers, icons, links */
-  --color-brand-blue-soft: #eaf1fe; /* icon tiles */
-  --color-brand-ball: #a9cf45; /* soft lime — replay bar, labels on navy */
-  --color-brand-ink: #0f3264; /* navy text on lime and on white buttons */
+  /* ── BRAND · DGSports (CR-036 — the DGPlay logo's colours, brand kit
+     temp/brand/dgplay.mjs) ─────────────────────────────────────────────────
+     The logo's blue (#174F8A at the top to #4189C8 below), white, the ball's
+     lime #E2F41F, and the dark of the ball's holes #0B2333 for ink. Blue bands
+     with white text, lime for the ball and highlights. Constant across themes. */
+  --color-brand-court: #174f8a; /* the logo's blue — hero and CTA bands, sign-in panel */
+  --color-brand-court-raised: #22609e; /* cards on the blue band */
+  --color-brand-court-deep: #184c80; /* a court's playing area (the logo's well) */
+  --color-brand-court-light: #4189c8; /* a court's kitchens / the logo's lower blue */
+  --color-brand-blue: #174f8a; /* labels, step numbers, icons, the wordmark's DG */
+  --color-brand-blue-soft: #e6eff9; /* icon tiles */
+  --color-brand-ball: #e2f41f; /* the ball's lime — replay bar, labels on blue */
+  --color-brand-ink: #0b2333; /* dark text on lime and on white buttons */
   --color-brand-flame: #f26b1d; /* orange — tiny highlights only (REC) */
-  --color-brand-on-court: #ffffff; /* text and lines on navy */
+  --color-brand-on-court: #ffffff; /* text and lines on blue */
 
-  /* ── ACCENT · soft lime, used sparingly (bars, ticks, focus rings, chips;
+  /* ── ACCENT · lime, used sparingly (bars, ticks, focus rings, chips;
      never text on a light surface) ─────────────────────────────────────── */
-  --color-secondary-color: #a9cf45;
+  --color-secondary-color: #e2f41f;
 
-  /* Chart series colour. NOT the same as --color-secondary-color: that accent is
-     specced for tiny marks (ticks/chips) and only reaches 1.7:1 on a white
-     surface, which is unreadable as a line/area fill. This step is validated
-     (OKLCH lightness band + >=3:1 contrast) for the light surface. */
-  --chart-series-1: #2f5ba8;
-  --color-secondary-dark: #8db52e;
-  --color-secondary-light: #c8e27f;
-  --color-link: #2f5ba8; /* text links — brand blue, 6.5:1 on white */
+  /* Chart series colour. NOT the lime: that accent is for tiny marks and is
+     unreadable as a line on white. The brand blue, lifted a step (>=3:1). */
+  --chart-series-1: #1f64ad;
+  --color-secondary-dark: #c2d80c; /* the ball's shade */
+  --color-secondary-light: #f3fd6a; /* the ball's light */
+  --color-link: #1f64ad; /* text links — the brand blue a step brighter, 5.9:1 on white */
 
-  /* Legacy aliases → resolved to the accent so any unconverted reference
-     degrades to the new system instead of the old indigo. */
-  --color-primary: #2f5ba8;
-  --color-primary-color: #2f5ba8;
-  --color-primary-dark: #0f3264;
-  --color-primary-light: #a9cf45;
+  /* Legacy aliases → resolved to the system so any unconverted reference
+     degrades to the brand instead of the old indigo. */
+  --color-primary: #1f64ad;
+  --color-primary-color: #1f64ad;
+  --color-primary-dark: #174f8a;
+  --color-primary-light: #e2f41f;
 
   /* ── SEMANTIC · Text ────────────────────────────────────────────────────── */
   --color-text-color: #ffffff; /* on-accent text */
-  --color-text-dark: #0f1d3a; /* primary text / values */
-  --color-text2: #1f2d4a; /* mid text (expanded-parent nav label) */
-  --color-text-secondary: #5b6880; /* body / labels */
-  --color-text-muted: #94a0b4; /* captions, icons, `#`, units */
+  --color-text-dark: #0b2333; /* primary text / values — the ball's hole */
+  --color-text2: #1b3347; /* mid text (expanded-parent nav label) */
+  --color-text-secondary: #556779; /* body / labels */
+  --color-text-muted: #8c9aaa; /* captions, icons, `#`, units */
 
   /* ── SEMANTIC · Surfaces ────────────────────────────────────────────────── */
-  --color-canvas: #f8fafc; /* page background */
+  --color-canvas: #f4f7fb; /* page background — a cool white under the blue */
   --color-surface: #ffffff; /* cards, table, drawer body */
   --color-surface-raised: #ffffff; /* dropdowns, popovers */
-  --color-surface-sunken: #f1f5f9; /* wells, hover, toggle track */
+  --color-surface-sunken: #edf2f8; /* wells, hover, toggle track */
 
   /* ── SEMANTIC · Lines (hairline borders, not shadows) ───────────────────── */
-  --color-line: #dbe2ed; /* hairline borders */
-  --color-line-soft: #eef2f7; /* row dividers */
+  --color-line: #d9e2ee; /* hairline borders */
+  --color-line-soft: #edf2f8; /* row dividers */
 
   /* Legacy aliases */
-  --color-border: #dbe2ed;
-  --color-border-light: #eef2f7;
-  --color-primary-pale: #eaf1fe; /* was a pastel tint — now neutral */
-  --color-secondary-pale: #f1f5f9;
-  --color-bg-primary: #f8fafc;
-  --color-bg-secondary: #f1f5f9;
-  --color-bg-tertiary: #dbe2ed;
+  --color-border: #d9e2ee;
+  --color-border-light: #edf2f8;
+  --color-primary-pale: #e6eff9;
+  --color-secondary-pale: #edf2f8;
+  --color-bg-primary: #f4f7fb;
+  --color-bg-secondary: #edf2f8;
+  --color-bg-tertiary: #d9e2ee;
 
-  /* ── PRIMARY BUTTON · navy with white text (CR-011 design); white with navy
-     text in dark, like the design's button on the navy band ─────────────── */
-  --color-btn-bg: #0f3264;
+  /* ── PRIMARY BUTTON · the logo's blue with white text on a light ground;
+     the ball's lime with dark text in dark ──────────────────────────────── */
+  --color-btn-bg: #174f8a;
   --color-btn-text: #ffffff;
 
   /* ── RADII ──────────────────────────────────────────────────────────────── */
@@ -105,8 +106,8 @@
   --color-info: #22c55e;
 
   /* ── ACCENT CHIP GRADIENT (drawer header mark only) ─────────────────────── */
-  --gradient-primary: linear-gradient(135deg, #0f3264 0%, #2f5ba8 100%);
-  --gradient-background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+  --gradient-primary: linear-gradient(135deg, #174f8a 0%, #4189c8 100%);
+  --gradient-background: linear-gradient(135deg, #f4f7fb 0%, #ffffff 100%);
 
   /* ── SHADOWS — structure comes from borders, not shadows. Flat by design;
      floating layers (dropdown/modal/drawer) get their shadow from shadcn/Radix. ── */
@@ -120,42 +121,42 @@
    ============================================================================ */
 .dark {
   /* Accent — lift slightly for legibility on dark surfaces */
-  --color-link: #8fb0e8; /* court blue, lifted for the dark surface */
-  --color-primary-color: #8fb0e8;
+  --color-link: #8cc0ee; /* the logo's blue, lifted for the dark surface */
+  --color-primary-color: #8cc0ee;
 
-  /* Chart series — court blue lifted for the dark surface (>=3:1). */
-  --chart-series-1: #8fb0e8;
+  /* Chart series — the blue lifted for the dark surface (>=3:1). */
+  --chart-series-1: #8cc0ee;
 
   /* Text */
-  --color-text-dark: #eef3fb;
-  --color-text2: #dce4f2;
-  --color-text-secondary: #a8b6cf;
-  --color-text-muted: #6b7c9c;
+  --color-text-dark: #eef4fa;
+  --color-text2: #d8e3ee;
+  --color-text-secondary: #a5b7c9;
+  --color-text-muted: #6e8499;
 
-  /* Surfaces */
-  --color-canvas: #0a1630;
-  --color-surface: #0f2142;
-  --color-surface-raised: #16294d;
-  --color-surface-sunken: #16294d;
+  /* Surfaces — the dark of the ball's holes, cards a step up */
+  --color-canvas: #0b2333;
+  --color-surface: #10304a;
+  --color-surface-raised: #163b5a;
+  --color-surface-sunken: #163b5a;
 
   /* Lines */
-  --color-line: #223a66;
-  --color-line-soft: #16294d;
+  --color-line: #22496b;
+  --color-line-soft: #163b5a;
 
   /* Legacy aliases */
-  --color-border: #223a66;
-  --color-border-light: #16294d;
-  --color-primary-pale: #16294d;
-  --color-secondary-pale: #16294d;
-  --color-bg-primary: #0a1630;
-  --color-bg-secondary: #16294d;
-  --color-bg-tertiary: #223a66;
+  --color-border: #22496b;
+  --color-border-light: #163b5a;
+  --color-primary-pale: #163b5a;
+  --color-secondary-pale: #163b5a;
+  --color-bg-primary: #0b2333;
+  --color-bg-secondary: #163b5a;
+  --color-bg-tertiary: #22496b;
 
-  /* Primary button: white with navy text on the dark navy */
-  --color-btn-bg: #ffffff;
-  --color-btn-text: #0f3264;
+  /* Primary button: the ball's lime with dark text — the dark theme's action */
+  --color-btn-bg: #e2f41f;
+  --color-btn-text: #0b2333;
 
-  --gradient-background: linear-gradient(135deg, #0a1630 0%, #0f2142 100%);
+  --gradient-background: linear-gradient(135deg, #0b2333 0%, #10304a 100%);
 }
 
 /* ============================================================================

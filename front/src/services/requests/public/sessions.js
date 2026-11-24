@@ -55,7 +55,7 @@ export const useSavePublicCapture = (shareToken) => {
 /** The API's sentence for a failed control, or a fallback. */
 const failText = (error, fallback) =>
   !error?.response
-    ? "Can't reach Dyna Cam — check your connection and try again."
+    ? "Can't reach DGSports — check your connection and try again."
     : error.response.data?.message || fallback;
 
 /** A control on the game's page (CR-028): toast the answer, then re-read the game. */

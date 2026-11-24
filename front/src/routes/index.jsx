@@ -13,6 +13,14 @@ const PublicSession = lazy(() => import("../pages/Public/Session"));
 // A player streams their session to their own Facebook / YouTube (PLAN-002
 // Phase G) — the setup code from the session device's QR is the credential.
 const PublicStream = lazy(() => import("../pages/Public/Stream"));
+// Court booking (PLAN-003) — the venue's booking link / a booking's own link
+const PublicBook = lazy(() => import("../pages/Public/Book"));
+const PublicBooking = lazy(() => import("../pages/Public/Booking"));
+// CR-030: the way in for players — every venue taking bookings, and Find my booking
+const PublicVenues = lazy(() => import("../pages/Public/Venues"));
+const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
+const PublicPaymentSandbox = lazy(() => import("../pages/Public/PaymentSandbox")); // CR-033
+const PublicBoard = lazy(() => import("../pages/Public/Board")); // CR-038: a venue's TV court board
 
 const RootRoutes = () => {
   return (
@@ -63,6 +71,54 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicStream />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/book"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicVenues />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/booking"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicFindBooking />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/book/:bookingToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBook />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/booking/:manageToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBooking />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/payment-sandbox/:checkoutId"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicPaymentSandbox />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/board/:displayToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBoard />
             </Suspense>
           }
         />

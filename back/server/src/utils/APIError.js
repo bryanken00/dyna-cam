@@ -69,6 +69,8 @@ export const ERROR_CODES = {
 
   // Unavailable (503)
   CAMERA_OFFLINE: 'CAMERA_OFFLINE',
+  // PLAN-003: a closure would land on live bookings — error.conflicts lists them
+  BOOKINGS_IN_THE_WAY: 'BOOKINGS_IN_THE_WAY',
   // PLAN-002 Phase I: the API has no RECORDER_ENROLL_KEY, so boxes can't enrol
   ENROLLMENT_DISABLED: 'ENROLLMENT_DISABLED',
 

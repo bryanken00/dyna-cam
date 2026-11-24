@@ -24,9 +24,13 @@ const Venues = lazy(() => import("../../pages/Admin/Setup/Venues"));
 const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
 const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
 const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
-// Dyna Cam (PLAN-001): day-to-day work
+// PLAN-003: printable "Book a court" sign for a venue's online booking link
+const BookingSign = lazy(() => import("../../pages/Admin/Setup/BookingSign"));
+// DGSports (PLAN-001; CR-036 renamed from Dyna Cam): day-to-day work
 const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
+// PLAN-003: court bookings at the desk
+const Bookings = lazy(() => import("../../pages/Admin/DynaCam/Bookings"));
 
 const VENUE_PAGE_ACCESS = [
   { module: "venues", submodule: "list", accessLevel: "read" },
@@ -77,11 +81,12 @@ const AdminRoute = () => {
     },
     {
       key: "dyna-cam",
-      name: "Dyna Cam",
-      label: "Dyna Cam",
+      name: "DGSports",
+      label: "DGSports",
       icon: <Video className="h-5 w-5" />,
       permission: {
         anyOf: [
+          { module: "bookings", submodule: null, accessLevel: "read" },
           { module: "clips", submodule: null, accessLevel: "read" },
           { module: "payments", submodule: null, accessLevel: "read" },
         ],
@@ -89,6 +94,21 @@ const AdminRoute = () => {
       isFilter: true,
       isShow: true,
       children: [
+        {
+          route: "/bookings",
+          name: "Bookings",
+          label: "Bookings",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="bookings" accessLevel="read">
+                <Bookings />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "bookings", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
         {
           route: "/sessions",
           name: "Sessions",
@@ -269,6 +289,17 @@ const AdminRoute = () => {
                 accessLevel="read"
               >
                 <CourtSign />
+              </ProtectedRoute>
+            </Suspense>
+          }
+        />
+        {/* PLAN-003: printable A5 "Book a court" sign — full page, new tab */}
+        <Route
+          path="setup/venues/:venueId/booking-sign"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="bookings" accessLevel="read">
+                <BookingSign />
               </ProtectedRoute>
             </Suspense>
           }

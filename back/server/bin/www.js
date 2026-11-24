@@ -10,6 +10,7 @@ import { scheduleIdempotencyCleanup } from "../src/middlewares/idempotency.middl
 import { scheduleClipMaintenance } from "../src/jobs/clipMaintenance.js";
 import { scheduleDriveUploads } from "../src/jobs/driveUploads.js";
 import { scheduleVenueAlerts } from "../src/jobs/venueAlerts.js";
+import { scheduleBookingMaintenance } from "../src/jobs/bookingMaintenance.js";
 import { close as closeRateLimiter } from "../src/utils/rateLimiterService.js";
 
 const debug = debugLib("wb:server");
@@ -108,6 +109,7 @@ let stopIdempotencyCleanup = () => {};
 let stopClipMaintenance = () => {};
 let stopDriveUploads = () => {};
 let stopVenueAlerts = () => {};
+let stopBookingMaintenance = () => {};
 
 /**
  * Create HTTPS server.
@@ -147,6 +149,7 @@ async function gracefulShutdown(signal) {
   stopClipMaintenance();
   stopDriveUploads();
   stopVenueAlerts();
+  stopBookingMaintenance();
 
   // Stop accepting new connections
   server.close(() => {
@@ -304,6 +307,9 @@ function onListening() {
 
     // CR-008: box offline / camera down / disk / clock / backlog → Discord + email — every minute
     stopVenueAlerts = scheduleVenueAlerts(db);
+
+    // PLAN-003: expire unpaid holds, mark no-shows, mark played bookings — every minute
+    stopBookingMaintenance = scheduleBookingMaintenance(db);
 
     // Start listening only after health checks pass
     server.listen(port);

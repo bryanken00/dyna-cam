@@ -223,6 +223,103 @@ export const courtSetupPath = (venueId, courtId) =>
   `${venuePath(venueId)}/courts/${courtId}`;
 /** The printable A5 sign — full page, opened in its own tab. */
 export const courtSignPath = (courtId) => `/admin/setup/courts/${courtId}/print`;
+/** PLAN-003: the printable A5 "Book a court" sign for a venue's booking link. */
+export const bookingSignPath = (venueId) => `${venuePath(venueId)}/booking-sign`;
+
+/* ── Court booking (PLAN-003) ────────────────────────────────────────────── */
+
+/** Dyna Cam → Bookings; `?booking=<id>` opens that booking. */
+export const BOOKINGS_PATH = "/admin/bookings";
+export const bookingPath = (bookingId) => `${BOOKINGS_PATH}?booking=${bookingId}`;
+
+/** Booking status → what staff read, and its StatusDot tone. */
+export const BOOKING_STATUS_LABEL = {
+  Pending: "Unpaid hold",
+  Confirmed: "Confirmed",
+  CheckedIn: "Checked in",
+  Completed: "Played",
+  NoShow: "No-show",
+  Cancelled: "Cancelled",
+  Expired: "Hold expired",
+  Deleted: "Deleted",
+};
+export const BOOKING_STATUS_TONE = {
+  Pending: "warning",
+  Confirmed: "success",
+  CheckedIn: "success",
+  Completed: "muted",
+  NoShow: "error",
+  Cancelled: "muted",
+  Expired: "muted",
+  Deleted: "muted",
+};
+/** paymentStatus → label. */
+export const BOOKING_PAYMENT_LABEL = {
+  Unpaid: "Unpaid",
+  Paid: "Paid",
+  Refunded: "Refunded",
+  Free: "Free",
+};
+
+/** dayOfWeek 0 = Sunday … 6 = Saturday, as the API stores it. */
+export const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Monday first — how the week reads on the venue's forms. */
+export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/** "17:00" → "5 PM", "00:00" → "12 AM", "24:00" → "12 AM (midnight)". */
+export const formatHour = (hhmm) => {
+  const hour = Number(String(hhmm).slice(0, 2));
+  if (hour === 24) return "Midnight";
+  const suffix = hour < 12 ? "AM" : "PM";
+  return `${hour % 12 === 0 ? 12 : hour % 12} ${suffix}`;
+};
+
+/** Every bookable start ("00:00" … "23:00") and end ("01:00" … "24:00"). */
+export const START_HOURS = Array.from(
+  { length: 24 },
+  (_, h) => `${String(h).padStart(2, "0")}:00`,
+);
+export const END_HOURS = Array.from(
+  { length: 24 },
+  (_, h) => `${String(h + 1).padStart(2, "0")}:00`,
+);
+
+/**
+ * [1, 2, 3, 4, 5] → "Mon–Fri", [0, 6] → "Sat, Sun", all seven → "Every day".
+ * Runs of 3+ days (Monday-first) collapse to a range.
+ */
+export const formatDays = (days = []) => {
+  const set = new Set(days.map(Number));
+  if (set.size === 7) return "Every day";
+  const ordered = WEEK_ORDER.filter((d) => set.has(d));
+  const parts = [];
+  let i = 0;
+  while (i < ordered.length) {
+    let j = i;
+    while (
+      j + 1 < ordered.length &&
+      WEEK_ORDER.indexOf(ordered[j + 1]) === WEEK_ORDER.indexOf(ordered[j]) + 1
+    ) {
+      j += 1;
+    }
+    if (j - i >= 2) {
+      parts.push(`${WEEKDAY_SHORT[ordered[i]]}–${WEEKDAY_SHORT[ordered[j]]}`);
+    } else {
+      for (let k = i; k <= j; k += 1) parts.push(WEEKDAY_SHORT[ordered[k]]);
+    }
+    i = j + 1;
+  }
+  return parts.join(", ");
+};
 
 /** 4 → "4 s ago", 125 → "2 min ago", 7300 → "2 h ago", 200000 → "2 days ago". */
 export const formatAgo = (seconds) => {
@@ -433,3 +530,11 @@ export const courtUpdatePayload = (court, overrides = {}) => ({
   removeStream: false,
   ...overrides,
 });
+
+/** CR-038: the TV court board's colours (grid blocks and legend) — booked orange, in play blue, played grey. */
+export const BOARD_TONE = {
+  free: "var(--color-success)",
+  booked: "var(--color-warning)",
+  playing: "var(--color-link)",
+  done: "var(--color-text-muted)",
+};

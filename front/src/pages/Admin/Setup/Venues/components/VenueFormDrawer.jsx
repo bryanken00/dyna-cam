@@ -277,7 +277,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                     >
                       {isEditMode
                         ? "Update venue details and clip settings"
-                        : "Add a venue that hosts Dyna Cam courts"}
+                        : "Add a venue that hosts DGSports courts"}
                     </p>
                   </div>
                 </div>

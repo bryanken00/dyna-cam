@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { optionalEmail, optionalPhone, optionalString } from "./_helpers.js";
+import {
+  formatPhone,
+  optionalPhone,
+  toLocalDigits,
+} from "./_helpers.js";
+import { bookingDate, bookingLength, startTime } from "./bookings.validator.js";
 
 /** Validators for the no-login player routes (controllers/v1/public/). */
 
@@ -9,20 +14,6 @@ const token = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid link");
 
 // /courts/:qrToken
 export const courtTokenParamsSchema = z.object({ qrToken: token });
-
-// POST /courts/:qrToken/games — CR-027: the player's own game. The game time has
-// the same bounds as Admin's New game; no payment and no save limit here (the
-// game is free and allows PLAYER_MAX_CAPTURES saves).
-export const startGameSchema = z.object({
-  durationMinutes: z.coerce
-    .number()
-    .int("Use whole minutes")
-    .min(5, "A game is at least 5 minutes")
-    .max(180, "A game is at most 3 hours"),
-  playerName: optionalString(100),
-  phone: optionalPhone(),
-  email: optionalEmail(255),
-});
 
 // /clips/:shareToken
 export const clipTokenParamsSchema = z.object({ shareToken: token });
@@ -99,3 +90,94 @@ export const saveStreamSchema = z.discriminatedUnion("platform", [
 
 // …or only a new layout for the stream already saved
 export const streamLayoutSchema = z.object({ layout: z.enum(["CAM1", "CAM2", "STACKED"]) });
+
+/* ── PLAN-003 Phase C: the public booking page ──────────────────────────────
+ * /book/:bookingToken is a venue's online booking link; /bookings/:manageToken
+ * is one booking's own link. Courts are named by a key from the page's reply
+ * (courtKey), never by their business ID.
+ */
+
+// /book/:bookingToken
+export const bookingTokenParamsSchema = z.object({ bookingToken: token });
+
+// /bookings/:manageToken
+export const manageTokenParamsSchema = z.object({ manageToken: token });
+
+const courtKey = z.string().regex(/^[a-f0-9]{16}$/, "Pick a court");
+
+// GET /book/:bookingToken/availability?date=&durationMinutes=
+export const availabilityQuerySchema = z.object({
+  date: bookingDate(),
+  durationMinutes: bookingLength(360),
+});
+
+// POST /book/:bookingToken/bookings
+export const publicBookingSchema = z.object({
+  courtKey,
+  date: bookingDate(),
+  startTime: startTime(),
+  durationMinutes: bookingLength(360),
+  playerName: z.string().trim().min(1, "Enter your name").max(100),
+  phone: optionalPhone(),
+  // Required online: it's how the player gets their booking link back
+  email: z.string().trim().email("Enter a valid email").max(255),
+  // Phase F: Online = a Xendit checkout (refused with 409 while online payment is off)
+  payMethod: z.enum(["Desk", "Online"]),
+});
+
+// GET /bookings/:manageToken/move-options?date= — PLAN-003 Phase H
+export const moveOptionsQuerySchema = z.object({ date: bookingDate() });
+
+// POST /bookings/:manageToken/move — PLAN-003 Phase H: a court (by its key from
+// move-options; the booking's own court when left out), a date and a start
+export const playerMoveSchema = z.object({
+  courtKey: courtKey.optional(),
+  date: bookingDate(),
+  startTime: startTime(),
+});
+
+// A booking code as the player types it ("k7q m2p" works)
+const bookingCode = z
+  .string()
+  .transform((v) => v.replace(/\s+/g, "").toUpperCase())
+  .pipe(z.string().regex(/^[A-Z0-9]{4,12}$/, "Enter the code from your booking"));
+
+// POST /courts/:qrToken/check-in — PLAN-003 Phase D: the booking code the
+// player was given, checked in at that court's QR
+export const checkInCodeSchema = z.object({ bookingCode });
+
+const CONTACT_MESSAGE = "Enter the phone number or email you booked with";
+
+// POST /bookings/find — CR-030: the booking code plus the phone (any accepted
+// format → 09XX XXXX XXX) or email the booking was made with
+export const findBookingSchema = z.object({
+  bookingCode,
+  contact: z
+    .string()
+    .trim()
+    .min(1, CONTACT_MESSAGE)
+    .max(255)
+    .transform((value, ctx) => {
+      if (value.includes("@")) {
+        if (!z.string().email().safeParse(value).success) {
+          ctx.addIssue({ code: "custom", message: CONTACT_MESSAGE });
+          return z.NEVER;
+        }
+        return { email: value.toLowerCase() };
+      }
+      const digits = toLocalDigits(value);
+      if (!/^09\d{9}$/.test(digits)) {
+        ctx.addIssue({ code: "custom", message: CONTACT_MESSAGE });
+        return z.NEVER;
+      }
+      return { phone: formatPhone(digits) };
+    }),
+});
+
+// CR-033: /payment-sandbox/:checkoutId — the built-in test checkout's ID
+export const paymentSandboxParamsSchema = z.object({
+  checkoutId: z.string().regex(/^sandbox_[A-Za-z0-9_-]{16,64}$/, "Invalid link"),
+});
+
+// CR-038: /board/:displayToken — a venue's TV court board link
+export const displayTokenParamsSchema = z.object({ displayToken: token });

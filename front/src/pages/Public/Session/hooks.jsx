@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { decodeHTML } from "../../../utils/decode-html";
 import { copyText } from "../../../utils/clipboard";
+import { useWindowSize } from "../../../hooks/useWindowSize";
 import { confirm } from "../../../store/confirmStore";
 import {
   useDeletePublicCapture,
@@ -15,6 +16,8 @@ import {
 } from "../../../services/requests/public/sessions";
 
 export const useSessionPageHooks = () => {
+  // CR-035: two columns from Tailwind's lg (1024px); phones keep the one column
+  const { width } = useWindowSize();
   const { shareToken } = useParams();
   const navigate = useNavigate();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } =
@@ -181,5 +184,6 @@ export const useSessionPageHooks = () => {
     loadError: !notFound ? error : null,
     refetch,
     handleShare,
+    wide: width >= 1024,
   };
 };

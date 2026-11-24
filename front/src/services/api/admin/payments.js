@@ -40,3 +40,13 @@ export const refundPaymentApi = async ({ paymentId, note }) => {
   );
   return response.data;
 };
+
+// PLAN-003 Phase F: each venue's online (Xendit) money for a date range →
+// { dateFrom, dateTo, venues: [{ venueId, venueName, payments, collected, refunded,
+//   refundFailed, refundFailedCount, net }], totals }
+export const getSettlementApi = async ({ dateFrom, dateTo } = {}) => {
+  const response = await api.get("/api/v1/admin/payments/settlement", {
+    params: { dateFrom, dateTo },
+  });
+  return response.data;
+};

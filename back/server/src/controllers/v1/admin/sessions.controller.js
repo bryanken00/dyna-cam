@@ -34,6 +34,7 @@ import {
 import { loadSessionVideos, toAdminVideo } from "../../../utils/sessionVideos.js";
 import { captureLimits, loadCaptures } from "../../../utils/sessionCaptures.js";
 import { bookCourt } from "../../../utils/gameStart.js";
+import { findConflict } from "../../../utils/courtTimeline.js";
 import {
   DRIVE_EMAIL_COLUMNS,
   driveEmailState,
@@ -82,7 +83,9 @@ const SESSION_SELECT = `
                    AND dv.driveStatus = 'Uploaded') AS driveReady,
          (SELECT SUM(p.amount) FROM payments p WHERE p.sessionId = s.sessionId AND p.status = 'Paid')
            AS paidAmount,
-         COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'),
+         s.bookingId, bk.bookingCode,
+         COALESCE(IF(s.bookingId IS NOT NULL, CONCAT('Booking ', bk.bookingCode), NULL),
+                  CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'),
                   IF(s.startedByPlayer = 1, 'Player (QR)', NULL)) AS startedBy,
          (SELECT COUNT(*) FROM session_videos sv
           WHERE sv.sessionId = s.sessionId AND sv.captureId IS NULL AND sv.status = 'Ready')
@@ -96,7 +99,8 @@ const SESSION_SELECT = `
   JOIN venues v ON v.venueId = s.venueId
   JOIN courts c ON c.courtId = s.courtId
   LEFT JOIN users u ON u.accountId = s.createdByAccountId
-  LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId`;
+  LEFT JOIN paired_apps pa ON pa.pairedAppId = s.pairedAppId
+  LEFT JOIN bookings bk ON bk.bookingId = s.bookingId`;
 
 /**
  * CR-018 (2026-11-20): the game's Google Drive upload, for Re-upload in Sessions.
@@ -387,6 +391,26 @@ const createOpenGame = async (req, res) => {
       await req.db.rollback(conn);
       return res.sendError("This court already has a game — end it before starting a new one", 409);
     }
+    // PLAN-003: an open game's rolling end reaches OPEN_GAME_AHEAD_HOURS ahead,
+    // so a booking or closure inside that would be run over
+    const ahead = await findConflict(conn, {
+      courtId,
+      startLocal: now,
+      endLocal: openGameEnd(),
+      now,
+    });
+    if (ahead) {
+      await req.db.rollback(conn);
+      const from = moment.tz(ahead.from, FORMAT, TIMEZONE).format("h:mm A");
+      return res.sendError(
+        ahead.type === "CLOSURE"
+          ? `This court is closed from ${from} — give the game a game time that ends before then`
+          : ahead.type === "BOOKING"
+            ? `Booking ${ahead.code} has this court from ${from} — give the game a game time that ends before then`
+            : "This court already has a game — end it before starting a new one",
+        409
+      );
+    }
 
     const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
     const sessionId = uuidRow[0].id;
@@ -488,6 +512,24 @@ router.post(
         if (booked.reason === "NO_CAMERA") {
           return res.sendError("This court has no camera configured", 400);
         }
+        // PLAN-003: a booking or closure in the way is named, so staff can find it
+        const { conflict } = booked;
+        if (conflict?.type === "BOOKING") {
+          return res.sendError(
+            `Booking ${conflict.code} has this court from ${moment
+              .tz(conflict.from, FORMAT, TIMEZONE)
+              .format("h:mm A")} — pick a shorter game time or another court`,
+            409
+          );
+        }
+        if (conflict?.type === "CLOSURE") {
+          return res.sendError(
+            `This court is closed from ${moment
+              .tz(conflict.from, FORMAT, TIMEZONE)
+              .format("MMM D, h:mm A")} — pick a shorter game time or another court`,
+            409
+          );
+        }
         return res.sendError(
           startNow
             ? "This court already has a game — end it before starting a new one"
@@ -577,7 +619,7 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
       const [sessions] = await conn.execute(
-        `SELECT s.sessionId, s.courtId, s.startAt, s.endAt, s.status, s.openEnded
+        `SELECT s.sessionId, s.courtId, s.bookingId, s.startAt, s.endAt, s.status, s.openEnded
          FROM recording_sessions s JOIN venues v ON v.venueId = s.venueId AND v.status != 'Deleted'
          WHERE s.sessionId = ?
          LIMIT 1 FOR UPDATE`,
@@ -609,17 +651,30 @@ router.post(
         );
       }
       const newEndLocal = newEnd.format(FORMAT);
-      // A session booked later on the same court (older clients) keeps its time
-      const [overlap] = await conn.execute(
-        `SELECT sessionId FROM recording_sessions
-         WHERE courtId = ? AND sessionId != ? AND status NOT IN ('Cancelled', 'Failed')
-           AND startAt < ? AND endAt > ?
-         LIMIT 1`,
-        [session.courtId, session.sessionId, newEndLocal, session.endAt]
-      );
-      if (overlap.length > 0) {
+      // PLAN-003: lock the court like every other timeline writer, then check
+      // the added time — a game, booking or closure after it keeps its time
+      await conn.execute(`SELECT courtId FROM courts WHERE courtId = ? FOR UPDATE`, [
+        session.courtId,
+      ]);
+      const inTheWay = await findConflict(conn, {
+        courtId: session.courtId,
+        startLocal: session.endAt,
+        endLocal: newEndLocal,
+        ignoreBookingId: session.bookingId,
+        now,
+      });
+      if (inTheWay) {
         await req.db.rollback(conn);
-        return res.sendError("Another session is booked on this court in that time", 409);
+        return res.sendError(
+          inTheWay.type === "BOOKING"
+            ? `Booking ${inTheWay.code} has this court from ${moment
+                .tz(inTheWay.from, FORMAT, TIMEZONE)
+                .format("h:mm A")} — add less time`
+            : inTheWay.type === "CLOSURE"
+              ? "The court is closed in that time — add less time"
+              : "Another session is booked on this court in that time",
+          409
+        );
       }
       await conn.execute(
         `UPDATE recording_sessions

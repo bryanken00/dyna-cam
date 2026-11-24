@@ -19,7 +19,10 @@ import {
 
 const EMPTY_FILTERS = { venueId: "", status: "", dateFrom: "", dateTo: "" };
 
-const METHOD_LABEL = { CASH: "Cash" };
+const METHOD_LABEL = { CASH: "Cash", ONLINE: "Online" };
+
+/** What was paid for: a replay, a whole game (CR-015) or a court booking (PLAN-003). */
+const KIND_LABEL = { Clip: "Replay", Game: "Game", Booking: "Court booking" };
 
 export const usePaymentHooks = () => {
   const { hasPermission } = usePermissions();
@@ -32,6 +35,10 @@ export const usePaymentHooks = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [takePaymentOpen, setTakePaymentOpen] = useState(false);
+  // PLAN-003 Phase F: the online (Xendit) settlement statement
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const handleOpenSettlement = useCallback(() => setSettlementOpen(true), []);
+  const handleCloseSettlement = useCallback(() => setSettlementOpen(false), []);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -79,6 +86,22 @@ export const usePaymentHooks = () => {
     [],
   );
 
+  // Phase F: Xendit refused a booking's online refund; staff repaid the player by hand
+  const handleMarkRepaid = useCallback(
+    async (record) => {
+      const ok = await confirm({
+        title: "Mark as repaid by hand",
+        description: `The online refund of ${formatPeso(record.amount)} for booking ${formatPayCode(
+          record.payCode,
+        )} failed (${decodeHTML(record.refundError)}). Mark it refunded once you've given the player their money back another way.`,
+        confirmText: "Mark repaid",
+        cancelText: "Cancel",
+      });
+      if (ok) refundMutation.mutate({ paymentId: record.paymentId });
+    },
+    [refundMutation],
+  );
+
   const handleRefundRequest = useCallback(
     async (record) => {
       const ok = await confirm({
@@ -100,6 +123,19 @@ export const usePaymentHooks = () => {
   const getActionItems = useCallback(
     (record) => {
       if (!canWrite || record.status !== "Paid") return [];
+      // Phase F: a failed online refund of a booking, repaid by hand
+      if (record.kind === "Booking" && record.refundError) {
+        return [
+          {
+            key: "repaid",
+            label: "Mark repaid by hand",
+            icon: <Undo2 className="w-4 h-4" />,
+            onClick: () => handleMarkRepaid(record),
+          },
+        ];
+      }
+      // PLAN-003: a booking is refunded by cancelling it in Bookings
+      if (record.kind === "Booking") return [];
       return [
         {
           key: "refund",
@@ -110,7 +146,7 @@ export const usePaymentHooks = () => {
         },
       ];
     },
-    [canWrite, handleRefundRequest],
+    [canWrite, handleRefundRequest, handleMarkRepaid],
   );
 
   const { current, pageSize } = pagination;
@@ -169,7 +205,7 @@ export const usePaymentHooks = () => {
               {decodeHTML(record.venueName)}
               {/* CR-015: a whole game, or a single replay */}
               {" · "}
-              {record.kind === "Game" ? "Game" : "Replay"}
+              {KIND_LABEL[record.kind] || "Replay"}
             </div>
           </div>
         ),
@@ -258,9 +294,14 @@ export const usePaymentHooks = () => {
         width: 150,
         render: (status, record) => (
           <div>
-            <StatusDot tone={PAYMENT_STATUS_TONE[status] || "muted"}>
-              {status}
-            </StatusDot>
+            {status === "Paid" && record.refundError ? (
+              // Phase F: Xendit refused the refund — the player is still owed it
+              <StatusDot tone="error">Refund failed</StatusDot>
+            ) : (
+              <StatusDot tone={PAYMENT_STATUS_TONE[status] || "muted"}>
+                {status}
+              </StatusDot>
+            )}
             {status === "Refunded" && record.refundedAt && (
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                 {formatDateTime(record.refundedAt)}
@@ -320,5 +361,8 @@ export const usePaymentHooks = () => {
     takePaymentOpen,
     handleOpenTakePayment,
     handleCloseTakePayment,
+    settlementOpen,
+    handleOpenSettlement,
+    handleCloseSettlement,
   };
 };

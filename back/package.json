@@ -1,7 +1,7 @@
 {
   "name": "dyna-cam-api",
   "version": "1.0.0",
-  "description": "Dyna Cam API",
+  "description": "DGSports API",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "db:migrate": "node scripts/migrate.js",
     "db:reset": "node scripts/reset-database.js",
     "db:check": "node scripts/check-database.js",
+    "db:data": "node scripts/seed-demo-data.js",
     "boxes": "node scripts/boxes.js",
     "boxes:revoke": "node scripts/boxes.js revoke",
     "keys": "node scripts/generate-keys.js"
@@ -62,5 +63,10 @@
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "storage/*"
+    ]
   }
 }

@@ -14,6 +14,9 @@ import courtsController from "../../../controllers/v1/admin/courts.controller.js
 import clipsController from "../../../controllers/v1/admin/clips.controller.js";
 import sessionsController from "../../../controllers/v1/admin/sessions.controller.js";
 import paymentsController from "../../../controllers/v1/admin/payments.controller.js";
+import bookingSettingsController from "../../../controllers/v1/admin/booking-settings.controller.js";
+import closuresController from "../../../controllers/v1/admin/closures.controller.js";
+import bookingsController from "../../../controllers/v1/admin/bookings.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -48,6 +51,16 @@ router.use("/courts", requireAuth, auditTrail("courts"), courtsController);
 router.use("/clips", requireAuth, auditTrail("clips"), clipsController);
 router.use("/sessions", requireAuth, auditTrail("sessions"), sessionsController);
 router.use("/payments", requireAuth, auditTrail("payments"), paymentsController);
+
+// Court booking (PLAN-003)
+router.use(
+  "/booking-settings",
+  requireAuth,
+  auditTrail("booking_settings"),
+  bookingSettingsController
+);
+router.use("/closures", requireAuth, auditTrail("closures"), closuresController);
+router.use("/bookings", requireAuth, auditTrail("bookings"), bookingsController);
 
 
 export default router;

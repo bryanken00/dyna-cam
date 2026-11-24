@@ -12,7 +12,7 @@ import { logger } from "../../../config/logger.js";
  *
  * Env:
  *   SENDGRID_API_KEY, SENDGRID_API_URL
- *   MAIL_FROM   e.g.  "Dyna Cam <no-reply@dynacam.ph>"
+ *   MAIL_FROM   e.g.  "DGSports <no-reply@dgsports.ph>"
  */
 
 const DEFAULT_FROM = process.env.MAIL_FROM || "Template <no-reply@template.test>";
@@ -22,7 +22,7 @@ const SENDGRID_TIMEOUT_MS = 30 * 1000;
 /** True when emails go through SendGrid (CR-018). */
 export const sendgridConfigured = () => Boolean(process.env.SENDGRID_API_KEY);
 
-/** "Dyna Cam <no-reply@x.ph>" → { name, email }; a bare address → { email }. */
+/** "DGSports <no-reply@x.ph>" → { name, email }; a bare address → { email }. */
 const parseAddress = (value) => {
   const text = String(value || "").trim();
   const match = text.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
@@ -87,6 +87,17 @@ const sendViaSendgrid = async ({ to, subject, html, text }) => {
   return res.headers.get("x-message-id") || null;
 };
 
+const ENTITIES = { "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
+
+/** The plain-text part: tags dropped, the entities templates escape turned back (&amp; last). */
+const htmlToText = (html) =>
+  html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/&(lt|gt|quot|#39|nbsp);/g, (entity) => ENTITIES[entity])
+    .replace(/&amp;/g, "&");
+
 /**
  * Send an email. Never throws to the caller by default — a failed email must
  * not break the request flow (e.g. forgot-password stays a 200). Pass
@@ -101,7 +112,7 @@ const sendViaSendgrid = async ({ to, subject, html, text }) => {
  * @returns {Promise<{ sent: boolean }>}
  */
 export const sendMail = async ({ to, subject, html, text, throwOnError = false }) => {
-  const plain = text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const plain = text || htmlToText(html);
   try {
     if (sendgridConfigured()) {
       const messageId = await sendViaSendgrid({ to, subject, html, text: plain });

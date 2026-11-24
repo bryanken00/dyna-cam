@@ -155,8 +155,8 @@ const PairDeviceFormModal = ({ open, onClose, onSuccess, entity }) => {
                     </FormControl>
                   </div>
                   <FormDescription>
-                    Next you&apos;ll get a 6-digit key to type into the Dyna Cam
-                    app on the device. It works for 10 minutes, or until the
+                    Next you&apos;ll get a 6-digit key to type into the app on
+                    the court&apos;s device. It works for 10 minutes, or until the
                     session ends.
                   </FormDescription>
                   <FormMessage />
