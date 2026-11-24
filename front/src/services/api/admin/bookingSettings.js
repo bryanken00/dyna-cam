@@ -23,3 +23,15 @@ export const turnOffBookingLinkApi = async (venueId) => {
   const response = await api.delete(`/api/v1/admin/booking-settings/${venueId}/link`);
   return response.data;
 };
+
+// CR-038: turn the venue's TV court board on / issue a new link → { displayUrl }
+export const issueDisplayLinkApi = async (venueId) => {
+  const response = await api.post(`/api/v1/admin/booking-settings/${venueId}/display-link`);
+  return response.data;
+};
+
+// CR-038: turn the TV court board off
+export const turnOffDisplayLinkApi = async (venueId) => {
+  const response = await api.delete(`/api/v1/admin/booking-settings/${venueId}/display-link`);
+  return response.data;
+};

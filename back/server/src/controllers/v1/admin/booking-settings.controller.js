@@ -3,7 +3,7 @@ import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
-import { bookingPageUrl } from "../../../utils/clips.js";
+import { bookingPageUrl, courtBoardUrl } from "../../../utils/clips.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { toRate } from "../../../utils/bookingPrice.js";
 import { hoursList, loadVenueHours } from "../../../utils/courtTimeline.js";
@@ -26,7 +26,7 @@ const toTime = (hhmm) => `${hhmm}:00`;
 /** The venue (not Deleted) or null. */
 const findVenue = async (db, venueId) => {
   const rows = await db.query(
-    `SELECT v.venueId, v.name, v.phone, v.logoUrl, v.bookingToken, ${RULE_COLUMNS}
+    `SELECT v.venueId, v.name, v.phone, v.logoUrl, v.bookingToken, v.displayToken, ${RULE_COLUMNS}
      FROM venues v
      WHERE v.venueId = ? AND v.status != 'Deleted'
      LIMIT 1`,
@@ -76,6 +76,8 @@ router.get(
         venueLogoUrl: signUploadUrl(venue.logoUrl),
         bookingEnabled: Boolean(venue.bookingToken),
         bookingUrl: venue.bookingToken ? bookingPageUrl(venue.bookingToken) : null,
+        // CR-038: the TV court board's link (null: off)
+        displayUrl: venue.displayToken ? courtBoardUrl(venue.displayToken) : null,
         maxBookingMinutes: venue.maxBookingMinutes,
         bookingDaysAhead: venue.bookingDaysAhead,
         deskHoldMinutes: venue.deskHoldMinutes,
@@ -277,6 +279,50 @@ router.delete(
       return res.sendError("Venue not found", 404);
     }
     return res.sendSuccess("Online booking turned off");
+  })
+);
+
+/**
+ * POST /:venueId/display-link
+ * CR-038: turn the TV court board on with a new link. A link opened before
+ * (on a TV) stops working.
+ */
+router.post(
+  "/:venueId/display-link",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    const displayToken = randomToken();
+    const result = await req.db.query(
+      `UPDATE venues SET displayToken = ?, dateUpdated = ?
+       WHERE venueId = ? AND status != 'Deleted'`,
+      [displayToken, getCurrentTimestampLocal(), req.params.venueId]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("Venue not found", 404);
+    }
+    return res.sendSuccess("New TV board link issued — open it on the TV again", {
+      displayUrl: courtBoardUrl(displayToken),
+    });
+  })
+);
+
+/**
+ * DELETE /:venueId/display-link
+ * CR-038: turn the TV court board off; a TV showing it says the link isn't valid.
+ */
+router.delete(
+  "/:venueId/display-link",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    const result = await req.db.query(
+      `UPDATE venues SET displayToken = NULL, dateUpdated = ?
+       WHERE venueId = ? AND status != 'Deleted'`,
+      [getCurrentTimestampLocal(), req.params.venueId]
+    );
+    if (result.affectedRows === 0) {
+      return res.sendError("Venue not found", 404);
+    }
+    return res.sendSuccess("TV board turned off");
   })
 );
 

@@ -530,3 +530,11 @@ export const courtUpdatePayload = (court, overrides = {}) => ({
   removeStream: false,
   ...overrides,
 });
+
+/** CR-038: the TV court board's colours (grid blocks and legend) — booked orange, in play blue, played grey. */
+export const BOARD_TONE = {
+  free: "var(--color-success)",
+  booked: "var(--color-warning)",
+  playing: "var(--color-link)",
+  done: "var(--color-text-muted)",
+};

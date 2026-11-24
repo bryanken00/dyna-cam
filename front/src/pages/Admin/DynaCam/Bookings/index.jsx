@@ -21,7 +21,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useBookingHooks } from "./hooks";
-import DayGrid from "./components/DayGrid";
+import CourtDayGrid from "../../../../components/CourtDayGrid";
+import TvBoardMenu from "./components/TvBoardMenu";
 import BookingFormDrawer from "./components/BookingFormDrawer";
 import BookingDetailSheet from "./components/BookingDetailSheet";
 import PageHeader from "../../../../components/PageHeader";
@@ -63,6 +64,11 @@ const BookingsPage = () => {
     handleShiftDate,
     handleToday,
     handleCellClick,
+    displayUrl,
+    isDisplayBusy,
+    handleIssueDisplayLink,
+    handleTurnOffDisplayLink,
+    handleCopyDisplayLink,
     bookings,
     stats,
     pagination,
@@ -203,6 +209,15 @@ const BookingsPage = () => {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* CR-038: the venue's public TV court board link */}
+                <TvBoardMenu
+                  displayUrl={displayUrl}
+                  canWrite={canWrite}
+                  busy={isDisplayBusy}
+                  onIssue={handleIssueDisplayLink}
+                  onTurnOff={handleTurnOffDisplayLink}
+                  onCopy={handleCopyDisplayLink}
+                />
                 <RefreshButton
                   onRefresh={view === "Day" ? refetchDay : refetchList}
                   isFetching={view === "Day" ? dayFetching : listFetching}
@@ -310,7 +325,7 @@ const BookingsPage = () => {
                       No courts at this venue yet
                     </p>
                   ) : (
-                    <DayGrid
+                    <CourtDayGrid
                       day={day}
                       canWrite={canWrite}
                       onCellClick={handleCellClick}

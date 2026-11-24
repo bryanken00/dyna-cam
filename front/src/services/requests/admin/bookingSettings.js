@@ -5,6 +5,8 @@ import {
   issueBookingLinkApi,
   turnOffBookingLinkApi,
   updateBookingSettingsApi,
+  issueDisplayLinkApi,
+  turnOffDisplayLinkApi,
 } from "../../api/admin/bookingSettings";
 
 // Query: a venue's booking setup → data.settings, data.courts
@@ -62,6 +64,38 @@ export const useTurnOffBookingLink = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to turn online booking off");
+    },
+  });
+};
+
+// Mutation: CR-038 — turn the TV court board on / issue a new link (a TV on the old one stops)
+export const useIssueDisplayLink = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: issueDisplayLinkApi,
+    onSuccess: (_data, venueId) => {
+      toast.success("TV board link ready — open it on the venue's TV");
+      queryClient.invalidateQueries({ queryKey: ["bookingSettings", venueId] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to issue a TV board link");
+    },
+  });
+};
+
+// Mutation: CR-038 — turn the TV court board off
+export const useTurnOffDisplayLink = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: turnOffDisplayLinkApi,
+    onSuccess: (_data, venueId) => {
+      toast.success("TV board turned off");
+      queryClient.invalidateQueries({ queryKey: ["bookingSettings", venueId] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to turn the TV board off");
     },
   });
 };

@@ -20,6 +20,7 @@ const PublicBooking = lazy(() => import("../pages/Public/Booking"));
 const PublicVenues = lazy(() => import("../pages/Public/Venues"));
 const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
 const PublicPaymentSandbox = lazy(() => import("../pages/Public/PaymentSandbox")); // CR-033
+const PublicBoard = lazy(() => import("../pages/Public/Board")); // CR-038: a venue's TV court board
 
 const RootRoutes = () => {
   return (
@@ -110,6 +111,14 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicPaymentSandbox />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/board/:displayToken"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicBoard />
             </Suspense>
           }
         />

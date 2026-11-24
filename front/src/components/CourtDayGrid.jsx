@@ -1,14 +1,15 @@
 import { useEffect, useRef } from "react";
 import dayjs from "dayjs";
 import { Plus } from "lucide-react";
-import { decodeHTML } from "../../../../../utils/decode-html";
+import { decodeHTML } from "../utils/decode-html";
 import {
+  BOARD_TONE,
   BOOKING_STATUS_LABEL,
   formatHour,
   formatPayCode,
   formatTimeRange,
   manilaNow,
-} from "../../../../../utils/dynaCam";
+} from "../utils/dynaCam";
 
 const LABEL_WIDTH = 150;
 const HOUR_WIDTH = 72;
@@ -58,7 +59,20 @@ const hourRange = (day) => {
   return { from, to };
 };
 
-const Block = ({ left, width, bar, title, subtitle, onClick, hatched, tooltip }) => {
+/**
+ * CR-038: on the TV display a block says only what's happening — never who
+ * booked or their code (a closure's reason stays off too).
+ */
+const displayBookingLabel = (status) =>
+  status === "CheckedIn" ? "In play" : status === "Completed" ? "Played" : "Booked";
+
+const displayBookingBar = (status) =>
+  status === "CheckedIn" ? BOARD_TONE.playing : status === "Completed" ? BOARD_TONE.done : BOARD_TONE.booked;
+
+/** "11:00–12:00" — short enough for an hour's block on the TV. */
+const shortRange = (startAt, endAt) => `${dayjs(startAt).format("h:mm")}–${dayjs(endAt).format("h:mm")}`;
+
+const Block = ({ left, width, bar, title, subtitle, onClick, hatched, tooltip, big = false }) => {
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
@@ -71,21 +85,27 @@ const Block = ({ left, width, bar, title, subtitle, onClick, hatched, tooltip })
         bottom: 4,
         left: `${left}%`,
         width: `calc(${width}% - 3px)`,
-        padding: "4px 8px",
-        borderRadius: 8,
+        padding: big ? "8px 10px" : "4px 8px",
+        borderRadius: big ? 12 : 8,
         border: "1px solid var(--color-line)",
-        borderLeft: `3px solid ${bar}`,
+        borderLeft: `${big ? 6 : 3}px solid ${bar}`,
         background: hatched
           ? "repeating-linear-gradient(135deg, var(--color-surface-sunken) 0 6px, var(--color-surface) 6px 12px)"
           : "var(--color-surface-raised)",
         zIndex: 2,
       }}
     >
-      <div className="truncate" style={{ fontSize: 12.5, fontWeight: 600, color: "var(--color-text-dark)" }}>
+      <div
+        className={big ? "line-clamp-2 break-words" : "truncate"}
+        style={{ fontSize: big ? 18 : 12.5, fontWeight: 600, lineHeight: 1.2, color: "var(--color-text-dark)" }}
+      >
         {title}
       </div>
       {subtitle && (
-        <div className="truncate" style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}>
+        <div
+          className={big ? "mt-1 line-clamp-2 break-words" : "truncate"}
+          style={{ fontSize: big ? 14.5 : 11.5, color: "var(--color-text-muted)" }}
+        >
           {subtitle}
         </div>
       )}
@@ -98,8 +118,14 @@ const Block = ({ left, width, bar, title, subtitle, onClick, hatched, tooltip })
  * closures are blocks; a free future hour opens New booking. CR-031: the court
  * column is sticky, and each new day on screen (venue + date) scrolls today to
  * the current time, other days to their first hour.
+ *
+ * Shared by Admin → Bookings (Day) and the public TV board (pages/Public/Board).
+ *
+ * CR-038: `display` draws it for the venue's TV — the hours fit the width and
+ * the courts fill the height (no scrolling), large type, nothing clickable,
+ * no names, codes or closure reasons, and each court says what's on it now.
  */
-const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
+const CourtDayGrid = ({ day, canWrite, onCellClick, onBookingClick, display = false }) => {
   const scrollRef = useRef(null);
   // The day actually drawn — not the picked one: while the next day loads the
   // previous stays on screen, and the scroll waits for the new one
@@ -112,10 +138,12 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
     now.date === day.date ? hourOf(now.time) * 60 + Number(now.time.slice(3, 5)) : null;
   const isPastDay = day.date < now.date;
 
+  const labelWidth = display ? 250 : LABEL_WIDTH;
+
   // Scroll once per venue + date — never on a refetch, so it doesn't move under the user
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || display) return;
     if (nowMinute === null || nowMinute < from * 60 || nowMinute > to * 60) {
       el.scrollLeft = 0;
       return;
@@ -136,19 +164,54 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
     };
   };
 
+  // CR-038: what's on a court now, for the TV's court column
+  const courtNow = (bookings, games, closures) => {
+    if (nowMinute === null) return null;
+    const at = (item) => ({
+      start: minuteOfDay(item.startAt, day.date),
+      end: minuteOfDay(item.endAt, day.date),
+    });
+    const until = (item) => dayjs(item.endAt).format("h:mm A");
+    const playing = games.find((g) => g.status === "Recording");
+    if (playing) return { text: playing.openEnded ? "In play" : `In play until ${until(playing)}`, tone: BOARD_TONE.playing };
+    for (const b of bookings) {
+      const { start, end } = at(b);
+      if (start <= nowMinute && nowMinute < end) {
+        return b.status === "CheckedIn"
+          ? { text: `In play until ${until(b)}`, tone: BOARD_TONE.playing }
+          : { text: `Booked until ${until(b)}`, tone: BOARD_TONE.booked };
+      }
+    }
+    for (const c of closures) {
+      const { start, end } = at(c);
+      if (start <= nowMinute && nowMinute < end) return { text: `Closed until ${until(c)}`, tone: BOARD_TONE.done };
+    }
+    const next = [...bookings, ...games, ...closures]
+      .map((item) => ({ item, ...at(item) }))
+      .filter(({ start }) => start > nowMinute)
+      .sort((a, b) => a.start - b.start)[0];
+    return {
+      text: next ? `Free until ${dayjs(next.item.startAt).format("h:mm A")}` : "Free",
+      tone: BOARD_TONE.free,
+    };
+  };
+
   return (
-    <div ref={scrollRef} className="overflow-x-auto">
-      <div style={{ minWidth: LABEL_WIDTH + hours.length * HOUR_WIDTH }}>
+    <div ref={scrollRef} className={display ? "h-full flex flex-col" : "overflow-x-auto"}>
+      <div
+        className={display ? "flex-1 flex flex-col min-h-0" : undefined}
+        style={display ? undefined : { minWidth: LABEL_WIDTH + hours.length * HOUR_WIDTH }}
+      >
         {/* Hour labels */}
-        <div className="flex" style={{ borderBottom: "1px solid var(--color-line)" }}>
-          <div className="shrink-0" style={{ width: LABEL_WIDTH, ...stickyLabel }} />
+        <div className="flex shrink-0" style={{ borderBottom: "1px solid var(--color-line)" }}>
+          <div className="shrink-0" style={{ width: labelWidth, ...stickyLabel }} />
           <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${hours.length}, 1fr)` }}>
             {hours.map((h) => (
               <div
                 key={h}
-                className="px-1.5 py-2"
+                className={display ? "px-2 py-3" : "px-1.5 py-2"}
                 style={{
-                  fontSize: 11.5,
+                  fontSize: display ? 16 : 11.5,
                   color: "var(--color-text-muted)",
                   borderLeft: "1px solid var(--color-line-soft)",
                 }}
@@ -169,19 +232,34 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
           return (
             <div
               key={court.courtId}
-              className="flex"
-              style={{ borderBottom: "1px solid var(--color-line)", height: ROW_HEIGHT }}
+              className={display ? "flex flex-1" : "flex"}
+              style={{
+                borderBottom: "1px solid var(--color-line)",
+                ...(display ? { minHeight: 84, maxHeight: 200 } : { height: ROW_HEIGHT }),
+              }}
             >
               <div
-                className="shrink-0 flex flex-col justify-center px-4"
-                style={{ width: LABEL_WIDTH, borderRight: "1px solid var(--color-line)", ...stickyLabel }}
+                className={`shrink-0 flex flex-col justify-center ${display ? "px-6 gap-1" : "px-4"}`}
+                style={{ width: labelWidth, borderRight: "1px solid var(--color-line)", ...stickyLabel }}
               >
-                <span className="truncate" style={{ fontSize: 13.5, fontWeight: 500, color: "var(--color-text-dark)" }}>
+                <span
+                  className="truncate"
+                  style={{ fontSize: display ? 26 : 13.5, fontWeight: display ? 600 : 500, color: "var(--color-text-dark)" }}
+                >
                   {decodeHTML(court.name)}
                 </span>
                 {inactive && (
-                  <span style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}>Inactive</span>
+                  <span style={{ fontSize: display ? 15 : 11.5, color: "var(--color-text-muted)" }}>Inactive</span>
                 )}
+                {display && !inactive && (() => {
+                  const status = courtNow(bookings, games, closures);
+                  return status ? (
+                    <span className="inline-flex items-center gap-2 truncate" style={{ fontSize: 16, color: "var(--color-text-secondary)" }}>
+                      <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: status.tone }} />
+                      {status.text}
+                    </span>
+                  ) : null;
+                })()}
               </div>
 
               <div className="relative flex-1">
@@ -189,7 +267,7 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
                 <div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${hours.length}, 1fr)` }}>
                   {hours.map((h) => {
                     const past = isPastDay || (nowMinute !== null && (h + 1) * 60 <= nowMinute);
-                    const bookable = canWrite && !past && !inactive;
+                    const bookable = !display && canWrite && !past && !inactive;
                     return bookable ? (
                       <button
                         key={h}
@@ -222,9 +300,10 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
                     {...position(c.startAt, c.endAt)}
                     bar="var(--color-text-muted)"
                     hatched
+                    big={display}
                     title="Closed"
-                    subtitle={decodeHTML(c.reason) || formatTimeRange(c.startAt, c.endAt)}
-                    tooltip={`Closed ${formatTimeRange(c.startAt, c.endAt)}`}
+                    subtitle={display ? shortRange(c.startAt, c.endAt) : decodeHTML(c.reason) || formatTimeRange(c.startAt, c.endAt)}
+                    tooltip={display ? undefined : `Closed ${formatTimeRange(c.startAt, c.endAt)}`}
                   />
                 ))}
 
@@ -232,10 +311,29 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
                   <Block
                     key={g.sessionId}
                     {...position(g.startAt, g.endAt)}
-                    bar="var(--color-info)"
-                    title={g.status === "Recording" ? "Game · recording" : "Game"}
-                    subtitle={decodeHTML(g.playerName) || formatTimeRange(g.startAt, g.endAt)}
-                    tooltip={`Game ${formatTimeRange(g.startAt, g.endAt)}${g.openEnded ? " (no end time)" : ""}`}
+                    bar={
+                      !display
+                        ? "var(--color-info)"
+                        : g.status === "Recording"
+                          ? BOARD_TONE.playing
+                          : isPastDay || (nowMinute !== null && minuteOfDay(g.endAt, day.date) <= nowMinute)
+                            ? BOARD_TONE.done
+                            : BOARD_TONE.booked
+                    }
+                    big={display}
+                    title={
+                      display
+                        ? g.status === "Recording"
+                          ? "In play"
+                          : isPastDay || (nowMinute !== null && minuteOfDay(g.endAt, day.date) <= nowMinute)
+                            ? "Played"
+                            : "Booked"
+                        : g.status === "Recording"
+                          ? "Game · recording"
+                          : "Game"
+                    }
+                    subtitle={display ? shortRange(g.startAt, g.endAt) : decodeHTML(g.playerName) || formatTimeRange(g.startAt, g.endAt)}
+                    tooltip={display ? undefined : `Game ${formatTimeRange(g.startAt, g.endAt)}${g.openEnded ? " (no end time)" : ""}`}
                   />
                 ))}
 
@@ -243,11 +341,17 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
                   <Block
                     key={b.bookingId}
                     {...position(b.startAt, b.endAt)}
-                    bar={BAR[b.status] || "var(--color-text-muted)"}
-                    title={decodeHTML(b.playerName)}
-                    subtitle={`${formatPayCode(b.bookingCode)} · ${BOOKING_STATUS_LABEL[b.status] || b.status}`}
-                    tooltip={`${decodeHTML(b.playerName)} · ${formatTimeRange(b.startAt, b.endAt)}`}
-                    onClick={() => onBookingClick(b.bookingId)}
+                    bar={display ? displayBookingBar(b.status) : BAR[b.status] || "var(--color-text-muted)"}
+                    big={display}
+                    // CR-038: the TV never shows who booked or their code
+                    title={display ? displayBookingLabel(b.status) : decodeHTML(b.playerName)}
+                    subtitle={
+                      display
+                        ? shortRange(b.startAt, b.endAt)
+                        : `${formatPayCode(b.bookingCode)} · ${BOOKING_STATUS_LABEL[b.status] || b.status}`
+                    }
+                    tooltip={display ? undefined : `${decodeHTML(b.playerName)} · ${formatTimeRange(b.startAt, b.endAt)}`}
+                    onClick={display ? undefined : () => onBookingClick(b.bookingId)}
                   />
                 ))}
 
@@ -258,7 +362,7 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
                     className="absolute top-0 bottom-0"
                     style={{
                       left: `${((nowMinute - from * 60) / span) * 100}%`,
-                      width: 2,
+                      width: display ? 3 : 2,
                       background: "var(--color-error)",
                       zIndex: 3,
                     }}
@@ -273,4 +377,4 @@ const DayGrid = ({ day, canWrite, onCellClick, onBookingClick }) => {
   );
 };
 
-export default DayGrid;
+export default CourtDayGrid;

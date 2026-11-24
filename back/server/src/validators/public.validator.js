@@ -178,3 +178,6 @@ export const findBookingSchema = z.object({
 export const paymentSandboxParamsSchema = z.object({
   checkoutId: z.string().regex(/^sandbox_[A-Za-z0-9_-]{16,64}$/, "Invalid link"),
 });
+
+// CR-038: /board/:displayToken — a venue's TV court board link
+export const displayTokenParamsSchema = z.object({ displayToken: token });

@@ -1,12 +1,15 @@
 import { useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import dayjs from "dayjs";
+import { toast } from "sonner";
 import { Eye } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
+import { copyText } from "../../../../utils/clipboard";
+import { confirm } from "../../../../store/confirmStore";
 import { formatPhoneDisplay } from "../../../../utils/phoneFormat";
 import {
   BOOKING_PAYMENT_LABEL,
@@ -22,6 +25,11 @@ import {
   useGetBookingOptions,
   useGetBookings,
 } from "../../../../services/requests/admin/bookings";
+import {
+  useGetBookingSettings,
+  useIssueDisplayLink,
+  useTurnOffDisplayLink,
+} from "../../../../services/requests/admin/bookingSettings";
 
 const EMPTY_FILTERS = { search: "", status: "", dateFrom: "", dateTo: "" };
 
@@ -77,6 +85,12 @@ export const useBookingHooks = () => {
     { enabled: view === "Day", refetchInterval: 60 * 1000 },
   );
 
+  // CR-038: the picked venue's TV court board link (from its booking settings)
+  const { data: settingsData } = useGetBookingSettings(venueId);
+  const displayUrl = settingsData?.data?.settings?.displayUrl || null;
+  const issueDisplayMutation = useIssueDisplayLink();
+  const turnOffDisplayMutation = useTurnOffDisplayLink();
+
   const {
     data: listData,
     isLoading: listLoading,
@@ -95,6 +109,41 @@ export const useBookingHooks = () => {
     },
     { enabled: !!venueId },
   );
+
+  // ─── TV court board link (CR-038) ──────────────────────────────────
+  const handleIssueDisplayLink = useCallback(async () => {
+    if (displayUrl) {
+      const ok = await confirm({
+        title: "Issue a new TV board link",
+        description:
+          "A TV showing the board now says the link isn't valid until you open the new one on it.",
+        confirmText: "Issue new link",
+        cancelText: "Cancel",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    issueDisplayMutation.mutate(venueId);
+  }, [displayUrl, issueDisplayMutation, venueId]);
+
+  const handleTurnOffDisplayLink = useCallback(async () => {
+    const ok = await confirm({
+      title: "Turn the TV board off",
+      description:
+        "A TV showing the board says the link isn't valid. Turning it on again gives a new link.",
+      confirmText: "Turn off",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (ok) turnOffDisplayMutation.mutate(venueId);
+  }, [turnOffDisplayMutation, venueId]);
+
+  const handleCopyDisplayLink = useCallback(async () => {
+    if (!displayUrl) return;
+    const ok = await copyText(displayUrl);
+    if (ok) toast.success("TV board link copied");
+    else toast.error("Couldn't copy the link");
+  }, [displayUrl]);
 
   // ─── Handlers ──────────────────────────────────────────────────────
   const handleVenueChange = useCallback((value) => {
@@ -327,6 +376,12 @@ export const useBookingHooks = () => {
     handleShiftDate,
     handleToday,
     handleCellClick,
+    // CR-038: the venue's TV court board
+    displayUrl,
+    isDisplayBusy: issueDisplayMutation.isPending || turnOffDisplayMutation.isPending,
+    handleIssueDisplayLink,
+    handleTurnOffDisplayLink,
+    handleCopyDisplayLink,
     // list — apiData = { success, message, data: { bookings, stats, pagination } }
     bookings: listData?.data?.bookings || [],
     stats: listData?.data?.stats || { today: 0, unpaid: 0, noShowsThisWeek: 0, revenueToday: 0 },
