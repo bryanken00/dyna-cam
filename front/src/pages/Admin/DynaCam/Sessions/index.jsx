@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import dayjs from "dayjs";
 import {
   CalendarClock,
-  Plus,
+  CalendarDays,
   CircleAlert,
   Clapperboard,
   Filter,
@@ -18,7 +19,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PAYMENT_FILTERS, useSessionHooks } from "./hooks";
-import SessionFormDrawer from "./components/SessionFormDrawer";
 import SessionDetailSheet from "./components/SessionDetailSheet";
 import PairDeviceFormModal from "./components/PairDeviceFormModal";
 import AddTimeFormModal from "./components/AddTimeFormModal";
@@ -32,6 +32,7 @@ import SearchInput from "../../../../components/SearchInput";
 import SearchableSelect from "../../../../components/SearchableSelect";
 import DataTable from "../../../../components/DataTable";
 import FilterField from "../../../../components/FilterField";
+import { BOOKINGS_PATH } from "../../../../utils/dynaCam";
 
 const ALL = "all";
 /** CR-016: a recording game this close to its end counts as "Ending soon". */
@@ -63,10 +64,6 @@ const SessionsPage = () => {
     handleSearch,
     handleFilterChange,
     handleClearFilters,
-    drawerOpen,
-    handleCreate,
-    handleDrawerClose,
-    handleDrawerSuccess,
     detailSessionId,
     handleDetailClose,
     pairTarget,
@@ -120,14 +117,15 @@ const SessionsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Sessions"
-        subtitle="Start a game on a court with its game time — recording starts at once and stops by itself when the time is up (Add time gives it more). Pair the phone or tablet there for the player. The player gets the whole game on one link."
+        subtitle="Every game recorded on your courts. A game starts when its booking checks in — at the court's QR, or from the booking in Bookings. Pair the phone or tablet there for the player, add time while it records; the player gets the whole game on one link."
         actions={
-          canWrite && (
-            <Button onClick={handleCreate}>
-              <Plus />
-              New game
-            </Button>
-          )
+          // CR-039: no New game — games start from bookings (walk-ins: a desk booking, then Check in)
+          <Button asChild variant="outline">
+            <Link to={BOOKINGS_PATH}>
+              <CalendarDays />
+              Bookings
+            </Link>
+          </Button>
         }
       />
 
@@ -271,11 +269,10 @@ const SessionsPage = () => {
                 ? "No sessions match these filters"
                 : "No games yet"}
             </p>
-            {canWrite && !hasActiveFilters && (
-              <Button onClick={handleCreate}>
-                <Plus />
-                New game
-              </Button>
+            {!hasActiveFilters && (
+              <p className="m-0 -mt-2" style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+                A game appears here when a booking checks in.
+              </p>
             )}
           </div>
         ) : (
@@ -297,12 +294,6 @@ const SessionsPage = () => {
       </div>
 
       {/* 4. DRAWER / DIALOG / SHEET */}
-      <SessionFormDrawer
-        open={drawerOpen}
-        onClose={handleDrawerClose}
-        onSuccess={handleDrawerSuccess}
-      />
-
       <SessionDetailSheet
         open={!!detailSessionId}
         sessionId={detailSessionId}

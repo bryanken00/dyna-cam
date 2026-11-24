@@ -32,6 +32,8 @@ describe("game payments", () => {
     assert.equal(court.status, 201, JSON.stringify(court.body));
     const res = await call("POST", "/admin/sessions", { courtId: court.data.courtId });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    // CR-039: New game is always free; this test is about an unpaid game (one made before)
+    res.data.payCode = await ctx.makeUnpaid(res.data.sessionId);
     return res.data;
   };
 
@@ -233,14 +235,33 @@ describe("game payments", () => {
       assert.equal(session.payCode, null);
     });
 
-    it("a game staff create as free: no code, open on the device and the page at once", async () => {
+    it("New game is always free (CR-039): no code, whatever is sent, now, scheduled or waiting", async () => {
+      const { moment } = await ctx.importFromBack("server/src/utils/dateUtils.js");
+      const startAt = moment().tz("Asia/Manila").add(2, "hours").startOf("hour").format("YYYY-MM-DD HH:mm:ss");
+      for (const body of [{}, { free: false }, { startNow: true, durationMinutes: 30, free: false }, { startAt, durationMinutes: 30 }]) {
+        courtCount += 1;
+        const court = await call("POST", "/admin/courts", {
+          venueId,
+          name: `Court ${courtCount}`,
+          cameraRtspUrl: "rtsp://u:p@10.0.0.9:554/stream1",
+        });
+        const res = await call("POST", "/admin/sessions", { courtId: court.data.courtId, ...body });
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        assert.equal(res.data.payCode, null, JSON.stringify(body));
+        const one = await call("GET", `/admin/sessions/${res.data.sessionId}`);
+        assert.equal(one.data.session.paymentStatus, "Free", JSON.stringify(body));
+        assert.equal((await pay(res.data.sessionId, 300)).status, 409);
+      }
+    });
+
+    it("a free game: no code, open on the device and the page at once", async () => {
       courtCount += 1;
       const court = await call("POST", "/admin/courts", {
         venueId,
         name: `Court ${courtCount}`,
         cameraRtspUrl: "rtsp://u:p@10.0.0.9:554/stream1",
       });
-      const res = await call("POST", "/admin/sessions", { courtId: court.data.courtId, free: true });
+      const res = await call("POST", "/admin/sessions", { courtId: court.data.courtId });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       assert.equal(res.data.payCode, null);
       const device = await pairTo(res.data.sessionId);

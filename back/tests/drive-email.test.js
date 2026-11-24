@@ -71,6 +71,9 @@ describe("Google Drive link by email (CR-018)", () => {
       ...body,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    // CR-039: New game is always free; a game these tests don't ask to be free is
+    // an unpaid one (made before), as before
+    if (body.free !== true) await ctx.makeUnpaid(res.data.sessionId);
     return res.data.sessionId;
   };
 

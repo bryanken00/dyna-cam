@@ -47,8 +47,7 @@ export const createSessionSchema = z
     phone: optionalPhone(),
     // CR-018: gets the game's Google Drive link once it's in Drive (and paid)
     email: optionalEmail(255),
-    // CR-015: a free game — no payment at the desk, the player gets the videos at once
-    free: z.boolean().optional(),
+    // CR-039: no `free` — a staff game is always free (CR-015's "Free game" box is gone)
     // CR-013 revision: saves the courtside device may hold at once (default 5)
     maxCaptures: emptyToUndefined(
       z.coerce

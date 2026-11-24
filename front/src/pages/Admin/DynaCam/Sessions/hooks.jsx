@@ -74,7 +74,6 @@ export const useSessionHooks = () => {
   const debouncedSearch = useDebounce(filters.search, 500);
 
   // ─── Drawer / Dialog / Sheet State ─────────────────────────────────
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailSessionId, setDetailSessionId] = useState(null);
   // The session a device is being named for: { sessionId, courtName, venueName, startAt, endAt }
   const [pairTarget, setPairTarget] = useState(null);
@@ -153,15 +152,6 @@ export const useSessionHooks = () => {
   const handleClearFilters = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setPagination((prev) => ({ ...prev, current: 1 }));
-  }, []);
-
-  const handleCreate = useCallback(() => setDrawerOpen(true), []);
-  const handleDrawerClose = useCallback(() => setDrawerOpen(false), []);
-
-  // The drawer hands back the booking — go straight on to pairing a device
-  const handleDrawerSuccess = useCallback((booked) => {
-    setDrawerOpen(false);
-    if (booked?.sessionId) setPairTarget(booked);
   }, []);
 
   // ─── Pair a device: name it → its 6-digit key ──────────────────────
@@ -634,10 +624,6 @@ export const useSessionHooks = () => {
     handleSearch,
     handleFilterChange,
     handleClearFilters,
-    drawerOpen,
-    handleCreate,
-    handleDrawerClose,
-    handleDrawerSuccess,
     detailSessionId,
     handleDetailClose,
     pairTarget,

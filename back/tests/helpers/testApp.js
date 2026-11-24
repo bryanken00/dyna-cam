@@ -369,6 +369,23 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     };
   };
 
+  /**
+   * CR-039: staff's New game is always free now, so a test about paying for a
+   * game first turns it into one made before that — unpaid, with a pay code
+   * from the app's own generator.
+   * @returns {Promise<string>} the game's pay code
+   */
+  const makeUnpaid = async (sessionId) => {
+    const { randomPayCode } = await importFromBack("server/src/utils/crypto/tokens.js");
+    const payCode = randomPayCode();
+    const [result] = await sql.query(
+      `UPDATE recording_sessions SET paymentStatus = 'Unpaid', payCode = ? WHERE sessionId = ?`,
+      [payCode, sessionId]
+    );
+    if (result.affectedRows !== 1) throw new Error(`makeUnpaid: no game ${sessionId}`);
+    return payCode;
+  };
+
   const stop = async () => {
     server.closeAllConnections(); // fetch keeps connections alive; don't wait for them
     await new Promise((resolve) => server.close(resolve));
@@ -387,6 +404,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     ownerRoleId,
     createStaff,
     pairBox,
+    makeUnpaid,
     issueResetToken,
     sql,
     db,

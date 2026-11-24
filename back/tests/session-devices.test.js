@@ -55,6 +55,8 @@ describe("session devices", () => {
       ...body,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    // CR-039: New game is always free; this test is about an unpaid game (one made before)
+    await ctx.makeUnpaid(res.data.sessionId);
     return res.data.sessionId;
   };
 

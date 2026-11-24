@@ -140,8 +140,9 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   (`POST …/check-in`) — CR-027's walk-in `POST …/games` is gone, so the QR never starts a game
   without a booking (`startedByPlayer = 1` marks the walk-in games made before); CR-028: the game page also has
   the device's End game, delete a save and own-stream controls under `/public/sessions/:shareToken/…` —
-  anyone holding the link can use them). CR-015: a game's videos open only once staff record its
-  payment (Admin → Sessions → Record payment, Payments permission); until then the session device
+  anyone holding the link can use them). CR-015: an unpaid game's videos open only once staff record its
+  payment (CR-039: games no longer start unpaid — booking check-ins are free, Sessions has no New game
+  any more and its API always creates a free game; older unpaid games keep this — Admin → Sessions → Record payment, Payments permission); until then the session device
   and the player's page show its pay code, and `/public/games/:payCode` (rate-limited) gives a paid
   game's link to Find a game on the device; `/api/v1/oauth/google/callback` is where Google sends staff
 back after connecting a court's Google Drive (CR-001) — its encrypted, 10-minute `state` is the
