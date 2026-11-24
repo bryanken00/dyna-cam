@@ -1,209 +1,30 @@
 // CR-001 — Google Drive per court: staff connect a Google account on a court,
-// every clip on it (replays and whole-game parts) is copied to that Drive and
-// shared by link, and the player's page offers "Open in Google Drive".
+// and the player's page offers "Open in Google Drive". CR-040: the venue's
+// recorder box sends each game straight to that Drive (the API opens the
+// upload and checks the file); the API itself never uploads. CR-017 / CR-026:
+// Drive copies go to the Drive's trash after their keep time.
 // Google is a fake server here (OAuth token/revoke + Drive v3 files, resumable
 // uploads, permissions), so nothing leaves the machine.
 
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import http from "node:http";
-import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { gameJobs, sendGame } from "./helpers/gameUpload.js";
-import { JPEG, startTestApp } from "./helpers/testApp.js";
-import { insertLegacyClip } from "./helpers/legacyClip.js";
-
-const MP4 = Buffer.concat([
-  Buffer.from([0, 0, 0, 0x18]),
-  Buffer.from("ftypisom"),
-  Buffer.alloc(64, 1),
-]);
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-
-/**
- * A fake Google. An authorization code is "<email>" (Drive ticked) or
- * "nodrive:<email>" (Drive left unticked). Files a sign-in made are visible
- * only to that same account (Drive's `drive.file` scope).
- */
-const fakeGoogle = () => {
-  const state = {
-    refresh: new Map(), // refresh token → email
-    revoked: new Set(),
-    files: new Map(), // id → { name, parents, owner, mimeType, size, shared }
-    sessions: new Map(), // upload session → { meta, owner, received }
-    fail: null, // { status, body } to answer the next upload start with
-    trashFail: null, // CR-017: { status, body } to answer the next "move to trash" with
-    count: 0,
-  };
-  const next = (prefix) => `${prefix}-${++state.count}`;
-  const json = (res, status, body, headers = {}) => {
-    res.writeHead(status, { "Content-Type": "application/json", ...headers });
-    res.end(JSON.stringify(body));
-  };
-  const ownerOf = (req) => {
-    const token = (req.headers.authorization || "").replace(/^Bearer /, "");
-    const refresh = token.replace(/^access:/, "");
-    if (!token.startsWith("access:") || state.revoked.has(refresh)) return null;
-    return state.refresh.get(refresh) || null;
-  };
-  const visible = (id, owner) => {
-    const file = state.files.get(id);
-    return file && file.owner === owner ? file : null;
-  };
-  const read = (req) =>
-    new Promise((resolve) => {
-      const chunks = [];
-      req.on("data", (c) => chunks.push(c));
-      req.on("end", () => resolve(Buffer.concat(chunks)));
-    });
-
-  /** Google's OAuth endpoints. @returns {boolean} handled */
-  const oauth = (req, res, url, body) => {
-    const params = new URLSearchParams(body.toString());
-    if (req.method !== "POST") return false;
-    if (url.pathname === "/token" && params.get("grant_type") === "authorization_code") {
-      const code = params.get("code");
-      const email = code.replace(/^nodrive:/, "");
-      const refresh = next("refresh");
-      state.refresh.set(refresh, email);
-      const idToken = ["x", Buffer.from(JSON.stringify({ email })).toString("base64url"), "sig"];
-      json(res, 200, {
-        access_token: `access:${refresh}`,
-        refresh_token: refresh,
-        id_token: idToken.join("."),
-        scope: code.startsWith("nodrive:") ? "openid email" : `openid email ${DRIVE_SCOPE}`,
-      });
-      return true;
-    }
-    if (url.pathname === "/token") {
-      const refresh = params.get("refresh_token");
-      if (!state.refresh.has(refresh) || state.revoked.has(refresh)) {
-        json(res, 400, { error: "invalid_grant" });
-      } else {
-        json(res, 200, { access_token: `access:${refresh}` });
-      }
-      return true;
-    }
-    if (url.pathname === "/revoke") {
-      const email = state.refresh.get(params.get("token"));
-      // Revoking ends the account's whole grant to the app
-      for (const [refresh, owner] of state.refresh) {
-        if (owner === email) state.revoked.add(refresh);
-      }
-      json(res, 200, {});
-      return true;
-    }
-    return false;
-  };
-
-  /** Drive v3 files, folders and permissions. @returns {boolean} handled */
-  const files = (req, res, url, body, owner) => {
-    if (req.method === "POST" && url.pathname === "/drive/files") {
-      const meta = JSON.parse(body.toString());
-      const parent = meta.parents?.[0];
-      if (parent && !visible(parent, owner)) {
-        json(res, 404, { error: { message: "nf" } });
-        return true;
-      }
-      const id = next("folder");
-      state.files.set(id, { ...meta, owner, shared: false });
-      json(res, 200, { id, webViewLink: `https://drive.test/folders/${id}` });
-      return true;
-    }
-    const match = url.pathname.match(/^\/drive\/files\/([^/]+)(\/permissions)?$/);
-    if (!match) return false;
-    const file = visible(match[1], owner);
-    if (!file) {
-      json(res, 404, { error: { message: "File not found" } });
-    } else if (match[2] && req.method === "POST") {
-      const permission = JSON.parse(body.toString());
-      file.shared = permission.type === "anyone" && permission.role === "reader";
-      json(res, 200, { id: "anyoneWithLink" });
-    } else if (req.method === "PATCH") {
-      // CR-017: { trashed: true } moves it to the owner's trash
-      if (state.trashFail) {
-        json(res, state.trashFail.status, state.trashFail.body);
-        state.trashFail = null;
-      } else {
-        file.trashed = Boolean(JSON.parse(body.toString()).trashed);
-        json(res, 200, { id: match[1], trashed: file.trashed });
-      }
-    } else {
-      json(res, 200, { id: match[1], trashed: Boolean(file.trashed) });
-    }
-    return true;
-  };
-
-  /** Drive's resumable uploads: start a session, then PUT the bytes. @returns {boolean} handled */
-  const uploads = (req, res, url, body, owner) => {
-    if (req.method === "POST" && url.pathname === "/upload/files") {
-      const meta = JSON.parse(body.toString());
-      if (state.fail) {
-        json(res, state.fail.status, state.fail.body);
-        state.fail = null;
-      } else if (!visible(meta.parents?.[0], owner)) {
-        json(res, 404, { error: { message: "nf" } });
-      } else {
-        const session = next("upload");
-        const size = Number(req.headers["x-upload-content-length"]);
-        state.sessions.set(session, { meta, owner, size, received: 0 });
-        res.writeHead(200, { Location: `http://${req.headers.host}/session/${session}` });
-        res.end();
-      }
-      return true;
-    }
-    const match = url.pathname.match(/^\/session\/(.+)$/);
-    if (req.method !== "PUT" || !match) return false;
-    const upload = state.sessions.get(match[1]);
-    if (!upload) {
-      json(res, 404, {});
-      return true;
-    }
-    upload.received += body.length;
-    if (upload.received < upload.size) {
-      res.writeHead(308, { Range: `bytes=0-${upload.received - 1}` });
-      res.end();
-      return true;
-    }
-    const id = next("file");
-    state.files.set(id, { ...upload.meta, owner, size: upload.received, shared: false });
-    json(res, 200, { id, webViewLink: `https://drive.test/file/${id}` });
-    return true;
-  };
-
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, "http://fake");
-    const body = await read(req);
-    if (oauth(req, res, url, body)) return;
-    const owner = ownerOf(req);
-    if (!owner) {
-      json(res, 401, { error: { message: "Invalid Credentials" } });
-      return;
-    }
-    if (files(req, res, url, body, owner) || uploads(req, res, url, body, owner)) return;
-    json(res, 404, { error: { message: `fake: ${req.method} ${url.pathname}` } });
-  });
-
-  return { server, state };
-};
+import { gameJobs, keepGame, sendGameToDrive } from "./helpers/gameUpload.js";
+import { startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip, readyLegacyClip } from "./helpers/legacyClip.js";
+import { DRIVE_SCOPE, fakeGoogle } from "./helpers/fakeGoogle.js";
 
 describe("Google Drive per court", () => {
   let ctx;
   let admin;
   let viewer;
   let google;
-  let runDriveUploads;
   let runDriveCleanup;
   let runClipMaintenance;
   let db;
   const home = {};
 
   const call = (method, url, body, who = admin) => ctx.api(method, url, { token: who.token, body });
-  const asDevice =
-    (token) =>
-    (method, url, options = {}) =>
-      ctx.api(method, url, { ...options, headers: { Authorization: `Device ${token}` } });
   const court = async (courtId = home.courtId) =>
     (await call("GET", `/admin/courts/${courtId}`)).data.court;
 
@@ -222,26 +43,79 @@ describe("Google Drive per court", () => {
     return new URL(res.headers.get("location"));
   };
 
-  /** A replay saved before CR-027, cut and uploaded by the box. @returns {{ clipId, shareToken }} */
-  const replay = async (courtId = home.courtId) => {
-    const row = await insertLegacyClip(ctx.sql, { courtId });
-    const uploaded = await home.device("POST", `/device/clips/${row.clipId}/upload`, {
-      form: [
-        ["video", MP4, "video/mp4", "clip.mp4"],
-        ["thumbnail", JPEG, "image/jpeg", "t.jpg"],
-      ],
-    });
-    assert.equal(uploaded.status, 200, JSON.stringify(uploaded.body));
-    return { clipId: row.clipId, shareToken: row.shareToken };
-  };
-  const clipRow = async (clipId) =>
+  /** "YYYY-MM-DD HH:mm:ss" in Manila, `minutes` from now. */
+  const manila = async (minutes) =>
     (
       await ctx.sql.query(
-        `SELECT driveStatus, driveFileId, driveUrl, driveAttempts, driveError FROM clips
-         WHERE clipId = ?`,
-        [clipId]
+        `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                 INTERVAL ? SECOND), '%Y-%m-%d %H:%i:%s') AS t`,
+        [Math.round(minutes * 60)]
+      )
+    )[0][0].t;
+
+  /**
+   * A paid game on `courtId` that ran 12 → 2 minutes ago, with its game job.
+   * @returns {{ sessionId, shareToken, sessionVideoId }}
+   */
+  const endedGame = async (courtId = home.courtId, { playerName } = {}) => {
+    const created = await call("POST", "/admin/sessions", {
+      courtId,
+      startAt: await manila(1),
+      durationMinutes: 5,
+      ...(playerName ? { playerName } : {}),
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const { sessionId, shareUrl } = created.data;
+    // CR-039: New game is always free; these games are paid at the desk (CR-015)
+    await ctx.makeUnpaid(sessionId);
+    assert.equal((await call("POST", "/admin/payments", { sessionId, amount: 250 })).status, 201);
+    await ctx.sql.query(
+      `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
+      [await manila(-12), await manila(-2), sessionId]
+    );
+    const jobs = await gameJobs(ctx, home.token, sessionId);
+    assert.equal(jobs.length, 1, "one file for the whole game");
+    return {
+      sessionId,
+      shareToken: shareUrl.split("/").pop(),
+      sessionVideoId: jobs[0].sessionVideoId,
+    };
+  };
+  /** A game the box sent to the court's Drive. */
+  const sentGame = async (courtId = home.courtId, opts = {}) => {
+    const game = await endedGame(courtId, opts);
+    const sent = await sendGameToDrive(ctx, home.token, game.sessionVideoId);
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    return game;
+  };
+  const videoRow = async (sessionVideoId) =>
+    (
+      await ctx.sql.query(
+        `SELECT status, driveStatus, driveFileId, driveUrl, driveError, expiresAt
+         FROM session_videos WHERE sessionVideoId = ?`,
+        [sessionVideoId]
       )
     )[0][0];
+  const sessionPage = async (shareToken) =>
+    (await ctx.api("GET", `/public/sessions/${shareToken}`)).data.session;
+
+  /**
+   * A replay saved before CR-027 whose copy is in the court's Drive (the API
+   * uploaded those before CR-040), owned by `owner`.
+   */
+  const replayOnDrive = async (owner = "alice@club.test") => {
+    const clip = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+    await readyLegacyClip(ctx.sql, clip.clipId);
+    const driveFileId = `seeded-${clip.clipId.slice(0, 8)}`;
+    google.state.files.set(driveFileId, { name: "replay.mp4", parents: [], owner, shared: true });
+    await ctx.sql.query(
+      `UPDATE clips SET driveStatus = 'Uploaded', driveFileId = ?, driveUrl = ?,
+              driveUploadedAt = dateCreated
+       WHERE clipId = ?`,
+      [driveFileId, `https://drive.test/file/${driveFileId}`, clip.clipId]
+    );
+    return clip;
+  };
 
   before(async () => {
     google = fakeGoogle();
@@ -258,11 +132,8 @@ describe("Google Drive per court", () => {
         GOOGLE_DRIVE_API_URL: `${base}/drive`,
         GOOGLE_DRIVE_UPLOAD_URL: `${base}/upload`,
         APP_URL: "http://web.test",
-        // Many replays from one court QR in this file
-        RATE_LIMIT_PUBLIC_CLIP_POINTS: "1000",
       },
     });
-    ({ runDriveUploads } = await ctx.importFromBack("server/src/jobs/driveUploads.js"));
     ({ runDriveCleanup } = await ctx.importFromBack("server/src/jobs/driveCleanup.js"));
     ({ runClipMaintenance } = await ctx.importFromBack("server/src/jobs/clipMaintenance.js"));
     db = ctx.db;
@@ -276,7 +147,6 @@ describe("Google Drive per court", () => {
       cameraRtspUrl: "rtsp://u:p@10.0.0.7:554/stream1",
     });
     home.courtId = created.data.courtId;
-    home.qrToken = created.data.qrToken;
     const second = await call("POST", "/admin/courts", {
       venueId: home.venueId,
       name: "Court 2",
@@ -284,7 +154,6 @@ describe("Google Drive per court", () => {
     });
     home.court2Id = second.data.courtId;
     home.token = (await ctx.pairBox(admin.token, home.venueId, "Box")).data.token;
-    home.device = asDevice(home.token);
   });
   after(async () => {
     await ctx?.stop();
@@ -409,62 +278,43 @@ describe("Google Drive per court", () => {
     });
   });
 
-  describe("uploading", () => {
-    let first;
-
-    it("copies a replay into the court's folder and shares it by link", async () => {
-      first = await replay();
-      assert.equal((await clipRow(first.clipId)).driveStatus, "Pending");
-      assert.equal((await court()).googleDrive.queue.waiting, 1);
-
-      const tally = await runDriveUploads(db);
-      assert.deepEqual(tally, { uploaded: 1 });
-
-      const row = await clipRow(first.clipId);
+  describe("a game from the venue box (CR-040)", () => {
+    it("puts a whole game in its own shared folder, as one video", async () => {
+      const game = await sentGame(home.courtId, { playerName: "Drive Player" });
+      const row = await videoRow(game.sessionVideoId);
+      assert.equal(row.status, "Ready");
       assert.equal(row.driveStatus, "Uploaded");
+
       const file = google.state.files.get(row.driveFileId);
       assert.equal(file.owner, "alice@club.test");
       assert.equal(file.shared, true, "anyone with the link");
-      assert.equal(file.size, MP4.length);
-      assert.match(file.name, /Court 1 replay\.mp4$/);
-      const folder = google.state.files.get(file.parents[0]);
-      assert.equal(folder.name, "DGSports · Drive Courts · Court 1");
-      assert.equal(folder.shared, false, "the court's folder itself stays private");
-
-      const page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
-      assert.equal(page.data.clip.driveUrl, `https://drive.test/file/${row.driveFileId}`);
-
-      const listed = await call("GET", `/admin/clips?courtId=${home.courtId}`);
-      const found = listed.data.clips.find((c) => c.clipId === first.clipId);
-      assert.equal(found.driveStatus, "Uploaded");
-      assert.equal(found.driveUrl, row.driveUrl);
-    });
-
-    it("hides the Drive link while a clip is unpaid", async () => {
-      await ctx.sql.query(
-        `UPDATE clips SET paymentStatus = 'Unpaid', price = 50 WHERE clipId = ?`,
-        [first.clipId]
+      assert.equal(file.name, "Whole game.mp4");
+      const [[session]] = await ctx.sql.query(
+        `SELECT driveFolderId, driveUrl FROM recording_sessions WHERE sessionId = ?`,
+        [game.sessionId]
       );
-      let page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
-      assert.equal(page.data.clip.locked, true);
-      assert.equal(page.data.clip.driveUrl, null);
-      await ctx.sql.query(`UPDATE clips SET paymentStatus = 'Paid' WHERE clipId = ?`, [
-        first.clipId,
-      ]);
-      page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
-      assert.ok(page.data.clip.driveUrl);
-    });
+      const folder = google.state.files.get(session.driveFolderId);
+      assert.equal(file.parents[0], session.driveFolderId);
+      assert.match(folder.name, / game$/);
+      assert.equal(folder.shared, true, "players open the game's folder");
+      const courtFolder = google.state.files.get(folder.parents[0]);
+      assert.equal(courtFolder.name, "DGSports · Drive Courts · Court 1");
+      assert.equal(courtFolder.shared, false, "the court's folder itself stays private");
 
-    it("hides the Drive link once the server's copy expires (CR-017)", async () => {
-      await ctx.sql.query(
-        `UPDATE clips SET status = 'Expired', videoPath = NULL, thumbnailPath = NULL
-         WHERE clipId = ?`,
-        [first.clipId]
+      const page = await sessionPage(game.shareToken);
+      assert.equal(page.driveUrl, session.driveUrl);
+      assert.equal(page.videos[0].driveUrl, `https://drive.test/file/${row.driveFileId}`);
+      assert.equal("videoUrl" in page.videos[0], false, "no file link from the API");
+      assert.equal((await court()).googleDrive.queue.waiting, 0);
+
+      // Staff get the game's Drive folder link in Sessions, for the QR dialog
+      const listed = await call("GET", `/admin/sessions?courtId=${home.courtId}`);
+      assert.equal(
+        listed.data.sessions.find((g) => g.sessionId === game.sessionId).driveUrl,
+        session.driveUrl
       );
-      const page = await ctx.api("GET", `/public/clips/${first.shareToken}`);
-      assert.equal(page.data.clip.status, "Expired");
-      assert.equal(page.data.clip.videoUrl, null);
-      assert.equal(page.data.clip.driveUrl, null, "its Drive copy is on its way to the trash");
+      const one = await call("GET", `/admin/sessions/${game.sessionId}`);
+      assert.equal(one.data.session.driveUrl, session.driveUrl);
     });
 
     it("re-creates the court's folder when it was deleted in Drive", async () => {
@@ -473,101 +323,59 @@ describe("Google Drive per court", () => {
         [home.courtId]
       );
       google.state.files.delete(driveFolderId);
-      const clip = await replay();
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
-      const file = google.state.files.get((await clipRow(clip.clipId)).driveFileId);
-      assert.notEqual(file.parents[0], driveFolderId);
-      assert.ok(google.state.files.get(file.parents[0]));
+      const game = await sentGame();
+      const file = google.state.files.get((await videoRow(game.sessionVideoId)).driveFileId);
+      const gameFolder = google.state.files.get(file.parents[0]);
+      assert.notEqual(gameFolder.parents[0], driveFolderId);
+      assert.ok(google.state.files.get(gameFolder.parents[0]));
     });
 
-    it("retries a temporary Google failure later, then uploads", async () => {
-      const clip = await replay();
-      google.state.fail = { status: 503, body: { error: { message: "Backend Error" } } };
-      assert.deepEqual(await runDriveUploads(db), { retry: 1 });
-      let row = await clipRow(clip.clipId);
-      assert.equal(row.driveStatus, "Pending");
-      assert.equal(row.driveAttempts, 1);
-      assert.match(row.driveError, /Backend Error/);
-      assert.match((await court()).googleDrive.queue.lastError, /Backend Error/);
-
-      assert.deepEqual(await runDriveUploads(db), {}, "not before its retry time");
-      await ctx.sql.query(`UPDATE clips SET driveNextAttemptAt = NULL WHERE clipId = ?`, [
-        clip.clipId,
-      ]);
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
-      row = await clipRow(clip.clipId);
-      assert.equal(row.driveStatus, "Uploaded");
-      assert.equal(row.driveError, null);
-    });
-
-    it("puts a whole game in its own shared folder, as one video (CR-006)", async () => {
-      const created = await call("POST", "/admin/sessions", {
-        courtId: home.courtId,
-        startAt: (
-          await ctx.sql.query(
-            `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
-                 INTERVAL 1 MINUTE), '%Y-%m-%d %H:%i:%s') AS t`
-          )
-        )[0][0].t,
-        durationMinutes: 5,
-        playerName: "Drive Player",
-      });
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-      const { sessionId, shareUrl } = created.data;
-      // CR-039: New game is always free; this test is about an unpaid game (one made before)
-      await ctx.makeUnpaid(sessionId);
-      // CR-015: the Drive link shows on the player's page once the game is paid
-      assert.equal(
-        (await call("POST", "/admin/payments", { sessionId, amount: 250 })).status,
-        201
-      );
+    it("hides the Drive link while a game is unpaid", async () => {
+      const game = await sentGame();
       await ctx.sql.query(
-        `UPDATE recording_sessions
-           SET startAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 12 MINUTE),
-               endAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 2 MINUTE)
-           WHERE sessionId = ?`,
-        [sessionId]
+        `UPDATE recording_sessions SET paymentStatus = 'Unpaid' WHERE sessionId = ?`,
+        [game.sessionId]
       );
-      const jobs = await gameJobs(ctx, home.token, sessionId);
-      assert.equal(jobs.length, 1, "one file for the whole game");
-      assert.deepEqual(await runDriveUploads(db), {}, "nothing in until the box sends it");
-      const sent = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
-      assert.equal(sent.status, 200, JSON.stringify(sent.body));
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
+      let page = await sessionPage(game.shareToken);
+      assert.equal(page.locked, true);
+      assert.equal(page.driveUrl, null);
+      assert.equal(page.videos[0].driveUrl, null);
+      await ctx.sql.query(
+        `UPDATE recording_sessions SET paymentStatus = 'Paid' WHERE sessionId = ?`,
+        [game.sessionId]
+      );
+      page = await sessionPage(game.shareToken);
+      assert.ok(page.videos[0].driveUrl);
+    });
 
-      const [[session]] = await ctx.sql.query(
-        `SELECT driveFolderId, driveUrl FROM recording_sessions WHERE sessionId = ?`,
-        [sessionId]
+    it("a replay saved before CR-027: its Drive link only while kept and paid, never a file link", async () => {
+      const clip = await replayOnDrive();
+      let page = (await ctx.api("GET", `/public/clips/${clip.shareToken}`)).data.clip;
+      assert.match(page.driveUrl, /^https:\/\/drive\.test\/file\//);
+      for (const key of ["videoUrl", "downloadUrl", "thumbnailUrl"]) {
+        assert.equal(key in page, false, key);
+      }
+      await ctx.sql.query(
+        `UPDATE clips SET paymentStatus = 'Unpaid', price = 50 WHERE clipId = ?`,
+        [clip.clipId]
       );
-      const folder = google.state.files.get(session.driveFolderId);
-      assert.match(folder.name, / game$/);
-      assert.equal(folder.shared, true, "players open the game's folder");
-      const files = [...google.state.files.values()].filter(
-        (f) => f.parents?.[0] === session.driveFolderId
+      page = (await ctx.api("GET", `/public/clips/${clip.shareToken}`)).data.clip;
+      assert.equal(page.locked, true);
+      assert.equal(page.driveUrl, null);
+      await ctx.sql.query(
+        `UPDATE clips SET paymentStatus = 'Paid', status = 'Expired' WHERE clipId = ?`,
+        [clip.clipId]
       );
-      assert.deepEqual(
-        files.map((f) => [f.name, f.shared]),
-        [["Whole game.mp4", true]]
-      );
-
-      const page = await ctx.api("GET", `/public/sessions/${shareUrl.split("/").pop()}`);
-      assert.equal(page.data.session.driveUrl, session.driveUrl);
-      assert.ok(page.data.session.videos[0].driveUrl);
-      assert.equal((await court()).googleDrive.queue.waiting, 0);
-
-      // Staff get the game's Drive folder link in Sessions, for the QR dialog
-      const listed = await call("GET", `/admin/sessions?courtId=${home.courtId}`);
-      assert.equal(
-        listed.data.sessions.find((g) => g.sessionId === sessionId).driveUrl,
-        session.driveUrl
-      );
-      const one = await call("GET", `/admin/sessions/${sessionId}`);
-      assert.equal(one.data.session.driveUrl, session.driveUrl);
+      page = (await ctx.api("GET", `/public/clips/${clip.shareToken}`)).data.clip;
+      assert.equal(page.status, "Expired");
+      assert.equal(page.driveUrl, null, "its Drive copy is on its way to the trash");
+      // Leave nothing for the deletes below
+      await runDriveCleanup(db);
     });
   });
 
-  // CR-017: a video goes after the venue's days (1 by default) — on the server
-  // and, by moving it to the trash, in the court's Google Drive
+  // CR-017: a video goes after the venue's days — in the court's Google Drive
+  // by moving it to the trash
   describe("deleting after the venue's days (CR-017)", () => {
     const clipFull = async (clipId) =>
       (
@@ -585,15 +393,8 @@ describe("Google Drive per court", () => {
          WHERE ${key} = ?`,
         [id]
       );
-    /** A replay copied to Drive. */
-    const uploadedReplay = async () => {
-      const clip = await replay();
-      await runDriveUploads(db);
-      assert.equal((await clipFull(clip.clipId)).driveStatus, "Uploaded");
-      return clip;
-    };
 
-    it("keeps videos 7 days by default (CR-026)", async () => {
+    it("keeps videos 7 days by default (CR-026), on the box and in Drive", async () => {
       const venue = await call("POST", "/admin/venues", { name: "Default Days" });
       assert.equal(venue.status, 201, JSON.stringify(venue.body));
       const [[{ clipRetentionDays }]] = await ctx.sql.query(
@@ -602,29 +403,29 @@ describe("Google Drive per court", () => {
       );
       assert.equal(clipRetentionDays, 7);
 
-      const clip = await replay();
+      const game = await sentGame();
       const [[{ hours }]] = await ctx.sql.query(
         `SELECT TIMESTAMPDIFF(MINUTE, CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), expiresAt)
                   / 60 AS hours
-         FROM clips WHERE clipId = ?`,
-        [clip.clipId]
+         FROM session_videos WHERE sessionVideoId = ?`,
+        [game.sessionVideoId]
       );
+      // Drive Courts keeps the default 7 days too
       assert.ok(Math.abs(Number(hours) - 7 * 24) < 0.1, `expires in ${hours} h`);
-      await runDriveUploads(db); // leave nothing pending for the next tests
     });
 
-    it("moves the Drive copy to the trash when the server's copy expires", async () => {
-      const clip = await uploadedReplay();
+    it("moves the Drive copy to the trash when the video expires", async () => {
+      const clip = await replayOnDrive();
       const { driveFileId } = await clipFull(clip.clipId);
 
-      assert.equal((await runDriveCleanup(db)).trashed ?? 0, 1, "only the clip expired earlier");
-      assert.equal(google.state.files.get(driveFileId).trashed, undefined, "not before it expires");
+      assert.deepEqual(await runDriveCleanup(db), {}, "nothing before it expires");
+      assert.equal(google.state.files.get(driveFileId).trashed, undefined);
 
       await expireNow("clips", "clipId", clip.clipId);
       await runClipMaintenance(db);
       let row = await clipFull(clip.clipId);
       assert.equal(row.status, "Expired");
-      assert.equal(row.driveStatus, "Uploaded", "the server's copy goes first");
+      assert.equal(row.driveStatus, "Uploaded", "expired first, then its Drive copy");
       const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
       assert.equal(page.data.clip.driveUrl, null);
 
@@ -638,7 +439,7 @@ describe("Google Drive per court", () => {
     });
 
     it("counts a copy already gone from Drive as deleted", async () => {
-      const clip = await uploadedReplay();
+      const clip = await replayOnDrive();
       google.state.files.delete((await clipFull(clip.clipId)).driveFileId);
       await expireNow("clips", "clipId", clip.clipId);
       await runClipMaintenance(db);
@@ -647,7 +448,7 @@ describe("Google Drive per court", () => {
     });
 
     it("retries a failed delete later", async () => {
-      const clip = await uploadedReplay();
+      const clip = await replayOnDrive();
       await expireNow("clips", "clipId", clip.clipId);
       await runClipMaintenance(db);
 
@@ -669,7 +470,7 @@ describe("Google Drive per court", () => {
     });
 
     it("waits while the court needs reconnecting, then deletes", async () => {
-      const clip = await uploadedReplay();
+      const clip = await replayOnDrive();
       await expireNow("clips", "clipId", clip.clipId);
       await runClipMaintenance(db);
 
@@ -687,7 +488,8 @@ describe("Google Drive per court", () => {
 
     it("trashes a game's video, then the game's folder once it's empty", async () => {
       const [[game]] = await ctx.sql.query(
-        `SELECT sessionId, driveFolderId FROM recording_sessions WHERE playerName = 'Drive Player'`
+        `SELECT sessionId, driveFolderId, shareToken FROM recording_sessions
+         WHERE playerName = 'Drive Player'`
       );
       assert.ok(game.driveFolderId);
       const [[video]] = await ctx.sql.query(
@@ -698,17 +500,10 @@ describe("Google Drive per court", () => {
 
       await expireNow("session_videos", "sessionVideoId", video.sessionVideoId);
       await runClipMaintenance(db);
-      const page = await ctx.api(
-        "GET",
-        `/public/sessions/${(
-          await ctx.sql.query(`SELECT shareToken FROM recording_sessions WHERE sessionId = ?`, [
-            game.sessionId,
-          ])
-        )[0][0].shareToken}`
-      );
-      assert.equal(page.data.session.videos[0].status, "Expired");
-      assert.equal(page.data.session.videos[0].driveUrl, null);
-      assert.equal(page.data.session.driveUrl, null, "no folder link once nothing is kept");
+      const page = await sessionPage(game.shareToken);
+      assert.equal(page.videos[0].status, "Expired");
+      assert.equal(page.videos[0].driveUrl, null);
+      assert.equal(page.driveUrl, null, "no folder link once nothing is kept");
       const staff = await call("GET", `/admin/sessions/${game.sessionId}`);
       assert.equal(staff.data.session.driveUrl, null, "nor in Sessions");
 
@@ -727,43 +522,30 @@ describe("Google Drive per court", () => {
       assert.equal(driveStatus, "Deleted");
     });
 
-    /** Pretend the video was saved `days` ago (the Drive clock, CR-026). */
-    const savedDaysAgo = (table, key, id, days) =>
-      ctx.sql.query(
-        `UPDATE ${table}
-         SET dateCreated = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
-                                    INTERVAL ${days} * 24 * 60 + 1 MINUTE)
-         WHERE ${key} = ?`,
-        [id]
-      );
-
-    it("trashes the Drive copy 2 days after saving while the server keeps the video (CR-026)", async () => {
-      const clip = await uploadedReplay();
+    it("trashes an older replay's Drive copy 2 days after saving (CR-026)", async () => {
+      const clip = await replayOnDrive();
       const { driveFileId } = await clipFull(clip.clipId);
+      const savedDaysAgo = (days) =>
+        ctx.sql.query(
+          `UPDATE clips
+           SET dateCreated = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                                      INTERVAL ${days} * 24 * 60 + 1 MINUTE)
+           WHERE clipId = ?`,
+          [clip.clipId]
+        );
 
-      await savedDaysAgo("clips", "clipId", clip.clipId, 1);
+      await savedDaysAgo(1);
       assert.equal((await runDriveCleanup(db)).trashed ?? 0, 0, "kept in Drive for 2 days");
       assert.equal(google.state.files.get(driveFileId).trashed, undefined);
 
-      await savedDaysAgo("clips", "clipId", clip.clipId, 2);
+      await savedDaysAgo(2);
       assert.deepEqual(await runDriveCleanup(db), { trashed: 1 });
       const row = await clipFull(clip.clipId);
-      assert.equal(row.status, "Ready", "the server still keeps it");
+      assert.equal(row.status, "Ready");
       assert.equal(row.driveStatus, "Deleted");
       assert.equal(google.state.files.get(driveFileId).trashed, true);
-
       const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
-      assert.ok(page.data.clip.videoUrl, "still plays from the server");
       assert.equal(page.data.clip.driveUrl, null, "no Drive link once its copy is gone");
-    });
-
-    it("skips copying a video to Drive once it's past the 2 days (CR-026)", async () => {
-      const clip = await replay();
-      await savedDaysAgo("clips", "clipId", clip.clipId, 2);
-      assert.deepEqual(await runDriveUploads(db), {});
-      const row = await clipFull(clip.clipId);
-      assert.equal(row.driveStatus, "Skipped");
-      assert.match(row.driveError, /keeps videos only 2 days/);
     });
 
     it("never touches the court's own folder", async () => {
@@ -775,160 +557,119 @@ describe("Google Drive per court", () => {
     });
   });
 
-  // CR-018 (2026-11-20): Re-upload to Google Drive from Sessions
-  describe("re-uploading a game from Sessions (CR-018)", () => {
-    /** A finished, paid game on `courtId` whose video the box has sent. */
-    const sentGame = async (courtId) => {
-      const created = await call("POST", "/admin/sessions", {
-        courtId,
-        startAt: (
-          await ctx.sql.query(
-            `SELECT DATE_FORMAT(DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
-                 INTERVAL 1 MINUTE), '%Y-%m-%d %H:%i:%s') AS t`
-          )
-        )[0][0].t,
-        durationMinutes: 5,
-      });
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-      const { sessionId } = created.data;
-      // CR-039: New game is always free; this test is about an unpaid game (one made before)
-      await ctx.makeUnpaid(sessionId);
-      await call("POST", "/admin/payments", { sessionId, amount: 250 });
-      await ctx.sql.query(
-        `UPDATE recording_sessions
-           SET startAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 12 MINUTE),
-               endAt = DATE_SUB(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'), INTERVAL 2 MINUTE)
-           WHERE sessionId = ?`,
-        [sessionId]
-      );
-      const jobs = await gameJobs(ctx, home.token, sessionId);
-      const sent = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
-      assert.equal(sent.status, 200, JSON.stringify(sent.body));
-      return sessionId;
-    };
+  // CR-018 (2026-11-20) / CR-040: Re-upload to Google Drive from Sessions sends
+  // what the venue box kept
+  describe("re-sending a game from Sessions (CR-018)", () => {
     const upload = async (sessionId) =>
       (await call("GET", `/admin/sessions/${sessionId}`)).data.session.driveUpload;
 
-    it("shows a failed upload, re-queues it, and it uploads", async () => {
-      const sessionId = await sentGame(home.courtId);
-      google.state.fail = { status: 400, body: { error: { message: "Invalid metadata" } } };
-      assert.deepEqual(await runDriveUploads(db), { failed: 1 });
+    it("shows a video the box kept, sends it again from the box, and it reaches Drive", async () => {
+      const game = await endedGame();
+      // Google dropped the sign-in while the box asked: kept on the box
+      await ctx.sql.query(`UPDATE courts SET driveStatus = 'NeedsReconnect' WHERE courtId = ?`, [
+        home.courtId,
+      ]);
+      const kept = await keepGame(ctx, home.token, game.sessionVideoId);
+      assert.equal(kept.data.reason, "DRIVE_RECONNECT");
+      await ctx.sql.query(`UPDATE courts SET driveStatus = 'Connected' WHERE courtId = ?`, [
+        home.courtId,
+      ]);
 
-      let state = await upload(sessionId);
-      assert.equal(state.status, "Failed");
-      assert.match(state.error, /Invalid metadata/);
+      let state = await upload(game.sessionId);
+      assert.equal(state.status, "NotUploaded");
+      assert.match(state.error, /reconnecting/);
       assert.equal(state.canReupload, true);
-      const listed = await call("GET", `/admin/sessions?courtId=${home.courtId}`);
-      assert.equal(
-        listed.data.sessions.find((g) => g.sessionId === sessionId).driveUpload.status,
-        "Failed"
-      );
 
       const viewerTry = await call(
         "POST",
-        `/admin/sessions/${sessionId}/drive-upload`,
+        `/admin/sessions/${game.sessionId}/drive-upload`,
         undefined,
         viewer
       );
       assert.equal(viewerTry.status, 403);
 
-      const again = await call("POST", `/admin/sessions/${sessionId}/drive-upload`);
+      const again = await call("POST", `/admin/sessions/${game.sessionId}/drive-upload`);
       assert.equal(again.status, 200, JSON.stringify(again.body));
-      assert.match(again.body.message, /Uploading 1 video/);
-      assert.equal(again.data.session.driveUpload.status, "Uploading");
+      assert.match(again.body.message, /Sending 1 video to Google Drive from the venue box/);
       assert.equal(
-        (await call("POST", `/admin/sessions/${sessionId}/drive-upload`)).status,
+        (await call("POST", `/admin/sessions/${game.sessionId}/drive-upload`)).status,
         409,
-        "nothing more to queue"
+        "nothing more to send"
       );
 
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
-      state = await upload(sessionId);
+      const jobs = await gameJobs(ctx, home.token, game.sessionId);
+      assert.equal(jobs[0]?.sessionVideoId, game.sessionVideoId, "back to the same box");
+      const sent = await sendGameToDrive(ctx, home.token, game.sessionVideoId);
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      state = await upload(game.sessionId);
       assert.equal(state.status, "Uploaded");
       assert.equal(state.canReupload, false);
-      assert.ok((await call("GET", `/admin/sessions/${sessionId}`)).data.session.driveUrl);
+      assert.ok((await call("GET", `/admin/sessions/${game.sessionId}`)).data.session.driveUrl);
     });
 
     it("refuses on a court without Google Drive, and for a missing game", async () => {
-      const sessionId = await sentGame(home.court2Id);
-      const state = await upload(sessionId);
+      const game = await endedGame(home.court2Id);
+      const kept = await keepGame(ctx, home.token, game.sessionVideoId);
+      assert.equal(kept.data.reason, "NO_DRIVE");
+      const state = await upload(game.sessionId);
       assert.equal(state.status, "NoDrive");
       assert.equal(state.canReupload, false);
       assert.match(state.problem, /no Google Drive/);
 
-      const res = await call("POST", `/admin/sessions/${sessionId}/drive-upload`);
+      const res = await call("POST", `/admin/sessions/${game.sessionId}/drive-upload`);
       assert.equal(res.status, 409);
       assert.match(res.body.message, /no Google Drive connected/);
-      assert.equal(
-        (await call("POST", "/admin/sessions/no-such-game/drive-upload")).status,
-        404
-      );
-    });
-  });
-
-  describe("large files", () => {
-    it("uploads in 8 MB chunks, resuming where Google says it stopped", async () => {
-      const { uploadFile } = await ctx.importFromBack("server/src/utils/googleDrive.js");
-      const [refresh] = [...google.state.refresh].find(
-        ([token, email]) => email === "alice@club.test" && !google.state.revoked.has(token)
-      );
-      const [[{ driveFolderId }]] = await ctx.sql.query(
-        `SELECT driveFolderId FROM courts WHERE courtId = ?`,
-        [home.courtId]
-      );
-      const big = path.join(ctx.workDir, "big.mp4");
-      fs.writeFileSync(big, Buffer.alloc(9 * 1024 * 1024 + 123, 7));
-      const file = await uploadFile(`access:${refresh}`, {
-        filePath: big,
-        name: "big.mp4",
-        parentId: driveFolderId,
-      });
-      assert.equal(google.state.files.get(file.id).size, 9 * 1024 * 1024 + 123);
+      assert.equal((await call("POST", "/admin/sessions/no-such-game/drive-upload")).status, 404);
     });
   });
 
   describe("changing and losing the account", () => {
-    it("waits for a reconnect when Google drops the sign-in, then uploads", async () => {
+    it("keeps games on the box while Google drops the sign-in, then sends them on reconnect", async () => {
       // Alice removes DGSports' access in her Google account
       for (const refresh of google.state.refresh.keys()) google.state.revoked.add(refresh);
-      const clip = await replay();
-      assert.deepEqual(await runDriveUploads(db), { waiting: 1 });
+      const game = await endedGame();
+      const kept = await keepGame(ctx, home.token, game.sessionVideoId);
+      assert.equal(kept.status, 200, JSON.stringify(kept.body));
+      assert.equal(kept.data.drive, false);
+      assert.equal(kept.data.reason, "DRIVE_RECONNECT");
 
       const shown = await court();
       assert.equal(shown.googleDrive.status, "NeedsReconnect");
       assert.match(shown.googleDrive.problem, /Reconnect/);
-      assert.equal((await clipRow(clip.clipId)).driveStatus, "Pending");
-      assert.deepEqual(await runDriveUploads(db), {}, "held while the court needs reconnecting");
+      assert.equal((await videoRow(game.sessionVideoId)).driveStatus, "Skipped");
 
       await connect("alice@club.test");
       assert.equal((await court()).googleDrive.status, "Connected");
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
+      assert.equal((await videoRow(game.sessionVideoId)).status, "Pending", "the box sends it now");
+      const sent = await sendGameToDrive(ctx, home.token, game.sessionVideoId);
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
       assert.equal(
-        google.state.files.get((await clipRow(clip.clipId)).driveFileId).owner,
+        google.state.files.get((await videoRow(game.sessionVideoId)).driveFileId).owner,
         "alice@club.test"
       );
     });
 
-    it("switches to another account: new clips go there, old links stay", async () => {
+    it("switches to another account: new games go there, old links stay", async () => {
       const [[earlier]] = await ctx.sql.query(
-        `SELECT driveUrl FROM clips WHERE courtId = ? AND driveStatus = 'Uploaded' LIMIT 1`,
+        `SELECT sv.driveUrl FROM session_videos sv
+         JOIN recording_sessions s ON s.sessionId = sv.sessionId
+         WHERE s.courtId = ? AND sv.driveStatus = 'Uploaded' LIMIT 1`,
         [home.courtId]
       );
       // Court 2 also uses Alice's account — switching court 1 must not cut it off
       await connect("alice@club.test", home.court2Id);
       await connect("bob@club.test");
-      const shown = await court();
-      assert.equal(shown.googleDrive.email, "bob@club.test");
+      assert.equal((await court()).googleDrive.email, "bob@club.test");
 
-      const clip = await replay();
-      assert.deepEqual(await runDriveUploads(db), { uploaded: 1 });
-      const file = google.state.files.get((await clipRow(clip.clipId)).driveFileId);
+      const game = await sentGame();
+      const file = google.state.files.get((await videoRow(game.sessionVideoId)).driveFileId);
       assert.equal(file.owner, "bob@club.test");
       assert.equal(google.state.files.get(file.parents[0]).owner, "bob@club.test");
 
-      const [[still]] = await ctx.sql.query(`SELECT driveUrl FROM clips WHERE driveUrl = ?`, [
-        earlier.driveUrl,
-      ]);
+      const [[still]] = await ctx.sql.query(
+        `SELECT driveUrl FROM session_videos WHERE driveUrl = ?`,
+        [earlier.driveUrl]
+      );
       assert.ok(still, "the old link is kept");
       const aliceLive = [...google.state.refresh].some(
         ([refresh, email]) => email === "alice@club.test" && !google.state.revoked.has(refresh)
@@ -936,10 +677,7 @@ describe("Google Drive per court", () => {
       assert.ok(aliceLive, "Alice's grant stays: court 2 still uses it");
     });
 
-    it("disconnects: waiting clips are skipped, the token is revoked", async () => {
-      const clip = await replay();
-      assert.equal((await clipRow(clip.clipId)).driveStatus, "Pending");
-
+    it("disconnects: the token is revoked, later games stay on the box", async () => {
       const viewerTry = await call(
         "DELETE",
         `/admin/courts/${home.courtId}/google-drive`,
@@ -953,16 +691,15 @@ describe("Google Drive per court", () => {
       const shown = await court();
       assert.equal(shown.googleDrive.connected, false);
       assert.equal(shown.googleDrive.email, null);
-
-      const row = await clipRow(clip.clipId);
-      assert.equal(row.driveStatus, "Skipped");
       const bobLive = [...google.state.refresh].some(
         ([refresh, email]) => email === "bob@club.test" && !google.state.revoked.has(refresh)
       );
       assert.equal(bobLive, false, "Bob's grant was given back");
 
-      const later = await replay();
-      assert.equal((await clipRow(later.clipId)).driveStatus, null, "not queued any more");
+      const game = await endedGame();
+      const kept = await keepGame(ctx, home.token, game.sessionVideoId);
+      assert.equal(kept.data.drive, false);
+      assert.equal(kept.data.reason, "NO_DRIVE");
     });
   });
 });

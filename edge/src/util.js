@@ -29,6 +29,8 @@ export function maskCredentials(text) {
       // Device tokens: "dcb_…" from enrolment, and anything after "Device " in a header
       .replace(/\bdcb_[A-Za-z0-9_-]{4,}/g, "dcb_****")
       .replace(/\b(Device )[A-Za-z0-9_-]{12,}/g, "$1****")
+      // CR-040: a Google Drive upload session's address is its own credential
+      .replace(/([?&]upload_id=)[^&\s"'<>]+/g, "$1****")
       // RTMP ingest URLs carry the stream key in the path: keep the app, show ≤ 4 chars of the key
       .replace(/(rtmps?:\/\/[^\s/'"|\])]+)(\/[^\s'"|\]),]*)/gi, (_m, base, pathPart) => {
         const parts = pathPart.slice(1).split("/");

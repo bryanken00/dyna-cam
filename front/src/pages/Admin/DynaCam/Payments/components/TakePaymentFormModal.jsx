@@ -33,7 +33,6 @@ import { Input } from "@/components/ui/input";
 import PaymentStatusChip from "../../../../../components/PaymentStatusChip";
 import StatusDot from "../../../../../components/StatusDot";
 import { decodeHTML } from "../../../../../utils/decode-html";
-import { getImageUrl } from "../../../../../utils/upload";
 import {
   CLIP_STATUS_TONE,
   PAY_CODE_PATTERN,
@@ -172,7 +171,6 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
       ? gameBlockedReason(game)
       : null;
   const payable = (clip || game) && !blocked;
-  const thumb = getImageUrl(clip?.thumbnailUrl);
 
   return (
     <Dialog
@@ -292,15 +290,7 @@ const TakePaymentFormModal = ({ open, onClose, onSuccess }) => {
                     color: "var(--color-text-muted)",
                   }}
                 >
-                  {thumb ? (
-                    <img
-                      src={thumb}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Film className="w-5 h-5" strokeWidth={1.6} />
-                  )}
+                  <Film className="w-5 h-5" strokeWidth={1.6} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div

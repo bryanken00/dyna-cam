@@ -3,7 +3,6 @@ import {
   CircleAlert,
   Cloud,
   Lock,
-  Download,
   Video,
   Loader2,
   Radio,
@@ -15,6 +14,7 @@ import {
 import dayjs from "dayjs";
 import { Button } from "@/components/ui/button";
 import { useSessionPageHooks } from "./hooks";
+import DriveVideo from "./components/DriveVideo";
 import LivePanel from "./components/LivePanel";
 import SaveStretch from "./components/SaveStretch";
 import PublicLayout from "../../../components/layout/PublicLayout";
@@ -30,7 +30,6 @@ import {
   formatMinutes,
   formatDateTime,
   formatTimeRange,
-  partLabel,
 } from "../../../utils/dynaCam";
 
 const cardStyle = {
@@ -140,9 +139,7 @@ const SavingProgress = ({ percent }) => {
           style={{ color: "var(--color-secondary-color)" }}
         />
         <span className="font-semibold">
-          {known
-            ? `Saving your game… uploading ${percent}%`
-            : "Saving your game…"}
+          {known ? `Saving your game… sending to Google Drive ${percent}%` : "Saving your game…"}
         </span>
       </div>
       <div
@@ -172,8 +169,8 @@ const SavingProgress = ({ percent }) => {
         className="m-0 mt-2"
         style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
       >
-        A long game can take a while to upload from the court. This page updates
-        on its own — keep it open or come back to this link later.
+        The venue&apos;s recorder sends your game to Google Drive — a long game can take a
+        while. This page updates on its own — keep it open or come back to this link later.
       </p>
     </div>
   );
@@ -217,12 +214,10 @@ const CameraTabs = ({ videos, active, onSelect }) => (
 );
 
 /**
- * CR-003: the whole game as one video (per camera) — play, Download one file,
- * the stretches the camera missed, and the Google Drive copy.
+ * CR-003: the whole game as one video (per camera) — the stretches the camera
+ * missed, and (CR-040) its Google Drive link: players get videos only there.
  */
 const WholeVideoCard = ({ video, twoCameras }) => {
-  const videoSrc = getImageUrl(video.videoUrl);
-  const downloadHref = getImageUrl(video.downloadUrl);
   const title = twoCameras ? `${video.label} — whole game` : "Whole game";
   const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
 
@@ -249,52 +244,11 @@ const WholeVideoCard = ({ video, twoCameras }) => {
         )}
       </div>
 
-      {video.status === "Ready" && videoSrc && (
-        <>
-          <video
-            key={videoSrc}
-            src={videoSrc}
-            poster={getImageUrl(video.thumbnailUrl) || undefined}
-            controls
-            playsInline
-            preload="metadata"
-            className="w-full block"
-            style={{
-              aspectRatio: "16 / 9",
-              background: "var(--color-surface-sunken)",
-            }}
-          />
-          <div className="p-3 space-y-2">
-            {downloadHref && (
-              <Button asChild size="lg" className="h-11 w-full">
-                <a href={downloadHref} download>
-                  <Download />
-                  {twoCameras
-                    ? `Download ${video.label}`
-                    : "Download whole game"}
-                </a>
-              </Button>
-            )}
-            {video.driveUrl && (
-              <Button
-                asChild
-                variant="outline"
-                size="lg"
-                className="h-11 w-full"
-              >
-                <a
-                  href={video.driveUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Cloud />
-                  Open in Google Drive
-                </a>
-              </Button>
-            )}
-          </div>
-        </>
-      )}
+      <DriveVideo
+        video={video}
+        qr
+        label={twoCameras ? `Open ${video.label} in Google Drive` : "Open in Google Drive"}
+      />
 
       {video.gaps?.length > 0 && video.status === "Ready" && (
         <p className="m-0 px-4 pb-3" style={muted}>
@@ -310,8 +264,7 @@ const WholeVideoCard = ({ video, twoCameras }) => {
       {/* CR-017: gone from here and from the venue's Google Drive */}
       {video.status === "Expired" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          This video has been deleted — videos are only kept for a short time
-          after the game.
+          This video has been deleted — videos are only kept for a short time after the game.
         </p>
       )}
     </div>
@@ -329,9 +282,6 @@ const clockOf = (seconds) =>
  */
 const CaptureCard = ({ capture, onDelete, deleting }) => {
   const muted = { fontSize: 13, color: "var(--color-text-secondary)" };
-  const ready = capture.videos.filter(
-    (video) => video.status === "Ready" && video.videoUrl,
-  );
 
   return (
     <div className="overflow-hidden" style={cardStyle}>
@@ -378,54 +328,22 @@ const CaptureCard = ({ capture, onDelete, deleting }) => {
         )}
       </div>
 
-      {ready.map((video) => {
-        const src = getImageUrl(video.videoUrl);
-        const download = getImageUrl(video.downloadUrl);
-        return (
-          <div key={video.camera}>
-            {capture.videos.length > 1 && (
-              <p className="m-0 px-4 pb-2" style={muted}>
-                {video.label}
-              </p>
-            )}
-            <video
-              key={src}
-              src={src}
-              poster={getImageUrl(video.thumbnailUrl) || undefined}
-              controls
-              playsInline
-              preload="metadata"
-              className="w-full block"
-              style={{
-                aspectRatio: "16 / 9",
-                background: "var(--color-surface-sunken)",
-              }}
-            />
-            {download && (
-              <div className="p-3">
-                <Button
-                  asChild
-                  variant="outline"
-                  size="lg"
-                  className="h-11 w-full"
-                >
-                  <a href={download} download>
-                    <Download />
-                    {capture.videos.length > 1
-                      ? `Download ${video.label}`
-                      : "Download"}
-                  </a>
-                </Button>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {/* CR-040: a save is only a Google Drive link, like the whole game */}
+      {capture.videos.map((video) => (
+        <div key={video.camera}>
+          {capture.videos.length > 1 && video.status === "Ready" && (
+            <p className="m-0 px-4" style={muted}>
+              {video.label}
+            </p>
+          )}
+          <DriveVideo video={video} />
+        </div>
+      ))}
 
       {capture.status === "Saving" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          The recorder is copying this part of your game — it&apos;ll play here
-          in a few minutes.
+          The venue&apos;s recorder is sending this part of your game to Google Drive — its
+          link appears here when it&apos;s there.
         </p>
       )}
       {capture.status === "Queued" && (
@@ -442,99 +360,7 @@ const CaptureCard = ({ capture, onDelete, deleting }) => {
       )}
       {capture.status === "Expired" && (
         <p className="m-0 px-4 pb-3" style={muted}>
-          This save has been deleted — videos are only kept for a short time
-          after the game.
-        </p>
-      )}
-    </div>
-  );
-};
-
-/**
- * A game recorded before whole videos (it has no whole video): its saved
- * 5-minute pieces, as they were shown then. New games never show these.
- */
-const PartCard = ({ part }) => {
-  const videoSrc = getImageUrl(part.videoUrl);
-  const downloadHref = getImageUrl(part.downloadUrl);
-  return (
-    <div className="overflow-hidden" style={cardStyle}>
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <div className="min-w-0">
-          <span
-            className="font-semibold"
-            style={{ fontSize: 14.5, color: "var(--color-text-dark)" }}
-          >
-            {partLabel(part.partIndex)}
-            {part.camera > 0 && ` · Cam ${part.camera}`}
-          </span>
-          <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-            {" · "}
-            {formatTimeRange(part.windowStartAt, part.windowEndAt)}
-          </span>
-        </div>
-        {part.status === "Pending" && (
-          <span
-            className="inline-flex items-center gap-1.5 shrink-0"
-            style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
-          >
-            <Loader2
-              className="w-3.5 h-3.5 animate-spin"
-              style={{ color: "var(--color-secondary-color)" }}
-            />
-            Saving…
-          </span>
-        )}
-      </div>
-
-      {part.status === "Ready" && videoSrc && (
-        <>
-          <video
-            key={videoSrc}
-            src={videoSrc}
-            poster={getImageUrl(part.thumbnailUrl) || undefined}
-            controls
-            playsInline
-            preload="none"
-            className="w-full block"
-            style={{
-              aspectRatio: "16 / 9",
-              background: "var(--color-surface-sunken)",
-            }}
-          />
-          {downloadHref && (
-            <div className="p-3">
-              <Button
-                asChild
-                variant="outline"
-                size="lg"
-                className="h-11 w-full"
-              >
-                <a href={downloadHref} download>
-                  <Download />
-                  Download {partLabel(part.partIndex).toLowerCase()}
-                </a>
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-
-      {part.status === "Failed" && (
-        <p
-          className="m-0 px-4 pb-3"
-          style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
-        >
-          This part couldn&apos;t be saved.
-        </p>
-      )}
-      {part.status === "Expired" && (
-        <p
-          className="m-0 px-4 pb-3"
-          style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
-        >
-          This part has been deleted — videos are only kept for a short time
-          after the game.
+          This save has been deleted — videos are only kept for a short time after the game.
         </p>
       )}
     </div>
@@ -544,7 +370,7 @@ const PartCard = ({ part }) => {
 /**
  * `/session/:shareToken` — a recorded game for the player: when it starts, that
  * it's recording, how much is saved after it ends, then the whole video per
- * camera (CR-003). Players never see parts (CR-004). Polls while anything changes.
+ * camera (CR-003), each a Google Drive link (CR-040). Polls while anything changes.
  */
 /**
  * CR-015: a game that isn't paid yet — the code to show at the front desk and
@@ -703,7 +529,6 @@ const SessionPage = () => {
     isOpeningStream,
     handleStopStream,
     isStoppingStream,
-    parts,
     videos,
     captures,
     activeVideo,
@@ -838,14 +663,6 @@ const SessionPage = () => {
       </div>
     </div>
   );
-  // Only a game recorded before whole videos still lists its pieces
-  const partsBlock = !session.locked && parts.length > 0 && (
-    <div className="mt-4 space-y-3">
-      {parts.map((part) => (
-        <PartCard key={`${part.partIndex}-${part.camera ?? 0}`} part={part} />
-      ))}
-    </div>
-  );
   const shareBlock = !session.locked && readyCount > 0 && (
     <div className="mt-4">
       <Button size="lg" className="h-12 w-full" onClick={handleShare}>
@@ -854,7 +671,8 @@ const SessionPage = () => {
       </Button>
       {expiresAt && (
         <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-          Available until {formatDateTime(expiresAt)} — download it before then. It&apos;s deleted after that.
+          On Google Drive until {formatDateTime(expiresAt)} — save a copy before then. It&apos;s
+          removed after that.
         </p>
       )}
     </div>
@@ -923,14 +741,13 @@ const SessionPage = () => {
       {/* CR-035: each part built once below; phones keep today's order,
           wide screens put the video (CR-037: and the saves, as a grid) on the
           left and the game's controls on the right */}
-      {wide && (liveBlock || lockedBlock || videoBlock || savesBlock || partsBlock) ? (
+      {wide && (liveBlock || lockedBlock || videoBlock || savesBlock) ? (
         <div className="mt-4 grid gap-6 grid-cols-[minmax(0,1fr)_380px] items-start">
           <div className={columnClass}>
             {liveBlock}
             {lockedBlock}
             {videoBlock}
             {savesBlock}
-            {partsBlock}
           </div>
           <div className={columnClass}>
             {saveBlock}
@@ -952,7 +769,6 @@ const SessionPage = () => {
           {driveBlock}
           {videoBlock}
           {savesBlock}
-          {partsBlock}
           {shareBlock}
         </div>
       )}

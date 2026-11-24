@@ -23,7 +23,14 @@ export const alertSettings = () => ({
   backlogMinutes: envNumber("ALERT_BACKLOG_MINUTES", 60, 1),
 });
 
-export const ALERT_KINDS = ["BOX_OFFLINE", "CAMERA_DOWN", "DISK_LOW", "CLOCK_OFF", "UPLOAD_BACKLOG"];
+export const ALERT_KINDS = [
+  "BOX_OFFLINE",
+  "CAMERA_DOWN",
+  "DISK_LOW",
+  "CLOCK_OFF",
+  "UPLOAD_BACKLOG",
+  "BOX_OUTDATED",
+];
 
 /** Short labels for emails and the Dashboard. */
 export const ALERT_LABELS = {
@@ -32,6 +39,7 @@ export const ALERT_LABELS = {
   DISK_LOW: "Disk almost full",
   CLOCK_OFF: "Box clock is off",
   UPLOAD_BACKLOG: "Uploads piling up",
+  BOX_OUTDATED: "Recorder box needs updating",
 };
 
 /** The stored heartbeat (JSON column or string) as an object, {} when unreadable. */
@@ -112,6 +120,16 @@ export const boxProblems = (box, status, courts, settings) => {
       kind: "CLOCK_OFF",
       alertKey: `CLOCK_OFF:${box.deviceId}`,
       message: `${box.name}'s clock is ${seconds}s ${way} the server — clips will be cut at the wrong moment`,
+    });
+  }
+  // CR-040 Phase 4: only a box that sends games straight to Google Drive gets them
+  const capabilities = Array.isArray(status.capabilities) ? status.capabilities : [];
+  if (!capabilities.includes("drive-direct")) {
+    problems.push({
+      ...base,
+      kind: "BOX_OUTDATED",
+      alertKey: `BOX_OUTDATED:${box.deviceId}`,
+      message: `${box.name} needs updating — its games wait until it can send them to Google Drive`,
     });
   }
   if (

@@ -41,7 +41,6 @@ export const useSessionPageHooks = () => {
   const canStream = !!data?.data?.canStream;
   const isRecording = session?.status === "Recording";
   const notFound = error?.response?.status === 404;
-  const parts = useMemo(() => session?.parts || [], [session]);
   // CR-003: the whole game, one video per camera (Cam 1 / Cam 2 tabs)
   const videos = useMemo(() => session?.videos || [], [session]);
   // CR-013: stretches saved from the courtside device ("Save 1 · 8:00 – 10:00")
@@ -49,7 +48,7 @@ export const useSessionPageHooks = () => {
   const [cameraTab, setCameraTab] = useState(null);
   const activeVideo =
     videos.find((video) => video.camera === cameraTab) || videos[0] || null;
-  const twoCameras = parts.some((part) => part.camera > 0) || videos.length > 1;
+  const twoCameras = videos.length > 1;
 
   // CR-006: after End game, "Saving your game…" while the box makes the file,
   // then "uploading N%" until a whole video is ready
@@ -60,17 +59,17 @@ export const useSessionPageHooks = () => {
       (session.savingWholeVideo && !hasReadyVideo && !videos.some((v) => v.status === "Failed")))
       ? { percent: session.uploadPercent ?? null }
       : null;
-  const readyCount =
-    parts.filter((p) => p.status === "Ready").length +
-    videos.filter((v) => v.status === "Ready").length;
+  // CR-040: a video counts once its Google Drive link is there
+  const watchable = (v) => v.status === "Ready" && !!v.driveUrl;
+  const readyCount = videos.filter(watchable).length;
   // The soonest a ready part expires — what "available until" should promise
   const expiresAt = useMemo(
     () =>
-      [...parts, ...videos]
-        .filter((item) => item.status === "Ready" && item.expiresAt)
+      videos
+        .filter((item) => watchable(item) && item.expiresAt)
         .map((item) => item.expiresAt)
         .sort()[0] || null,
-    [parts, videos],
+    [videos],
   );
 
   const courtName = decodeHTML(session?.courtName);
@@ -166,7 +165,6 @@ export const useSessionPageHooks = () => {
     isOpeningStream: streamLink.isPending,
     handleStopStream,
     isStoppingStream: stopStream.isPending,
-    parts,
     videos,
     captures,
     activeVideo,

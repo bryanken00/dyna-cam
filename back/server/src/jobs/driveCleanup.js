@@ -21,7 +21,7 @@ import { accessToken, DriveAuthError, driveConfigured, trashFile } from "../util
  *   - Anything else → retried with backoff, then left with its error after
  *     MAX_ATTEMPTS (Admin shows the Drive copy wasn't deleted).
  *
- * Runs after every Drive upload pass (jobs/driveUploads.js, every 30 s).
+ * Runs every 30 s (jobs/driveJobs.js).
  * `driveNextAttemptAt` is the claim's lease and the retry time.
  */
 
@@ -42,12 +42,19 @@ const COURT_CONNECTED = `c.driveStatus = 'Connected' AND c.driveRefreshToken IS 
 
 /** A video (alias `a`) whose Drive copy is due: past its Drive days (1st ?) or expired. */
 const driveDue = (a) => `(${a}.status = 'Expired' OR ${a}.dateCreated <= ?)`;
+/**
+ * CR-040: a video the venue box sent to Drive itself — Drive is the players'
+ * only copy, so it stays the venue's keep time (until it expires), not 2 days.
+ */
+const sessionVideoDriveDue = (a) =>
+  `(${a}.status = 'Expired' OR (${a}.delivery = 'Server' AND ${a}.dateCreated <= ?))`;
 
 /** Videos whose Drive copy is due and still there: replays and whole-game videos / saves. */
 const KINDS = [
   {
     table: "clips",
     key: "clipId",
+    claimDue: driveDue("clips"),
     due: `
       SELECT cl.clipId AS id, cl.driveFileId, cl.driveDeleteAttempts AS attempts,
              c.courtId, c.driveRefreshToken
@@ -61,13 +68,14 @@ const KINDS = [
   {
     table: "session_videos",
     key: "sessionVideoId",
+    claimDue: sessionVideoDriveDue("session_videos"),
     due: `
       SELECT sv.sessionVideoId AS id, sv.driveFileId, sv.driveDeleteAttempts AS attempts,
              c.courtId, c.driveRefreshToken
       FROM session_videos sv
       JOIN recording_sessions s ON s.sessionId = sv.sessionId
       JOIN courts c ON c.courtId = s.courtId
-      WHERE ${driveDue("sv")} AND sv.driveStatus = 'Uploaded' AND sv.driveFileId IS NOT NULL
+      WHERE ${sessionVideoDriveDue("sv")} AND sv.driveStatus = 'Uploaded' AND sv.driveFileId IS NOT NULL
         AND sv.driveDeleteAttempts < ${DRIVE_DELETE_MAX_ATTEMPTS}
         AND (sv.driveNextAttemptAt IS NULL OR sv.driveNextAttemptAt <= ?)
         AND ${COURT_CONNECTED}
@@ -216,7 +224,7 @@ export const runDriveCleanup = async (db, { limit = BATCH } = {}) => {
     for (const row of due) {
       const claimed = await db.query(
         `UPDATE ${kind.table} SET driveNextAttemptAt = ?
-         WHERE ${kind.key} = ? AND (status = 'Expired' OR dateCreated <= ?)
+         WHERE ${kind.key} = ? AND ${kind.claimDue}
            AND driveStatus = 'Uploaded'
            AND (driveNextAttemptAt IS NULL OR driveNextAttemptAt <= ?)`,
         [minutesFromNow(LEASE_MINUTES), row.id, cutoff, now]

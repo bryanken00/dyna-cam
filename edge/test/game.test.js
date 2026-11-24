@@ -726,12 +726,12 @@ describe("api: game-video endpoints", () => {
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
 
 describe("heartbeat capabilities", () => {
-  it('names the game-file capability in one constant (no more "session-part-camera")', () => {
+  it('names the capabilities in one constant (no more "session-part-camera")', () => {
     assert.equal(CAPABILITY_GAME_FILE, "game-file");
-    assert.deepEqual([...DEVICE_CAPABILITIES], ["game-file"]);
+    assert.deepEqual([...DEVICE_CAPABILITIES], ["game-file", "drive-direct"]);
   });
 
-  it('sends capabilities: ["game-file"] in every heartbeat', async () => {
+  it('sends capabilities: ["game-file", "drive-direct"] in every heartbeat', async () => {
     const sent = [];
     const sync = new DeviceSync({
       api: { heartbeat: async (p) => sent.push(p) },
@@ -744,7 +744,10 @@ describe("heartbeat capabilities", () => {
     await sync.heartbeat();
     assert.deepEqual(
       sent.map((p) => p.capabilities),
-      [["game-file"], ["game-file"]]
+      [
+        ["game-file", "drive-direct"],
+        ["game-file", "drive-direct"],
+      ]
     );
   });
 

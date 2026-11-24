@@ -6,8 +6,8 @@ import { DRIVE_EMAIL_READY, sendGameDriveEmail } from "../utils/gameEmails.js";
 /**
  * CR-018: email each game's Google Drive link to its player, once — as soon as
  * the game is ready for it (utils/gameEmails.js: ended, paid or free, its
- * videos in Drive). Runs after every Drive upload pass (jobs/driveUploads.js,
- * every 30 s), so a payment recorded later sends it within half a minute.
+ * videos in Drive). Runs every 30 s (jobs/driveJobs.js), so a payment
+ * recorded later sends it within half a minute.
  *
  * A claim is a lease (`driveEmailStatus = 'Sending'`, `driveEmailNextAttemptAt`);
  * a send the mailer (SendGrid) refuses is retried with backoff, then Failed.

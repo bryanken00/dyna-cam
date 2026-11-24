@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { ApiError } from "./api.js";
+import { sendToDrive } from "./drive.js";
 import { isGameGone, isGameJob, uploadGameFile } from "./game.js";
 import { gameKey, queueKey } from "./queue.js";
 import { backoffMs, safeId, sleep, truncate } from "./util.js";
@@ -15,6 +16,13 @@ const LONG_POLL_SECONDS = 25;
 const MAX_CUT_ATTEMPTS = 2;
 /** Copying a game is retried this often before the game video is reported as failed. */
 const MAX_GAME_ATTEMPTS = 3;
+/** CR-040: new Drive sessions for one video before it is reported as failed. */
+const MAX_DRIVE_RESTARTS = 4;
+/** What a drive-session `reason` means, for the log. */
+const KEPT_REASON = {
+  NO_DRIVE: "the court has no Google Drive",
+  DRIVE_RECONNECT: "Google Drive needs reconnecting on this court",
+};
 
 /** A clip job persisted by a box from before CR-006: a 5-minute session part. */
 export const isOldSessionPart = (entry) =>
@@ -36,16 +44,31 @@ const jobKey = (job) => (job?.type === "game" ? gameKey(job.sessionVideoId) : jo
  * lane, one at a time: copy the game into one mp4 (`game`), then a resumable
  * chunked upload that pauses between chunks while a clip is waiting to upload.
  *
+ * CR-040: a game job with `delivery: "drive"` keeps its file on the box
+ * (`videos`, videos.js) and sends it straight to the court's Google Drive
+ * (drive.js); `delivery: "server"` (an API from before) uploads it to the API.
+ *
  * `clip(entry, { workDir, signal })` is clipper.makeClip and
  * `game(entry, { workDir, signal, onCopy })` game.makeGameFile, with the venue
  * context bound (see index.js) — injected so the loop is testable.
  */
 export class JobRunner {
-  constructor({ api, queue, clip, game, jobsDir, settings, log, now = () => Date.now() }) {
+  constructor({
+    api,
+    queue,
+    clip,
+    game,
+    videos = null,
+    jobsDir,
+    settings,
+    log,
+    now = () => Date.now(),
+  }) {
     this.api = api;
     this.queue = queue;
     this.clip = clip;
     this.game = game;
+    this.videos = videos;
     this.jobsDir = jobsDir;
     this.log = log;
     this.now = now;
@@ -418,6 +441,7 @@ export class JobRunner {
     if (this.queue.has(gameKey(id))) return;
     const windowStartMs = Number(job.windowStartMs);
     const windowEndMs = Number(job.windowEndMs);
+    const delivery = job.delivery === "drive" && this.videos ? "drive" : "server";
     const entry = {
       type: "game",
       sessionVideoId: id,
@@ -426,6 +450,7 @@ export class JobRunner {
       camera: job.camera ?? 0,
       windowStartMs,
       windowEndMs,
+      delivery,
       // Sorts the queue (oldest first) and keeps the entry valid in queue.json
       requestedAtMs: Number.isFinite(windowEndMs) ? windowEndMs : this.now(),
       phase: "waiting",
@@ -433,6 +458,19 @@ export class JobRunner {
       nextAttemptAt: 0,
       receivedAt: this.now(),
     };
+    // Sent again (Drive connected, or Retry): this box still has the file
+    const kept = delivery === "drive" ? this.videos.get(id) : null;
+    if (kept) {
+      Object.assign(entry, {
+        phase: "uploading",
+        videoPath: kept.videoPath,
+        thumbnailPath: null,
+        sizeBytes: kept.sizeBytes,
+        durationSeconds: kept.durationSeconds,
+        gaps: kept.gaps || [],
+      });
+      this.log.info(`game video ${id}: sending the copy kept on this box to Google Drive`);
+    }
     await this.queue.put(entry);
     const from = Number.isFinite(windowStartMs) ? new Date(windowStartMs).toISOString() : "?";
     const to = Number.isFinite(windowEndMs) ? new Date(windowEndMs).toISOString() : "?";
@@ -452,13 +490,21 @@ export class JobRunner {
       !(await exists(entry.videoPath))
     ) {
       this.log.info(`game video ${entry.sessionVideoId}: its file is gone — making it again`);
-      await this.queue.update(key, { phase: "waiting", videoPath: null, thumbnailPath: null });
+      if (entry.delivery === "drive") await this.videos?.forget(entry.sessionVideoId);
+      await this.queue.update(key, {
+        phase: "waiting",
+        videoPath: null,
+        thumbnailPath: null,
+        driveFileId: null,
+      });
     }
   }
 
   gameStep(entry) {
     if (entry.phase === "failing") return this.reportGame(entry);
-    if (entry.phase === "uploading" || entry.phase === "finishing") return this.uploadGame(entry);
+    if (entry.phase === "uploading" || entry.phase === "finishing") {
+      return entry.delivery === "drive" ? this.driveGame(entry) : this.uploadGame(entry);
+    }
     return this.makeGame(entry);
   }
 
@@ -503,10 +549,16 @@ export class JobRunner {
       `game video ${entry.sessionVideoId}: ${mb} MB, ${result.durationSeconds}s recorded` +
         (result.gaps.length ? `, ${result.gaps.length} gap(s)` : "")
     );
+    let { videoPath, thumbnailPath } = result;
+    if (entry.delivery === "drive") {
+      // Kept on the box from now on; Drive makes its own thumbnail
+      ({ videoPath } = await this.videos.adopt(entry.sessionVideoId, result));
+      thumbnailPath = null;
+    }
     await this.queue.update(key, {
       phase: "uploading",
-      videoPath: result.videoPath,
-      thumbnailPath: result.thumbnailPath,
+      videoPath,
+      thumbnailPath,
       sizeBytes: result.sizeBytes,
       durationSeconds: result.durationSeconds,
       gaps: result.gaps,
@@ -581,6 +633,129 @@ export class JobRunner {
       });
       return undefined;
     }
+  }
+
+  /**
+   * CR-040: send a kept game file to the court's Google Drive (drive.js). The
+   * file stays on the box either way; the job ends when Drive has it or the
+   * API says to keep it here (no usable Drive).
+   */
+  async driveGame(entry) {
+    const key = queueKey(entry);
+    const id = entry.sessionVideoId;
+    let logged = -1;
+    try {
+      const result = await sendToDrive({
+        api: this.api,
+        id,
+        file: entry,
+        newSession: Boolean(entry.newSession),
+        driveFileId: entry.driveFileId ?? null,
+        signal: this.abort.signal,
+        beforeChunk: () => this.clipsFirst(),
+        onSession: (opened) =>
+          this.queue.update(key, {
+            newSession: false,
+            keepUntilMs: Number.isFinite(opened.keepUntilMs) ? opened.keepUntilMs : null,
+          }),
+        onUploaded: (driveFileId) => this.queue.update(key, { driveFileId }),
+        onProgress: (bytes) => {
+          const tenth = Math.floor((bytes / Math.max(entry.sizeBytes, 1)) * 10);
+          if (tenth !== logged) {
+            logged = tenth;
+            this.log.info(`game video ${id}: ${tenth * 10}% on Google Drive`);
+          }
+        },
+      });
+      await this.videos.update(id, { onDrive: result.drive, keepUntilMs: result.keepUntilMs });
+      const until = Number.isFinite(result.keepUntilMs)
+        ? ` until ${new Date(result.keepUntilMs).toISOString()}`
+        : "";
+      if (result.drive) {
+        this.log.info(`game video ${id} is on Google Drive — this box keeps its copy${until}`);
+      } else {
+        this.log.warn(
+          `game video ${id}: ${KEPT_REASON[result.reason] || result.reason} — kept on this box${until}`
+        );
+      }
+      return this.drop(entry);
+    } catch (err) {
+      if (this.stopped) return undefined;
+      return this.driveFailed(entry, err);
+    }
+  }
+
+  async driveFailed(entry, err) {
+    const key = queueKey(entry);
+    const id = entry.sessionVideoId;
+    const attempts = (entry.attempts || 0) + 1;
+    if (!(err instanceof ApiError)) {
+      // The file itself is the problem (gone, shorter than recorded): make it again
+      await this.videos.forget(id);
+      if (attempts >= MAX_GAME_ATTEMPTS) {
+        this.log.error(`game video ${id}: could not read its file`, err);
+        return this.toGameFailing(entry, "Could not read the game video on the recorder box");
+      }
+      this.log.warn(`game video ${id}: could not read its file — making it again`, err);
+      await this.queue.update(key, {
+        phase: "waiting",
+        videoPath: null,
+        driveFileId: null,
+        attempts,
+        nextAttemptAt: this.now() + 5000,
+      });
+      return undefined;
+    }
+    if (err.code === "DRIVE_SESSION_EXPIRED" || err.code === "DRIVE_FILE_MISMATCH") {
+      const restarts = (entry.driveRestarts || 0) + 1;
+      if (restarts > MAX_DRIVE_RESTARTS) {
+        this.log.error(`game video ${id}: Google Drive kept losing the upload`, err);
+        return this.toGameFailing(entry, "Google Drive did not keep the uploaded game video");
+      }
+      this.log.warn(`game video ${id}: ${err.detail} — starting a new Google Drive upload`);
+      await this.queue.update(key, {
+        newSession: true,
+        driveFileId: null,
+        driveRestarts: restarts,
+        nextAttemptAt: this.now() + 5000,
+      });
+      return undefined;
+    }
+    if (err.code === "DRIVE_REFUSED") {
+      this.log.error(`game video ${id}: Google Drive refused it — kept on this box`, err);
+      return this.toGameFailing(entry, `Google Drive refused the video: ${err.detail}`);
+    }
+    if (err.code === "DRIVE_RECONNECT") {
+      // Google has the file; the API can't check it until staff reconnect Drive
+      if (Number.isFinite(entry.keepUntilMs) && this.now() >= entry.keepUntilMs) {
+        return this.toGameFailing(entry, "Google Drive needs reconnecting on this court");
+      }
+      const delay = Math.max(this.retryDelay(err, attempts, 60_000, 1_800_000), 60_000);
+      this.log.warn(
+        `game video ${id}: Google Drive needs reconnecting on this court — asking again in ${Math.round(delay / 60_000)} min`
+      );
+      await this.queue.update(key, { attempts, nextAttemptAt: this.now() + delay });
+      return undefined;
+    }
+    if (isGameGone(err, entry.sizeBytes)) {
+      // The API no longer wants it sent; whether the copy stays is /config's keepVideos
+      this.log.info(`game video ${id} is no longer waiting (${err.status}) — dropped`);
+      return this.drop(entry);
+    }
+    if (!err.isRetryable && err.code !== "DRIVE_BUSY") {
+      this.log.error(`sending game video ${id} was rejected`, err);
+      return this.toGameFailing(entry, `Upload rejected: ${err.detail}`);
+    }
+    // Network, timeout, 429, 5xx, Drive busy, 401: later — Google keeps what it has
+    const delay = this.retryDelay(err, attempts, 5000, 300_000);
+    if (err.status !== 401) {
+      this.log.warn(
+        `sending game video ${id} to Google Drive stopped, resuming in ${Math.round(delay / 1000)}s`,
+        err
+      );
+    }
+    await this.queue.update(key, { attempts, nextAttemptAt: this.now() + delay });
+    return undefined;
   }
 
   /** Waits while a cut clip is waiting to upload, so a long game upload never holds a replay back. */

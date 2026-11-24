@@ -1,18 +1,16 @@
-// PLAN-001 — the clip pipeline end to end, for 60-second clips saved before
-// CR-027 (the court QR now starts a game; nothing saves a new clip):
-// clip Pending → recorder box picks it up, cuts it, uploads it → player's
-// share link plays it → it expires.
-// Also: a box can only ever touch its own venue's clips.
+// PLAN-001 — 60-second clips saved before CR-027 (the court QR now starts a
+// game; nothing saves a new clip). CR-040 Phase 4: no box makes or uploads a
+// clip any more (no clip jobs, no clip routes) and no clip file is served —
+// an old clip's page shows its state and its Google Drive copy, then expires.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { JPEG, PNG, startTestApp } from "./helpers/testApp.js";
-import { insertLegacyClip } from "./helpers/legacyClip.js";
+import { JPEG, startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip, readyLegacyClip } from "./helpers/legacyClip.js";
 
-// The smallest buffer that passes the API's mp4 content check (an ISO media "ftyp" box)
 const MP4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
   Buffer.from("ftypisom"),
@@ -46,15 +44,21 @@ describe("clips", () => {
     target.deviceId = box.data.deviceId;
   };
 
-  const uploadForm = (
-    video = MP4,
-    thumbnail = JPEG,
-    thumbType = "image/jpeg",
-    thumbName = "t.jpg"
-  ) => [
-    ["video", video, "video/mp4", "clip.mp4"],
-    ["thumbnail", thumbnail, thumbType, thumbName],
-  ];
+  /**
+   * A legacy clip made Ready with files on disk, as the old box upload left it.
+   * @returns {{ videoFile: string }} the video's absolute path
+   */
+  const readyWithFiles = async (target, clipId) => {
+    const folder = `public/uploads/admin/clips/${target.venueId}/${clipId}`;
+    fs.mkdirSync(path.join(ctx.workDir, folder), { recursive: true });
+    fs.writeFileSync(path.join(ctx.workDir, folder, "clip.mp4"), MP4);
+    fs.writeFileSync(path.join(ctx.workDir, folder, "clip.jpg"), JPEG);
+    await readyLegacyClip(ctx.sql, clipId, {
+      videoPath: `/${folder}/clip.mp4`,
+      thumbnailPath: `/${folder}/clip.jpg`,
+    });
+    return { videoFile: path.join(ctx.workDir, folder, "clip.mp4") };
+  };
 
   before(async () => {
     ctx = await startTestApp();
@@ -125,149 +129,54 @@ describe("clips", () => {
     const page = await ctx.api("GET", `/public/clips/${shareToken}`);
     assert.equal(page.status, 200);
     assert.equal(page.data.clip.status, "Pending");
-    assert.equal(page.data.clip.videoUrl, null);
+    assert.equal("videoUrl" in page.data.clip, false);
   });
 
-  it("hands the job to the home box only", async () => {
-    const jobs = await home.device("GET", "/device/jobs?wait=0");
-    assert.equal(jobs.status, 200);
-    const job = jobs.data.jobs.find((j) => j.clipId === clipId);
-    assert.ok(job, "home box sees the clip");
-    assert.equal(job.courtId, home.courtId);
-    assert.equal(typeof job.requestedAtMs, "number");
-    assert.ok(Math.abs(Date.now() - job.requestedAtMs) < 60_000);
-
-    const otherJobs = await other.device("GET", "/device/jobs?wait=0");
-    assert.equal(otherJobs.data.jobs.length, 0);
+  it("hands no box a clip job (CR-040 Phase 4)", async () => {
+    for (const target of [home, other]) {
+      const jobs = await target.device("GET", "/device/jobs?wait=0");
+      assert.equal(jobs.status, 200);
+      assert.equal(jobs.data.jobs.filter((job) => job.type === "clip").length, 0, "no clip jobs");
+    }
   });
 
-  it("refuses another venue's box on every clip action, and writes nothing", async () => {
-    assert.equal((await other.device("POST", `/device/clips/${clipId}/processing`)).status, 404);
-    assert.equal(
-      (await other.device("POST", `/device/clips/${clipId}/fail`, { body: { reason: "x" } }))
-        .status,
-      404
-    );
-    const upload = await other.device("POST", `/device/clips/${clipId}/upload`, {
-      form: uploadForm(),
-    });
-    assert.equal(upload.status, 404);
-
+  it("has no clip routes for any box, and writes nothing", async () => {
+    for (const target of [home, other]) {
+      for (const action of ["processing", "upload", "fail"]) {
+        const res = await target.device("POST", `/device/clips/${clipId}/${action}`, {
+          body: { reason: "x" },
+        });
+        assert.equal(res.status, 404, action);
+      }
+    }
     const [[row]] = await ctx.sql.query(`SELECT status, videoPath FROM clips WHERE clipId = ?`, [
       clipId,
     ]);
     assert.equal(row.status, "Pending");
     assert.equal(row.videoPath, null);
-    const clipsFolder = path.join(
-      ctx.workDir,
-      "public",
-      "uploads",
-      "admin",
-      "clips",
-      other.venueId
-    );
-    assert.equal(fs.existsSync(clipsFolder), false);
   });
 
-  it("rejects an upload whose files are the wrong type", async () => {
-    const res = await home.device("POST", `/device/clips/${clipId}/upload`, {
-      form: uploadForm(MP4, PNG, "image/png", "t.png"),
-    });
-    assert.equal(res.status, 400);
-    const [[row]] = await ctx.sql.query(`SELECT status FROM clips WHERE clipId = ?`, [clipId]);
-    assert.equal(row.status, "Pending");
-  });
-
-  it("processes and uploads the clip, which then plays from the share link", async () => {
-    assert.equal((await home.device("POST", `/device/clips/${clipId}/processing`)).status, 200);
-    const processing = await ctx.api("GET", `/public/clips/${shareToken}`);
-    assert.equal(processing.data.clip.status, "Pending", "players see 'saving' until it is ready");
-
-    const upload = await home.device("POST", `/device/clips/${clipId}/upload`, {
-      form: uploadForm(),
-    });
-    assert.equal(upload.status, 200, JSON.stringify(upload.body));
+  it("shows a ready clip with no file link, on its page and in Admin", async () => {
+    const { videoFile } = await readyWithFiles(home, clipId);
+    assert.ok(fs.existsSync(videoFile));
 
     const page = await ctx.api("GET", `/public/clips/${shareToken}`);
     assert.equal(page.data.clip.status, "Ready");
-    assert.match(page.data.clip.videoUrl, /^\/public\/uploads\/admin\/clips\/.+\.mp4\?expires=/);
-    assert.ok(page.data.clip.thumbnailUrl);
     assert.ok(page.data.clip.expiresAt);
+    for (const key of ["videoUrl", "downloadUrl", "thumbnailUrl"]) {
+      assert.equal(key in page.data.clip, false, key);
+    }
 
-    // The signed link serves the video, including byte ranges (seeking on phones)
-    const full = await ctx.get(page.data.clip.videoUrl);
-    assert.equal(full.status, 200);
-    assert.equal(Buffer.from(await full.arrayBuffer()).length, MP4.length);
-    const ranged = await fetch(new URL(page.data.clip.videoUrl, full.url), {
-      headers: { Range: "bytes=0-9" },
-    });
-    assert.equal(ranged.status, 206);
-    assert.equal(Buffer.from(await ranged.arrayBuffer()).length, 10);
-
-    // The download link makes the browser save the file instead of opening it
-    const download = await ctx.get(page.data.clip.downloadUrl);
-    assert.equal(download.status, 200);
-    assert.equal(
-      download.headers.get("content-disposition"),
-      "attachment; filename=dgsports-replay.mp4"
-    );
-
-    // The bare path is refused
-    const bare = await ctx.get(page.data.clip.videoUrl.split("?")[0]);
-    assert.equal(bare.status, 403);
+    // The file itself is never served without a signed link, which nothing gives out
+    const [[row]] = await ctx.sql.query(`SELECT videoPath FROM clips WHERE clipId = ?`, [clipId]);
+    assert.equal((await ctx.get(row.videoPath)).status, 403);
 
     const adminView = await call("GET", `/admin/clips/${clipId}`);
     assert.equal(adminView.status, 200);
     assert.equal(adminView.data.clip.courtName, "Court 1");
-    assert.ok(adminView.data.clip.videoUrl);
-    assert.equal(adminView.data.clip.shareToken, undefined);
-  });
-
-  it("won't take a second upload for a finished clip", async () => {
-    const again = await home.device("POST", `/device/clips/${clipId}/upload`, {
-      form: uploadForm(),
-    });
-    assert.equal(again.status, 409);
-  });
-
-  it("lets only one box at a venue make a clip", async () => {
-    const second = await ctx.pairBox(admin.token, home.venueId, "Box 2");
-    const box2 = asDevice(second.data.token);
-    const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
-    const row = save;
-
-    assert.equal((await home.device("POST", `/device/clips/${row.clipId}/processing`)).status, 200);
-    assert.equal(
-      (await home.device("POST", `/device/clips/${row.clipId}/processing`)).status,
-      200,
-      "the claiming box may retry its claim"
-    );
-    assert.equal((await box2("POST", `/device/clips/${row.clipId}/processing`)).status, 409);
-    assert.equal(
-      (await box2("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() })).status,
-      409
-    );
-    assert.equal(
-      (await box2("POST", `/device/clips/${row.clipId}/fail`, { body: { reason: "x" } })).status,
-      409
-    );
-    assert.equal(
-      (await home.device("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() }))
-        .status,
-      200
-    );
-  });
-
-  it("records a clip the box could not make as failed", async () => {
-    const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
-    const row = save;
-
-    const failed = await home.device("POST", `/device/clips/${row.clipId}/fail`, {
-      body: { reason: "Camera stream dropped" },
-    });
-    assert.equal(failed.status, 200);
-    const page = await ctx.api("GET", `/public/clips/${save.shareToken}`);
-    assert.equal(page.data.clip.status, "Failed");
+    for (const key of ["videoUrl", "downloadUrl", "thumbnailUrl", "videoPath", "shareToken"]) {
+      assert.equal(key in adminView.data.clip, false, key);
+    }
   });
 
   it("expires old clips (deleting their files) and fails clips no box picked up", async () => {
@@ -295,7 +204,6 @@ describe("clips", () => {
     assert.equal(fs.existsSync(videoFile), false, "expired clip's video is deleted");
     const page = await ctx.api("GET", `/public/clips/${shareToken}`);
     assert.equal(page.data.clip.status, "Expired");
-    assert.equal(page.data.clip.videoUrl, null);
 
     const stalePage = await ctx.api("GET", `/public/clips/${stale.shareToken}`);
     assert.equal(stalePage.data.clip.status, "Failed");
@@ -303,35 +211,22 @@ describe("clips", () => {
 
   it("treats a deleted clip as missing everywhere", async () => {
     const save = await insertLegacyClip(ctx.sql, { courtId: home.courtId });
-    const row = save;
-    const upload = await home.device("POST", `/device/clips/${row.clipId}/upload`, {
-      form: uploadForm(),
-    });
-    assert.equal(upload.status, 200);
-    const [[ready]] = await ctx.sql.query(`SELECT videoPath FROM clips WHERE clipId = ?`, [
-      row.clipId,
-    ]);
-    assert.ok(ready.videoPath);
+    await readyWithFiles(home, save.clipId);
 
     // The Admin portal can't delete clips (view only since PLAN-002 Phase E);
     // a clip is soft-deleted by maintenance, so set it the way the database would
-    assert.equal((await call("DELETE", `/admin/clips/${row.clipId}`)).status, 404);
+    assert.equal((await call("DELETE", `/admin/clips/${save.clipId}`)).status, 404);
     await ctx.sql.query(
       `UPDATE clips SET status = 'Deleted', videoPath = NULL, thumbnailPath = NULL
        WHERE clipId = ?`,
-      [row.clipId]
+      [save.clipId]
     );
 
-    assert.equal((await call("GET", `/admin/clips/${row.clipId}`)).status, 404);
+    assert.equal((await call("GET", `/admin/clips/${save.clipId}`)).status, 404);
     assert.equal((await ctx.api("GET", `/public/clips/${save.shareToken}`)).status, 404);
-    assert.equal(
-      (await home.device("POST", `/device/clips/${row.clipId}/upload`, { form: uploadForm() }))
-        .status,
-      404
-    );
 
     const [[after]] = await ctx.sql.query(`SELECT status, courtId FROM clips WHERE clipId = ?`, [
-      row.clipId,
+      save.clipId,
     ]);
     assert.equal(after.status, "Deleted");
     assert.equal(after.courtId, home.courtId);

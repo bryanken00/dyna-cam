@@ -1,10 +1,12 @@
 import { getCurrentTimestampLocal } from "./dateUtils.js";
 import { decryptSecret, encryptSecret } from "./crypto/secretBox.js";
 import { driveConfigured, revokeToken } from "./googleDrive.js";
+import { resendFromBox } from "./boxVideos.js";
 
 /**
  * A court's Google Drive connection (CR-001): connect, change, disconnect, and
- * how it is shown. The upload itself is jobs/driveUploads.js.
+ * how it is shown. CR-040: the venue's recorder box uploads to it
+ * (controllers/v1/device/game-videos.controller.js).
  */
 
 /** The court columns `driveSummary` reads (prefix with the courts alias). */
@@ -140,6 +142,9 @@ export const connectCourtDrive = async (db, { courtId, accountId, refreshToken, 
        WHERE s.courtId = ? AND sv.driveStatus = 'Pending'`,
       [courtId]
     );
+    // CR-040: videos the venue box kept because this court had no usable Drive
+    // go to it now — the box still has them and sends them
+    await resendFromBox((sql, params) => conn.execute(sql, params), { courtId });
     await db.commit(conn);
   } catch (err) {
     await db.rollback(conn);
@@ -198,20 +203,4 @@ export const disconnectCourtDrive = async (db, courtId) => {
   return true;
 };
 
-/**
- * Queue a clip that just became Ready for its court's Drive, when the court
- * has a Google account (also one that needs reconnecting: it uploads once
- * reconnected). Whole-game parts are not queued: the game goes to Drive as
- * its whole video per camera, uploaded by the box after End game (CR-006).
- */
-export const queueClipForDrive = (db, clipId) =>
-  db.query(
-    `UPDATE clips cl
-     JOIN courts c ON c.courtId = cl.courtId
-     SET cl.driveStatus = 'Pending', cl.driveAttempts = 0, cl.driveNextAttemptAt = NULL,
-         cl.driveError = NULL
-     WHERE cl.clipId = ? AND cl.status = 'Ready' AND cl.driveStatus IS NULL
-       AND cl.sessionId IS NULL
-       AND c.driveRefreshToken IS NOT NULL AND c.status != 'Deleted'`,
-    [clipId]
-  );
+

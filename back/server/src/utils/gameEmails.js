@@ -77,10 +77,12 @@ const formatLocal = (value) =>
  */
 export const sendGameDriveEmail = async (db, sessionId) => {
   // keepUntil (CR-026): the Drive copy goes DRIVE_KEEP_DAYS after saving, or with the server's
+  // copy if that's sooner. CR-040: a video the venue box sent itself stays its whole keep time
   const [row] = await db.query(
     `SELECT s.sessionId, s.email, s.driveUrl, s.startAt, s.playerName,
             c.name AS courtName, v.name AS venueName,
-            (SELECT MIN(LEAST(sv.expiresAt, DATE_ADD(sv.dateCreated, INTERVAL ${DRIVE_KEEP_DAYS} DAY)))
+            (SELECT MIN(IF(sv.delivery = 'Drive', sv.expiresAt,
+                           LEAST(sv.expiresAt, DATE_ADD(sv.dateCreated, INTERVAL ${DRIVE_KEEP_DAYS} DAY))))
              FROM session_videos sv
              WHERE ${WHOLE} AND sv.status = 'Ready' AND sv.driveStatus = 'Uploaded') AS keepUntil
      FROM recording_sessions s

@@ -39,7 +39,11 @@ describe("venue health and alerts", () => {
   let mailed;
 
   const call = (method, url, body, token = admin.token) => ctx.api(method, url, { token, body });
-  const beat = (body) => box("POST", "/device/heartbeat", { body });
+  // CR-040 Phase 4: an up-to-date box sends games straight to Google Drive
+  const beat = (body) =>
+    box("POST", "/device/heartbeat", {
+      body: { capabilities: ["game-file", "drive-direct"], ...body },
+    });
   const run = (opts = {}) =>
     runVenueAlerts(ctx.db, {
       settings: SETTINGS,
@@ -54,8 +58,7 @@ describe("venue health and alerts", () => {
       emailEnabled: false,
       ...opts,
     });
-  const alerts = async () =>
-    (await ctx.sql.query(`SELECT * FROM venue_alerts ORDER BY id`))[0];
+  const alerts = async () => (await ctx.sql.query(`SELECT * FROM venue_alerts ORDER BY id`))[0];
 
   before(async () => {
     ctx = await startTestApp({
@@ -134,7 +137,10 @@ describe("venue health and alerts", () => {
     assert.equal(sent.length, 1);
     assert.match(sent[0].content, /1 new problem/);
     assert.match(sent[0].embeds[0].title, /Camera not recording · Alert Courts/);
-    assert.match(sent[0].embeds[0].description, /Court 1 · Cam 1 is not recording: Camera not reachable/);
+    assert.match(
+      sent[0].embeds[0].description,
+      /Court 1 · Cam 1 is not recording: Camera not reachable/
+    );
 
     await run();
     assert.equal(sent.length, 1, "an open problem isn't sent again");
@@ -171,7 +177,10 @@ describe("venue health and alerts", () => {
 
   it("clears a problem that goes away inside the grace period without telling anyone", async () => {
     sent = [];
-    await beat({ cameras: [{ courtId, status: "ok" }], system: { ...HEALTHY, clockOffsetMs: 9000 } });
+    await beat({
+      cameras: [{ courtId, status: "ok" }],
+      system: { ...HEALTHY, clockOffsetMs: 9000 },
+    });
     await run({ settings: { ...SETTINGS, graceMinutes: 30 } });
     await beat({ cameras: [{ courtId, status: "ok" }], system: HEALTHY });
     await run({ settings: { ...SETTINGS, graceMinutes: 30 } });
@@ -231,6 +240,38 @@ describe("venue health and alerts", () => {
     assert.equal(row.notifiedAt, null, "not marked as sent");
   });
 
+  it("flags a box that can't send games to Google Drive, so staff update it (CR-040)", async () => {
+    sent = [];
+    await beat({
+      cameras: [{ courtId, status: "error", message: "x" }],
+      system: HEALTHY,
+      capabilities: ["game-file"],
+    });
+    await run();
+    await run();
+    const outdated = (await alerts()).find((row) => row.kind === "BOX_OUTDATED");
+    assert.ok(outdated, "an alert for the old box");
+    assert.equal(outdated.status, "Open");
+    assert.match(
+      outdated.message,
+      /Venue Box needs updating — its games wait until it can send them to Google Drive/
+    );
+    const text = sent
+      .flatMap((message) => message.embeds.map((embed) => embed.description))
+      .join("\n");
+    assert.match(text, /needs updating/);
+
+    const res = await call("GET", "/admin/dashboard/alerts");
+    const shown = res.data.problems.find((p) => p.kind === "BOX_OUTDATED");
+    assert.equal(shown.label, "Recorder box needs updating");
+
+    // Updated: the problem goes
+    await beat({ cameras: [{ courtId, status: "error", message: "x" }], system: HEALTHY });
+    await run();
+    const after = (await alerts()).find((row) => row.kind === "BOX_OUTDATED");
+    assert.notEqual(after.status, "Open");
+  });
+
   describe("Dashboard", () => {
     it("shows today's figures to anyone with the Dashboard", async () => {
       const res = await call("GET", "/admin/dashboard/venues", undefined, viewer.token);
@@ -264,9 +305,10 @@ describe("venue health and alerts", () => {
       assert.ok(!JSON.stringify(res.body).includes("Juan Cruz"), "no player names on the board");
       assert.ok(!JSON.stringify(res.body).includes("Pass%40One1"));
 
-      await ctx.sql.query(`UPDATE devices SET lastSeenAt = '2000-01-01 00:00:00' WHERE deviceId = ?`, [
-        deviceId,
-      ]);
+      await ctx.sql.query(
+        `UPDATE devices SET lastSeenAt = '2000-01-01 00:00:00' WHERE deviceId = ?`,
+        [deviceId]
+      );
       const offline = await call("GET", "/admin/dashboard/venues");
       assert.equal(offline.data.venues.courts[0].cameras[0].status, "offline");
       await beat({ cameras: [{ courtId, status: "error", message: "x" }], system: HEALTHY });

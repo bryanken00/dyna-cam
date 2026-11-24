@@ -25,7 +25,11 @@
  *    JPEG thumbnail. Then uploadGameFile() sends each to a tiny local HTTP
  *    stand-in for /game-videos/:id/start|chunk|finish (1 MiB chunks there),
  *    which forces one OFFSET_MISMATCH and drops one connection mid-chunk; the
- *    reassembled bytes must equal the file.
+ *    reassembled bytes must equal the file. CR-040: camera 1's file is also
+ *    sent with sendToDrive() through a stand-in for the API's Drive routes and
+ *    Google's resumable session (256 KiB chunks, one short write, one dropped
+ *    connection, resumed via a status PUT in the same session, no token sent
+ *    to Google); the bytes must equal the file.
  * 6. Live view: 25 s in, the LAN live server serves the court's buffer as
  *    HLS; ffprobe plays the signed playlist URL and the video clock must run
  *    on across segments (each file restarts at 0 on disk), a bad signature
@@ -45,6 +49,7 @@ import { MediaProbe, PreviewSender } from "../src/camera.js";
 import { createApi } from "../src/api.js";
 import { detectEncoder, makeClip } from "../src/clipper.js";
 import { probeFile, runFfmpeg } from "../src/ffmpeg.js";
+import { sendToDrive } from "../src/drive.js";
 import { makeGameFile, uploadGameFile } from "../src/game.js";
 import { createLiveServer, liveSegmentCount, signLive } from "../src/live.js";
 import { createLogger } from "../src/log.js";
@@ -608,6 +613,169 @@ async function uploadThroughStandIn(standIn, id, made) {
   }
 }
 
+/**
+ * CR-040: a tiny stand-in for the API's Drive routes (/game-videos/:id/
+ * drive-session, /progress, /drive-done) and Google's resumable upload session
+ * (PUT with Content-Range → 308 Range / 201 { id }), on one port. Google
+ * "persists" a little less than it was sent once, and one connection is
+ * dropped mid-chunk; the box must resume where Google is, never from zero.
+ */
+function driveStandIn() {
+  const sessions = new Map();
+  const events = [];
+  let puts = 0;
+  let base = "";
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    const send = (status, body, headers = {}) => {
+      res.writeHead(status, { "Content-Type": "application/json", ...headers });
+      res.end(body === undefined ? "" : JSON.stringify(body));
+    };
+    const parts = [];
+    let seen = 0;
+    const google = url.pathname === "/upload/drive/v3/files";
+    if (google) puts += 1;
+    const dropThis = google && puts === 5;
+    req.on("data", (c) => {
+      parts.push(c);
+      seen += c.length;
+      if (dropThis && seen > 100_000 && !req.socket.destroyed) {
+        events.push(`dropped connection during PUT ${puts}`);
+        req.socket.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (dropThis) return;
+      const body = Buffer.concat(parts);
+      if (google) {
+        if (req.headers.authorization) events.push("Authorization sent to Google!");
+        const session = sessions.get(url.searchParams.get("upload_id"));
+        if (!session) return send(404, { error: { message: "Not Found" } });
+        const range = /^bytes (\*|(\d+)-(\d+))\/(\d+)$/.exec(req.headers["content-range"] || "");
+        if (!range || Number(range[4]) !== session.size)
+          return send(400, { error: { message: "Bad range" } });
+        if (range[1] !== "*") {
+          const start = Number(range[2]);
+          if (start !== session.received) {
+            events.push(`PUT @${start} refused, has ${session.received}`);
+          } else {
+            // Once, Google keeps a little less than it was sent
+            const keep = puts === 3 ? body.length - 1000 : body.length;
+            if (keep < body.length) events.push(`Google kept ${keep} of ${body.length} bytes`);
+            session.bytes.push(body.subarray(0, keep));
+            session.received += keep;
+          }
+        } else {
+          events.push(`status → has ${session.received}`);
+        }
+        if (session.received === session.size) return send(201, { id: `drive${session.id}` });
+        return send(
+          308,
+          undefined,
+          session.received ? { Range: `bytes=0-${session.received - 1}` } : {}
+        );
+      }
+      const match =
+        /^\/api\/v1\/device\/game-videos\/([^/]+)\/(drive-session|progress|drive-done)$/.exec(
+          url.pathname
+        );
+      if (!match || !req.headers.authorization?.startsWith("Device ")) {
+        return send(404, { success: false, message: "Not found" });
+      }
+      const [, id, action] = match;
+      const json = body.length ? JSON.parse(body) : {};
+      if (action === "drive-session") {
+        let session = [...sessions.values()].find((s) => s.videoId === id);
+        if (!session || json.newSession || session.size !== json.sizeBytes) {
+          session = {
+            id: sessions.size + 1,
+            videoId: id,
+            size: json.sizeBytes,
+            bytes: [],
+            received: 0,
+          };
+          sessions.set(`s${session.id}`, session);
+        }
+        events.push(`session ${id} → s${session.id}`);
+        return send(200, {
+          success: true,
+          message: "ok",
+          data: {
+            drive: true,
+            uploadUrl: `${base}/upload/drive/v3/files?uploadType=resumable&upload_id=s${session.id}`,
+            chunkBytes: 256 * 1024,
+            keepUntilMs: Date.now() + 7 * 86_400_000,
+          },
+        });
+      }
+      if (action === "progress")
+        return send(200, {
+          success: true,
+          message: "ok",
+          data: { receivedBytes: json.uploadedBytes },
+        });
+      const session = [...sessions.values()].find((s) => s.videoId === id);
+      session.doneWith = json.driveFileId;
+      return send(200, { success: true, message: "ok", data: { status: "Ready" } });
+    });
+  });
+  return {
+    server,
+    sessions,
+    events,
+    setBase: (value) => {
+      base = value;
+    },
+  };
+}
+
+/** CR-040: send a made game file to the Drive stand-in like the job loop does (retry → resume). */
+async function driveThroughStandIn(made) {
+  const standIn = driveStandIn();
+  await new Promise((resolve) => standIn.server.listen(0, "127.0.0.1", resolve));
+  const apiUrl = `http://127.0.0.1:${standIn.server.address().port}`;
+  standIn.setBase(apiUrl);
+  try {
+    const api = createApi({
+      apiUrl,
+      deviceToken: "dcb_smoke_token_123456",
+      userAgent: "DynaCamRecorder/smoke",
+    });
+    let attempts = 0;
+    let result;
+    for (;;) {
+      attempts += 1;
+      try {
+        result = await sendToDrive({ api, id: "smoke-drive", file: made });
+        break;
+      } catch (err) {
+        if (!(err.isRetryable || err.code === "DRIVE_BUSY") || attempts >= 5) throw err;
+        log.info(`drive upload: ${err.message} — resuming (attempt ${attempts + 1})`);
+      }
+    }
+    const session = [...standIn.sessions.values()][0];
+    const sent = Buffer.concat(session?.bytes ?? []);
+    const file = await fs.readFile(made.videoPath);
+    console.log(
+      `drive upload: ${attempts} attempt(s), ${standIn.sessions.size} session(s), ${sent.length} of ${file.length} bytes, ` +
+        `file ${result.driveFileId}\ndrive stand-in log: ${standIn.events.join("; ")}\n`
+    );
+    if (!sent.equals(file)) fail("the bytes on the Drive stand-in differ from the file");
+    if (session.doneWith !== result.driveFileId) fail("drive-done did not name Google's file");
+    if (standIn.sessions.size !== 1)
+      fail("the dropped connection opened a new session instead of resuming");
+    if (attempts < 2) fail("the dropped connection was not resumed");
+    if (!standIn.events.some((e) => /^status → has [1-9]/.test(e)))
+      fail("the resume did not ask Google where it was");
+    if (!standIn.events.some((e) => e.startsWith("Google kept")))
+      fail("the short write was never forced");
+    if (standIn.events.some((e) => e.startsWith("Authorization")))
+      fail("a token was sent to Google");
+  } finally {
+    standIn.server.close();
+  }
+}
+
 /** The pass/fail rules for a copied game video. */
 function checkGameFile({ camera, info, video, made, boxes, got, want, thumb, result }) {
   if (video?.codec !== "h264" || video.width !== 1280 || video.height !== 720)
@@ -685,6 +853,8 @@ async function gamePhase({ dir, bufferDirs, startedAt, settings }) {
   await new Promise((resolve) => standIn.server.listen(0, "127.0.0.1", resolve));
   try {
     const cam1 = await gameVideo({ dir, bufferDirs, startedAt, settings, camera: 0, standIn });
+    // CR-040: the same file straight to (a stand-in for) the court's Google Drive
+    await driveThroughStandIn(cam1.made);
     const cam2 = await gameVideo({ dir, bufferDirs, startedAt, settings, camera: 2, standIn });
     console.log(`stand-in log: ${standIn.events.join("; ")}\n`);
     if (!standIn.events.some((e) => e.startsWith("forced OFFSET_MISMATCH")))

@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
+import { markDriveDirect } from "./helpers/gameUpload.js";
 import { startTestApp } from "./helpers/testApp.js";
 
 describe("open games", () => {
@@ -75,7 +76,10 @@ describe("open games", () => {
       cameraRtspUrl: "rtsp://u:p@10.0.0.10:554/stream1",
     });
     home.court2Id = court2.data.courtId;
-    home.device = asDevice((await ctx.pairBox(admin.token, home.venueId, "Box")).data.token);
+    const boxToken = (await ctx.pairBox(admin.token, home.venueId, "Box")).data.token;
+    home.device = asDevice(boxToken);
+    // CR-040 Phase 4: game jobs go only to a box that sends to Google Drive
+    await markDriveDirect(ctx, boxToken);
   });
   after(() => ctx?.stop());
 

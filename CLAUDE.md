@@ -7,7 +7,9 @@ recorder box are still branded Dyna Cam until their own rebuild.
 A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
 court, then scan its QR and enter their booking code to start recording their game (CR-034), then watch it live, save their best rallies, and get the
 whole game on their phone (CR-027; the old 60-second clips and court buttons are gone — clips saved
-before only expire). Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
+before only expire). Videos never live in the cloud (CR-040): the venue's recorder box keeps each
+game's video and sends it straight to the court's **Google Drive**, and players get it only as a
+Drive link. Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
 staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
 
 The platform is single-organisation with one portal, **Admin** (`/admin/*` in the client,
@@ -146,7 +148,10 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   and the player's page show its pay code, and `/public/games/:payCode` (rate-limited) gives a paid
   game's link to Find a game on the device; `/api/v1/oauth/google/callback` is where Google sends staff
 back after connecting a court's Google Drive (CR-001) — its encrypted, 10-minute `state` is the
-credential, and the court's Drive refresh token is stored encrypted and never returned. The app keeps its token
+credential, and the court's Drive refresh token is stored encrypted and never returned. CR-040: the
+API opens each Drive upload (`/device/game-videos/:id/drive-session`) and the box sends the bytes to
+Google itself; the API never stores or serves a video file, and gives game jobs only to a box that
+reports `drive-direct`. The app keeps its token
   in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
   only — staff work, including payments, happens on the web.
 - **Court booking (PLAN-003):** players reserve court time ahead; a `bookings` row reserves it and

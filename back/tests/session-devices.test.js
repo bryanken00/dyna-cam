@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import { after, before, describe, it } from "node:test";
 
 import { startTestApp } from "./helpers/testApp.js";
-import { gameJobs, sendGame } from "./helpers/gameUpload.js";
+import { gameJobs, keepGame } from "./helpers/gameUpload.js";
 
 const LIVE_KEY = "ab".repeat(32);
 
@@ -236,10 +236,11 @@ describe("session devices", () => {
       assert.ok(stopped.data.unpairInSeconds > 590 && stopped.data.unpairInSeconds <= 600);
       assert.equal((await device.app("POST", "/app/session/stop")).status, 409);
 
-      // CR-006: the box sends the game's one file → Ready, still visible to the device
+      // CR-006 / CR-040: the box makes the game's one file and keeps it (no
+      // Google Drive on this court) → Ready, still visible to the device
       const jobs = await gameJobs(ctx, home.token, sessionId);
       assert.equal(jobs.length, 1);
-      const res = await sendGame(ctx, home.token, jobs[0].sessionVideoId);
+      const res = await keepGame(ctx, home.token, jobs[0].sessionVideoId);
       assert.equal(res.status, 200, JSON.stringify(res.body));
       const ready = await device.app("GET", "/app/session");
       assert.equal(ready.data.session.status, "Ready");

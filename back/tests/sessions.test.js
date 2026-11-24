@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { gameJobs, sendGame } from "./helpers/gameUpload.js";
+import { gameJobs, keepGame } from "./helpers/gameUpload.js";
 import { startTestApp } from "./helpers/testApp.js";
 
 describe("recording sessions", () => {
@@ -184,7 +184,8 @@ describe("recording sessions", () => {
     });
 
     it("settles Ready once the file is in; the player's page shows the video, never parts", async () => {
-      const done = await sendGame(ctx, home.token, finished.jobs[0].sessionVideoId);
+      // CR-040: on a court without Google Drive the box keeps it — Ready
+      const done = await keepGame(ctx, home.token, finished.jobs[0].sessionVideoId);
       assert.equal(done.status, 200, JSON.stringify(done.body));
       const one = await call("GET", `/admin/sessions/${finished.sessionId}`);
       assert.equal(one.data.session.status, "Ready");
@@ -197,8 +198,8 @@ describe("recording sessions", () => {
       const locked = await ctx.api("GET", `/public/sessions/${token}`);
       assert.equal(locked.data.session.locked, true);
       assert.match(locked.data.session.payCode, /^[A-Z0-9]{6}$/);
-      assert.equal(locked.data.session.videos[0].videoUrl, null);
-      assert.equal(locked.data.session.videos[0].downloadUrl, null);
+      assert.equal(locked.data.session.videos[0].driveUrl, null);
+      assert.equal("videoUrl" in locked.data.session.videos[0], false, "never a file link");
       const paid = await call("POST", "/admin/payments", {
         sessionId: finished.sessionId,
         amount: 300,
@@ -211,9 +212,13 @@ describe("recording sessions", () => {
       assert.equal(page.status, 200);
       assert.equal(page.data.session.status, "Ready");
       assert.equal(page.data.session.sessionId, undefined, "no IDs on the public page");
-      assert.deepEqual(page.data.session.parts, []);
+      assert.equal("parts" in page.data.session, false);
       assert.equal(page.data.session.uploadPercent, 100);
-      assert.ok(page.data.session.videos[0].downloadUrl);
+      assert.equal(page.data.session.videos[0].status, "Ready");
+      assert.equal(page.data.session.videos[0].driveState, "NotShared", "no Drive on this court");
+      for (const key of ["videoUrl", "downloadUrl", "thumbnailUrl"]) {
+        assert.equal(key in page.data.session.videos[0], false, key);
+      }
       assert.equal(
         (await gameJobs(ctx, home.token, finished.sessionId)).length,
         0,
@@ -225,7 +230,7 @@ describe("recording sessions", () => {
       const partial = await bookAt(home, -30, -19);
       const [job] = await gameJobs(ctx, home.token, partial.sessionId);
       const end = job.windowEndMs;
-      const done = await sendGame(ctx, home.token, job.sessionVideoId, {
+      const done = await keepGame(ctx, home.token, job.sessionVideoId, {
         gaps: [{ startMs: end - 60_000, endMs: end }],
       });
       assert.equal(done.status, 200, JSON.stringify(done.body));

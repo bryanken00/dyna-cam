@@ -63,6 +63,7 @@ export async function diskSpace(dir, statfs = fsp.statfs) {
  * @param {object} opts
  * @param {string} opts.dataDir      DATA_DIR (the buffer lives there)
  * @param {() => object[]} [opts.queueEntries]
+ * @param {() => object} [opts.videoStats] CR-040: { localVideos, localVideoMb } kept for Drive
  * @param {number|null} [opts.clockOffsetMs] server − box, from the last /config or heartbeat
  * @param {() => number} [opts.now]
  * @param {Function} [opts.statfs]
@@ -71,6 +72,7 @@ export async function diskSpace(dir, statfs = fsp.statfs) {
 export async function sampleHealth({
   dataDir,
   queueEntries = () => [],
+  videoStats = null,
   clockOffsetMs = null,
   now = () => Date.now(),
   statfs = fsp.statfs,
@@ -85,6 +87,7 @@ export async function sampleHealth({
     cpus: osImpl.cpus().length || 1,
     uptimeSeconds: Math.floor(osImpl.uptime()),
     ...queueBacklog(queueEntries(), now()),
+    ...(videoStats ? videoStats() : {}),
   };
   if (Number.isFinite(clockOffsetMs)) health.clockOffsetMs = Math.round(clockOffsetMs);
   return health;

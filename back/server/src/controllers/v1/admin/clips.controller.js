@@ -2,7 +2,6 @@ import express from "express";
 import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { clipShareUrl } from "../../../utils/clips.js";
-import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { listClipsQuerySchema } from "../../../validators/clips.validator.js";
 
 /**
@@ -18,24 +17,20 @@ const CLIP_SELECT = `
          cl.price, cl.paymentStatus, cl.payCode, cl.pairedAppId,
          (SELECT pa.name FROM paired_apps pa WHERE pa.pairedAppId = cl.pairedAppId)
            AS pairedAppName,
-         cl.shareToken, cl.videoPath,
-         cl.thumbnailPath, cl.sizeBytes, cl.failureReason, cl.expiresAt, cl.status,
+         cl.shareToken, cl.sizeBytes, cl.failureReason, cl.expiresAt, cl.status,
          cl.driveStatus, cl.driveUrl, cl.driveError,
          cl.dateCreated, cl.dateUpdated
   FROM clips cl
   JOIN venues v ON v.venueId = cl.venueId
   JOIN courts c ON c.courtId = cl.courtId`;
 
+/** CR-040 Phase 4: no file links — a clip's video is only on Google Drive (driveUrl). */
 const toClip = (row) => {
-  const { shareToken, videoPath, thumbnailPath, ...clip } = row;
-  const playable = row.status === "Ready";
+  const { shareToken, ...clip } = row;
   return {
     ...clip,
     price: Number(row.price),
     shareUrl: clipShareUrl(shareToken),
-    videoUrl: playable ? signUploadUrl(videoPath) : null,
-    downloadUrl: playable ? signedDownloadUrl(videoPath) : null,
-    thumbnailUrl: playable ? signUploadUrl(thumbnailPath) : null,
   };
 };
 

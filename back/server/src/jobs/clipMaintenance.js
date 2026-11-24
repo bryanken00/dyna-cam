@@ -93,22 +93,34 @@ export const runClipMaintenance = async (db) => {
   let failed = stale.affectedRows || 0;
 
   // CR-006: a game video the box never finished sending — give up, so the game
-  // settles (Ready with what came in, or Failed) and its footage can go
+  // settles (Ready with what came in, or Failed) and its footage can go.
+  // CR-040: one the box already made and is sending to Google Drive is on the
+  // box, so it keeps trying until the box's keep time is over, not 24 hours
   const giveUpBefore = secondsAgoLocal(GAME_UPLOAD_GIVE_UP_HOURS * 3600);
   const abandoned = await db.query(
-    `SELECT sv.sessionVideoId, sv.venueId FROM session_videos sv
+    `SELECT sv.sessionVideoId, sv.venueId,
+            (sv.delivery = 'Drive' AND sv.status = 'Uploading') AS onBox
+     FROM session_videos sv
      JOIN recording_sessions s ON s.sessionId = sv.sessionId
-     WHERE sv.status IN ('Pending', 'Uploading') AND s.endAt < ?
+     WHERE sv.status IN ('Pending', 'Uploading')
+       AND IF(sv.delivery = 'Drive' AND sv.status = 'Uploading',
+              sv.boxKeepUntil IS NOT NULL AND sv.boxKeepUntil < ?,
+              s.endAt < ?)
      LIMIT 200`,
-    [giveUpBefore]
+    [now, giveUpBefore]
   );
   for (const video of abandoned) {
     const result = await db.query(
       `UPDATE session_videos
-       SET status = 'Failed', failureReason = 'The recorder box didn''t send this game in time',
-           dateUpdated = ?
+       SET status = 'Failed', failureReason = ?, dateUpdated = ?
        WHERE sessionVideoId = ? AND status IN ('Pending', 'Uploading')`,
-      [now, video.sessionVideoId]
+      [
+        Number(video.onBox) === 1
+          ? "The recorder box couldn't get this game to Google Drive before its keep time ended"
+          : "The recorder box didn't send this game in time",
+        now,
+        video.sessionVideoId,
+      ]
     );
     if (result.affectedRows > 0) {
       const folder = path.resolve("public", clipUploadFolder(video.venueId, video.sessionVideoId));

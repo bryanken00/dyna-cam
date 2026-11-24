@@ -25,10 +25,14 @@ revoked with `npm run boxes[:revoke]`) and `/api/v1/public/*` (players, no login
 credential; `/public/stream-setup/:code` takes a player's own stream key, see
 `utils/sessionStreams.js`). CR-001 adds `/api/v1/oauth/google/callback` (Google's redirect after
 a court's "Connect Google Drive"; the encrypted `state` is the credential — see
-`utils/googleDrive.js`, `utils/courtDrive.js` and the 30-second `jobs/driveUploads.js`).
-CR-006: a finished game travels as one file per camera — the box gets a `type: "game"` job and
-uploads it in resumable chunks to `/api/v1/device/game-videos/:id/{start,chunk,finish,fail}`
-(`controllers/v1/device/game-videos.controller.js`, `session_videos`); no 5-minute pieces, no
+`utils/googleDrive.js`, `utils/courtDrive.js` and the 30-second `jobs/driveJobs.js`: Drive-link
+emails and trashing expired Drive copies). CR-006: a finished game is one file per camera — the
+box gets a `type: "game"` job. CR-040: the box keeps that file and sends it straight to the court's
+Google Drive: the API opens the upload (`/api/v1/device/game-videos/:id/drive-session`), takes
+progress and `drive-done` (it reads the file back from Drive before believing it), and `box-deleted`
+(`controllers/v1/device/game-videos.controller.js`, `session_videos.delivery = 'Drive'`). The API
+never stores, serves or uploads a video file; the old `/start`, `/chunk`, `/finish` answer 410 and
+game jobs go only to a box reporting `drive-direct`. No 5-minute pieces, no
 joining, no ffmpeg on the server. PLAN-003 (court booking) adds the player's booking pages under
 `/api/v1/public/book/:bookingToken/*` and `/api/v1/public/bookings/:manageToken/*`
 (`controllers/v1/public/booking.controller.js`; the venue's booking link / the booking's own link is

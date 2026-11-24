@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
+import { markDriveDirect } from "./helpers/gameUpload.js";
 import { startTestApp } from "./helpers/testApp.js";
 
 describe("saving the last few minutes (captures)", () => {
@@ -15,8 +16,10 @@ describe("saving the last few minutes (captures)", () => {
   const home = {};
 
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
-  const asDevice = (token) => (method, url, options = {}) =>
-    ctx.api(method, url, { ...options, headers: { Authorization: `Device ${token}` } });
+  const asDevice =
+    (token) =>
+    (method, url, options = {}) =>
+      ctx.api(method, url, { ...options, headers: { Authorization: `Device ${token}` } });
   const asApp = (token) => (method, url, body) =>
     ctx.api(method, url, { body, headers: { Authorization: `App ${token}` } });
 
@@ -70,7 +73,10 @@ describe("saving the last few minutes (captures)", () => {
         camera2RtspUrl: "rtsp://u:p@10.0.0.11:554/stream1",
       })
     ).data.courtId;
-    home.box = asDevice((await ctx.pairBox(admin.token, home.venueId, "Box")).data.token);
+    const boxToken = (await ctx.pairBox(admin.token, home.venueId, "Box")).data.token;
+    home.box = asDevice(boxToken);
+    // CR-040 Phase 4: game jobs go only to a box that sends to Google Drive
+    await markDriveDirect(ctx, boxToken);
   });
   after(() => ctx?.stop());
 
@@ -217,7 +223,10 @@ describe("saving the last few minutes (captures)", () => {
   });
 
   it("New game can set how many saves it holds (here 2); out of range is refused", async () => {
-    const tooMany = await call("POST", "/admin/sessions", { courtId: home.court1, maxCaptures: 21 });
+    const tooMany = await call("POST", "/admin/sessions", {
+      courtId: home.court1,
+      maxCaptures: 21,
+    });
     assert.equal(tooMany.status, 400);
     const none = await call("POST", "/admin/sessions", { courtId: home.court1, maxCaptures: 0 });
     assert.equal(none.status, 400);
@@ -280,10 +289,9 @@ describe("saving the last few minutes (captures)", () => {
       [captureId]
     );
     assert.equal(capture.status, "Deleted", "soft delete");
-    const [videos] = await ctx.sql.query(
-      `SELECT status FROM session_videos WHERE captureId = ?`,
-      [captureId]
-    );
+    const [videos] = await ctx.sql.query(`SELECT status FROM session_videos WHERE captureId = ?`, [
+      captureId,
+    ]);
     assert.ok(videos.every((video) => video.status === "Deleted"));
     const jobs = (await home.box("GET", "/device/jobs?wait=0")).data.jobs;
     assert.ok(!jobs.some((job) => job.sessionId === g.sessionId), "the box no longer makes it");

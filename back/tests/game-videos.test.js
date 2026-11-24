@@ -1,13 +1,11 @@
 // CR-006 — a game travels as ONE file per camera: after End game the box gets
-// a game job per camera and uploads the file in resumable chunks. No 5-minute
-// pieces, no joining on the server.
+// a game job per camera. CR-040 Phase 4: the box keeps the file and sends it
+// straight to the court's Google Drive; the old upload to the API is gone.
 
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { GAME_MP4, gameJobs, putChunk, sendGame } from "./helpers/gameUpload.js";
+import { GAME_MP4, gameJobs, keepGame } from "./helpers/gameUpload.js";
 import { startTestApp } from "./helpers/testApp.js";
 import { insertLegacyClip } from "./helpers/legacyClip.js";
 
@@ -70,21 +68,18 @@ describe("game videos", () => {
     return { ...created.data, token: created.data.shareUrl.split("/").pop(), jobs };
   };
 
-  const start = (token, id, body) =>
-    ctx.api("POST", `/device/game-videos/${id}/start`, { headers: asBox(token), body });
-  const finish = (token, id) =>
-    ctx.api("POST", `/device/game-videos/${id}/finish`, {
-      headers: asBox(token),
-      form: [["note", "-"]],
-    });
   const video = async (id) =>
     (
       await ctx.sql.query(
-        `SELECT status, uploadBytes, receivedBytes, deviceId, videoPath, sizeBytes, venueId
+        `SELECT status, delivery, driveStatus, uploadBytes, receivedBytes, deviceId, videoPath,
+                sizeBytes, venueId
          FROM session_videos WHERE sessionVideoId = ?`,
         [id]
       )
     )[0][0];
+  /** GET /jobs as the box sees it, without marking it "drive-direct". */
+  const rawJobs = async (token) =>
+    (await ctx.api("GET", "/device/jobs?wait=0", { headers: asBox(token) })).data.jobs;
   const page = async (token) => (await ctx.api("GET", `/public/sessions/${token}`)).data.session;
 
   before(async () => {
@@ -96,47 +91,44 @@ describe("game videos", () => {
   });
   after(() => ctx?.stop());
 
-  describe("the upload", () => {
+  describe("the box keeps the file (CR-040)", () => {
     let game;
     let id;
 
-    it("starts, reports progress, and resumes where the server is", async () => {
+    it("is Ready and kept on the box on a court without Google Drive; no file links", async () => {
       game = await gameAt(home, -20, -2);
       id = game.jobs[0].sessionVideoId;
-      const first = await start(home.token, id, {
-        sizeBytes: GAME_MP4.length,
-        durationSeconds: 18 * 60,
-        gaps: [],
-      });
-      assert.equal(first.status, 200, JSON.stringify(first.body));
-      assert.equal(first.data.receivedBytes, 0);
-      assert.equal(first.data.chunkBytes, 8 * 1024 * 1024);
+      assert.equal(game.jobs[0].delivery, "drive");
+      const kept = await keepGame(ctx, home.token, id, { durationSeconds: 18 * 60 });
+      assert.equal(kept.status, 200, JSON.stringify(kept.body));
+      assert.equal(kept.data.drive, false);
+      assert.equal(kept.data.reason, "NO_DRIVE");
 
-      const put = await putChunk(ctx, home.token, id, 0, GAME_MP4.subarray(0, 100));
-      assert.equal(put.status, 200);
-      assert.equal(put.body.data.receivedBytes, 100);
+      const row = await video(id);
+      assert.equal(row.status, "Ready");
+      assert.equal(row.delivery, "Drive");
+      assert.equal(row.driveStatus, "Skipped");
+      assert.equal(row.videoPath, null, "never on the API's disk");
+      assert.equal(row.sizeBytes, GAME_MP4.length);
 
-      let shown = await page(game.token);
-      assert.equal(shown.videos[0].status, "Saving");
-      assert.equal(shown.uploadPercent, Math.floor((100 / GAME_MP4.length) * 100));
-
-      // The box restarted: the same file resumes at 100, nothing is lost or doubled
-      const again = await start(home.token, id, {
-        sizeBytes: GAME_MP4.length,
-        durationSeconds: 18 * 60,
-        gaps: [],
-      });
-      assert.equal(again.data.receivedBytes, 100);
-      shown = await page(game.token);
-      assert.ok(shown.uploadPercent > 0);
+      const shown = await page(game.token);
+      assert.equal(shown.status, "Ready");
+      assert.equal(shown.uploadPercent, 100);
+      assert.equal(shown.videos[0].status, "Ready");
+      assert.equal(shown.videos[0].driveState, "NotShared");
+      assert.equal(shown.videos[0].driveUrl, null);
+      for (const key of ["videoUrl", "downloadUrl", "thumbnailUrl"]) {
+        assert.equal(key in shown.videos[0], false, key);
+      }
+      assert.equal("parts" in shown, false);
     });
 
     it("accepts gap times with fractions of a millisecond, as the box's timeline has them", async () => {
       const other = await gameAt(home, -95, -85);
       const otherId = other.jobs[0].sessionVideoId;
       const end = other.jobs[0].windowEndMs;
-      const res = await start(home.token, otherId, {
-        sizeBytes: 10,
+      const res = await keepGame(ctx, home.token, otherId, {
+        bytes: Buffer.alloc(10),
         durationSeconds: 539.6,
         gaps: [{ startMs: end - 60_000.4, endMs: end - 0.7 }],
       });
@@ -149,109 +141,94 @@ describe("game videos", () => {
       assert.equal(row.gaps.length, 1);
     });
 
-    it("answers OFFSET_MISMATCH with where to continue", async () => {
-      const wrong = await putChunk(ctx, home.token, id, 0, GAME_MP4.subarray(0, 50));
-      assert.equal(wrong.status, 409);
-      assert.equal(wrong.body.code, "OFFSET_MISMATCH");
-      assert.equal(wrong.body.data.receivedBytes, 100);
-      assert.equal((await video(id)).receivedBytes, 100, "nothing appended");
-    });
-
-    it("won't finish while bytes are missing", async () => {
-      const early = await finish(home.token, id);
-      assert.equal(early.status, 409);
-      assert.equal(early.body.code, "INCOMPLETE_UPLOAD");
-      assert.equal(early.body.data.receivedBytes, 100);
-    });
-
     it("refuses another venue's box and a second box of the same venue", async () => {
-      const foreign = await start(away.token, id, { sizeBytes: 10, durationSeconds: 1 });
+      const other = await gameAt(home, -110, -100);
+      const otherId = other.jobs[0].sessionVideoId;
+      const foreign = await keepGame(ctx, away.token, otherId);
       assert.equal(foreign.status, 404);
-      const foreignChunk = await putChunk(ctx, away.token, id, 100, Buffer.alloc(10));
-      assert.equal(foreignChunk.status, 404);
-
+      // The home box has it (its progress is being sent)
+      await ctx.sql.query(
+        `UPDATE session_videos SET status = 'Uploading', deviceId =
+           (SELECT deviceId FROM devices WHERE venueId = ? ORDER BY id ASC LIMIT 1)
+         WHERE sessionVideoId = ?`,
+        [home.venueId, otherId]
+      );
       const second = (await ctx.pairBox(admin.token, home.venueId, "Box 2")).data.token;
-      const res = await start(second, id, { sizeBytes: GAME_MP4.length, durationSeconds: 1 });
+      const res = await keepGame(ctx, second, otherId);
       assert.equal(res.status, 409);
-      assert.equal((await video(id)).receivedBytes, 100, "left alone");
+      assert.equal((await video(otherId)).status, "Uploading", "left alone");
     });
 
-    it("finishes: the game's one file is Ready, the game too", async () => {
-      const rest = await putChunk(ctx, home.token, id, 100, GAME_MP4.subarray(100));
-      assert.equal(rest.status, 200);
-      const done = await finish(home.token, id);
-      assert.equal(done.status, 200, JSON.stringify(done.body));
-      assert.equal(done.data.status, "Ready");
-
-      const row = await video(id);
-      assert.equal(row.status, "Ready");
-      assert.equal(row.sizeBytes, GAME_MP4.length);
-      assert.match(row.videoPath, /\/game-cam0-[^/]+\.mp4$/);
-      const file = path.resolve(ctx.workDir, row.videoPath.replace(/^\/+/, ""));
-      assert.deepEqual(fs.readFileSync(file), GAME_MP4, "the bytes, reassembled");
-      assert.equal(fs.existsSync(path.join(path.dirname(file), "upload.part")), false);
-
-      const shown = await page(game.token);
-      assert.equal(shown.status, "Ready");
-      assert.equal(shown.uploadPercent, 100);
-      const res = await ctx.get(shown.videos[0].downloadUrl);
-      assert.equal(res.status, 200);
-      assert.equal(
-        res.headers.get("content-disposition"),
-        "attachment; filename=dgsports-game.mp4"
-      );
-
-      assert.equal((await start(home.token, id, { sizeBytes: 5, durationSeconds: 1 })).status, 409);
+    it("the old upload to the API answers 410 BOX_UPDATE_REQUIRED and changes nothing", async () => {
+      const other = await gameAt(home, -125, -115);
+      const otherId = other.jobs[0].sessionVideoId;
+      const before = await video(otherId);
+      const startRes = await ctx.api("POST", `/device/game-videos/${otherId}/start`, {
+        headers: asBox(home.token),
+        body: { sizeBytes: GAME_MP4.length, durationSeconds: 60, gaps: [] },
+      });
+      assert.equal(startRes.status, 410);
+      assert.equal(startRes.body.code, "BOX_UPDATE_REQUIRED");
+      const chunk = await ctx.get(`/api/v1/device/game-videos/${otherId}/chunk?offset=0`, {
+        method: "PUT",
+        headers: { ...asBox(home.token), "Content-Type": "application/octet-stream" },
+        body: GAME_MP4,
+      });
+      assert.equal(chunk.status, 410);
+      const finish = await ctx.api("POST", `/device/game-videos/${otherId}/finish`, {
+        headers: asBox(home.token),
+        form: [["note", "-"]],
+      });
+      assert.equal(finish.status, 410);
+      assert.deepEqual(await video(otherId), before);
     });
   });
 
-  describe("what the server refuses", () => {
-    it("a new size starts over; chunks past the size; a file that isn't an mp4", async () => {
-      const game = await gameAt(home, -40, -30);
-      const id = game.jobs[0].sessionVideoId;
-      await start(home.token, id, { sizeBytes: 300, durationSeconds: 60 });
-      await putChunk(ctx, home.token, id, 0, Buffer.alloc(100, 1));
-      const restarted = await start(home.token, id, { sizeBytes: 200, durationSeconds: 60 });
-      assert.equal(restarted.data.receivedBytes, 0, "a different file starts at 0");
-
-      const tooMuch = await putChunk(ctx, home.token, id, 0, Buffer.alloc(201, 1));
-      assert.equal(tooMuch.status, 400);
-
-      await putChunk(ctx, home.token, id, 0, Buffer.alloc(200, 1));
-      const notMp4 = await finish(home.token, id);
-      assert.equal(notMp4.status, 400);
-      assert.equal((await video(id)).status, "Pending", "the box can send it again");
+  describe("which box gets game jobs", () => {
+    it("a box that doesn't send to Google Drive gets none until it does", async () => {
+      const box = {};
+      await setupVenue(box, "Old Box Courts");
+      const created = await call("POST", "/admin/sessions", {
+        courtId: box.courtId,
+        startAt: await manila(1),
+        durationMinutes: 5,
+      });
+      await ctx.sql.query(
+        `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
+        [await manila(-20), await manila(-2), created.data.sessionId]
+      );
+      const old = await ctx.api("POST", "/device/heartbeat", {
+        headers: asBox(box.token),
+        body: { cameras: [], capabilities: ["game-file"] },
+      });
+      assert.equal(old.status, 200);
+      assert.deepEqual(await rawJobs(box.token), [], "an old box gets nothing to upload");
+      const jobs = await gameJobs(ctx, box.token, created.data.sessionId);
+      assert.equal(jobs.length, 1, "once it reports drive-direct");
+      assert.equal(jobs[0].delivery, "drive");
     });
 
-    it("a chunk before start, a bad offset, and a JSON body", async () => {
-      const game = await gameAt(home, -55, -45);
-      const id = game.jobs[0].sessionVideoId;
-      assert.equal((await putChunk(ctx, home.token, id, 0, Buffer.alloc(4))).status, 409);
-      await start(home.token, id, { sizeBytes: 10, durationSeconds: 1 });
-      const bad = await ctx.get(`/api/v1/device/game-videos/${id}/chunk?offset=-1`, {
-        method: "PUT",
-        headers: { ...asBox(home.token), "Content-Type": "application/octet-stream" },
-        body: Buffer.alloc(4),
-      });
-      assert.equal(bad.status, 400);
-      const json = await ctx.api("PUT", `/device/game-videos/${id}/chunk?offset=0`, {
-        headers: asBox(home.token),
-        body: { hello: "world" },
-      });
-      assert.equal(json.status, 400);
+    it("hands out no clip jobs, even for a replay saved before CR-027", async () => {
+      await insertLegacyClip(ctx.sql, { courtId: home.courtId });
+      const jobs = await gameJobs(ctx, home.token);
+      assert.ok(jobs.every((job) => job.type === "game"));
+      const all = await rawJobs(home.token);
+      assert.equal(all.filter((job) => job.type === "clip").length, 0, "no clip jobs at all");
     });
 
-    it("404s an unknown video and a game of another venue on every endpoint", async () => {
-      for (const url of [
-        "/device/game-videos/no-such-video/start",
-        "/device/game-videos/no-such-video/finish",
-        "/device/game-videos/no-such-video/fail",
-      ]) {
-        const res = await ctx.api("POST", url, {
+    it("404s an unknown video on every endpoint", async () => {
+      for (const action of ["drive-session", "progress", "drive-done", "fail", "box-deleted"]) {
+        const res = await ctx.api("POST", `/device/game-videos/no-such-video/${action}`, {
           headers: asBox(home.token),
-          body: { sizeBytes: 1, durationSeconds: 1, reason: "x" },
+          body: {
+            sizeBytes: 1,
+            durationSeconds: 1,
+            uploadedBytes: 1,
+            driveFileId: "abc",
+            reason: "x",
+          },
         });
-        assert.equal(res.status, 404, url);
+        assert.equal(res.status, 404, action);
       }
     });
   });
@@ -304,10 +281,10 @@ describe("game videos", () => {
         [1, 2]
       );
       const [cam1, cam2] = game.jobs;
-      assert.equal((await sendGame(ctx, both.token, cam1.sessionVideoId)).status, 200);
+      assert.equal((await keepGame(ctx, both.token, cam1.sessionVideoId)).status, 200);
       let shown = await page(game.token);
       assert.equal(shown.status, "Processing", "still waiting for Cam 2");
-      assert.equal((await sendGame(ctx, both.token, cam2.sessionVideoId)).status, 200);
+      assert.equal((await keepGame(ctx, both.token, cam2.sessionVideoId)).status, 200);
       shown = await page(game.token);
       assert.equal(shown.status, "Ready");
       assert.deepEqual(
@@ -317,21 +294,6 @@ describe("game videos", () => {
           [2, "Cam 2", "Ready"],
         ]
       );
-      const dl = await ctx.get(shown.videos[1].downloadUrl);
-      assert.equal(
-        dl.headers.get("content-disposition"),
-        "attachment; filename=dgsports-game-cam2.mp4"
-      );
     });
-  });
-
-  it("keeps replays as they were: clip jobs, never game jobs", async () => {
-    // A replay saved before CR-027 (nothing saves new ones)
-    await insertLegacyClip(ctx.sql, { courtId: home.courtId });
-    const jobs = (
-      await ctx.api("GET", "/device/jobs?wait=0", { headers: asBox(home.token) })
-    ).data.jobs.filter((job) => job.type === "clip");
-    assert.equal(jobs.length, 1);
-    assert.equal(jobs[0].sessionId, undefined);
   });
 });

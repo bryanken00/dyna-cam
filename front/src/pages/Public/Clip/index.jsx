@@ -1,6 +1,5 @@
 import {
   Cloud,
-  Download,
   Film,
   Loader2,
   Lock,
@@ -66,23 +65,18 @@ const ClipHeading = ({ clip, courtName, venueName }) => {
 };
 
 /**
- * A Ready clip that isn't paid yet: the thumbnail under a lock, the price and
+ * A Ready clip that isn't paid yet: a lock, the price and
  * the pay code. The page keeps polling, so it unlocks by itself once staff
  * record the cash.
  */
 const LockedClip = ({ clip }) => {
-  const thumb = getImageUrl(clip.thumbnailUrl);
   return (
     <div className="overflow-hidden" style={cardStyle}>
       <div
         className="relative w-full flex items-center justify-center"
         style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
       >
-        {thumb ? (
-          <img src={thumb} alt="" className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <Film className="w-8 h-8" style={{ color: "var(--color-text-muted)" }} />
-        )}
+        <Film className="w-8 h-8" style={{ color: "var(--color-text-muted)" }} />
         {/* Dim the preview so the lock reads as the message */}
         <div
           aria-hidden="true"
@@ -141,7 +135,7 @@ const LockedClip = ({ clip }) => {
 
 /**
  * `/clip/:shareToken` — the player's replay. Polls while the clip is being
- * saved, then shows the video with Download and Share.
+ * saved, then its Google Drive link and Share (CR-040: never a video from here).
  */
 const ClipPage = () => {
   const {
@@ -322,60 +316,27 @@ const ClipPage = () => {
     );
   }
 
-  // Ready
-  const videoSrc = getImageUrl(clip.videoUrl);
-  // Signed `&download=1` link — the server answers it as an attachment
-  // (dyna-cam-replay.mp4), so it saves even when the API is on another origin
-  const downloadHref = getImageUrl(clip.downloadUrl);
+  // Ready — CR-040 Phase 4: a clip plays only from its Google Drive copy
   return (
     <PublicLayout>
       {heading}
       {mergedNotice}
       <div className="overflow-hidden" style={cardStyle}>
-        {videoSrc ? (
-          <video
-            key={videoSrc}
-            src={videoSrc}
-            poster={getImageUrl(clip.thumbnailUrl) || undefined}
-            controls
-            playsInline
-            preload="metadata"
-            className="w-full block"
-            style={{ aspectRatio: "16 / 9", background: "var(--color-surface-sunken)" }}
-          />
-        ) : (
-          <div
-            className="w-full flex items-center justify-center"
-            style={{
-              aspectRatio: "16 / 9",
-              background: "var(--color-surface-sunken)",
-              color: "var(--color-text-muted)",
-              fontSize: 13.5,
-            }}
-          >
-            The video isn&apos;t available.
-          </div>
-        )}
-
-        <div className="p-4 grid grid-cols-2 gap-3">
-          {downloadHref ? (
-            <Button asChild variant="outline" size="lg" className="h-12">
-              <a href={downloadHref} download>
-                <Download />
-                Download
-              </a>
-            </Button>
+        <div className="p-4 grid grid-cols-1 gap-3">
+          {clip.driveUrl ? (
+            <DriveButton href={clip.driveUrl} />
           ) : (
-            <Button variant="outline" size="lg" className="h-12" disabled>
-              <Download />
-              Download
-            </Button>
+            <p
+              className="m-0 text-center"
+              style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}
+            >
+              This clip isn&apos;t on Google Drive — ask the front desk.
+            </p>
           )}
-          <Button size="lg" className="h-12" onClick={handleShare}>
+          <Button variant="outline" size="lg" className="h-12" onClick={handleShare}>
             <Share2 />
             Share
           </Button>
-          {clip.driveUrl && <DriveButton href={clip.driveUrl} className="col-span-2" />}
         </div>
       </div>
 

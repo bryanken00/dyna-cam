@@ -29,7 +29,7 @@ import {
   toDeviceSession,
 } from "../../../utils/sessionDevices.js";
 import { describeStream } from "../../../utils/sessionStreams.js";
-import { signedDownloadUrl, signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { captureSchema } from "../../../validators/app.validator.js";
 import {
   checkInCodeSchema,
@@ -316,17 +316,15 @@ router.post(
 
 /**
  * GET /clips/:shareToken
- * The player's clip page polls this until the clip is Ready (or Failed).
- * Video and thumbnail links are signed and expiring, and only given out while
- * the clip is Ready.
+ * The player's clip page (60-second clips from before CR-027). CR-040 Phase 4:
+ * no file links — only the clip's Google Drive copy, while it's there.
  */
 router.get(
   "/clips/:shareToken",
   validateParams(clipTokenParamsSchema),
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
-      `SELECT cl.status, cl.requestedAt, cl.durationSeconds, cl.expiresAt, cl.videoPath,
-              cl.thumbnailPath, cl.price, cl.paymentStatus, cl.payCode, cl.driveStatus,
+      `SELECT cl.status, cl.requestedAt, cl.durationSeconds, cl.expiresAt, cl.price, cl.paymentStatus, cl.payCode, cl.driveStatus,
               cl.driveUrl, c.name AS courtName, v.name AS venueName, v.logoUrl
        FROM clips cl
        JOIN courts c ON c.courtId = cl.courtId
@@ -341,9 +339,8 @@ router.get(
 
     const clip = rows[0];
     const ready = clip.status === "Ready";
-    // An unpaid clip shows only its thumbnail until it is paid at the desk
+    // An unpaid clip shows nothing until it is paid at the desk
     const locked = clip.paymentStatus === "Unpaid";
-    const playable = ready && !locked;
     return res.sendSuccess("Clip", {
       clip: {
         // Processing is an internal step; to the player it is still "saving"
@@ -354,9 +351,6 @@ router.get(
         courtName: clip.courtName,
         venueName: clip.venueName,
         venueLogoUrl: signUploadUrl(clip.logoUrl),
-        videoUrl: playable ? signUploadUrl(clip.videoPath) : null,
-        downloadUrl: playable ? signedDownloadUrl(clip.videoPath) : null,
-        thumbnailUrl: ready ? signUploadUrl(clip.thumbnailPath) : null,
         price: Number(clip.price),
         paymentStatus: clip.paymentStatus,
         locked,
@@ -414,20 +408,6 @@ router.get(
     // CR-013: stretches saved from the courtside device (no business IDs here)
     const captures = await loadCaptures(req.db, rows[0].sessionId, toVideo);
 
-    // CR-004: players never see parts. Only a game from before whole videos
-    // (wholeVideo 'Skipped' with saved parts) still lists its parts.
-    const legacy = rows[0].wholeVideo === "Skipped";
-    const parts = legacy
-      ? await req.db.query(
-          `SELECT partIndex, camera, windowStartAt, windowEndAt, durationSeconds, status,
-                  videoPath, thumbnailPath, expiresAt
-           FROM clips
-           WHERE sessionId = ? AND status = 'Ready' AND videoPath IS NOT NULL
-           ORDER BY partIndex ASC, camera ASC`,
-          [rows[0].sessionId]
-        )
-      : [];
-
     const {
       sessionId: _sessionId,
       venueId: _venueId,
@@ -483,12 +463,8 @@ router.get(
         savingWholeVideo:
           ["Processing", "Ready"].includes(session.status) &&
           (wholeVideo === null || wholeVideo === "Pending"),
-        parts: parts.map(({ videoPath, thumbnailPath, ...part }) => ({
-          ...part,
-          videoUrl: locked ? null : signUploadUrl(videoPath),
-          downloadUrl: locked ? null : signedDownloadUrl(videoPath),
-          thumbnailUrl: signUploadUrl(thumbnailPath),
-        })),
+        // CR-040 Phase 4: a game from before whole videos no longer lists its
+        // 5-minute parts (they were files on the server)
       },
     });
   })

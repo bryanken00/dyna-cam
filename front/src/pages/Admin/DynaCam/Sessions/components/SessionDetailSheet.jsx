@@ -4,7 +4,6 @@ import {
   Banknote,
   Cloud,
   Copy,
-  Download,
   Film,
   Mail,
   QrCode,
@@ -39,7 +38,6 @@ import { confirm } from "../../../../../store/confirmStore";
 import { copyText } from "../../../../../utils/clipboard";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../../../utils/phoneFormat";
-import { getImageUrl } from "../../../../../utils/upload";
 import {
   CLIP_STATUS_TONE,
   DRIVE_EMAIL_SENDABLE,
@@ -48,6 +46,7 @@ import {
   driveUploadText,
   formatBytes,
   formatDate,
+  formatDateTime,
   formatMinutes,
   formatPayCode,
   formatTimeRange,
@@ -72,18 +71,33 @@ const VIDEO_STATUS_TONE = {
 };
 
 /**
- * CR-003: one camera's whole-game video — what the player downloads — with
+ * CR-003: one camera's whole-game video — on the player's Google Drive link (CR-040) — with
  * its status, the stretches it skips, and Try again when joining failed.
  */
 /** 125 → "2:05" — a point in the game (CR-013 saves). */
 const clockOf = (seconds) =>
   `${Math.floor(seconds / 60)}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
 
+/**
+ * CR-040: a video the venue's recorder box sends straight to Google Drive —
+ * what its status pill says (the box makes it, sends it, Drive has it, or only
+ * the box has it).
+ */
+const driveVideoStatus = (video) => {
+  if (video.status === "Pending") return "Being made on the box";
+  if (video.status === "Uploading") return `To Google Drive ${video.uploadPercent ?? 0}%`;
+  if (video.status === "Ready") {
+    return video.driveStatus === "Uploaded" ? "On Google Drive" : "Only on the venue box";
+  }
+  return video.status === "Expired" ? "Deleted" : video.status;
+};
+
 const WholeVideoRow = ({ video, sessionId, canWrite }) => {
   const retryMutation = useRetrySessionVideo();
   const ready = video.status === "Ready";
-  const videoSrc = getImageUrl(video.videoUrl);
-  const downloadHref = getImageUrl(video.downloadUrl);
+  // CR-040: sent from the venue box to Google Drive; the server never has it
+  const onDrive = video.delivery === "Drive";
+  const keptOnBox = onDrive && ready && video.driveStatus !== "Uploaded";
   const muted = { fontSize: 12, color: "var(--color-text-muted)" };
   return (
     <div className="p-3.5" style={{ borderTop: "1px solid var(--color-line)" }}>
@@ -105,11 +119,13 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
         </div>
         <div className="flex items-center gap-2">
           <StatusDot
-            tone={VIDEO_STATUS_TONE[video.status] || "muted"}
+            tone={keptOnBox ? "warning" : VIDEO_STATUS_TONE[video.status] || "muted"}
             title={video.failureReason || undefined}
           >
             {/* CR-006: the recorder box makes the file, then uploads it */}
-            {video.status === "Pending"
+            {onDrive
+              ? driveVideoStatus(video)
+              : video.status === "Pending"
               ? "Being made on the box"
               : video.status === "Uploading"
                 ? `Uploading ${video.uploadPercent ?? 0}%`
@@ -117,14 +133,6 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
                   ? "Deleted"
                   : video.status}
           </StatusDot>
-          {ready && downloadHref && (
-            <Button asChild variant="outline" size="sm">
-              <a href={downloadHref} download>
-                <Download />
-                Download
-              </a>
-            </Button>
-          )}
           {video.driveUrl && (
             <Button
               asChild
@@ -139,6 +147,19 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
               >
                 <Cloud />
               </a>
+            </Button>
+          )}
+          {keptOnBox && !video.boxDeletedAt && canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={retryMutation.isPending}
+              onClick={() =>
+                retryMutation.mutate({ sessionId, camera: video.camera })
+              }
+            >
+              <UploadCloud />
+              Send to Drive
             </Button>
           )}
           {video.status === "Failed" && canWrite && (
@@ -159,7 +180,24 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
       {video.status === "Failed" && video.failureReason && (
         <p className="m-0 mt-1" style={muted}>
           {video.failureReason}. Try again asks the recorder box to send it
-          again — it works while the box still has the game&apos;s footage.
+          again — it works while the box still has the game&apos;s footage
+          {onDrive ? " or its copy of the video" : ""}.
+        </p>
+      )}
+      {/* CR-040: where the video is — the venue box keeps a copy for the keep time */}
+      {onDrive && keptOnBox && video.driveError && (
+        <p className="m-0 mt-1" style={muted}>
+          {video.driveError}.{" "}
+          {video.boxDeletedAt
+            ? ""
+            : "Send to Drive once the court's Google Drive is connected."}
+        </p>
+      )}
+      {onDrive && video.status !== "Expired" && (video.boxDeletedAt || video.boxKeepUntil) && (
+        <p className="m-0 mt-1" style={muted}>
+          {video.boxDeletedAt
+            ? `Removed from the venue box ${formatDateTime(video.boxDeletedAt)}.`
+            : `On the venue box until ${formatDateTime(video.boxKeepUntil)}.`}
         </p>
       )}
       {/* CR-017: deleted after the venue's days, with its Drive copy */}
@@ -183,23 +221,6 @@ const WholeVideoRow = ({ video, sessionId, canWrite }) => {
             .join(", ")}{" "}
           (no footage)
         </p>
-      )}
-      {ready && videoSrc && (
-        <video
-          key={videoSrc}
-          src={videoSrc}
-          poster={getImageUrl(video.thumbnailUrl) || undefined}
-          controls
-          playsInline
-          preload="none"
-          className="w-full block mt-3"
-          style={{
-            aspectRatio: "16 / 9",
-            borderRadius: 10,
-            border: "1px solid var(--color-line)",
-            background: "var(--color-surface-sunken)",
-          }}
-        />
       )}
     </div>
   );
