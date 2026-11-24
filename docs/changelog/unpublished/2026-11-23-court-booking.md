@@ -34,3 +34,5 @@ Payments shows each venue's online money for settling up.
 - back/ (BUG-007, before release): checking in at the court QR with a real code that can't be
   used there now (too early, another day, over, cancelled, another court) says why (409) instead of
   the wrong-code 404; a code matching nothing at the venue still gets the wrong-code 404.
+- front/ (BUG-008, before release): the Sessions page's "Started by Booking …" link opened Page not
+  found — `BOOKINGS_PATH` is now `/admin/dyna-cam/bookings`.

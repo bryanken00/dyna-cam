@@ -228,8 +228,12 @@ export const bookingSignPath = (venueId) => `${venuePath(venueId)}/booking-sign`
 
 /* ── Court booking (PLAN-003) ────────────────────────────────────────────── */
 
-/** Dyna Cam → Bookings; `?booking=<id>` opens that booking. */
-export const BOOKINGS_PATH = "/admin/bookings";
+/**
+ * DGSports → Bookings; `?booking=<id>` opens that booking. A child of the
+ * sidebar's `dyna-cam` group, so AdminRoute mounts it at /admin/dyna-cam/…
+ * (BUG-008: it was /admin/bookings, which has no route).
+ */
+export const BOOKINGS_PATH = "/admin/dyna-cam/bookings";
 export const bookingPath = (bookingId) => `${BOOKINGS_PATH}?booking=${bookingId}`;
 
 /** Booking status → what staff read, and its StatusDot tone. */
