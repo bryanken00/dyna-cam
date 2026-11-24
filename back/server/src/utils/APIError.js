@@ -73,6 +73,10 @@ export const ERROR_CODES = {
   BOOKINGS_IN_THE_WAY: 'BOOKINGS_IN_THE_WAY',
   // PLAN-002 Phase I: the API has no RECORDER_ENROLL_KEY, so boxes can't enrol
   ENROLLMENT_DISABLED: 'ENROLLMENT_DISABLED',
+  // CR-040: Google Drive didn't answer the API for a box's upload — the box tries again
+  DRIVE_UNAVAILABLE: 'DRIVE_UNAVAILABLE',
+  // CR-040: an old recorder box tried the removed upload to the API
+  BOX_UPDATE_REQUIRED: 'BOX_UPDATE_REQUIRED',
 
   // Server Errors (500)
   INTERNAL_ERROR: 'INTERNAL_ERROR',

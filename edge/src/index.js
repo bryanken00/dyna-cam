@@ -19,11 +19,12 @@ import { sampleHealth } from "./health.js";
 import { JobRunner } from "./jobs.js";
 import { LiveView } from "./live.js";
 import { createLogger, setLogLevel } from "./log.js";
-import { JobQueue } from "./queue.js";
+import { gameKey, JobQueue } from "./queue.js";
 import { RecorderManager } from "./recorder.js";
 import { Restreams } from "./restream.js";
 import { DeviceSync } from "./sync.js";
 import { registerSecret } from "./util.js";
+import { VideoStore } from "./videos.js";
 
 /**
  * Dyna Cam recorder box: config sync + heartbeat, one recorder per court, and
@@ -89,12 +90,27 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
   const clipLog = createLogger("clip");
   const gameLog = createLogger("game");
   const queue = new JobQueue(path.join(settings.dataDir, "queue.json"));
+  // CR-040: game videos kept on the box and sent from here to Google Drive
+  const videos = new VideoStore({
+    dir: path.join(settings.dataDir, "videos"),
+    api,
+    log: createLogger("videos"),
+    isBusy: (id) => queue.has(gameKey(id)),
+    diskCriticalMb: settings.diskCriticalMb,
+  });
+  sync.videos = videos;
   // CR-008: the box's own health in every heartbeat (disk, memory, clock, backlog)
   sync.health = (clockOffsetMs) =>
-    sampleHealth({ dataDir: settings.dataDir, queueEntries: () => queue.list(), clockOffsetMs });
+    sampleHealth({
+      dataDir: settings.dataDir,
+      queueEntries: () => queue.list(),
+      videoStats: () => videos.stats(),
+      clockOffsetMs,
+    });
   jobs = new JobRunner({
     api,
     queue,
+    videos,
     jobsDir,
     settings,
     log: createLogger("jobs"),
@@ -124,7 +140,7 @@ function createServices({ settings, api, recorders, encoder, jobsDir, live, stre
       }),
   });
 
-  return { preview, sync, jobs };
+  return { preview, sync, jobs, videos };
 }
 
 /**
@@ -205,7 +221,7 @@ async function main() {
 
   const { live, streams } = await startLiveView(settings, recorders, encoder);
   const services = { settings, api, recorders, encoder, jobsDir, live, streams };
-  const { preview, sync, jobs } = createServices(services);
+  const { preview, sync, jobs, videos } = createServices(services);
 
   let buttons = null;
   const previewTimer = setInterval(() => {
@@ -235,6 +251,7 @@ async function main() {
     await streams.stopAll();
     live.close();
     await jobs.stop();
+    await videos.stop();
     await recorders.stopAll();
   };
 
@@ -257,9 +274,12 @@ async function main() {
 
   recorders.startTicker();
   streams.startTicker();
+  // Before the first /config: it tidies the kept videos
+  await videos.load();
   await sync.init();
   if (shuttingDown) return;
   await jobs.start();
+  videos.start();
   sync.startTimers();
   if (settings.buttonPort && !shuttingDown) {
     buttons = await startButtonServer({

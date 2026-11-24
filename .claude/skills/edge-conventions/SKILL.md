@@ -1,6 +1,6 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and whole-game files (stream copy + resumable chunked upload), two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and whole-game files (stream copy, kept on the box and sent straight to the court's Google Drive — CR-040), two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
@@ -21,7 +21,9 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `segments.js` | Segment files → wall-clock time line (`segments.csv` + `index.json` + `run.json`) |
 | `clipper.js` | Pure window and selection math, `planClip` (stacked or one camera, wait/fail/cut), `jobCamera`, ffmpeg argument builders, encoder detection, `pinSegments`, `cutClip`, `makeClip` |
 | `game.js` | Whole-game videos (CR-006): `planGame` / `selectGameSegments` (gaps, duration), concat-copy args, `makeGameFile`, and `uploadGameFile` (start → chunks → finish state machine) |
-| `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`); game jobs in their own lane (copy → resumable upload) |
+| `jobs.js` | Long-poll → persist → claim → cut → upload / fail, with backoff (`JobRunner`); game jobs in their own lane (copy → resumable upload, or CR-040 keep + send to Drive) |
+| `drive.js` | CR-040: `sendToDrive` — drive-session → status PUT → chunks to Google's resumable session → drive-done (`driveChunkBytes`: 256 KiB multiples) |
+| `videos.js` | CR-040: `VideoStore` — game files kept in `DATA_DIR/videos/` (`videos.json`), keep times from `/config` `keepVideos`, expiry, disk-critical removal, `box-deleted` reports |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
 | `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
 | `restream.js` | Every live stream (`Restreams`): venue court streams + players' own, one ffmpeg each reading the box's live HLS on 127.0.0.1; CAM1/CAM2 copied, STACKED encoded; backoff, status, caps, heartbeat `sessionStreams` + camera 1's `streamStatus` |
@@ -29,7 +31,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `stream.js` | Stream-key masking (`maskStreamKey`, `maskStreamUrl`) and `parseLogLine` |
 | `camera.js` | Setup: `video`/`audio` for the heartbeat (`MediaProbe`) + preview JPEGs (`PreviewSender`) from the latest CLOSED segment |
 | `sync.js` | `/config` refresh, logo download, config cache, heartbeat timer, clock-skew warning, heartbeat `system` |
-| `health.js` | The box's own health for the heartbeat (CR-008): disk, memory, load, uptime, clock offset, upload backlog |
+| `health.js` | The box's own health for the heartbeat (CR-008): disk, memory, load, uptime, clock offset, upload backlog, kept videos (CR-040) |
 | `ffmpeg.js` | `runFfmpeg` (arg array, timeout, abort), `probeVideo`/`probeFile`, version parse |
 | `log.js` / `util.js` | Logger (masks every line); `maskCredentials`, `safeId`, `backoffMs`, `sleep`, atomic JSON |
 | `index.js` | Wiring and graceful shutdown only |
@@ -74,7 +76,9 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   not recording during this game" (camera 1/2) / "The camera was not recording during this game" (0);
   a camera-2 job on a court without camera 2 in `/config` and no camera-2 footage → at once "This
   court has no camera 2". `planGame` decides.
-- **Resumable upload** (`uploadGameFile`): `POST /game-videos/:id/start { sizeBytes, durationSeconds,
+- **Resumable upload to the API** (`uploadGameFile`, `delivery: "server"` — only an API from before
+  CR-040 sends it; since CR-040 Phase 4 `/start`, `/chunk`, `/finish` answer 410
+  `BOX_UPDATE_REQUIRED` and game jobs go only to a `drive-direct` box): `POST /game-videos/:id/start { sizeBytes, durationSeconds,
   gaps }` → `{ receivedBytes, chunkBytes }` (8 MiB; same size resumes, a different one restarts at 0) →
   `PUT /game-videos/:id/chunk?offset=N` (`application/octet-stream`, bytes `[N, N+len)` read with a
   file handle at the offset — never the whole file in memory) → `{ receivedBytes }`; 409
@@ -90,12 +94,39 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   `copying` → `uploading` → `finishing` (+ `failing`). Restart: `copying` → `waiting`; `uploading`/
   `finishing` with the file → resume via `/start`; without it → `waiting` (copied again). The folder
   goes after `/finish` or a drop.
+- **Straight to Google Drive (CR-040, PLAN-005).** A game job with `delivery: "drive"` (the API sends
+  it to a box whose heartbeat has `drive-direct`; anything else is `"server"`, the upload above). The
+  made `game.mp4` is **moved into the video store** (`videos.js`, `DATA_DIR/videos/<safeId>/game.mp4`;
+  no thumbnail — Drive makes its own), then `sendToDrive` (`drive.js`):
+  `POST /game-videos/:id/drive-session { sizeBytes, durationSeconds, gaps, newSession }` →
+  `{ drive: false, reason, keepUntilMs }` (no usable Drive: the job ends, the box keeps the only copy)
+  or `{ drive: true, uploadUrl, chunkBytes, keepUntilMs }`. The **upload address is the credential**:
+  it is never stored on the box (after a restart the API hands back the same session), never logged
+  (`maskCredentials` hides `upload_id=`), and it gets **no Authorization header** (`api.js`
+  `driveUploadStatus` / `putDriveChunk`; https only, plain http only on loopback). An empty PUT with
+  `Content-Range: bytes */size` asks Google what it has; chunks are `bytes s-e/size`, 256 KiB multiples,
+  read at the offset; 308 `Range: bytes=0-N` → resume at N + 1; 200/201 `{ id }` → kept in the queue as
+  `driveFileId` → `POST …/drive-done { driveFileId }` (progress: `POST …/progress { uploadedBytes }` at
+  most every 15 s; a failed one is ignored). Errors: Google 401/404/410 → `DRIVE_SESSION_EXPIRED` and
+  409 `DRIVE_FILE_MISMATCH` from drive-done → `newSession: true` next time (at most 4, then `/fail`);
+  Google 403 `storageQuotaExceeded` / other 4xx → `DRIVE_REFUSED` → `/fail "Google Drive refused the
+  video: …"` (the copy stays for a Retry); 409 `DRIVE_RECONNECT` at drive-done → ask again every
+  1–30 min keeping `driveFileId`, `/fail` after `keepUntilMs`; 429/5xx/`DRIVE_BUSY`/offline → backoff
+  5 s → 5 min; 404 / another 409 → drop the job (the copy is `/config`'s to decide). A re-sent job
+  (Drive connected, Admin Retry) whose file is in the store goes straight to `uploading`.
+- **Kept videos** (`VideoStore`): a fresh `/config` (never the cache) `keepVideos: [{ sessionVideoId,
+  keepUntilMs, onDrive }]` sets keep times; a stored video it doesn't list is removed — unless a job
+  still has it or it was touched after that `/config` was requested. Past `keepUntilMs` → removed
+  (checked with each `/config` and every 5 min). Under `DISK_CRITICAL_MB`: oldest on Drive first, then
+  the oldest of the rest (logged as an error). Every removal → `POST …/box-deleted` (404 = done; else
+  retried). An API without `keepVideos` removes nothing.
 - Heartbeat `system` (CR-008, `health.js` `sampleHealth`, optional on the API): `diskFreeMb`/`diskTotalMb`
   (`fs.statfs` of `DATA_DIR`), `memFreeMb`/`memTotalMb`, `load1`, `cpus`, `uptimeSeconds`, `clockOffsetMs`
   (server − box, from `/config` and the heartbeat reply's `serverTime`), `pendingClips`/`pendingGames`/
   `oldestPendingSeconds` (presses don't count). Whole non-negative numbers (`load1` and `clockOffsetMs`
   aside); a value that can't be read is left out, a failed sample sends the heartbeat without `system`.
-- Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today `["game-file"]`).
+- Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today
+  `["game-file", "drive-direct"]`). `system` adds `localVideos` / `localVideoMb` (CR-040, the video store).
   `/config` `sessions` keep their segments (± 10 s) **for as long as they are listed** — the API keeps a
   finished game listed until its videos are uploaded, so there is no box-side cut-off
   (`retentionWindows`); dropped below `DISK_CRITICAL_MB` so recording never stops.
@@ -112,7 +143,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Two cameras (PLAN-002 §7): `/config` courts `camera2RtspUrl` + `camera2Version` (null = none),
   `stream: { rtmpUrl, layout } | null`; sessions `stream: { url, layout } | null`. `layout` ∈
   CAM1/CAM2/STACKED; missing/unknown → CAM1; CAM2/STACKED without camera 2 → CAM1.
-- Clip upload: multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
+- Clip upload (an API from before CR-040 Phase 4 only; the API hands out no clip jobs now): multipart `video` (`video/mp4`, `*.mp4`) + optional `thumbnail` (`image/jpeg`, `*.jpg`) via `fs.openAsBlob`. Fail reasons ≤ 255 chars (`truncate`).
 
 ## ffmpeg rules
 
@@ -223,7 +254,7 @@ pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` and
 `jobs/<sessionVideoId>/` (segments hard-linked into `parts/` while ffmpeg reads them, so pruning can't
 pull them away; a game folder keeps `game.mp4` + `thumb.jpg` until `/finish`), `queue.json` (clips,
 game jobs with their phase, and button presses),
-`config.json` (mode 600, holds camera passwords), `device.json` (0600, the token), `enroll-refused.json`
+`videos/` (CR-040: kept game files + `videos.json`), `config.json` (mode 600, holds camera passwords), `device.json` (0600, the token), `enroll-refused.json`
 (hashes), `revoked.json` (0600, blocks enrolment until a person deletes it), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
 

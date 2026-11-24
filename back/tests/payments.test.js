@@ -1,18 +1,13 @@
 // PLAN-001 Phase 4 — paid clips, cash at the front desk: a priced player clip
-// is locked (thumbnail + pay code only) until staff record the payment;
-// refunding locks it again. Staff saves are free.
+// is locked (pay code only) until staff record the payment; refunding locks it
+// again. Staff saves are free. CR-040 Phase 4: a clip is never served from the
+// API — what unlocks is its Google Drive link.
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { JPEG, startTestApp } from "./helpers/testApp.js";
-import { insertLegacyClip } from "./helpers/legacyClip.js";
-
-const MP4 = Buffer.concat([
-  Buffer.from([0, 0, 0, 0x18]),
-  Buffer.from("ftypisom"),
-  Buffer.alloc(64, 1),
-]);
+import { startTestApp } from "./helpers/testApp.js";
+import { insertLegacyClip, readyLegacyClip } from "./helpers/legacyClip.js";
 
 describe("clip payments (cash)", () => {
   let ctx;
@@ -43,19 +38,19 @@ describe("clip payments (cash)", () => {
     await target.device("GET", "/device/config"); // online
   };
 
-
-  /** A clip saved before CR-027, uploaded by the box; returns { shareToken, clipId }. */
+  /**
+   * A clip saved before CR-027, Ready, with a copy in the court's Google Drive;
+   * returns { shareToken, clipId }.
+   */
   const readyClip = async (target) => {
     const save = await insertLegacyClip(ctx.sql, { courtId: target.courtId });
-    const row = { clipId: save.clipId };
-    const upload = await target.device("POST", `/device/clips/${row.clipId}/upload`, {
-      form: [
-        ["video", MP4, "video/mp4", "c.mp4"],
-        ["thumbnail", JPEG, "image/jpeg", "c.jpg"],
-      ],
-    });
-    assert.equal(upload.status, 200);
-    return { shareToken: save.shareToken, clipId: row.clipId };
+    await readyLegacyClip(ctx.sql, save.clipId);
+    await ctx.sql.query(
+      `UPDATE clips SET driveStatus = 'Uploaded', driveFileId = 'f1', driveUrl = ?
+       WHERE clipId = ?`,
+      [`https://drive.test/file/${save.clipId}`, save.clipId]
+    );
+    return { shareToken: save.shareToken, clipId: save.clipId };
   };
 
   before(async () => {
@@ -70,21 +65,20 @@ describe("clip payments (cash)", () => {
   let clip;
   let payCode;
 
-  it("locks a priced clip: thumbnail and pay code, no video", async () => {
+  it("locks a priced clip: pay code, no Drive link", async () => {
     clip = await readyClip(paid);
     const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
     assert.equal(page.data.clip.status, "Ready");
     assert.equal(page.data.clip.locked, true);
     assert.equal(page.data.clip.price, 50);
-    assert.equal(page.data.clip.videoUrl, null);
-    assert.equal(page.data.clip.downloadUrl, null);
-    assert.ok(page.data.clip.thumbnailUrl, "the player still sees what they're paying for");
+    assert.equal(page.data.clip.driveUrl, null);
+    assert.equal("videoUrl" in page.data.clip, false, "never a file link");
     assert.match(page.data.clip.payCode, /^[A-Z2-9]{6}$/);
     payCode = page.data.clip.payCode;
 
     const adminView = await call("GET", `/admin/clips/${clip.clipId}`);
     assert.equal(adminView.data.clip.paymentStatus, "Unpaid");
-    assert.ok(adminView.data.clip.videoUrl, "staff can still check the clip");
+    assert.ok(adminView.data.clip.driveUrl, "staff can still check the clip in Drive");
   });
 
   it("finds the clip by its pay code, however it is typed", async () => {
@@ -111,8 +105,7 @@ describe("clip payments (cash)", () => {
     const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
     assert.equal(page.data.clip.locked, false);
     assert.equal(page.data.clip.payCode, null);
-    assert.ok(page.data.clip.videoUrl);
-    assert.ok(page.data.clip.downloadUrl);
+    assert.ok(page.data.clip.driveUrl);
 
     assert.equal((await call("POST", "/admin/payments", { payCode })).status, 409);
 
@@ -129,7 +122,7 @@ describe("clip payments (cash)", () => {
     assert.equal(refund.status, 200);
     const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
     assert.equal(page.data.clip.locked, true);
-    assert.equal(page.data.clip.videoUrl, null);
+    assert.equal(page.data.clip.driveUrl, null);
     assert.equal((await call("POST", `/admin/payments/${clip.paymentId}/refund`, {})).status, 409);
     const list = await call("GET", "/admin/payments");
     assert.equal(list.data.totals.today, 0);
@@ -148,13 +141,16 @@ describe("clip payments (cash)", () => {
     assert.equal(page.data.clip.locked, false);
     assert.equal(page.data.clip.paymentStatus, "Free");
     assert.equal(page.data.clip.payCode, null);
-    assert.ok(page.data.clip.videoUrl);
+    assert.ok(page.data.clip.driveUrl);
     assert.equal((await call("POST", "/admin/payments", { clipId: freeClip.clipId })).status, 409);
   });
 
   it("won't take payment for a clip that failed", async () => {
     const row = await insertLegacyClip(ctx.sql, { courtId: paid.courtId });
-    await paid.device("POST", `/device/clips/${row.clipId}/fail`, { body: { reason: "x" } });
+    await ctx.sql.query(
+      `UPDATE clips SET status = 'Failed', failureReason = 'x' WHERE clipId = ?`,
+      [row.clipId]
+    );
     assert.equal((await call("POST", "/admin/payments", { clipId: row.clipId })).status, 409);
   });
 

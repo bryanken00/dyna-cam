@@ -2,7 +2,6 @@ import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { recordCashPayment, recordGamePayment } from "../../../utils/payments.js";
 import {
   createPaymentSchema,
@@ -26,15 +25,14 @@ const router = express.Router();
 
 const CLIP_FOR_PAYMENT = `
   SELECT cl.clipId, cl.venueId, v.name AS venueName, c.name AS courtName, cl.source,
-         cl.requestedAt, cl.price, cl.paymentStatus, cl.payCode, cl.status, cl.thumbnailPath
+         cl.requestedAt, cl.price, cl.paymentStatus, cl.payCode, cl.status
   FROM clips cl
   JOIN venues v ON v.venueId = cl.venueId
   JOIN courts c ON c.courtId = cl.courtId`;
 
-const toClipSummary = ({ thumbnailPath, ...clip }) => ({
+const toClipSummary = (clip) => ({
   ...clip,
   price: Number(clip.price),
-  thumbnailUrl: clip.status === "Ready" ? signUploadUrl(thumbnailPath) : null,
 });
 
 /**

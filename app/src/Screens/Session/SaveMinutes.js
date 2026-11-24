@@ -1,13 +1,13 @@
-import { Check, Minus, Play, Plus, Scissors, Trash2 } from "lucide-react-native";
+import { Check, Minus, Plus, QrCode, Scissors, Trash2 } from "lucide-react-native";
 import { useRef, useState } from "react";
-import { Alert, Image, PanResponder, Pressable, View } from "react-native";
+import { Alert, PanResponder, Pressable, View } from "react-native";
 import DotsLoader from "@/components/Loading/DotsLoader";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import useNow from "@/hooks/useNow";
 import { useThemeColors } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import { formatElapsed, mediaUrl, secondsSince } from "@/utils/dynaCam";
+import { formatElapsed, secondsSince } from "@/utils/dynaCam";
 import CapturePreviewSheet from "./CapturePreviewSheet";
 
 /** Steps of 15 seconds, from 1 minute (the API's minimum) up to the time played. */
@@ -103,8 +103,17 @@ const LengthTrack = ({ seconds, played, maxSeconds, onChange, disabled }) => {
   );
 };
 
+/** CR-040: the save's videos the venue box sent to Google Drive (links only). */
+const driveVideosOf = (capture) =>
+  (capture.videos ?? []).filter((video) => video.delivery === "Drive");
+
 /** A save's state in a few words: "In queue", "Saving 45%", "Finishing…", "Ready". */
 const captureStateText = (capture) => {
+  const drive = driveVideosOf(capture);
+  // Made, but the court has no usable Google Drive: kept at the venue only
+  if (capture.status === "Ready" && drive.length > 0 && !drive.some((video) => video.driveUrl)) {
+    return "Not on Drive";
+  }
   if (capture.status === "Queued") return "In queue";
   if (capture.status === "Saving") {
     if (capture.uploadPercent == null) return "Saving…";
@@ -113,14 +122,13 @@ const captureStateText = (capture) => {
   return capture.status;
 };
 
-/** One save in the list: [▶ picture] "Save 2  8:00 – 10:00 · Ready" [🗑] — the picture plays it. */
+/** One save in the list: [QR] "Save 2  8:00 – 10:00 · Ready" [🗑] — the QR opens its Google Drive link. */
 const CaptureRow = ({ capture, onDelete, deleting, onPreview }) => {
   const colors = useThemeColors();
   const ready = capture.status === "Ready";
   const waiting = ["Queued", "Saving"].includes(capture.status);
-  // CR-013 preview: a finished save with a video can be played on the device
-  const playable = ready && capture.videos?.some((video) => video.videoUrl);
-  const thumbnail = mediaUrl(capture.videos?.find((video) => video.thumbnailUrl)?.thumbnailUrl);
+  // CR-040: a finished save on Google Drive shows its link as a QR
+  const onDrive = ready && driveVideosOf(capture).some((video) => video.driveUrl);
 
   const confirmDelete = () =>
     Alert.alert(
@@ -136,23 +144,15 @@ const CaptureRow = ({ capture, onDelete, deleting, onPreview }) => {
 
   return (
     <View className="border-line-soft flex-row items-center justify-between gap-3 border-t py-2">
-      {playable ? (
+      {onDrive ? (
         <Pressable
           onPress={() => onPreview(capture)}
           accessibilityRole="button"
-          accessibilityLabel={`Play Save ${capture.number}`}
+          accessibilityLabel={`Show Save ${capture.number}'s Google Drive QR`}
           className="h-[36px] w-[64px] items-center justify-center overflow-hidden rounded-md bg-black active:opacity-80"
         >
-          {thumbnail ? (
-            <Image
-              source={{ uri: thumbnail }}
-              style={{ position: "absolute", width: "100%", height: "100%" }}
-              resizeMode="cover"
-              accessible={false}
-            />
-          ) : null}
           <View className="h-6 w-6 items-center justify-center rounded-full bg-black/55">
-            <Play size={12} color="#fff" fill="#fff" />
+            <QrCode size={13} color="#fff" />
           </View>
         </Pressable>
       ) : null}
@@ -223,8 +223,7 @@ const SaveMinutes = ({ session, since, capture, captures, save, removeCapture })
   const from = Math.max(0, played - seconds);
   const error = saveErrorText(save.error) ?? saveErrorText(removeCapture.error);
   const deletingId = removeCapture.isPending ? removeCapture.variables : null;
-  // The save being previewed — a snapshot taken when it opens, so the video
-  // doesn't restart when the next poll re-signs its link
+  // The save whose Google Drive QR is open — a snapshot taken when it opens
   const [previewing, setPreviewing] = useState(null);
 
   const step = (delta) =>

@@ -156,10 +156,6 @@ export const formatTimeRange = (startAt, endAt) => {
     : `${start.format("MMM D, h:mm A")} – ${end.format("MMM D, h:mm A")}`;
 };
 
-/** A session part's 1-based label: partIndex 0 → "Part 1". */
-export const partLabel = (partIndex) =>
-  `Part ${(Number(partIndex) || 0) + 1}`;
-
 /**
  * "Now" as Manila wall-clock time — the zone the API books in — whatever the
  * browser's own zone is. → { date: "YYYY-MM-DD", time: "HH:mm" }

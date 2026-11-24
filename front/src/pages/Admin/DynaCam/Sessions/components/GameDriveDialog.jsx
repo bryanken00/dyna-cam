@@ -29,6 +29,7 @@ import { useSendSessionDriveEmail } from "../../../../../services/requests/admin
  */
 const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
   const url = session?.driveUrl || "";
+  const boxSent = (session?.videos || []).some((video) => video.delivery === "Drive");
   const sendEmailMutation = useSendSessionDriveEmail();
   const canEmail =
     canWrite && !!session?.email && DRIVE_EMAIL_SENDABLE.includes(session?.driveEmail?.status);
@@ -95,8 +96,10 @@ const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
               className="m-0 text-center"
               style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
             >
-              The Drive copy is moved to the Drive&apos;s trash 2 days after
-              the game&apos;s videos are saved.
+              {/* CR-040: sent from the venue box, Drive keeps it the venue's keep time */}
+              {boxSent
+                ? "The Drive copy is moved to the Drive's trash when the game's videos expire."
+                : "The Drive copy is moved to the Drive's trash 2 days after the game's videos are saved."}
             </p>
             {/* CR-018: the automatic email, and sending it now */}
             {session?.driveEmail && session.driveEmail.status !== "NoEmail" && (

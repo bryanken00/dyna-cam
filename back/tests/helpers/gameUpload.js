@@ -1,68 +1,81 @@
-// CR-006 — what the recorder box does after End game: a game job per camera,
-// then the whole file in chunks (start → chunk… → finish). For tests.
+// CR-006 / CR-040 — what the recorder box does after End game: a game job per
+// camera, then (CR-040 Phase 4) the file stays on the box and goes straight to
+// the court's Google Drive (drive-session → PUT to Google → drive-done). For tests.
 
-import { JPEG } from "./testApp.js";
+import crypto from "node:crypto";
 
-/** The smallest buffer that passes the API's mp4 check (an ISO media "ftyp" box). */
+/** The smallest buffer that looks like an mp4 (an ISO media "ftyp" box). */
 export const GAME_MP4 = Buffer.concat([
   Buffer.from([0, 0, 0, 0x18]),
   Buffer.from("ftypisom"),
   Buffer.alloc(200, 7),
 ]);
 
+const device = (deviceToken) => ({ Authorization: `Device ${deviceToken}` });
+
+/**
+ * CR-040 Phase 4: only a box that reports "drive-direct" gets game jobs. Marks
+ * the box so in its stored status (as its heartbeat would), leaving the rest of
+ * that status (cameras, live view) alone.
+ */
+export const markDriveDirect = (ctx, deviceToken) =>
+  ctx.sql.query(
+    `UPDATE devices
+     SET lastStatus = JSON_SET(COALESCE(lastStatus, JSON_OBJECT()), '$.capabilities',
+                               JSON_ARRAY('game-file', 'drive-direct'))
+     WHERE tokenHash = ?`,
+    [crypto.createHash("sha256").update(String(deviceToken)).digest("hex")]
+  );
+
 /** The box's game jobs (type "game"), optionally for one session, camera order. */
 export const gameJobs = async (ctx, deviceToken, sessionId) => {
-  const res = await ctx.api("GET", "/device/jobs?wait=0", {
-    headers: { Authorization: `Device ${deviceToken}` },
-  });
+  await markDriveDirect(ctx, deviceToken);
+  const res = await ctx.api("GET", "/device/jobs?wait=0", { headers: device(deviceToken) });
   return (res.data?.jobs || [])
     .filter((job) => job.type === "game" && (!sessionId || job.sessionId === sessionId))
     .sort((a, b) => a.camera - b.camera);
 };
 
-/** PUT one chunk of raw bytes. @returns {{ status, body }} */
-export const putChunk = async (ctx, deviceToken, sessionVideoId, offset, bytes) => {
-  const res = await ctx.get(`/api/v1/device/game-videos/${sessionVideoId}/chunk?offset=${offset}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Device ${deviceToken}`,
-      "Content-Type": "application/octet-stream",
-    },
-    body: bytes,
-  });
-  return { status: res.status, body: await res.json().catch(() => null) };
-};
-
 /**
- * Send a whole game file for one game job, in chunks of `chunk` bytes.
- * @returns {Promise<{ status, body }>} the finish response
+ * The box made the file: POST drive-session. On a court without a usable
+ * Google Drive the video is Ready at once and kept on the box only.
+ * @returns {Promise<{ status, body, data }>} the drive-session answer
  */
-export const sendGame = async (
+export const keepGame = (
   ctx,
   deviceToken,
   sessionVideoId,
-  { bytes = GAME_MP4, gaps = [], durationSeconds = 60, chunk = 64, thumbnail = true } = {}
-) => {
-  const device = { Authorization: `Device ${deviceToken}` };
-  const start = await ctx.api("POST", `/device/game-videos/${sessionVideoId}/start`, {
-    headers: device,
-    body: { sizeBytes: bytes.length, durationSeconds, gaps },
+  { bytes = GAME_MP4, gaps = [], durationSeconds = 60, newSession } = {}
+) =>
+  ctx.api("POST", `/device/game-videos/${sessionVideoId}/drive-session`, {
+    headers: device(deviceToken),
+    body: {
+      sizeBytes: bytes.length,
+      durationSeconds,
+      gaps,
+      ...(newSession === undefined ? {} : { newSession }),
+    },
   });
-  if (start.status !== 200) return start;
-  let offset = start.data.receivedBytes;
-  while (offset < bytes.length) {
-    const put = await putChunk(
-      ctx,
-      deviceToken,
-      sessionVideoId,
-      offset,
-      bytes.subarray(offset, offset + chunk)
-    );
-    if (put.status !== 200) return put;
-    offset = put.body.data.receivedBytes;
-  }
-  return ctx.api("POST", `/device/game-videos/${sessionVideoId}/finish`, {
-    headers: device,
-    form: thumbnail ? [["thumbnail", JPEG, "image/jpeg", "thumb.jpg"]] : [["note", "no thumbnail"]],
+
+/**
+ * The whole box flow to a court with Google Drive (a fakeGoogle in the test):
+ * drive-session → the bytes to Google's upload address (no token) → drive-done.
+ * @returns {Promise<{ status, body, data }>} the drive-done answer (or the
+ *   drive-session answer when it didn't hand out an upload address)
+ */
+export const sendGameToDrive = async (ctx, deviceToken, sessionVideoId, opts = {}) => {
+  const bytes = opts.bytes || GAME_MP4;
+  const opened = await keepGame(ctx, deviceToken, sessionVideoId, opts);
+  if (opened.status !== 200 || !opened.data?.drive) return opened;
+  const put = await fetch(opened.data.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Range": `bytes 0-${bytes.length - 1}/${bytes.length}` },
+    body: bytes,
+  });
+  if (![200, 201].includes(put.status)) return { status: put.status, body: null, data: null };
+  const { id } = await put.json();
+  return ctx.api("POST", `/device/game-videos/${sessionVideoId}/drive-done`, {
+    headers: device(deviceToken),
+    body: { driveFileId: id },
   });
 };

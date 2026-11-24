@@ -94,7 +94,8 @@ export const createStreamLinkApi = async () => {
  * Capture = { captureId, number, fromSeconds, toSeconds (where in the game),
  *   seconds, savedAt, status: "Queued" | "Saving" | "Ready" | "Failed" |
  *   "Expired", uploadPercent (0–99 while saving, 100 once Ready, null before
- *   the box sends), videos: [{ camera, label, status, videoUrl, downloadUrl, … }] }
+ *   the box sends), videos: [{ camera, label, status, delivery, driveUrl, … }] }
+ *   (CR-040: no file links — a save is only its Google Drive link)
  *   — GET /session's `captures`, oldest first, and
  *   `capture: { minSeconds, available, maxPerGame, used }`.
  */

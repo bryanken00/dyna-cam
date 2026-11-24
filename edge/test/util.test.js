@@ -21,6 +21,15 @@ describe("maskCredentials", () => {
     assert.doesNotMatch(masked, /w0rd|p@ss/);
   });
 
+  it("hides a Google Drive upload session's upload_id (CR-040)", () => {
+    assert.equal(
+      maskCredentials(
+        "PUT https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=ABpAL-xyz_123 failed"
+      ),
+      "PUT https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=**** failed"
+    );
+  });
+
   it("masks a user-only userinfo and leaves plain URLs alone", () => {
     assert.equal(maskCredentials("rtsp://token@cam/x"), "rtsp://***@cam/x");
     assert.equal(maskCredentials("rtsp://10.0.0.9/stream1"), "rtsp://10.0.0.9/stream1");

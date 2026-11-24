@@ -439,6 +439,8 @@ router.get(
           pendingClips: system.pendingClips ?? 0,
           pendingGames: system.pendingGames ?? 0,
           oldestPendingSeconds: system.oldestPendingSeconds ?? 0,
+          localVideos: system.localVideos ?? null,
+          localVideoMb: system.localVideoMb ?? null,
         },
         cameras: (Array.isArray(box.status.cameras) ? box.status.cameras : [])
           .filter((entry) => box.courts.has(entry?.courtId))

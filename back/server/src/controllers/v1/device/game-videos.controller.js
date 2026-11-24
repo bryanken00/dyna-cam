@@ -2,39 +2,52 @@ import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import { z } from "zod";
+import { logger } from "../../../../config/logger.js";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
-import { daysFromNowLocal } from "../../../utils/clips.js";
-import { randomToken } from "../../../utils/crypto/tokens.js";
+import { daysFromNowLocal, toEpochMs } from "../../../utils/clips.js";
+import { decryptSecret, encryptSecret } from "../../../utils/crypto/secretBox.js";
+import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import {
-  clipUploadFolder,
-  removeClipFiles,
-  toStoredUploadPath,
-} from "../../../utils/file/clipFiles.js";
-import { upload } from "../../../utils/file/uploads.js";
+  accessToken,
+  DriveAuthError,
+  driveConfigured,
+  DriveNotFoundError,
+  fileViewUrl,
+  getFile,
+  openUploadSession,
+  shareWithLink,
+} from "../../../utils/googleDrive.js";
+import { courtFolder, sessionFolder, sessionVideoFileName } from "../../../utils/driveFolders.js";
+import { clipUploadFolder } from "../../../utils/file/clipFiles.js";
 import { settleSessions } from "../../../utils/sessions.js";
 
 /**
- * A game's whole video, uploaded by the recorder box in chunks (CR-006) —
- * mounted at /api/v1/device/game-videos behind requireDevice.
+ * A game's whole video (CR-006), and each save (CR-013) — mounted at
+ * /api/v1/device/game-videos behind requireDevice. After End game the box gets
+ * a game job per camera (GET /device/jobs, type "game") and copies the game
+ * into one mp4. Only the venue's own boxes see a video (else 404), and once one
+ * box started it, another is refused.
  *
- * After End game the box gets a game job per camera (GET /device/jobs, type
- * "game"), copies the game into one mp4 and sends it:
+ *   POST /:sessionVideoId/fail    { reason }  the box can't make the file
  *
- *   POST /:sessionVideoId/start   { sizeBytes, durationSeconds, gaps }
- *                                 → { receivedBytes, chunkBytes }  (resume point)
- *   PUT  /:sessionVideoId/chunk?offset=N   application/octet-stream
- *                                 → { receivedBytes }
- *        409 OFFSET_MISMATCH { receivedBytes } when N isn't what the server has
- *   POST /:sessionVideoId/finish  multipart, optional `thumbnail` (JPEG)
- *        409 INCOMPLETE_UPLOAD { receivedBytes } while bytes are missing
- *   POST /:sessionVideoId/fail    { reason }
+ * The old upload to the API (/start, /chunk, /finish, CR-006) answers 410
+ * BOX_UPDATE_REQUIRED since CR-040 Phase 4.
  *
- * The file grows in `<clip folder>/upload.part`; the bytes on disk are the
- * truth for where to resume (a crash between write and DB update can't lose a
- * chunk or double it). Only the venue's own boxes see a video (else 404), and
- * once one box started it, another is refused.
+ * CR-040 (PLAN-005) — the video never comes to the API: a box that reports
+ * "drive-direct" keeps the file and sends it straight to the court's Google
+ * Drive. The API opens the Drive upload (the court's sign-in never leaves the
+ * cloud) and believes it only after reading the file back from Drive:
+ *
+ *   POST /:sessionVideoId/drive-session  { sizeBytes, durationSeconds, gaps, newSession? }
+ *        → { drive: true, uploadUrl, chunkBytes, keepUntilMs }  send the bytes there
+ *        → { drive: false, reason: NO_DRIVE | DRIVE_RECONNECT, keepUntilMs }  keep it only
+ *        503 DRIVE_UNAVAILABLE  Google didn't answer — try again later
+ *   POST /:sessionVideoId/progress       { uploadedBytes }  (for the game page)
+ *   POST /:sessionVideoId/drive-done     { driveFileId }  → Ready, shared by link
+ *        409 DRIVE_FILE_MISMATCH  Drive's file isn't the one sent — open a new session
+ *   POST /:sessionVideoId/box-deleted    the box removed its copy (keep time over)
  */
 const router = express.Router();
 
@@ -46,42 +59,14 @@ const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 
 const folderOf = (video) =>
   path.resolve("public", clipUploadFolder(video.venueId, video.sessionVideoId));
+// A half-sent file left by the old upload (before CR-040 Phase 4): removed on fail
 const partFileOf = (video) => path.join(folderOf(video), PART_FILE);
-const sizeOnDisk = (file) =>
-  fs.promises
-    .stat(file)
-    .then((stat) => stat.size)
-    .catch(() => 0);
-
-/** One chunk at a time per video (two requests must not append at once). */
-const locks = new Map();
-const withLock = async (key, fn) => {
-  const previous = locks.get(key) || Promise.resolve();
-  let release;
-  const current = new Promise((resolve) => {
-    release = resolve;
-  });
-  locks.set(
-    key,
-    previous.then(() => current)
-  );
-  await previous;
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (locks.get(key) === current) locks.delete(key);
-  }
-};
-
-const conflict = (res, code, message, receivedBytes) =>
-  res.status(409).json({ success: false, message, code, data: { receivedBytes } });
 
 /** The video, if it belongs to this box's venue and is still waiting for its file. */
 const loadVideo = catchAsync(async (req, res, next) => {
   const rows = await req.db.query(
     `SELECT sv.sessionVideoId, sv.sessionId, sv.venueId, sv.camera, sv.status, sv.deviceId,
-            sv.uploadBytes, sv.receivedBytes, v.clipRetentionDays
+            sv.uploadBytes, sv.receivedBytes, sv.delivery, v.clipRetentionDays
      FROM session_videos sv
      JOIN venues v ON v.venueId = sv.venueId
      WHERE sv.sessionVideoId = ? AND sv.venueId = ? AND sv.status != 'Deleted'
@@ -131,196 +116,21 @@ const startSchema = z.object({
 const toLocal = (ms) => moment(ms).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss");
 
 /**
- * POST /:sessionVideoId/start — begin, or resume, sending the game's file.
- * The same size resumes where the server is; a different size starts over.
+ * CR-040 Phase 4: the old upload to the API (/start, /chunk, /finish) is gone —
+ * game videos go from the venue box straight to Google Drive. A box that still
+ * tries it is told to update (an old box reports the game as failed with this).
  */
-router.post(
-  "/:sessionVideoId/start",
-  validateBody(startSchema),
-  loadVideo,
-  catchAsync(async (req, res) => {
-    const { sizeBytes, durationSeconds, gaps } = req.body;
-    const { video } = req;
-    if (sizeBytes > MAX_GAME_BYTES) {
-      throw new APIError(
-        `A game video can be at most ${Math.round(MAX_GAME_BYTES / 1048576)} MB`,
-        413,
-        ERROR_CODES.VALIDATION_FAILED
-      );
-    }
-    const received = await withLock(video.sessionVideoId, async () => {
-      const file = partFileOf(video);
-      const resuming = video.status === "Uploading" && Number(video.uploadBytes) === sizeBytes;
-      let onDisk = resuming ? await sizeOnDisk(file) : 0;
-      if (!resuming || onDisk > sizeBytes) {
-        await fs.promises.mkdir(folderOf(video), { recursive: true });
-        await fs.promises.writeFile(file, Buffer.alloc(0));
-        onDisk = 0;
-      }
-      const cleanGaps = gaps
-        .filter((gap) => gap.endMs > gap.startMs)
-        .map((gap) => ({ startAt: toLocal(gap.startMs), endAt: toLocal(gap.endMs) }));
-      await req.db.query(
-        `UPDATE session_videos
-         SET status = 'Uploading', deviceId = ?, uploadBytes = ?, receivedBytes = ?,
-             durationSeconds = ?, gaps = ?, partsMissing = ?, lastChunkAt = ?, dateUpdated = ?
-         WHERE sessionVideoId = ?`,
-        [
-          req.device.deviceId,
-          sizeBytes,
-          onDisk,
-          durationSeconds,
-          JSON.stringify(cleanGaps),
-          cleanGaps.length,
-          getCurrentTimestampLocal(),
-          getCurrentTimestampLocal(),
-          video.sessionVideoId,
-        ]
-      );
-      return onDisk;
-    });
-    return res.sendSuccess("Send the game video", {
-      receivedBytes: received,
-      chunkBytes: CHUNK_BYTES,
-    });
-  })
-);
-
-const offsetSchema = z.coerce.number().int().min(0);
-
-/**
- * PUT /:sessionVideoId/chunk?offset=N — the file's bytes [N, N + length).
- */
-router.put(
-  "/:sessionVideoId/chunk",
-  express.raw({ type: "application/octet-stream", limit: CHUNK_BYTES + 1024 }),
-  loadVideo,
-  catchAsync((req, res) => {
-    const { video } = req;
-    const offset = offsetSchema.safeParse(req.query.offset);
-    if (!offset.success) {
-      throw new APIError("offset must be a whole number", 400, ERROR_CODES.VALIDATION_FAILED);
-    }
-    const body = Buffer.isBuffer(req.body) ? req.body : null;
-    if (!body || body.length === 0) {
-      throw new APIError(
-        "Send the bytes as application/octet-stream",
-        400,
-        ERROR_CODES.VALIDATION_FAILED
-      );
-    }
-    if (video.status !== "Uploading" || !video.uploadBytes) {
-      throw new APIError("Start the upload first", 409, ERROR_CODES.INVALID_STATUS);
-    }
-
-    return withLock(video.sessionVideoId, async () => {
-      const file = partFileOf(video);
-      const onDisk = await sizeOnDisk(file);
-      if (offset.data !== onDisk) {
-        return conflict(res, "OFFSET_MISMATCH", "Continue from the server's position", onDisk);
-      }
-      if (onDisk + body.length > Number(video.uploadBytes)) {
-        throw new APIError("More bytes than the file's size", 400, ERROR_CODES.VALIDATION_FAILED);
-      }
-      await fs.promises.appendFile(file, body);
-      const receivedBytes = onDisk + body.length;
-      // Live progress, not an edit: dateUpdated is left alone
-      await req.db.query(
-        `UPDATE session_videos SET receivedBytes = ?, lastChunkAt = ? WHERE sessionVideoId = ?`,
-        [receivedBytes, getCurrentTimestampLocal(), video.sessionVideoId]
-      );
-      return res.sendSuccess("Chunk received", { receivedBytes });
-    });
-  })
-);
-
-const thumbnailUpload = upload({
-  filePath: (req) => clipUploadFolder(req.video.venueId, req.video.sessionVideoId),
-  allowedTypes: { "image/jpeg": [".jpg", ".jpeg"] },
-  maxFileSize: 3 * 1024 * 1024,
-});
-
-/** True when the file starts like an MP4 (an ISO media "ftyp" box). */
-const looksLikeMp4 = async (file) => {
-  const handle = await fs.promises.open(file, "r");
-  try {
-    const head = Buffer.alloc(12);
-    await handle.read(head, 0, 12, 0);
-    return head.subarray(4, 8).toString("latin1") === "ftyp";
-  } finally {
-    await handle.close();
-  }
-};
-
-/**
- * POST /:sessionVideoId/finish — every byte is in: the game's video is Ready.
- */
-router.post(
-  "/:sessionVideoId/finish",
-  loadVideo,
-  thumbnailUpload.fields([{ name: "thumbnail", maxCount: 1 }]),
-  catchAsync(async (req, res) => {
-    const { video } = req;
-    const thumbnail = req.files?.thumbnail?.[0];
-    const thumbnailPath = thumbnail ? toStoredUploadPath(thumbnail) : null;
-    if (video.status !== "Uploading" || !video.uploadBytes) {
-      await removeClipFiles(thumbnailPath);
-      throw new APIError("Start the upload first", 409, ERROR_CODES.INVALID_STATUS);
-    }
-
-    return withLock(video.sessionVideoId, async () => {
-      const file = partFileOf(video);
-      const onDisk = await sizeOnDisk(file);
-      if (onDisk !== Number(video.uploadBytes)) {
-        await removeClipFiles(thumbnailPath);
-        return conflict(res, "INCOMPLETE_UPLOAD", "Some of the file is still missing", onDisk);
-      }
-      if (!(await looksLikeMp4(file))) {
-        await removeClipFiles(thumbnailPath);
-        await fs.promises.unlink(file).catch(() => {});
-        await req.db.query(
-          `UPDATE session_videos SET status = 'Pending', deviceId = NULL, uploadBytes = NULL,
-                  receivedBytes = 0, dateUpdated = ?
-           WHERE sessionVideoId = ?`,
-          [getCurrentTimestampLocal(), video.sessionVideoId]
-        );
-        throw new APIError("The file isn't an mp4 video", 400, ERROR_CODES.VALIDATION_FAILED);
-      }
-
-      const name = `game-cam${video.camera}-${randomToken(12)}.mp4`;
-      await fs.promises.rename(file, path.join(folderOf(video), name));
-      const videoPath = `/public/${clipUploadFolder(video.venueId, video.sessionVideoId)}/${name}`;
-      const now = getCurrentTimestampLocal();
-      await req.db.query(
-        `UPDATE session_videos
-         SET status = 'Ready', videoPath = ?, thumbnailPath = ?, sizeBytes = ?, receivedBytes = ?,
-             failureReason = NULL, expiresAt = ?, dateUpdated = ?
-         WHERE sessionVideoId = ?`,
-        [
-          videoPath,
-          thumbnailPath,
-          onDisk,
-          onDisk,
-          daysFromNowLocal(video.clipRetentionDays),
-          now,
-          video.sessionVideoId,
-        ]
-      );
-      // CR-001: a court with a Google account gets the game in its Drive
-      await req.db.query(
-        `UPDATE session_videos sv
-         JOIN recording_sessions s ON s.sessionId = sv.sessionId
-         JOIN courts c ON c.courtId = s.courtId
-         SET sv.driveStatus = 'Pending', sv.driveAttempts = 0, sv.driveNextAttemptAt = NULL
-         WHERE sv.sessionVideoId = ? AND sv.driveStatus IS NULL
-           AND c.driveRefreshToken IS NOT NULL AND c.status != 'Deleted'`,
-        [video.sessionVideoId]
-      );
-      await settleSessions(req.db, video.sessionId);
-      return res.sendSuccess("Game video saved", { status: "Ready" });
-    });
-  })
-);
+const boxUpdateRequired = (req, res) =>
+  res.status(410).json({
+    success: false,
+    message:
+      "This recorder box needs updating — game videos now go from the box straight to Google Drive",
+    code: ERROR_CODES.BOX_UPDATE_REQUIRED,
+    data: null,
+  });
+router.post("/:sessionVideoId/start", boxUpdateRequired);
+router.put("/:sessionVideoId/chunk", boxUpdateRequired);
+router.post("/:sessionVideoId/finish", boxUpdateRequired);
 
 const failSchema = z.object({ reason: z.string().trim().min(1).max(255) });
 
@@ -343,6 +153,332 @@ router.post(
     await fs.promises.unlink(partFileOf(video)).catch(() => {});
     await settleSessions(req.db, video.sessionId);
     return res.sendSuccess("Game video marked as failed");
+  })
+);
+
+/* ── CR-040: straight from the box to Google Drive ─────────────────────────── */
+
+// Google keeps a resumable session about a week; open a new one after 6 days
+const SESSION_REUSE_DAYS = 6;
+const DRIVE_REASON = {
+  NO_DRIVE: "No Google Drive on this court — the video stays on the venue box",
+  DRIVE_RECONNECT: "Google Drive needs reconnecting on this court — the video stays on the venue box",
+};
+
+/** What a Drive upload needs about a video: its court, game, folders and file name. */
+const driveRowOf = async (db, sessionVideoId) => {
+  const [row] = await db.query(
+    `SELECT sv.sessionVideoId, sv.sessionId, sv.camera, sv.uploadBytes, sv.receivedBytes,
+            sv.delivery, sv.driveSessionUrl, sv.driveSessionAt, sv.boxKeepUntil,
+            s.courtId, s.startAt AS sessionStartAt, s.driveFolderId AS sessionFolderId,
+            c.name AS courtName, c.driveRefreshToken, c.driveFolderId,
+            c.driveStatus AS courtDriveStatus, c.status AS courtStatus, v.name AS venueName,
+            sc.startAt AS captureStartAt, sc.endAt AS captureEndAt
+     FROM session_videos sv
+     JOIN recording_sessions s ON s.sessionId = sv.sessionId
+     JOIN courts c ON c.courtId = s.courtId
+     JOIN venues v ON v.venueId = sv.venueId
+     LEFT JOIN session_captures sc ON sc.captureId = sv.captureId
+     WHERE sv.sessionVideoId = ? LIMIT 1`,
+    [sessionVideoId]
+  );
+  return row;
+};
+
+/** The court's stored sign-in failed or can't be read: staff must reconnect it. */
+const markReconnect = (db, row, problem) =>
+  db.query(
+    `UPDATE courts SET driveStatus = 'NeedsReconnect', driveProblem = ?
+     WHERE courtId = ? AND driveRefreshToken = ?`,
+    [String(problem).slice(0, 255), row.courtId, row.driveRefreshToken]
+  );
+
+/** The court's sign-in as an access token, or null when the court has no usable Drive. */
+const courtToken = async (db, row) => {
+  if (!driveConfigured() || !row.driveRefreshToken || row.courtStatus === "Deleted") return null;
+  if (row.courtDriveStatus !== "Connected") return null;
+  const refreshToken = decryptSecret(row.driveRefreshToken);
+  if (!refreshToken) {
+    await markReconnect(db, row, "The stored sign-in can no longer be read. Reconnect Google Drive.");
+    return null;
+  }
+  return accessToken(refreshToken);
+};
+
+const driveUnavailable = (err, sessionVideoId) => {
+  logger.warn("Google Drive didn't answer for a box upload", { sessionVideoId, error: err.message });
+  return new APIError(
+    "Google Drive didn't answer — try again shortly",
+    503,
+    ERROR_CODES.DRIVE_UNAVAILABLE
+  );
+};
+
+const driveSessionSchema = startSchema.extend({ newSession: z.boolean().optional().default(false) });
+
+/**
+ * POST /:sessionVideoId/drive-session — the box made the file and keeps it;
+ * where should it send it? A Drive resumable session (the same one again while
+ * it lasts, or a new one), or nowhere when the court has no usable Drive.
+ */
+router.post(
+  "/:sessionVideoId/drive-session",
+  validateBody(driveSessionSchema),
+  loadVideo,
+  catchAsync(async (req, res) => {
+    const { sizeBytes, durationSeconds, gaps, newSession } = req.body;
+    const { video } = req;
+    if (sizeBytes > MAX_GAME_BYTES) {
+      throw new APIError(
+        `A game video can be at most ${Math.round(MAX_GAME_BYTES / 1048576)} MB`,
+        413,
+        ERROR_CODES.VALIDATION_FAILED
+      );
+    }
+    const row = await driveRowOf(req.db, video.sessionVideoId);
+    const now = getCurrentTimestampLocal();
+    const sameFile = row.delivery === "Drive" && Number(row.uploadBytes) === sizeBytes;
+    // The box keeps its copy the venue's keep time from when it first had it
+    const keepUntil = row.delivery === "Drive" && row.boxKeepUntil ? row.boxKeepUntil : daysFromNowLocal(video.clipRetentionDays);
+    const keepUntilMs = toEpochMs(keepUntil);
+    const cleanGaps = gaps
+      .filter((gap) => gap.endMs > gap.startMs)
+      .map((gap) => ({ startAt: toLocal(gap.startMs), endAt: toLocal(gap.endMs) }));
+
+    await req.db.query(
+      `UPDATE session_videos
+       SET status = 'Uploading', delivery = 'Drive', deviceId = ?, uploadBytes = ?, receivedBytes = ?,
+           durationSeconds = ?, gaps = ?, partsMissing = ?, lastChunkAt = ?, videoPath = NULL,
+           boxKeepUntil = ?, boxDeletedAt = NULL, expiresAt = ?, dateUpdated = ?
+       WHERE sessionVideoId = ?`,
+      [
+        req.device.deviceId,
+        sizeBytes,
+        sameFile ? Number(row.receivedBytes) || 0 : 0,
+        durationSeconds,
+        JSON.stringify(cleanGaps),
+        cleanGaps.length,
+        now,
+        keepUntil,
+        keepUntil,
+        now,
+        video.sessionVideoId,
+      ]
+    );
+
+    // No usable Drive: the video is made and kept on the box only
+    const keptOnBox = async (reason) => {
+      await req.db.query(
+        `UPDATE session_videos
+         SET status = 'Ready', sizeBytes = ?, receivedBytes = ?, driveStatus = 'Skipped',
+             driveError = ?, driveSessionUrl = NULL, driveSessionAt = NULL, dateUpdated = ?
+         WHERE sessionVideoId = ?`,
+        [sizeBytes, sizeBytes, DRIVE_REASON[reason], now, video.sessionVideoId]
+      );
+      await settleSessions(req.db, video.sessionId);
+      return res.sendSuccess("Keep the video on the box", { drive: false, reason, keepUntilMs });
+    };
+
+    const fresh =
+      sameFile &&
+      !newSession &&
+      row.driveSessionUrl &&
+      row.driveSessionAt > moment().tz(TIMEZONE).subtract(SESSION_REUSE_DAYS, "days").format("YYYY-MM-DD HH:mm:ss");
+    let uploadUrl = fresh ? decryptSecret(row.driveSessionUrl) : null;
+
+    if (!uploadUrl) {
+      let token;
+      try {
+        token = await courtToken(req.db, row);
+        if (!token) {
+          return keptOnBox(row.driveRefreshToken && row.courtStatus !== "Deleted" && driveConfigured() ? "DRIVE_RECONNECT" : "NO_DRIVE");
+        }
+        const open = async () => {
+          let parentId = await courtFolder(req.db, token, row);
+          parentId = await sessionFolder(req.db, token, row, parentId);
+          return openUploadSession(token, { name: sessionVideoFileName(row), parentId, sizeBytes });
+        };
+        try {
+          uploadUrl = await open();
+        } catch (err) {
+          // A folder was deleted in the meantime: make it again, once
+          if (!(err instanceof DriveNotFoundError)) throw err;
+          row.driveFolderId = null;
+          row.sessionFolderId = null;
+          uploadUrl = await open();
+        }
+      } catch (err) {
+        if (err instanceof DriveAuthError) {
+          await markReconnect(req.db, row, err.message);
+          return keptOnBox("DRIVE_RECONNECT");
+        }
+        throw driveUnavailable(err, video.sessionVideoId);
+      }
+      await req.db.query(
+        `UPDATE session_videos
+         SET driveSessionUrl = ?, driveSessionAt = ?, receivedBytes = 0, driveStatus = 'Uploading',
+             driveError = NULL, driveNextAttemptAt = NULL
+         WHERE sessionVideoId = ?`,
+        [encryptSecret(uploadUrl), now, video.sessionVideoId]
+      );
+    } else {
+      await req.db.query(
+        `UPDATE session_videos SET driveStatus = 'Uploading', driveError = NULL WHERE sessionVideoId = ?`,
+        [video.sessionVideoId]
+      );
+    }
+
+    return res.sendSuccess("Send the game video to Google Drive", {
+      drive: true,
+      uploadUrl,
+      chunkBytes: CHUNK_BYTES,
+      keepUntilMs,
+    });
+  })
+);
+
+/** A video the box is sending to Drive right now (else 409). */
+const requireDriveUpload = (video) => {
+  if (video.delivery !== "Drive" || video.status !== "Uploading") {
+    throw new APIError("Open a Drive session first", 409, ERROR_CODES.INVALID_STATUS);
+  }
+};
+
+// Per box: progress comes about once a chunk
+const progressLimiter = dynamicLimiter({
+  points: parseInt(process.env.RATE_LIMIT_DEVICE_PROGRESS_POINTS || "240", 10),
+  duration: 60,
+  keyGenerator: (req) => `device-progress:${req.device?.deviceId || req.ip}`,
+  message: "Too many progress reports — slow down.",
+});
+
+const progressSchema = z.object({ uploadedBytes: z.number().int().min(0) });
+
+/** POST /:sessionVideoId/progress — how much Google has, for the game page and Admin. */
+router.post(
+  "/:sessionVideoId/progress",
+  progressLimiter,
+  validateBody(progressSchema),
+  loadVideo,
+  catchAsync(async (req, res) => {
+    const { video } = req;
+    requireDriveUpload(video);
+    const received = Math.min(req.body.uploadedBytes, Number(video.uploadBytes) || 0);
+    // Live progress, not an edit: dateUpdated is left alone
+    await req.db.query(
+      `UPDATE session_videos SET receivedBytes = ?, lastChunkAt = ? WHERE sessionVideoId = ?`,
+      [received, getCurrentTimestampLocal(), video.sessionVideoId]
+    );
+    return res.sendSuccess("Progress recorded", { receivedBytes: received });
+  })
+);
+
+const doneSchema = z.object({
+  driveFileId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[A-Za-z0-9_-]+$/, "Invalid Drive file ID"),
+});
+
+/**
+ * POST /:sessionVideoId/drive-done — Google answered the last chunk with the
+ * file's ID. Believed only once Drive itself has that file, whole, in the
+ * game's folder; then it's shared by link and the video is Ready.
+ */
+router.post(
+  "/:sessionVideoId/drive-done",
+  validateBody(doneSchema),
+  loadVideo,
+  catchAsync(async (req, res) => {
+    const { video } = req;
+    requireDriveUpload(video);
+    const row = await driveRowOf(req.db, video.sessionVideoId);
+
+    let file;
+    let token;
+    try {
+      token = await courtToken(req.db, row);
+      if (!token) {
+        return res.status(409).json({
+          success: false,
+          message: DRIVE_REASON.DRIVE_RECONNECT,
+          code: "DRIVE_RECONNECT",
+          data: null,
+        });
+      }
+      file = await getFile(token, req.body.driveFileId);
+    } catch (err) {
+      if (err instanceof DriveAuthError) {
+        await markReconnect(req.db, row, err.message);
+        return res.status(409).json({
+          success: false,
+          message: DRIVE_REASON.DRIVE_RECONNECT,
+          code: "DRIVE_RECONNECT",
+          data: null,
+        });
+      }
+      throw driveUnavailable(err, video.sessionVideoId);
+    }
+
+    const size = Number(video.uploadBytes);
+    if (!file || file.trashed || file.size !== size || !file.parents.includes(row.sessionFolderId)) {
+      // Not the file the box was to send: start again with a new session
+      await req.db.query(
+        `UPDATE session_videos SET driveSessionUrl = NULL, driveSessionAt = NULL, receivedBytes = 0
+         WHERE sessionVideoId = ?`,
+        [video.sessionVideoId]
+      );
+      return res.status(409).json({
+        success: false,
+        message: "Google Drive doesn't have this video as it was sent — open a new Drive session",
+        code: "DRIVE_FILE_MISMATCH",
+        data: null,
+      });
+    }
+
+    try {
+      await shareWithLink(token, file.id);
+    } catch (err) {
+      throw driveUnavailable(err, video.sessionVideoId);
+    }
+    const now = getCurrentTimestampLocal();
+    const driveUrl = fileViewUrl(file.id, file.webViewLink);
+    await req.db.query(
+      `UPDATE session_videos
+       SET status = 'Ready', sizeBytes = ?, receivedBytes = ?, failureReason = NULL,
+           driveStatus = 'Uploaded', driveFileId = ?, driveUrl = ?, driveUploadedAt = ?,
+           driveError = NULL, driveSessionUrl = NULL, driveSessionAt = NULL, dateUpdated = ?
+       WHERE sessionVideoId = ?`,
+      [size, size, file.id, driveUrl, now, now, video.sessionVideoId]
+    );
+    await settleSessions(req.db, video.sessionId);
+    return res.sendSuccess("Game video on Google Drive", { status: "Ready", driveUrl });
+  })
+);
+
+/**
+ * POST /:sessionVideoId/box-deleted — the box removed its copy (keep time
+ * over, the video was deleted, or the disk was critically full). Any status:
+ * a deleted save's file goes too.
+ */
+router.post(
+  "/:sessionVideoId/box-deleted",
+  catchAsync(async (req, res) => {
+    const rows = await req.db.query(
+      `SELECT sessionVideoId FROM session_videos
+       WHERE sessionVideoId = ? AND venueId = ? AND delivery = 'Drive' LIMIT 1`,
+      [req.params.sessionVideoId, req.device.venueId]
+    );
+    if (rows.length === 0) {
+      throw new APIError("Game video not found", 404, ERROR_CODES.RESOURCE_NOT_FOUND);
+    }
+    await req.db.query(
+      `UPDATE session_videos SET boxDeletedAt = COALESCE(boxDeletedAt, ?) WHERE sessionVideoId = ?`,
+      [getCurrentTimestampLocal(), req.params.sessionVideoId]
+    );
+    return res.sendSuccess("Noted: the box removed its copy");
   })
 );
 

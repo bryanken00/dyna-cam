@@ -1,7 +1,7 @@
 // CR-027 removed every way to save a 60-second clip (court QR, court button).
-// Clips saved before that still go through the box (cut, upload), payments and
-// Google Drive until they expire, so the tests for those make one directly —
-// the row the old court-QR save inserted.
+// Clips saved before that still show on their pages, in payments and in Google
+// Drive until they expire, so the tests for those make one directly — the row
+// the old court-QR save inserted (CR-040 Phase 4: and the box's upload).
 
 import { randomPayCode, randomToken } from "../../server/src/utils/crypto/tokens.js";
 
@@ -33,3 +33,21 @@ export const insertLegacyClip = async (sql, { courtId, price }) => {
   );
   return { clipId, shareToken, payCode };
 };
+
+/**
+ * CR-040 Phase 4: the box can no longer upload a clip, so a test makes a
+ * legacy clip Ready directly — kept for the venue's days, optionally with its
+ * files (relative upload paths) as the old upload stored them.
+ * @param {import("mysql2/promise").Connection} sql - ctx.sql
+ * @param {string} clipId
+ * @param {{ videoPath?: string|null, thumbnailPath?: string|null }} [files]
+ */
+export const readyLegacyClip = (sql, clipId, { videoPath = null, thumbnailPath = null } = {}) =>
+  sql.query(
+    `UPDATE clips cl JOIN venues v ON v.venueId = cl.venueId
+     SET cl.status = 'Ready', cl.sizeBytes = 1000, cl.videoPath = ?, cl.thumbnailPath = ?,
+         cl.expiresAt = DATE_ADD(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00'),
+                                 INTERVAL v.clipRetentionDays DAY)
+     WHERE cl.clipId = ?`,
+    [videoPath, thumbnailPath, clipId]
+  );

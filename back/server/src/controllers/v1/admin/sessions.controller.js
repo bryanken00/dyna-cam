@@ -8,7 +8,6 @@ import {
 import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
-import { DRIVE_KEEP_DAYS, driveKeepCutoff } from "../../../utils/driveKeep.js";
 import { insertWithPayCode } from "../../../utils/payments.js";
 import { sessionShareUrl, toEpochMs } from "../../../utils/clips.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
@@ -40,6 +39,7 @@ import {
   driveEmailState,
   sendGameDriveEmail,
 } from "../../../utils/gameEmails.js";
+import { resendFromBox } from "../../../utils/boxVideos.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -729,11 +729,11 @@ router.patch(
 );
 
 /**
- * POST /:sessionId/drive-upload — CR-018 (2026-11-20): upload the game's kept
- * videos (whole game and saves) to the court's Google Drive again — the ones
- * whose upload failed, was skipped, or never ran (the court was connected
- * after the game). jobs/driveUploads.js picks them up within 30 s; the
- * Drive-link email follows by itself if it wasn't sent.
+ * POST /:sessionId/drive-upload — CR-018 (2026-11-20), CR-040: send the game's
+ * videos (whole game and saves) that the venue's recorder box kept but couldn't
+ * get to Google Drive (the court had no usable Drive, or Drive refused them) —
+ * the box still has them and sends them. The Drive-link email follows by
+ * itself if it wasn't sent.
  */
 router.post(
   "/:sessionId/drive-upload",
@@ -759,25 +759,17 @@ router.post(
       return res.sendError("Reconnect the court's Google Drive first (court setup)", 409);
     }
 
-    const now = getCurrentTimestampLocal();
-    const queued = await req.db.query(
-      `UPDATE session_videos
-       SET driveStatus = 'Pending', driveAttempts = 0, driveNextAttemptAt = NULL,
-           driveError = NULL, dateUpdated = ?
-       WHERE sessionId = ? AND status = 'Ready'
-         AND (driveStatus IN ('Failed', 'Skipped') OR driveStatus IS NULL)
-         AND dateCreated > ?`,
-      // CR-026: Drive keeps a video only DRIVE_KEEP_DAYS after it's saved
-      [now, req.params.sessionId, driveKeepCutoff()]
-    );
-    if (!queued.affectedRows) {
+    const count = await resendFromBox((sql, params) => req.db.query(sql, params), {
+      sessionId: req.params.sessionId,
+    });
+    if (!count) {
       return res.sendError(
-        `Nothing to upload — the game's videos are already in Google Drive, uploading, or older than the ${DRIVE_KEEP_DAYS} days Google Drive keeps them`,
+        "Nothing to send — the game's videos are already in Google Drive, on their way, or no longer on the venue box",
         409
       );
     }
     return res.sendSuccess(
-      `Uploading ${queued.affectedRows} ${queued.affectedRows === 1 ? "video" : "videos"} to Google Drive — within a minute`,
+      `Sending ${count} ${count === 1 ? "video" : "videos"} to Google Drive from the venue box`,
       { session: await loadSession(req.db, req.params.sessionId) }
     );
   })
@@ -984,13 +976,23 @@ router.post(
     const result = await req.db.query(
       `UPDATE session_videos sv
        JOIN recording_sessions s ON s.sessionId = sv.sessionId AND s.status != 'Cancelled'
-       SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL, sv.deviceId = NULL,
+       SET sv.status = 'Pending', sv.attempts = 0, sv.nextAttemptAt = NULL,
+           -- CR-040: a video made for Drive stays with the box that holds its file
+           sv.deviceId = IF(sv.delivery = 'Drive' AND sv.boxDeletedAt IS NULL, sv.deviceId, NULL),
            sv.uploadBytes = NULL, sv.receivedBytes = 0, sv.failureReason = NULL,
            sv.dateUpdated = ?
        WHERE sv.sessionId = ? AND sv.captureId IS NULL AND sv.camera = ? AND sv.status = 'Failed'`,
       [getCurrentTimestampLocal(), req.params.sessionId, req.params.camera]
     );
-    if (result.affectedRows === 0) {
+    // CR-040: or a video the venue box made for Drive but couldn't send there
+    const resent =
+      result.affectedRows === 0
+        ? await resendFromBox((sql, params) => req.db.query(sql, params), {
+            sessionId: req.params.sessionId,
+            camera: Number(req.params.camera),
+          })
+        : 0;
+    if (result.affectedRows === 0 && resent === 0) {
       return res.sendError("No failed whole-game video for this camera", 404);
     }
     // Back to Processing: the box keeps the footage and gets the job again

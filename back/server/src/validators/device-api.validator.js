@@ -87,6 +87,9 @@ export const heartbeatSchema = z.object({
       pendingClips: healthNumber(1e6),
       pendingGames: healthNumber(1e6),
       oldestPendingSeconds: healthNumber(1e10),
+      // CR-040: the game videos the box keeps for Google Drive, and their size
+      localVideos: healthNumber(1e6),
+      localVideoMb: healthNumber(1e9),
     })
     .optional(),
 });
@@ -97,7 +100,3 @@ export const jobsQuerySchema = z.object({
   wait: queryInt(25, { min: 0, max: 30 }),
 });
 
-// POST /clips/:clipId/fail
-export const failClipSchema = z.object({
-  reason: z.string().trim().min(1, "Reason is required").max(255),
-});

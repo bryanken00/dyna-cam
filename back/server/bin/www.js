@@ -8,7 +8,7 @@ import app, { db } from "../config/express.js";
 import { logger } from "../config/logger.js";
 import { scheduleIdempotencyCleanup } from "../src/middlewares/idempotency.middleware.js";
 import { scheduleClipMaintenance } from "../src/jobs/clipMaintenance.js";
-import { scheduleDriveUploads } from "../src/jobs/driveUploads.js";
+import { scheduleDriveJobs } from "../src/jobs/driveJobs.js";
 import { scheduleVenueAlerts } from "../src/jobs/venueAlerts.js";
 import { scheduleBookingMaintenance } from "../src/jobs/bookingMaintenance.js";
 import { close as closeRateLimiter } from "../src/utils/rateLimiterService.js";
@@ -107,7 +107,7 @@ let server;
 // Set once the server starts; a no-op until then so shutdown can always call it
 let stopIdempotencyCleanup = () => {};
 let stopClipMaintenance = () => {};
-let stopDriveUploads = () => {};
+let stopDriveJobs = () => {};
 let stopVenueAlerts = () => {};
 let stopBookingMaintenance = () => {};
 
@@ -147,7 +147,7 @@ async function gracefulShutdown(signal) {
   // Stop background jobs before the database pool closes
   stopIdempotencyCleanup();
   stopClipMaintenance();
-  stopDriveUploads();
+  stopDriveJobs();
   stopVenueAlerts();
   stopBookingMaintenance();
 
@@ -301,9 +301,9 @@ function onListening() {
     // Expire old clips (and delete their files), fail clips no recorder picked up — every 10 min
     stopClipMaintenance = scheduleClipMaintenance(db);
 
-    // CR-001: copy Ready clips of courts with a Google account to its Drive — every 30 s
-    // (CR-017: and move expired videos' Drive copies to the Drive's trash)
-    stopDriveUploads = scheduleDriveUploads(db);
+    // Google Drive, every 30 s: CR-018 Drive-link emails, CR-017 moving expired
+    // videos' Drive copies to the trash (CR-040: the box uploads, never the API)
+    stopDriveJobs = scheduleDriveJobs(db);
 
     // CR-008: box offline / camera down / disk / clock / backlog → Discord + email — every minute
     stopVenueAlerts = scheduleVenueAlerts(db);

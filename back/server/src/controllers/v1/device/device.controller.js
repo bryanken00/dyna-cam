@@ -3,28 +3,14 @@ import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsy
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
-import {
-  CLIP_POST_SECONDS,
-  CLIP_PRE_SECONDS,
-  daysFromNowLocal,
-  toEpochMs,
-} from "../../../utils/clips.js";
+import { CLIP_POST_SECONDS, CLIP_PRE_SECONDS, toEpochMs } from "../../../utils/clips.js";
 import { cameraVersion, decryptSecret, encryptSecret } from "../../../utils/crypto/secretBox.js";
-import {
-  clipUploadFolder,
-  removeClipFiles,
-  toStoredUploadPath,
-} from "../../../utils/file/clipFiles.js";
+import { toStoredUploadPath } from "../../../utils/file/clipFiles.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
-import { materializeSessionParts, settleSessions } from "../../../utils/sessions.js";
+import { materializeSessionParts } from "../../../utils/sessions.js";
 import { upload } from "../../../utils/file/uploads.js";
-import { queueClipForDrive } from "../../../utils/courtDrive.js";
 import { removeSnapshotFile, snapshotUploadFolder } from "../../../utils/file/snapshotFiles.js";
-import {
-  failClipSchema,
-  heartbeatSchema,
-  jobsQuerySchema,
-} from "../../../validators/device-api.validator.js";
+import { heartbeatSchema, jobsQuerySchema } from "../../../validators/device-api.validator.js";
 
 /**
  * Recorder-box API (PLAN-001) — mounted at /api/v1/device behind
@@ -36,28 +22,12 @@ import {
  * The box only ever calls out (no inbound ports at the venue):
  *   GET  /config                       courts + camera URLs + watermark logo
  *   POST /heartbeat                    every ~30s, with per-camera health
- *   GET  /jobs?wait=25                 long-poll for clips to cut
- *   POST /clips/:clipId/processing     claim a job
- *   POST /clips/:clipId/upload         multipart: video (mp4) + thumbnail (jpeg)
- *   POST /clips/:clipId/fail           give up on a job, with a reason
+ *   GET  /jobs?wait=25                 long-poll for game videos to make and send
+ *                                      (to a box that reports "drive-direct", CR-040)
  *   POST /courts/:courtId/snapshot     a preview JPEG for camera setup (PLAN-002)
  */
 
 const router = express.Router();
-
-const CLIP_MAX_UPLOAD_MB = Math.max(
-  1,
-  parseInt(process.env.CLIP_MAX_UPLOAD_MB || "100", 10) || 100
-);
-
-// Keyed by box, not IP: several boxes can share a venue's one public IP, and a
-// busy venue uploads far more than the per-IP upload limit allows.
-const deviceUploadLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_DEVICE_UPLOAD_POINTS || "600", 10),
-  duration: 3600,
-  keyGenerator: (req) => `device:${req.device.deviceId}`,
-  message: "Too many uploads from this recorder box",
-});
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -73,7 +43,8 @@ router.get(
 
     await materializeSessionParts(req.db, { venueId });
 
-    const [venueRows, courtRows, sessionRows] = await Promise.all([
+    const now = getCurrentTimestampLocal();
+    const [venueRows, courtRows, sessionRows, keptRows] = await Promise.all([
       req.db.query(
         `SELECT venueId, name, logoUrl, clipRetentionDays FROM venues WHERE venueId = ? LIMIT 1`,
         [venueId]
@@ -106,6 +77,17 @@ router.get(
              ))
            )`,
         [venueId, getCurrentTimestampLocal(), getCurrentTimestampLocal()]
+      ),
+      // CR-040: videos this venue's box keeps itself (sent to Google Drive from
+      // the box) and until when — a Failed one too, so staff can Retry it from
+      // the box; a file not listed here may go
+      req.db.query(
+        `SELECT sv.sessionVideoId, sv.boxKeepUntil, sv.driveStatus
+         FROM session_videos sv
+         WHERE sv.venueId = ? AND sv.delivery = 'Drive' AND sv.boxDeletedAt IS NULL
+           AND sv.status IN ('Pending', 'Uploading', 'Ready', 'Failed')
+           AND (sv.boxKeepUntil IS NULL OR sv.boxKeepUntil > ?)`,
+        [venueId, now]
       ),
     ]);
 
@@ -164,6 +146,13 @@ router.get(
             : null,
         };
       }),
+      // CR-040: keep these files (made for Google Drive) until keepUntilMs;
+      // onDrive = Google Drive has it (the box only keeps its copy)
+      keepVideos: keptRows.map((row) => ({
+        sessionVideoId: row.sessionVideoId,
+        keepUntilMs: row.boxKeepUntil ? toEpochMs(row.boxKeepUntil) : null,
+        onDrive: row.driveStatus === "Uploaded",
+      })),
       clip: { preSeconds: CLIP_PRE_SECONDS, postSeconds: CLIP_POST_SECONDS },
       serverTime: Date.now(),
     });
@@ -254,8 +243,27 @@ router.get(
   "/jobs",
   validateQuery(jobsQuerySchema),
   catchAsync(async (req, res) => {
-    const { venueId } = req.device;
+    const { venueId, deviceId } = req.device;
     const waitMs = Number(req.query.wait ?? 25) * 1000;
+    // CR-040: a box that reports "drive-direct" sends game videos straight to
+    // Google Drive; an older one still uploads them here
+    const [device] = await req.db.query(`SELECT lastStatus FROM devices WHERE deviceId = ?`, [
+      deviceId,
+    ]);
+    // A JSON column: the driver may hand it back parsed or as text
+    let status = device?.lastStatus || {};
+    if (typeof status === "string") {
+      try {
+        status = JSON.parse(status);
+      } catch {
+        status = {};
+      }
+    }
+    const capabilities = Array.isArray(status.capabilities) ? status.capabilities : [];
+    // CR-040 Phase 4: only a box that sends to Drive gets game jobs. An older
+    // one gets none — the game's footage stays listed in /config, so it is
+    // sent once the box is updated
+    const sendsToDrive = capabilities.includes("drive-direct");
     const deadline = Date.now() + waitMs;
 
     let closed = false;
@@ -263,16 +271,6 @@ router.get(
       closed = true;
     });
 
-    const findClips = () =>
-      req.db.query(
-        `SELECT cl.clipId, cl.courtId, cl.requestedAt, cl.durationSeconds, cl.source
-         FROM clips cl
-         JOIN courts c ON c.courtId = cl.courtId AND c.status != 'Deleted'
-         WHERE cl.venueId = ? AND cl.status = 'Pending' AND cl.sessionId IS NULL
-         ORDER BY cl.requestedAt ASC
-         LIMIT 10`,
-        [venueId]
-      );
     // CR-006: a finished game's whole video per camera, still to be sent —
     // waiting, or being sent by this box (it resumes after a restart).
     // CR-013: a save from the courtside device is the same job over its own
@@ -293,13 +291,8 @@ router.get(
          LIMIT 10`,
         [venueId, req.device.deviceId]
       );
-    const findJobs = async () => {
-      const [clips, games] = await Promise.all([findClips(), findGames()]);
-      return [
-        ...clips.map((row) => ({ type: "clip", ...row })),
-        ...games.map((row) => ({ type: "game", ...row })),
-      ];
-    };
+    const findJobs = async () =>
+      sendsToDrive ? (await findGames()).map((row) => ({ type: "game", ...row })) : [];
 
     // Session parts become jobs when their window ends (utils/sessions.js);
     // check for due parts now and every few seconds while waiting
@@ -317,221 +310,29 @@ router.get(
     if (closed) return undefined;
 
     return res.sendSuccess("Jobs", {
-      jobs: rows.map((row) =>
-        row.type === "game"
-          ? {
-              // CR-006: copy the game into one file for this camera and upload
-              // it in chunks (/device/game-videos/:sessionVideoId/…).
-              // camera 0 = the court's only camera; 1 / 2 = that camera
-              type: "game",
-              sessionVideoId: row.sessionVideoId,
-              sessionId: row.sessionId,
-              courtId: row.courtId,
-              camera: row.camera,
-              windowStartMs: toEpochMs(row.startAt),
-              windowEndMs: toEpochMs(row.endAt),
-            }
-          : {
-              type: "clip",
-              clipId: row.clipId,
-              courtId: row.courtId,
-              source: row.source,
-              requestedAt: row.requestedAt,
-              requestedAtMs: toEpochMs(row.requestedAt),
-              durationSeconds: row.durationSeconds,
-              preSeconds: CLIP_PRE_SECONDS,
-              postSeconds: CLIP_POST_SECONDS,
-            }
-      ),
+      jobs: rows.map((row) => ({
+        // CR-006: copy the game into one file for this camera; CR-040: keep it
+        // and send it to the court's Google Drive (/game-videos/:id/drive-session).
+        // camera 0 = the court's only camera; 1 / 2 = that camera
+        type: "game",
+        sessionVideoId: row.sessionVideoId,
+        sessionId: row.sessionId,
+        courtId: row.courtId,
+        camera: row.camera,
+        windowStartMs: toEpochMs(row.startAt),
+        windowEndMs: toEpochMs(row.endAt),
+        delivery: "drive",
+      })),
     });
   })
 );
 
-/**
- * Load a clip of the box's venue that is still waiting for a video, into
- * `req.clip`. Runs before multer, so nothing is written for a clip the box may
- * not touch.
+/*
+ * CR-040 Phase 4: the 60-second clip routes (/clips/:clipId/processing,
+ * /upload, /fail) are gone — no clip has been made since CR-027, and no video
+ * comes to the API any more. An old box never gets a clip job, so it never
+ * calls them.
  */
-const loadOpenClip = catchAsync(async (req, res, next) => {
-  const rows = await req.db.query(
-    `SELECT clipId, venueId, sessionId, status, deviceId FROM clips
-     WHERE clipId = ? AND venueId = ? AND status != 'Deleted'
-     LIMIT 1`,
-    [req.params.clipId, req.device.venueId]
-  );
-  if (rows.length === 0) {
-    throw new APIError("Clip not found", 404, ERROR_CODES.RESOURCE_NOT_FOUND);
-  }
-  if (!["Pending", "Processing"].includes(rows[0].status)) {
-    throw new APIError(
-      `This clip is already ${rows[0].status.toLowerCase()}`,
-      409,
-      ERROR_CODES.INVALID_STATUS
-    );
-  }
-  // Only one box makes a clip: once claimed, other boxes at the venue are refused
-  if (
-    rows[0].status === "Processing" &&
-    rows[0].deviceId &&
-    rows[0].deviceId !== req.device.deviceId
-  ) {
-    throw new APIError("Another recorder box is making this clip", 409, ERROR_CODES.INVALID_STATUS);
-  }
-  req.clip = rows[0];
-  next();
-});
-
-/**
- * POST /clips/:clipId/processing — claim the job
- */
-router.post(
-  "/clips/:clipId/processing",
-  loadOpenClip,
-  catchAsync(async (req, res) => {
-    // Atomic claim: a Pending clip, or one this box already holds (a retry).
-    // Two boxes claiming at once — exactly one update matches.
-    const result = await req.db.query(
-      `UPDATE clips SET status = 'Processing', deviceId = ?, dateUpdated = ?
-       WHERE clipId = ?
-         AND (status = 'Pending' OR (status = 'Processing' AND deviceId = ?))`,
-      [req.device.deviceId, getCurrentTimestampLocal(), req.clip.clipId, req.device.deviceId]
-    );
-    if (result.affectedRows === 0) {
-      throw new APIError(
-        "Another recorder box is making this clip",
-        409,
-        ERROR_CODES.INVALID_STATUS
-      );
-    }
-    return res.sendSuccess("Clip claimed");
-  })
-);
-
-const clipUpload = upload({
-  filePath: (req) => clipUploadFolder(req.clip.venueId, req.clip.clipId),
-  allowedTypes: {
-    "video/mp4": [".mp4"],
-    "image/jpeg": [".jpg", ".jpeg"],
-  },
-  maxFileSize: CLIP_MAX_UPLOAD_MB * 1024 * 1024,
-});
-
-/**
- * POST /clips/:clipId/upload
- * multipart/form-data: `video` (mp4, required), `thumbnail` (jpeg, optional).
- * Marks the clip Ready; it stays downloadable for the venue's retention days.
- */
-// A clip or session part can take minutes to upload on a slow venue line —
-// longer than the server's default request timeout
-const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
-const allowSlowUpload = (req, res, next) => {
-  req.setTimeout(UPLOAD_TIMEOUT_MS);
-  res.setTimeout(UPLOAD_TIMEOUT_MS);
-  next();
-};
-
-router.post(
-  "/clips/:clipId/upload",
-  allowSlowUpload,
-  deviceUploadLimiter,
-  loadOpenClip,
-  clipUpload.fields([
-    { name: "video", maxCount: 1 },
-    { name: "thumbnail", maxCount: 1 },
-  ]),
-  catchAsync(async (req, res) => {
-    const video = req.files?.video?.[0];
-    const thumbnail = req.files?.thumbnail?.[0];
-    const written = [video, thumbnail].filter(Boolean).map(toStoredUploadPath);
-
-    // The allowed types are shared by both fields — check each is the right one
-    if (!video || video.mimetype !== "video/mp4") {
-      await removeClipFiles(...written);
-      throw new APIError("An mp4 video is required", 400, ERROR_CODES.VALIDATION_FAILED);
-    }
-    if (thumbnail && thumbnail.mimetype !== "image/jpeg") {
-      await removeClipFiles(...written);
-      throw new APIError("The thumbnail must be a JPEG", 400, ERROR_CODES.VALIDATION_FAILED);
-    }
-
-    const videoPath = toStoredUploadPath(video);
-    const thumbnailPath = thumbnail ? toStoredUploadPath(thumbnail) : null;
-    const now = getCurrentTimestampLocal();
-
-    let conn;
-    let stillOpen = false;
-    try {
-      conn = await req.db.beginTransaction();
-
-      // Re-check under a lock: the clip may have been deleted or failed while
-      // the upload was in flight
-      const [rows] = await conn.execute(
-        `SELECT cl.status, v.clipRetentionDays
-         FROM clips cl JOIN venues v ON v.venueId = cl.venueId
-         WHERE cl.clipId = ? AND cl.venueId = ?
-         LIMIT 1 FOR UPDATE`,
-        [req.clip.clipId, req.device.venueId]
-      );
-      stillOpen = rows.length > 0 && ["Pending", "Processing"].includes(rows[0].status);
-      if (!stillOpen) {
-        await req.db.rollback(conn);
-      } else {
-        await conn.execute(
-          `UPDATE clips
-         SET status = 'Ready', videoPath = ?, thumbnailPath = ?, sizeBytes = ?, deviceId = ?,
-             failureReason = NULL, expiresAt = ?, dateUpdated = ?
-         WHERE clipId = ?`,
-          [
-            videoPath,
-            thumbnailPath,
-            video.size,
-            req.device.deviceId,
-            daysFromNowLocal(rows[0].clipRetentionDays),
-            now,
-            req.clip.clipId,
-          ]
-        );
-        await req.db.commit(conn);
-      }
-    } catch (err) {
-      await req.db.rollback(conn);
-      await removeClipFiles(...written);
-      throw err;
-    }
-
-    if (!stillOpen) {
-      await removeClipFiles(...written);
-      throw new APIError(
-        "This clip is no longer waiting for a video",
-        409,
-        ERROR_CODES.INVALID_STATUS
-      );
-    }
-
-    // CR-001: a court with a Google account gets a copy in its Drive
-    await queueClipForDrive(req.db, req.clip.clipId);
-    if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
-    return res.sendSuccess("Clip uploaded", { clipId: req.clip.clipId, status: "Ready" });
-  })
-);
-
-/**
- * POST /clips/:clipId/fail — the box could not make this clip
- */
-router.post(
-  "/clips/:clipId/fail",
-  validateBody(failClipSchema),
-  loadOpenClip,
-  catchAsync(async (req, res) => {
-    await req.db.query(
-      `UPDATE clips SET status = 'Failed', failureReason = ?, deviceId = ?, dateUpdated = ?
-       WHERE clipId = ? AND status IN ('Pending', 'Processing')`,
-      [req.body.reason, req.device.deviceId, getCurrentTimestampLocal(), req.clip.clipId]
-    );
-    if (req.clip.sessionId) await settleSessions(req.db, req.clip.sessionId);
-    return res.sendSuccess("Clip marked as failed");
-  })
-);
 
 /**
  * Load a court of the box's venue into `req.court` (before multer, so nothing

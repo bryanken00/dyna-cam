@@ -27,7 +27,10 @@ export class DeviceSync {
     live = null,
     streams = null,
     health = null,
+    videos = null,
   }) {
+    // CR-040: the game videos kept for Google Drive (videos.js), tidied with each fresh /config
+    this.videos = videos;
     this.preview = preview;
     // CR-008: (clockOffsetMs) => the heartbeat's `system` field (health.js sampleHealth)
     this.health = health;
@@ -98,6 +101,11 @@ export class DeviceSync {
     const receivedAt = Date.now();
     this.checkClock(config.serverTime, sentAt, receivedAt);
     await this.apply(config);
+    try {
+      await this.videos?.reconcile(config.keepVideos, sentAt);
+    } catch (err) {
+      this.log.warn("could not tidy the kept game videos", err);
+    }
     await writeJsonAtomic(this.cacheFile, {
       savedAt: new Date().toISOString(),
       device: config.device,

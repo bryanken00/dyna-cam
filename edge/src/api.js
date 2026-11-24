@@ -145,6 +145,153 @@ function gameVideoCalls(request) {
 
     failGameVideo: (id, reason) =>
       request("POST", gamePath(id, "fail"), { json: { reason: truncate(reason, 255) } }),
+
+    /**
+     * CR-040: the box made the file and keeps it — where should it go?
+     * → { drive: true, uploadUrl, chunkBytes, keepUntilMs } (a Google Drive
+     * resumable session; the same one again unless `newSession`), or
+     * { drive: false, reason, keepUntilMs } (no usable Drive: keep it here).
+     */
+    openDriveSession: (id, { sizeBytes, durationSeconds, gaps, newSession = false }, signal) =>
+      request("POST", gamePath(id, "drive-session"), {
+        json: { sizeBytes, durationSeconds, gaps, newSession },
+        timeoutMs: 60_000,
+        signal,
+      }),
+
+    /** How much Google has, for the game page. → { receivedBytes } */
+    reportDriveProgress: (id, uploadedBytes, signal) =>
+      request("POST", gamePath(id, "progress"), { json: { uploadedBytes }, signal }),
+
+    /** Google answered the last chunk with the file's ID. → { status: "Ready", driveUrl } */
+    driveDone: (id, driveFileId, signal) =>
+      request("POST", gamePath(id, "drive-done"), {
+        json: { driveFileId },
+        timeoutMs: 60_000,
+        signal,
+      }),
+
+    /** The box removed its copy of a video it kept for Drive. */
+    boxDeleted: (id) => request("POST", gamePath(id, "box-deleted")),
+  };
+}
+
+/**
+ * CR-040: a game video goes from the box straight to the court's Google Drive.
+ * The API opens a resumable upload session (it holds the court's sign-in) and
+ * hands the box its address; the address itself is the credential, so no
+ * token is sent to Google. Never log the address — only its path.
+ */
+const DRIVE_LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const DRIVE_BUSY_REASONS = new Set(["rateLimitExceeded", "userRateLimitExceeded", "backendError"]);
+
+/** The upload address, if the box will send a game there (https; plain http only on loopback, for tests). */
+function driveUrl(uploadUrl) {
+  let url = null;
+  try {
+    url = new URL(uploadUrl);
+  } catch (_err) {
+    // checked below
+  }
+  const usable =
+    url &&
+    (url.protocol === "https:" || (url.protocol === "http:" && DRIVE_LOOPBACK.has(url.hostname)));
+  if (!usable) {
+    throw new ApiError("Drive upload: the API sent an unusable upload address", {
+      status: 502,
+      code: "DRIVE_BAD_URL",
+    });
+  }
+  return url;
+}
+
+/** Google's error body → { message, reason } (both may be null). */
+function googleError(text) {
+  const body = parseEnvelope(text);
+  const error = body?.error && typeof body.error === "object" ? body.error : null;
+  return {
+    message: typeof error?.message === "string" ? error.message : null,
+    reason: error?.errors?.[0]?.reason ?? null,
+  };
+}
+
+/**
+ * One answer from a Drive upload session:
+ * 200/201 → { done: true, fileId }; 308 → { done: false, receivedBytes }.
+ * Errors are ApiErrors with a `DRIVE_*` code, never status 401 (that means a
+ * revoked box): DRIVE_SESSION_EXPIRED (open a new session), DRIVE_BUSY (try
+ * again later), DRIVE_REFUSED (Google won't take it: full, forbidden).
+ */
+export function driveAnswer(res, text) {
+  if (res.status === 200 || res.status === 201) {
+    const fileId = parseEnvelope(text)?.id;
+    if (typeof fileId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(fileId)) {
+      throw new ApiError("Drive upload: Google answered without a file ID", {
+        status: 502,
+        code: "DRIVE_BUSY",
+      });
+    }
+    return { done: true, fileId };
+  }
+  if (res.status === 308) {
+    // "bytes=0-N": Google has N + 1 bytes; no Range header: none yet
+    const match = /^bytes=0-(\d+)$/.exec(res.headers.get("range") || "");
+    return { done: false, receivedBytes: match ? Number(match[1]) + 1 : 0 };
+  }
+  const { message, reason } = googleError(text);
+  const fail = (status, code, words = message || `HTTP ${res.status}`) =>
+    new ApiError(`Drive upload: ${words}`, {
+      status,
+      code,
+      detail: words,
+      retryAfterMs: parseRetryAfter(res.headers.get("retry-after")),
+    });
+  if ([401, 404, 410].includes(res.status)) throw fail(410, "DRIVE_SESSION_EXPIRED");
+  if (res.status === 403 && reason === "storageQuotaExceeded") {
+    throw fail(403, "DRIVE_REFUSED", "the court's Google Drive is full");
+  }
+  if (
+    res.status === 429 ||
+    res.status === 408 ||
+    res.status >= 500 ||
+    DRIVE_BUSY_REASONS.has(reason)
+  ) {
+    throw fail(res.status >= 500 ? res.status : 429, "DRIVE_BUSY");
+  }
+  throw fail(res.status, "DRIVE_REFUSED");
+}
+
+/** The PUTs of a Google Drive resumable upload (no Authorization header). */
+function driveCalls(fetchImpl, userAgent) {
+  async function put(uploadUrl, contentRange, body, timeoutMs, signal) {
+    const url = driveUrl(uploadUrl);
+    const { res, body: text } = await call(
+      fetchImpl,
+      url,
+      {
+        method: "PUT",
+        headers: { "User-Agent": userAgent, "Content-Range": contentRange },
+        body,
+      },
+      timeoutMs,
+      signal
+    );
+    return driveAnswer(res, text);
+  }
+  return {
+    /** Where is Google? An empty PUT with Content-Range "bytes STAR/size". */
+    driveUploadStatus: (uploadUrl, sizeBytes, signal) =>
+      put(uploadUrl, `bytes */${sizeBytes}`, Buffer.alloc(0), 30_000, signal),
+
+    /** Bytes [offset, offset + length) of a `sizeBytes` file. */
+    putDriveChunk: (uploadUrl, offset, bytes, sizeBytes, signal) =>
+      put(
+        uploadUrl,
+        `bytes ${offset}-${offset + bytes.length - 1}/${sizeBytes}`,
+        bytes,
+        uploadTimeoutMs(bytes.length),
+        signal
+      ),
   };
 }
 
@@ -271,6 +418,8 @@ export function createApi({
     },
 
     ...gameVideoCalls(request),
+
+    ...driveCalls(fetchImpl, userAgent),
 
     /**
      * Download a file the API linked to (the signed logo path is RELATIVE to

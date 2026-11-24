@@ -18,7 +18,13 @@ export const USER_AGENT = `DynaCamRecorder/${pkg.version}`;
  * chunks (/game-videos/:id/start, /chunk, /finish, /fail).
  */
 export const CAPABILITY_GAME_FILE = "game-file";
-export const DEVICE_CAPABILITIES = Object.freeze([CAPABILITY_GAME_FILE]);
+/**
+ * "drive-direct" (CR-040): the box keeps each game file and sends it straight to
+ * the court's Google Drive (/game-videos/:id/drive-session, /progress,
+ * /drive-done, /box-deleted); the API then gives game jobs `delivery: "drive"`.
+ */
+export const CAPABILITY_DRIVE_DIRECT = "drive-direct";
+export const DEVICE_CAPABILITIES = Object.freeze([CAPABILITY_GAME_FILE, CAPABILITY_DRIVE_DIRECT]);
 
 export const ENCODERS = ["auto", "libx264", "h264_qsv", "h264_vaapi", "h264_videotoolbox"];
 

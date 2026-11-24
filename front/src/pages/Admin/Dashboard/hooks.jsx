@@ -190,6 +190,17 @@ const boxFacts = (system) => {
         : `${waiting} (oldest ${durationText(system.oldestPendingSeconds)})`,
     tone: waiting === 0 ? "success" : system.oldestPendingSeconds > 3600 ? "error" : "warning",
   });
+  // CR-040: game videos the box keeps (sent from there to Google Drive)
+  if (Number.isFinite(system.localVideos)) {
+    facts.push({
+      label: "Videos kept",
+      value:
+        system.localVideos === 0
+          ? "None"
+          : `${system.localVideos} (${gb(system.localVideoMb || 0)})`,
+      tone: "muted",
+    });
+  }
   if (Number.isFinite(system.memTotalMb) && system.memTotalMb > 0) {
     facts.push({
       label: "Memory free",

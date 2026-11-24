@@ -13,7 +13,6 @@
  * (`tickSeconds`), so a device with the wrong clock or zone still counts right.
  */
 
-import { BASE_URL } from "@/constants";
 
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -138,17 +137,4 @@ export const liveExpiryMs = (live) => {
   return Number.isNaN(ms) ? null : ms;
 };
 
-/* ── Media from the API ──────────────────────────────────────────────────── */
 
-/**
- * A file link the API returned (CR-013 saves: `videoUrl`, `thumbnailUrl`) as a
- * full address the player can load. The API returns signed, expiring
- * *relative* links ("/public/uploads/…?expires&signature"); use them exactly
- * as given — only the API's origin is added. null when there is no link.
- * ⚠️ Never log it: the signature is what lets it be opened.
- */
-export const mediaUrl = (link) => {
-  if (!link) return null;
-  if (/^https?:\/\//i.test(link)) return link;
-  return `${BASE_URL.replace(/\/+$/, "")}${link.startsWith("/") ? "" : "/"}${link}`;
-};

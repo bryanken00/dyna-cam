@@ -1,11 +1,11 @@
 # Dyna Cam — recorder box
 
-The small computer at each venue that records every court's camera and cuts the replays players
-save. It keeps a rolling ~3-minute buffer per court. When a player taps **Save last 60 seconds**,
-the API queues a clip job. The box picks the job up, cuts 60 s before the tap plus 5 s after,
-burns the venue logo in bottom-right, makes a JPEG thumbnail and uploads both.
+The small computer at each venue that records every court's camera. It keeps a rolling
+~3-minute buffer per court and each game's footage. After a game (and for each "Save the last …"),
+it makes the video, **keeps it on its own disk** for the venue's keep time and **sends it straight
+to the court's Google Drive**, where players open it (CR-040). The cloud never holds a video file.
 
-The box only makes **outbound** HTTPS calls to the API. The venue needs no port-forwarding and no
+The box only makes **outbound** HTTPS calls — to the API, and to Google for the video bytes. The venue needs no port-forwarding and no
 public IP. It listens only on the venue LAN: a small port for the court buttons and one for the
 [live view](#live-view-on-the-venue-wi-fi) on session devices. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
 product.
@@ -16,9 +16,9 @@ Conventions live in the [`edge-conventions`](../.claude/skills/edge-conventions/
 ```
 IP camera ──RTSP──▶ ffmpeg (-c:v copy) ──▶ data/buffer/<courtId>/<epoch>.ts   (rolling, ~180 s)
                                                          │
-API ──GET /jobs (long-poll)──▶ job ──▶ cut + logo + H.264 ──▶ POST /clips/:id/upload
-                                 └──▶ game job (after End game) ──▶ copy the game into one mp4
-                                        ──▶ /game-videos/:id/start, /chunk ×N, /finish
+API ──GET /jobs (long-poll)──▶ game job (after End game / a save) ──▶ copy into one mp4
+   ──▶ data/videos/<id>/game.mp4 (kept) ──▶ POST /game-videos/:id/drive-session
+   ──▶ PUT chunks to Google Drive ──▶ POST /game-videos/:id/drive-done
 ```
 
 ---
@@ -28,8 +28,9 @@ API ──GET /jobs (long-poll)──▶ job ──▶ cut + logo + H.264 ──
 - **Mini PC:** an Intel N100-class box (4 cores, Quick Sync) with 8 GB RAM. Recording is stream
   copy, so it costs almost no CPU. Only cutting a clip encodes video, and the N100's `h264_qsv`
   encoder does that in a few seconds.
-- **SSD:** at least 128 GB. The buffer is small (about 6 courts × 180 s × 2–4 Mbps ≈ 0.5 GB), but
-  it is rewritten all day, so don't use an SD card or a USB stick.
+- **SSD:** 1–2 TB. The box keeps every game's video for the venue's keep time (see
+  [Disk sizing](#sessions-full-session-recording)); the buffer itself is small but rewritten all day, so don't
+  use an SD card or a USB stick.
 - **Wired network:** plug the box into the router with a cable. The cameras may be on Wi-Fi; the
   box should not be.
 - **Power:** a small UPS is worth it. The queue survives a reboot, but footage from during the
@@ -169,11 +170,13 @@ Every heartbeat (30 s) also carries the box's own health, read without any extra
 | `diskFreeMb` / `diskTotalMb` | Space on the disk that holds `DATA_DIR` (the buffer) |
 | `memFreeMb` / `memTotalMb`, `load1`, `cpus`, `uptimeSeconds` | Memory, 1-minute load, CPU count, time since boot |
 | `clockOffsetMs` | Server clock minus the box's, from the last `/config` or heartbeat reply |
-| `pendingClips`, `pendingGames`, `oldestPendingSeconds` | Clips and game videos not yet uploaded, and the oldest one's age |
+| `pendingClips`, `pendingGames`, `oldestPendingSeconds` | Clips and game videos not yet sent, and the oldest one's age |
+| `localVideos`, `localVideoMb` | Game videos kept on the box for the keep time (CR-040), and their size |
 
 The API turns these into problems: **disk almost full** (under 10% free), **clock off** (more than
 2 s), **uploads piling up** (something unsent for over an hour), plus **box offline** (no
-heartbeat) and **camera not recording**. A problem that lasts about 5 minutes is posted to the
+heartbeat), **camera not recording** and (CR-040) **box needs updating** (it doesn't send games to
+Google Drive yet, so it gets none). A problem that lasts about 5 minutes is posted to the
 staff Discord channel (and emailed once SendGrid is set up), and again when it's fixed. The web
 Dashboard shows the same per box. Older boxes keep working; only their disk, clock and backlog
 don't show.
@@ -247,27 +250,28 @@ contains:
 ## Sessions (full-session recording)
 
 A game ("session") is recorded from when the session device is paired until **End game**
-(CR-005). Each camera's whole game travels to the server as **one file** (CR-006) — there are
-no 5-minute pieces anywhere.
+(CR-005). Each camera's whole game is **one file** (CR-006), kept on the box and sent to the
+court's Google Drive (CR-040) — there are no 5-minute pieces anywhere.
 
 What the box does:
 
 1. **Keeps the footage while the game is on.** `/config` lists the court's sessions, and every
    segment that overlaps a listed session window, ±10 s, is kept instead of being pruned after
    `BUFFER_SECONDS`. There is no time limit on the box's side: the API keeps a finished game
-   listed until its videos are uploaded, then stops listing it and the footage ages out. A cached
+   listed until its videos are made, then stops listing it and the footage ages out. A cached
    config keeps this working across a reboot.
 2. **Makes one file per camera after End game.** The API sends one **game job** per camera
    (`type: "game"`, `sessionVideoId`, `camera`, `windowStartMs`/`windowEndMs`; it may come back on
    every poll until it's finished — the box keeps one). The box waits until the end of the game
    is in a closed segment (or a minute has passed), then **joins that camera's segments by stream
-   copy** into one mp4 (`data/jobs/<sessionVideoId>/game.mp4`, faststart). No re-encode: it takes
-   seconds even for a 3 h game and keeps the camera's full quality.
+   copy** into one mp4 (`data/jobs/<sessionVideoId>/game.mp4`, faststart), then moves it into
+   its video store (`data/videos/<sessionVideoId>/game.mp4`). No re-encode: it takes seconds even
+   for a 3 h game and keeps the camera's full quality.
    - **No venue logo** on game videos, no scaling, no size cap (60-second replays keep their logo).
    - It starts on the keyframe at (or just before) the game's start and ends at the game's end.
    - `camera: 0` is the court's only camera, `1` camera 1, `2` camera 2 — never stacked, never the
      other camera. On a two-camera court that's "Cam 1" and "Cam 2", each its own file.
-   - A JPEG thumbnail from about 1 s in (a failed thumbnail doesn't stop the upload).
+   - No thumbnail is kept: Google Drive makes its own.
 3. **Skips camera drop-outs.** A hole of up to 7 s shows as a held frame. A longer one is left out
    of the file and reported as a gap (`gaps: [{ startMs, endMs }]`), so the server can name the
    missing stretch; `durationSeconds` is the game minus its gaps.
@@ -275,39 +279,50 @@ What the box does:
      game" ("The camera was not recording during this game" on a one-camera court).
    - A camera-2 job for a court with no camera 2 in `/config` and no camera-2 footage fails at once
      with "This court has no camera 2". Footage camera 2 recorded before it was removed is still used.
-4. **Uploads it in resumable chunks.** `POST /game-videos/:id/start` (size, duration, gaps) answers
-   how much the server already has and the chunk size (8 MB); the box `PUT`s each chunk from that
-   offset (read straight from disk, so memory stays flat) and then `POST`s `/finish` with the
-   thumbnail.
-   - **A dropped connection or a restart continues where it stopped**, never from zero: the job,
-     its file and its phase (`waiting` / `copying` / `uploading` / `finishing`) are saved in
-     `data/queue.json`. After a restart the upload resumes through `/start`; a job whose file is
-     gone is copied again (the footage is still kept).
-   - Network errors and 5xx back off 5 s → 5 min; 429 waits for `Retry-After`. If the server is at
-     another offset (409 `OFFSET_MISMATCH`) the box carries on from there.
-   - The game was deleted or is already finished (404 / 409): the job and its files are dropped.
-   - The folder is deleted once `/finish` succeeds.
-5. **Puts players first.** Game videos run one at a time in their own lane. A player's clip is
-   always cut first, and a game upload pauses between chunks while a clip is waiting to upload.
-6. The box tells the API it does all this with `capabilities: ["game-file"]` in every heartbeat.
-   Session-part jobs left in `data/queue.json` by an older box are dropped with a log line.
+4. **Sends it straight to the court's Google Drive.** `POST /game-videos/:id/drive-session`
+   (size, duration, gaps) answers with a Google Drive upload address the API opened with the
+   court's sign-in (the box never has the court's Google sign-in), or `drive: false` when the court
+   has no usable Drive — then the box just keeps the video. The box asks Google how much it already
+   has, `PUT`s 8 MB chunks from there (read straight from disk, so memory stays flat), reports
+   progress for the game page, and finishes with `POST /game-videos/:id/drive-done` and the Drive
+   file's ID; the API checks the file in Drive and shares it by link.
+   - **A dropped connection or a restart continues where Google stopped**, never from zero: the
+     job and its phase are saved in `data/queue.json`, and after a restart the API hands back the
+     same upload. The upload address is never saved on the box nor logged.
+   - Google lost the upload (expired after about a week) or has a different file: a new upload.
+     Google is busy, or the line is down: back off 5 s → 5 min. Google refuses it (Drive full): the
+     video is reported failed and **the box keeps it** — staff free space and press Retry.
+   - The game was deleted (404): the job is dropped; whether the file stays is the keep list's call.
+5. **Keeps every video for the venue's keep time** (`data/videos/`, `videos.json`). `/config`
+   lists the videos the box should keep (`keepVideos`) and until when. A video goes when its keep
+   time is over, or when a fresh `/config` no longer lists it; under `DISK_CRITICAL_MB` the oldest
+   ones already on Drive go first. Each removal is reported (`/game-videos/:id/box-deleted`).
+   A court without Drive: the box keeps the only copy, and connecting the court's Drive (or Retry
+   in Admin → Sessions) sends it.
+6. **Puts players first.** Game videos run one at a time in their own lane, and pause between
+   chunks while anything more urgent is waiting.
+7. The box tells the API it does all this with `capabilities: ["game-file", "drive-direct"]` in
+   every heartbeat; the heartbeat's `system` also counts the kept videos (`localVideos`,
+   `localVideoMb`). An API from before CR-040 sends `delivery: "server"` and gets the old upload.
+   Since CR-040 Phase 4 the API gives game jobs only to a `drive-direct` box: an older box gets
+   none (its games wait) and shows "Recorder box needs updating".
 
-**How long it takes.** The copy takes seconds; the upload is the camera's own bitrate × the game:
+**How long it takes.** The copy takes seconds; sending is the camera's own bitrate × the game:
 about 0.45–0.9 GB per camera per hour for a C200 `stream1`. A 2 h game on a two-camera court is
-about 2–3.5 GB, so at 10 Mbit/s upload it is ready 30–50 minutes after End game.
+about 2–3.5 GB, so at 10 Mbit/s upload it is on Drive 30–50 minutes after End game.
 
-**Disk sizing.** The game's footage is kept until its videos are uploaded, and the copied file
-needs about as much again while it uploads. Plan for:
+**Disk sizing.** The box keeps every game's video for the venue's keep time (7 days by default),
+on top of the footage of games still being made. Plan for:
 
-> free space ≥ (courts in games at the same time) × (cameras per court) × (longest game in hours) × 0.9 GB × 2 + 2 GB margin
+> free space ≥ cameras × hours of games a day × 0.5 GB × keep days + 10 GB margin
 
-For example, 6 one-camera courts with 3 h games at once is about 34 GB, so use a 128 GB SSD or
-larger (256 GB with two cameras per court). A box that is offline after End game keeps the
-footage until it can upload. The box checks free space every minute:
+For example, 4 one-camera courts with 10 h of games a day kept 7 days is about 150 GB, so use a
+1 TB SSD (2 TB with two cameras per court or a longer keep time). A box that is offline keeps
+everything until it can send it. The box checks free space every minute:
 
 - Below `DISK_WARN_GB` (2 GB) it logs a warning every 10 min.
-- Below `DISK_CRITICAL_MB` (500 MB) it logs an error and stops keeping game footage, so
-  recording never stops.
+- Below `DISK_CRITICAL_MB` (500 MB) it logs an error, stops keeping game footage and removes the
+  oldest kept videos (those already on Drive first), so recording never stops.
 
 ## Live streaming
 
@@ -626,9 +641,11 @@ clip from the court's QR page.
   the API lists them (`segments.js` `retentionWindows`).
 - **Game videos** (`src/game.js`, CR-006): a game job picks one camera's segments for the game
   window (`planGame`: gaps over 7 s left out and reported), copies them into one mp4 with the
-  concat demuxer and `-c:v copy -c:a copy` (no re-encode, no logo), and uploads it with the
-  resumable chunked upload (`uploadGameFile`: start → chunks → finish, resume on 409
-  `OFFSET_MISMATCH` and after errors or restarts).
+  concat demuxer and `-c:v copy -c:a copy` (no re-encode, no logo). CR-040: `src/drive.js`
+  `sendToDrive` sends it straight to the court's Google Drive (drive-session → ask Google where it
+  is → chunks → drive-done, resuming after errors or restarts), and `src/videos.js` keeps it for the
+  venue's keep time. (`uploadGameFile`, the old upload to the API, is used only with an API from
+  before CR-040.)
 - **Stream keys** (`src/stream.js`): stream-key masking and reading ffmpeg's log lines.
 - **Live view** (`src/live.js`): a `node:http` server on the LAN that turns the newest closed
   segments into a signed HLS live playlist and streams the files with their timestamps shifted.
@@ -646,7 +663,10 @@ clip from the court's QR page.
   5. 404 or 409 means the clip is gone or already done, so the job is dropped.
   6. A cut clip that wasn't uploaded yet is re-uploaded after a reboot.
   7. Game jobs run in their own lane, one at a time, after clips; their phase is persisted so a
-     reboot resumes the upload.
+     reboot resumes sending to Drive.
+
+  Since CR-027 the API makes no 60-second clips, and since CR-040 Phase 4 it hands out no clip
+  jobs, so steps 2–6 only ever run against an older API.
 
 ## Troubleshooting
 

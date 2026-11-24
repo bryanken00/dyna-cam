@@ -1,4 +1,4 @@
-import { Cloud, Loader2, RefreshCw, Unplug } from "lucide-react";
+import { Cloud, CloudOff, Loader2, RefreshCw, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SetupSection from "./SetupSection";
 import StatusDot from "../../../../../components/StatusDot";
@@ -38,6 +38,30 @@ const queueLine = (queue) => {
   );
   return parts.join(" · ");
 };
+
+/**
+ * CR-040: without a usable Drive, players get no video from this court — the
+ * venue's recorder box keeps each game and sends it once Drive is connected.
+ */
+const NoVideoWarning = () => (
+  <div
+    className="flex items-start gap-2 px-3.5 py-3"
+    role="status"
+    style={{
+      border: "1px solid var(--color-line)",
+      borderRadius: 10,
+      fontSize: 13,
+      color: "var(--color-warning)",
+    }}
+  >
+    <CloudOff className="w-4 h-4 shrink-0 mt-0.5" />
+    <span>
+      Players get no video from this court until Google Drive is connected. The venue&apos;s
+      recorder box keeps each game for the venue&apos;s keep time and sends it to Drive once
+      it&apos;s connected.
+    </span>
+  </div>
+);
 
 /**
  * CR-001 — the court's Google Drive: every recording on this court (replays
@@ -88,30 +112,30 @@ const GoogleDriveSection = ({ court, canWrite }) => {
   let body;
   if (!drive.configured) {
     body = (
-      <Panel>
-        <StatusDot tone="muted">
-          <span className="font-semibold" style={{ color: "var(--color-text-dark)" }}>
-            Google Drive isn&apos;t available yet
-          </span>
-        </StatusDot>
-        <div className="mt-1" style={muted}>
-          It has to be turned on for DGSports once. After that, a Connect Google
-          Drive button appears here.
-        </div>
-        <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          For the administrator: set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and
-          GOOGLE_REDIRECT_URI in the API&apos;s .env (steps in back/.env.example), then
-          restart the API.
-        </div>
-      </Panel>
+      <div className="space-y-3">
+        <NoVideoWarning />
+        <Panel>
+          <StatusDot tone="muted">
+            <span className="font-semibold" style={{ color: "var(--color-text-dark)" }}>
+              Google Drive isn&apos;t available yet
+            </span>
+          </StatusDot>
+          <div className="mt-1" style={muted}>
+            It has to be turned on for DGSports once. After that, a Connect Google
+            Drive button appears here.
+          </div>
+          <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            For the administrator: set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and
+            GOOGLE_REDIRECT_URI in the API&apos;s .env (steps in back/.env.example), then
+            restart the API.
+          </div>
+        </Panel>
+      </div>
     );
   } else if (!drive.connected) {
     body = (
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div style={muted}>
-          Not connected — recordings stay on the server only, for the
-          venue&apos;s retention days.
-        </div>
+      <div className="space-y-3">
+        <NoVideoWarning />
         {canWrite && (
           <Button type="button" className="h-10" onClick={handleConnect} disabled={busy}>
             {connectIcon}
@@ -135,8 +159,9 @@ const GoogleDriveSection = ({ court, canWrite }) => {
             <div className="mt-1" style={{ ...muted, color: "var(--color-warning)" }}>
               {drive.problem ||
                 "Google refused the sign-in. Reconnect to resume uploads."}{" "}
-              Recordings made meanwhile upload once it&apos;s reconnected, and
-              expired videos leave the Drive then too.
+              Players get no new video from this court until then: recordings
+              made meanwhile stay on the venue&apos;s recorder box and are sent
+              once it&apos;s reconnected, and expired videos leave the Drive then too.
             </div>
           )}
           {queue && (
@@ -149,10 +174,12 @@ const GoogleDriveSection = ({ court, canWrite }) => {
               Last problem: {drive.queue.lastError}
             </div>
           )}
-          {/* CR-017 / CR-026 */}
+          {/* CR-017 / CR-026; CR-040: sent from the box, kept the venue's keep time */}
           <div className="mt-1" style={muted}>
-            Each video&apos;s Drive copy is moved to the Drive&apos;s trash 2 days
-            after it&apos;s saved (Google empties the trash after 30 days).
+            Each video&apos;s Drive copy is moved to the Drive&apos;s trash when the
+            venue&apos;s keep time is over (Google empties the trash after 30 days).
+            A week of games is about 35 GB per camera — the account needs that much
+            Google storage.
           </div>
           {drive.connectedAt && (
             <div className="mt-1" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -199,7 +226,7 @@ const GoogleDriveSection = ({ court, canWrite }) => {
     <SetupSection
       id="court-google-drive"
       title="Google Drive"
-      description="Copy every recording on this court — replays and whole games — to a Google Drive, in a folder for this court. Players get an Open in Google Drive link on their page."
+      description="Where players get their games: the venue's recorder box sends every game video and save on this court straight to this Google Drive, in a folder for this court, and players open it from an Open in Google Drive link on their page."
     >
       {body}
     </SetupSection>

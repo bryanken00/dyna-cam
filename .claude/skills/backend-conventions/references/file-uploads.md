@@ -13,13 +13,13 @@ public/uploads/
     ├── avatars/{accountId}/      ← User avatars (per-user)
     ├── signatures/{accountId}/   ← User signatures (per-user)
     ├── images/                   ← General images (venue logos too)
-    └── clips/{venueId}/{clipId}/ ← Replay clips (mp4 + jpg) uploaded by recorder boxes
+    └── clips/{venueId}/{clipId}/ ← Legacy: replay clips and game videos boxes uploaded before CR-040
 ```
 
-`clips/` is written only by the device API (`controllers/v1/device/`), with both IDs taken from
-the clip row the box is allowed to touch, never from the request. Use the helpers in
-`utils/file/clipFiles.js` (`clipUploadFolder()`, `removeClipFiles()`); expiry deletes the files
-(`jobs/clipMaintenance.js`).
+`clips/` is no longer written (CR-040 Phase 4): videos stay on the venue's recorder box and go
+straight to the court's Google Drive; the API never stores or serves a video file. What older
+uploads left there is deleted on expiry (`jobs/clipMaintenance.js`, `utils/file/clipFiles.js`
+`removeClipFiles()`). Don't add a video upload route.
 
 ---
 
@@ -79,7 +79,7 @@ request never writes a file.
 | User avatar    | `uploads/admin/avatars/{accountId}/`    | `req.user.accountId`          |
 | User signature | `uploads/admin/signatures/{accountId}/` | `req.user.accountId`          |
 | General image  | `uploads/admin/images/`                 | —                             |
-| Replay clip    | `uploads/admin/clips/{venueId}/{clipId}/` | the clip row (`req.clip`)   |
+| Replay clip (legacy, no longer written) | `uploads/admin/clips/{venueId}/{clipId}/` | the clip row |
 
 ---
 

@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { decryptSecret, encryptSecret } from "./crypto/secretBox.js";
 import { appUrl } from "./clips.js";
 
@@ -6,8 +5,10 @@ import { appUrl } from "./clips.js";
  * Google Drive for courts (CR-001) — plain REST over `fetch`, no Google SDK.
  *
  * Staff connect one Google account per court (OAuth "web server" flow); the
- * API keeps its refresh token (encrypted) and copies each Ready clip of that
- * court into the account's Drive (jobs/driveUploads.js).
+ * API keeps its refresh token (encrypted). CR-040: the API never uploads a
+ * file — it opens a resumable upload session (openUploadSession) that the
+ * venue's recorder box sends the video to, then reads the file back (getFile)
+ * and shares it by link.
  *
  *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET   the OAuth client (type "Web")
  *   GOOGLE_REDIRECT_URI                       registered in Google Cloud; points
@@ -28,8 +29,6 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 /** How long the consent screen's `state` stays valid. */
 const STATE_TTL_MS = 10 * 60 * 1000;
-/** Resumable upload chunk: a multiple of 256 KiB. */
-const CHUNK_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 
 const urls = () => ({
@@ -329,75 +328,54 @@ export const trashFile = async (token, fileId) => {
   return true;
 };
 
-/** Read up to `length` bytes of an open file at `position`. */
-const readChunk = async (handle, position, length) => {
-  const buffer = Buffer.alloc(length);
-  const { bytesRead } = await handle.read(buffer, 0, length, position);
-  return bytesRead === length ? buffer : buffer.subarray(0, bytesRead);
-};
-
 /**
- * Upload a local file into a folder with a resumable session, in 8 MB chunks
- * (memory stays flat whatever the file size).
+ * Open a resumable upload session for one file in a folder. Google answers with
+ * the session's address: whoever holds it can send that one file's bytes (no
+ * token needed), for about a week. CR-040: the API opens it with the court's
+ * sign-in and hands the address to the venue's recorder box, which sends the
+ * file to Google itself — the bytes never pass through the API.
  *
- * @param {string} token - access token
- * @param {Object} file
- * @param {string} file.filePath - absolute path on this server
- * @param {string} file.name - the name in Drive
- * @param {string} file.parentId - folder ID
- * @param {string} [file.mimeType]
- * @returns {Promise<{ id: string, webViewLink: string|null }>}
+ * @returns {Promise<string>} the session URI
  * @throws {DriveNotFoundError} when the folder is gone
  */
-export const uploadFile = async (token, { filePath, name, parentId, mimeType = "video/mp4" }) => {
-  const { size } = await fs.promises.stat(filePath);
-
+export const openUploadSession = async (token, { name, parentId, sizeBytes, mimeType = "video/mp4" }) => {
   const start = await request(`${urls().upload}/files?uploadType=resumable&fields=id,webViewLink`, {
     method: "POST",
     headers: {
       ...auth(token),
       "Content-Type": "application/json; charset=UTF-8",
       "X-Upload-Content-Type": mimeType,
-      "X-Upload-Content-Length": String(size),
+      "X-Upload-Content-Length": String(sizeBytes),
     },
     body: JSON.stringify({ name, parents: [parentId], mimeType }),
   });
   if (!start.ok) throw await driveFailure(start, "Starting the upload");
   const session = start.headers.get("location");
   if (!session) throw new DriveError("Google did not start the upload session");
+  return session;
+};
 
-  if (size === 0) throw new DriveError("The video file is empty", { retryable: false });
-
-  const handle = await fs.promises.open(filePath, "r");
-  try {
-    let offset = 0;
-    while (offset < size) {
-      const chunk = await readChunk(handle, offset, Math.min(CHUNK_BYTES, size - offset));
-      if (chunk.length === 0) break; // the file shrank under us
-      const res = await request(session, {
-        method: "PUT",
-        headers: {
-          ...auth(token),
-          "Content-Range": `bytes ${offset}-${offset + chunk.length - 1}/${size}`,
-        },
-        body: chunk,
-      });
-      if (res.status === 308) {
-        // More wanted. Google says how much it has; carry on from there.
-        const range = res.headers.get("range");
-        const next = range ? Number(range.split("-")[1]) + 1 : offset + chunk.length;
-        if (!(next > offset)) throw new DriveError("Google did not accept the upload's data");
-        offset = next;
-        continue;
-      }
-      if (!res.ok) throw await driveFailure(res, "Uploading the video");
-      const body = await readJson(res);
-      return { id: body.id, webViewLink: body.webViewLink || null };
-    }
-    throw new DriveError("The upload ended before Google confirmed the file");
-  } finally {
-    await handle.close();
-  }
+/**
+ * CR-040: a file as Drive has it — what the API checks before believing a
+ * recorder box's "it's uploaded".
+ * @returns {Promise<{ id, size: number, parents: string[], trashed: boolean, webViewLink }|null>}
+ *   null when it doesn't exist (or isn't this sign-in's)
+ */
+export const getFile = async (token, fileId) => {
+  const res = await request(
+    `${urls().api}/files/${encodeURIComponent(fileId)}?fields=id,size,parents,trashed,webViewLink`,
+    { headers: auth(token) }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw await driveFailure(res, "Checking the file");
+  const body = await readJson(res);
+  return {
+    id: body.id,
+    size: Number(body.size || 0),
+    parents: body.parents || [],
+    trashed: Boolean(body.trashed),
+    webViewLink: body.webViewLink || null,
+  };
 };
 
 /** The address players open for a file DGSports shared. */
