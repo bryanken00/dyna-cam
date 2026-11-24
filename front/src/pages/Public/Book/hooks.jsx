@@ -59,6 +59,8 @@ export const useBookPageHooks = () => {
 
   const date = pickedDate || pageData?.today || null;
   const payOnline = !!pageData?.payOnline;
+  // CR-033: online payment is the built-in test checkout, not Xendit
+  const paymentSandbox = !!pageData?.paymentSandbox;
   const payMethod = payOnline ? pickedPayMethod || "Online" : "Desk";
 
   // Every date from today to the last bookable one, and whether the venue opens then
@@ -210,6 +212,7 @@ export const useBookPageHooks = () => {
     form,
     handleBook: form.handleSubmit(handleBook),
     payOnline,
+    paymentSandbox,
     payMethod,
     handlePickPayMethod,
     isBooking: bookMutation.isPending || isRedirecting,

@@ -124,6 +124,8 @@ export const loadTestEnv = (overrides = {}) => {
     XENDIT_SECRET_KEY: "",
     XENDIT_CALLBACK_TOKEN: "",
     XENDIT_API_URL: "http://127.0.0.1:9",
+    // CR-033: a developer's PAYMENT_SANDBOX=true must not turn payment on in every test
+    PAYMENT_SANDBOX: "",
     OWNER_EMAIL: OWNER.email,
     OWNER_PASSWORD: OWNER.password,
     // The app runs from a temp directory, so key paths must be absolute

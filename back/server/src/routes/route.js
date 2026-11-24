@@ -40,6 +40,8 @@ router.use("/v1/public/stream-setup", streamSetupRoute); // PLAN-002 Phase G
 router.use("/v1/public/sessions", gameControlsRoute); // CR-028: End game, delete a save, stream
 // PLAN-003 Phase C: the booking pages — the venue's booking link / a booking's own link
 import bookingPublicRoute from "../controllers/v1/public/booking.controller.js";
+import paymentSandboxRoute from "../controllers/v1/public/payment-sandbox.controller.js";
+router.use("/v1/public/payment-sandbox", paymentSandboxRoute); // CR-033: test checkout (PAYMENT_SANDBOX)
 router.use("/v1/public", bookingPublicRoute);
 router.use("/v1/public", publicRoute);
 

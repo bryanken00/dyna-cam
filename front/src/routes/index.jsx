@@ -19,6 +19,7 @@ const PublicBooking = lazy(() => import("../pages/Public/Booking"));
 // CR-030: the way in for players — every venue taking bookings, and Find my booking
 const PublicVenues = lazy(() => import("../pages/Public/Venues"));
 const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
+const PublicPaymentSandbox = lazy(() => import("../pages/Public/PaymentSandbox")); // CR-033
 
 const RootRoutes = () => {
   return (
@@ -101,6 +102,14 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicBooking />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/payment-sandbox/:checkoutId"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicPaymentSandbox />
             </Suspense>
           }
         />

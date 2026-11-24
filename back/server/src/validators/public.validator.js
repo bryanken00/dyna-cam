@@ -189,3 +189,8 @@ export const findBookingSchema = z.object({
       return { phone: formatPhone(digits) };
     }),
 });
+
+// CR-033: /payment-sandbox/:checkoutId — the built-in test checkout's ID
+export const paymentSandboxParamsSchema = z.object({
+  checkoutId: z.string().regex(/^sandbox_[A-Za-z0-9_-]{16,64}$/, "Invalid link"),
+});

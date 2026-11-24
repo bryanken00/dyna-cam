@@ -83,6 +83,7 @@ const BookPage = () => {
     form,
     handleBook,
     payOnline,
+    paymentSandbox,
     payMethod,
     handlePickPayMethod,
     isBooking,
@@ -353,8 +354,10 @@ const BookPage = () => {
                                 style={{ color: "var(--color-text-secondary)" }}
                               />
                               <span>
-                                Pay {formatPeso(picked.price)} with GCash, Maya or a card on Xendit&apos;s secure page. We
-                                hold the court for {page.rules.onlineHoldMinutes} minutes while you pay. Cancel up to{" "}
+                                {paymentSandbox
+                                  ? `Pay ${formatPeso(picked.price)} on a test checkout — no real money moves.`
+                                  : `Pay ${formatPeso(picked.price)} with GCash, Maya or a card on Xendit's secure page.`}{" "}
+                                We hold the court for {page.rules.onlineHoldMinutes} minutes while you pay. Cancel up to{" "}
                                 {page.rules.cancelCutoffHours} hours before for a full refund.
                               </span>
                             </>

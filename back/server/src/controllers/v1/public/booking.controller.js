@@ -21,7 +21,7 @@ import {
   moveBooking,
   toStartLocal,
 } from "../../../utils/bookings.js";
-import { isOnlinePaymentOn } from "../../../lib/payments/xendit.js";
+import { isOnlinePaymentOn, isPaymentSandbox } from "../../../lib/payments/xendit.js";
 import { describeSlot, sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
 import {
   MIN_CHECKOUT_SECONDS,
@@ -244,6 +244,8 @@ router.get(
       },
       // Phase F: Xendit is set up on the server
       payOnline: isOnlinePaymentOn(),
+      // CR-033: online payment is the built-in test checkout, not Xendit
+      paymentSandbox: isPaymentSandbox(),
     });
   })
 );
@@ -527,6 +529,8 @@ router.get(
         // Phase D: the game's page once checked in
         gameUrl: b.gameShareToken ? sessionShareUrl(b.gameShareToken) : null,
         gameShareToken: b.gameShareToken || null,
+        // CR-033: online payment is the built-in test checkout, not Xendit
+        paymentSandbox: isPaymentSandbox(),
         actions: {
           checkIn: b.status === "Confirmed" && now >= checkInFrom && now < b.endAt,
           payOnline: canPayOnline(b, now),

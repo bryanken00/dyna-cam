@@ -196,7 +196,7 @@ const BookingPage = () => {
               style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}
             >
               <Loader2 className="size-4 animate-spin" />
-              This page updates by itself once Xendit tells us it&apos;s paid.
+              This page updates by itself once the payment comes through.
             </p>
           )}
           {booking.status === "Pending" && booking.payBy && !awaitingPayment && (
@@ -241,7 +241,9 @@ const BookingPage = () => {
               </p>
             )}
             <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-              GCash, Maya or a card, on Xendit&apos;s secure page.
+              {booking.paymentSandbox
+                ? "Test checkout — no real money moves."
+                : "GCash, Maya or a card, on Xendit's secure page."}
               {booking.checkoutOpen && " Already paid? It shows here within a minute."}
             </p>
           </div>

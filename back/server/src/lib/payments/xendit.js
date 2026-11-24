@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import * as sandbox from "./sandbox.js";
+
 /**
  * PLAN-003 Phase F — Xendit, Dyna Cam's one payment account (every venue's
  * online bookings are paid into it; settling with venues happens outside the
@@ -9,6 +11,10 @@ import crypto from "node:crypto";
  * Online payment is ON only when both XENDIT_SECRET_KEY and
  * XENDIT_CALLBACK_TOKEN are set (test-mode keys work the same way). Without
  * them the booking page offers "Pay at the desk" only.
+ *
+ * CR-033: PAYMENT_SANDBOX=true answers every call below from the built-in
+ * payment sandbox (./sandbox.js) instead of Xendit — no keys needed, and no
+ * request leaves the server. Ignored when NODE_ENV=production.
  *
  * This file is the only place that knows Xendit's API, so a contract change
  * (or a second provider) stays here. XENDIT_API_URL points the client at a
@@ -44,9 +50,15 @@ export class XenditError extends Error {
   }
 }
 
-/** Is online payment configured? */
+/** CR-033: is the built-in payment sandbox standing in for Xendit? Never in production. */
+export const isPaymentSandbox = () =>
+  String(process.env.PAYMENT_SANDBOX || "").trim().toLowerCase() === "true" &&
+  process.env.NODE_ENV !== "production";
+
+/** Is online payment configured (Xendit keys, or the sandbox)? */
 export const isOnlinePaymentOn = () =>
-  Boolean(process.env.XENDIT_SECRET_KEY) && Boolean(process.env.XENDIT_CALLBACK_TOKEN);
+  isPaymentSandbox() ||
+  (Boolean(process.env.XENDIT_SECRET_KEY) && Boolean(process.env.XENDIT_CALLBACK_TOKEN));
 
 const authHeader = () =>
   `Basic ${Buffer.from(`${process.env.XENDIT_SECRET_KEY || ""}:`).toString("base64")}`;
@@ -55,6 +67,10 @@ const authHeader = () =>
 const request = async (method, path, body) => {
   if (!isOnlinePaymentOn()) {
     throw new XenditError("Online payment is not set up", { code: "NOT_CONFIGURED" });
+  }
+  if (isPaymentSandbox()) {
+    const { status, body: json } = sandbox.handle(method, path, body);
+    return parseReply(status, json);
   }
   let res;
   try {
@@ -81,12 +97,17 @@ const request = async (method, path, body) => {
   } catch {
     json = null;
   }
-  if (!res.ok) {
+  return parseReply(res.status, json);
+};
+
+/** Xendit's reply (or the sandbox's) → its JSON body, or a XenditError. */
+const parseReply = (status, json) => {
+  if (status < 200 || status >= 300) {
     // Xendit errors are { error_code, message }
-    throw new XenditError(json?.message || `Xendit answered ${res.status}`, {
-      status: res.status,
+    throw new XenditError(json?.message || `Xendit answered ${status}`, {
+      status,
       code: json?.error_code || null,
-      transient: res.status >= 500 || res.status === 429,
+      transient: status >= 500 || status === 429,
     });
   }
   return json || {};

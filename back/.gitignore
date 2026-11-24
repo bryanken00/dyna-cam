@@ -8,3 +8,5 @@ auth-keys
 logs
 .claude*
 .env
+# CR-033: the payment sandbox's test checkouts
+/storage
