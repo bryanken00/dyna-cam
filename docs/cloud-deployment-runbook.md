@@ -233,6 +233,7 @@ Restart the API after changing `.env`: `cd back && npm run pm2:reload`.
 ## 7. Each venue — the recorder box
 
 On site, with the box **wired** to the venue router and on the same network as the cameras.
+A Windows PC or a Mac as the box: follow [recorder-box-installation.md](recorder-box-installation.md).
 
 1. **In the Admin** (cloud): Venues → add the venue → add its courts with each camera's RTSP URL.
    Copy the venue's ID (Venues → the venue → **Venue ID**, with its copy button).
