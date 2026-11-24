@@ -7,17 +7,10 @@
 // once with the same Idempotency-Key.
 import axiosInstance from "../axios";
 
-// CR-027: the court's Start a game page →
+// The court's QR page (CR-034: check in with a booking code) →
 // { court: { name, venueName, venueLogoUrl, cameraReady, liveWatchUrl, busy, busyUntil, maxSaves } }
 export const getPublicCourtApi = async (qrToken) => {
   const response = await axiosInstance.get(`/api/v1/public/courts/${qrToken}`);
-  return response.data;
-};
-
-// CR-027: start a game. body: { durationMinutes, playerName?, phone?, email? }
-// 201 { shareToken, shareUrl } — the game records now; open its page
-export const startPublicGameApi = async ({ qrToken, body }) => {
-  const response = await axiosInstance.post(`/api/v1/public/courts/${qrToken}/games`, body);
   return response.data;
 };
 

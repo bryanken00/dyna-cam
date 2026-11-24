@@ -37,7 +37,7 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       cameraRtspUrl: `rtsp://u:p@10.0.3.${courtNo}:554/stream1`,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    return { courtId: res.data.courtId, qrToken: res.data.qrToken };
+    return { courtId: res.data.courtId };
   };
 
   const book = (courtId, hoursFromNow, body = {}, who = admin) =>
@@ -92,7 +92,7 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
   };
 
   before(async () => {
-    ctx = await startTestApp({ env: { RATE_LIMIT_PUBLIC_START_POINTS: "1000" } });
+    ctx = await startTestApp();
     admin = await ctx.createStaff("Admin", { access: "write" });
     ({ moment } = await ctx.importFromBack("server/src/utils/dateUtils.js"));
 
@@ -279,24 +279,6 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       const extend = await call("POST", `/admin/sessions/${game.data.sessionId}/extend`, { minutes: 120 });
       assert.equal(extend.status, 409);
       assert.ok(extend.body.message.includes(booked.data.bookingCode), extend.body.message);
-    });
-
-    it("keeps the court QR's Start a game out of booked time (CR-027)", async () => {
-      const { courtId, qrToken } = await newCourt();
-      assert.equal((await book(courtId, 0)).status, 201);
-      const start = await ctx.api("POST", `/public/courts/${qrToken}/games`, {
-        body: { durationMinutes: 30 },
-      });
-      assert.equal(start.status, 409);
-      assert.match(start.body.message, /booked/);
-
-      const later = await newCourt();
-      assert.equal((await book(later.courtId, 2)).status, 201);
-      const tooLong = await ctx.api("POST", `/public/courts/${later.qrToken}/games`, {
-        body: { durationMinutes: 180 },
-      });
-      assert.equal(tooLong.status, 409);
-      assert.match(tooLong.body.message, /booked from/);
     });
 
     it("refuses a closed court, and outside opening hours unless staff override", async () => {

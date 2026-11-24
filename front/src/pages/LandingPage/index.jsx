@@ -4,7 +4,6 @@ import {
   Bell,
   CalendarCheck,
   Camera,
-  Clock,
   CloudUpload,
   HandCoins,
   Image as ImageIcon,
@@ -23,17 +22,17 @@ import HeroCourt, { ReplayBar } from "@/components/brand/HeroCourt";
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || "Dyna Cam";
 
-/** A player's game, in the order it happens: the player starts it from the court's QR (CR-027). */
+/** A player's game, in the order it happens: book, then check in at the court's QR (CR-034). */
 const STEPS = [
   {
-    icon: QrCode,
-    title: "Scan the court's code",
-    body: "Point your phone at the QR sign by your court. Nothing to install.",
+    icon: CalendarCheck,
+    title: "Book your court",
+    body: "Pick a venue and a time, and pay online or at the desk. You get a booking code.",
   },
   {
-    icon: Clock,
-    title: "Pick your game time",
-    body: "Choose how long you'll play and add your name if you like. Tap Start game and the cameras roll.",
+    icon: QrCode,
+    title: "Scan and enter your code",
+    body: "Point your phone at the QR sign by your court and enter your booking code. The cameras roll. Nothing to install.",
   },
   {
     icon: Smartphone,

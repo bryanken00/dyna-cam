@@ -234,11 +234,11 @@ describe("booking check-in (PLAN-003 Phase D)", () => {
     assert.equal((await bookingRow(b.bookingId)).status, "Deleted");
   });
 
-  it("tells the court QR when the court is next booked", async () => {
+  it("the court QR shows a booking only from its check-in time (CR-034: no free-until)", async () => {
     const { courtId, qrToken } = await newCourt();
     await book(courtId, 2);
     const court = await pub("GET", `/public/courts/${qrToken}`);
     assert.equal(court.data.court.booking, null);
-    assert.equal(court.data.court.freeUntil, at(2));
+    assert.equal(court.data.court.freeUntil, undefined);
   });
 });

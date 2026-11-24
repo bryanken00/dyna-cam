@@ -1,9 +1,7 @@
 import { z } from "zod";
 import {
   formatPhone,
-  optionalEmail,
   optionalPhone,
-  optionalString,
   toLocalDigits,
 } from "./_helpers.js";
 import { bookingDate, bookingLength, startTime } from "./bookings.validator.js";
@@ -16,20 +14,6 @@ const token = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid link");
 
 // /courts/:qrToken
 export const courtTokenParamsSchema = z.object({ qrToken: token });
-
-// POST /courts/:qrToken/games — CR-027: the player's own game. The game time has
-// the same bounds as Admin's New game; no payment and no save limit here (the
-// game is free and allows PLAYER_MAX_CAPTURES saves).
-export const startGameSchema = z.object({
-  durationMinutes: z.coerce
-    .number()
-    .int("Use whole minutes")
-    .min(5, "A game is at least 5 minutes")
-    .max(180, "A game is at most 3 hours"),
-  playerName: optionalString(100),
-  phone: optionalPhone(),
-  email: optionalEmail(255),
-});
 
 // /clips/:shareToken
 export const clipTokenParamsSchema = z.object({ shareToken: token });

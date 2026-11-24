@@ -10,7 +10,8 @@ import { useRotateCourtQr } from "../../../../../services/requests/admin/courts"
 
 /**
  * The court's QR sign: preview, player link, print, and issue a new code.
- * CR-027: players scan it to start their own game (free, up to 5 saves).
+ * CR-034: players scan it and enter their booking code to start their booked
+ * game (CR-027's walk-in Start game is gone).
  */
 const QrSignSection = ({ court, canWrite }) => {
   const rotateMutation = useRotateCourtQr();
@@ -37,7 +38,7 @@ const QrSignSection = ({ court, canWrite }) => {
     <SetupSection
       id="court-qr"
       title="QR sign"
-      description="Players scan it to start recording their game: they pick the game time and add their name, phone and email. Free, with up to 5 saves — the court is paid with the reservation. Print it at A5 and put it up by the court."
+      description="Players scan it and enter their booking code to start recording their booked game, with up to 5 saves. A game can't start from it without a booking. Print it at A5 and put it up by the court."
     >
       <div className="flex gap-5 flex-wrap items-start">
         <div

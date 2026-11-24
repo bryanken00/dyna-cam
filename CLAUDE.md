@@ -1,7 +1,7 @@
 # Dyna Cam
 
-A court-camera service for pickleball venues, built on this repo's admin platform. Players scan a
-court QR to start recording their game, then watch it live, save their best rallies, and get the
+A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
+court, then scan its QR and enter their booking code to start recording their game (CR-034), then watch it live, save their best rallies, and get the
 whole game on their phone (CR-027; the old 60-second clips and court buttons are gone — clips saved
 before only expire). Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
 staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
@@ -131,9 +131,10 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
   stored encrypted and never returned; CR-025: while a game records, its page also gets the box's signed
-  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-027:
-  the court QR's `/public/courts/:qrToken` is the Start a game page, and `POST …/games` (rate-limited)
-  starts a timed game that is Free with 5 saves, `startedByPlayer = 1`; CR-028: the game page also has
+  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-034:
+  the court QR's `/public/courts/:qrToken` only checks a booking in by its code
+  (`POST …/check-in`) — CR-027's walk-in `POST …/games` is gone, so the QR never starts a game
+  without a booking (`startedByPlayer = 1` marks the walk-in games made before); CR-028: the game page also has
   the device's End game, delete a save and own-stream controls under `/public/sessions/:shareToken/…` —
   anyone holding the link can use them). CR-015: a game's videos open only once staff record its
   payment (Admin → Sessions → Record payment, Payments permission); until then the session device

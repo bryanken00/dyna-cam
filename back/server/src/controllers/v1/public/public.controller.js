@@ -1,7 +1,6 @@
 import express from "express";
 import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
-import { ERROR_CODES } from "../../../utils/APIError.js";
+import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { sessionShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince } from "../../../utils/clipRequests.js";
@@ -11,8 +10,7 @@ import {
   settleSessions,
   uploadPercent,
 } from "../../../utils/sessions.js";
-import { bookCourt } from "../../../utils/gameStart.js";
-import { checkInBooking } from "../../../utils/bookingCheckIn.js";
+import { BOOKED_GAME_MAX_CAPTURES, checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { sendBookingEmail } from "../../../utils/bookingEmails.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
@@ -39,7 +37,6 @@ import {
   courtTokenParamsSchema,
   gameCodeParamsSchema,
   sessionTokenParamsSchema,
-  startGameSchema,
 } from "../../../validators/public.validator.js";
 
 /**
@@ -48,8 +45,9 @@ import {
  * reveal only what the player's page shows (no IDs, no camera details) and the
  * writes are rate-limited.
  *
- *   GET  /courts/:qrToken          CR-027: the court's Start a game page
- *   POST /courts/:qrToken/games    CR-027: start a game (free, 5 saves, records now)
+ *   GET  /courts/:qrToken          the court's page — CR-034: check in with a booking code
+ *   POST /courts/:qrToken/check-in PLAN-003 Phase D: start the booked game by its code
+ *   (CR-034 removed CR-027's POST /courts/:qrToken/games: no game without a booking)
  *   GET  /clips/:shareToken        a clip saved before CR-027 (polls until Ready)
  *   GET  /sessions/:shareToken     a recorded session's page (its parts; CR-025: live view)
  *   POST /sessions/:shareToken/captures   CR-025: Save the last … from the game's page
@@ -57,21 +55,6 @@ import {
  *   GET  /games/:payCode           CR-015: Find a game on the courtside device
  */
 const router = express.Router();
-
-const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
-const FORMAT = "YYYY-MM-DD HH:mm:ss";
-
-/** CR-027: saves a player-started game allows (the requester's "max clip is only 5"). */
-export const PLAYER_MAX_CAPTURES = 5;
-
-// CR-027, per IP: starting a game is a once-a-booking thing. A few tries a
-// minute covers a mistyped form; the court's one-game rule stops the rest.
-const startGameLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_PUBLIC_START_POINTS || "5", 10),
-  duration: 60,
-  keyGenerator: (req) => `public-start:${req.ip}`,
-  message: "Too many tries — wait a minute and try again.",
-});
 
 // CR-015: Find a game by its code — a code is 6 characters from 31, so a few
 // tries a minute per IP is plenty for staff and useless for guessing
@@ -132,12 +115,9 @@ const findCourt = async (db, qrToken) => {
   return rows[0] || null;
 };
 
-/** "3:45 PM" for a stored Manila timestamp. */
-const clockTime = (local) => moment.tz(local, FORMAT, TIMEZONE).format("h:mm A");
-
 /**
  * GET /courts/:qrToken
- * CR-027: the court's Start a game page — the court, and whether a game is on
+ * The court's QR page — the court, and whether a game is on
  * it now (and until when).
  */
 router.get(
@@ -162,7 +142,7 @@ router.get(
     );
 
     // PLAN-003 Phase D: a booking that holds the court now (or opens for check-in
-    // soon) — the page asks for its code instead of offering Start a game
+    // soon). CR-034: the page always asks for a booking code; this only says when
     const [booked] = await req.db.query(
       `SELECT b.startAt, b.endAt FROM bookings b
        JOIN venues v ON v.venueId = b.venueId
@@ -173,24 +153,6 @@ router.get(
        LIMIT 1`,
       [court.courtId, now, now, now]
     );
-    // When the court is next taken (a booking or closure ahead) — Start a game
-    // can only run until then
-    const [next] = current
-      ? [null]
-      : await req.db.query(
-          `SELECT MIN(t.startAt) AS startAt FROM (
-             SELECT b.startAt FROM bookings b
-             WHERE b.courtId = ? AND b.startAt > ?
-               AND (b.status IN ('Confirmed', 'CheckedIn')
-                    OR (b.status = 'Pending' AND b.holdExpiresAt > ?))
-             UNION ALL
-             SELECT cl.startAt FROM court_closures cl
-             WHERE cl.venueId = ? AND (cl.courtId IS NULL OR cl.courtId = ?)
-               AND cl.status = 'Active' AND cl.startAt > ?
-           ) t`,
-          [court.courtId, now, now, court.venueId, court.courtId, now]
-        );
-
     const [venue] = await req.db.query(
       `SELECT bookingToken FROM venues WHERE venueId = ? LIMIT 1`,
       [court.venueId]
@@ -208,105 +170,14 @@ router.get(
         // A game is on the court now; busyUntil is when it ends (null: open-ended)
         busy: Boolean(current),
         busyUntil: current && Number(current.openEnded) !== 1 ? current.endAt : null,
-        maxSaves: PLAYER_MAX_CAPTURES,
+        // A booked game's saves (CR-034: the only game the QR starts)
+        maxSaves: BOOKED_GAME_MAX_CAPTURES,
         // PLAN-003: booked now → check in with the booking code (no names, no code)
         booking: !current && booked ? { from: booked.startAt, until: booked.endAt } : null,
-        // A game started here must end by then (null: nothing booked ahead)
-        freeUntil: !current && !booked ? next?.startAt || null : null,
         // CR-030: "Book this court ahead" — the venue's booking link (null: booking off)
         bookingToken: venue?.bookingToken || null,
       },
     });
-  })
-);
-
-/**
- * POST /courts/:qrToken/games
- * CR-027: a player starts their own game. Body: { durationMinutes, playerName?,
- * phone?, email? }. The court is paid for with its reservation, outside the
- * system, so the game is free (no pay code) and allows PLAYER_MAX_CAPTURES
- * saves. It records at once and stops by itself, like Admin's New game with a
- * game time (CR-016). One game per court; the reply has only the game's link.
- */
-router.post(
-  "/courts/:qrToken/games",
-  startGameLimiter,
-  validateParams(courtTokenParamsSchema),
-  validateBody(startGameSchema),
-  catchAsync(async (req, res) => {
-    const court = await findCourt(req.db, req.params.qrToken);
-    if (!court) {
-      return res.sendError("This court code is not valid", 404);
-    }
-    // Nothing would be recorded — say so instead of starting an empty game
-    if (!court.hasCamera || !court.recorderOnline) {
-      return res.sendError(
-        "This court's camera is offline right now, so a game can't start. Please tell the front desk.",
-        null,
-        503,
-        ERROR_CODES.CAMERA_OFFLINE
-      );
-    }
-    await advanceSessions(req.db, { venueId: court.venueId });
-
-    const { durationMinutes, playerName, phone, email } = req.body;
-    const start = moment().tz(TIMEZONE);
-    const startLocal = start.format(FORMAT);
-    const endLocal = start.clone().add(durationMinutes, "minutes").format(FORMAT);
-
-    let conn;
-    let booked;
-    try {
-      conn = await req.db.beginTransaction();
-      booked = await bookCourt(conn, {
-        courtId: court.courtId,
-        startLocal,
-        endLocal,
-        status: "Recording",
-        now: getCurrentTimestampLocal(),
-        playerName,
-        phone,
-        email,
-        maxCaptures: PLAYER_MAX_CAPTURES,
-        free: true,
-        startedByPlayer: true,
-      });
-      if (booked.ok) await req.db.commit(conn);
-      else await req.db.rollback(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    if (!booked.ok) {
-      if (booked.reason === "BUSY") {
-        // A game on now, or a game / booking / closure (PLAN-003) later inside
-        // the chosen game time
-        const later = booked.busyFrom && booked.busyFrom > startLocal;
-        const type = booked.conflict?.type;
-        let message;
-        if (later) {
-          message =
-            type === "CLOSURE"
-              ? `This court is closed from ${clockTime(booked.busyFrom)} — pick a shorter game time`
-              : `This court is booked from ${clockTime(booked.busyFrom)} — pick a shorter game time`;
-        } else if (type === "CLOSURE") {
-          message = "This court is closed right now";
-        } else if (type === "BOOKING") {
-          message = "This court is booked right now";
-        } else {
-          message = "This court already has a game going";
-        }
-        return res.sendError(message, 409);
-      }
-      return res.sendError("This court code is not valid", 404);
-    }
-
-    return res.sendSuccess(
-      "Game started — the camera is recording",
-      { shareToken: booked.shareToken, shareUrl: sessionShareUrl(booked.shareToken) },
-      201
-    );
   })
 );
 
