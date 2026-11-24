@@ -6,13 +6,13 @@ import {
   Camera,
   CloudUpload,
   HandCoins,
-  Image as ImageIcon,
   MonitorPlay,
   QrCode,
   Radio,
   RadioTower,
   ShieldCheck,
   Smartphone,
+  Tv,
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,75 +22,83 @@ import Wordmark from "@/components/brand/Wordmark";
 import { APP_NAME } from "@/components/brand/appName";
 import HeroCourt, { ReplayBar } from "@/components/brand/HeroCourt";
 
-/** A player's game, in the order it happens: book, then check in at the court's QR (CR-034). */
+/**
+ * A player's game, in the order it happens: book, check in at the court's QR with the booking
+ * code (CR-034), play (CR-041: Resume after ending early), then the Drive link (CR-040).
+ */
 const STEPS = [
   {
     icon: CalendarCheck,
     title: "Book your court",
-    body: "Pick a venue and a time, and pay online or at the desk. You get a booking code.",
+    body: "Pick a venue, a court and a time. Pay online with GCash, Maya or a card, or at the desk. You get a booking code.",
   },
   {
     icon: QrCode,
-    title: "Scan and enter your code",
-    body: "Point your phone at the QR sign by your court and enter your booking code. The cameras roll. Nothing to install.",
+    title: "Check in at the court",
+    body: "When you arrive, scan the QR sign by your court and enter your booking code. The cameras roll for your booked time. Nothing to install.",
   },
   {
     icon: Smartphone,
     title: "Play, watch, save",
-    body: "Your game's page shows the court live, and saves your best rallies as you play.",
+    body: "Your game's page shows the court live and saves your best rallies as you play. Ended too soon? Resume for the rest of your time.",
   },
   {
     icon: Video,
     title: "Get the whole game",
-    body: "When the time is up, the whole game, one video per camera, is ready on your game's page.",
+    body: "After the game, the whole game, one video per camera, goes to Google Drive. Watch or download it there, no Google account needed.",
   },
 ];
 
-/** What players can do during their game. */
+/** What players can do during their game, all from their game's page. */
 const DURING_GAME = [
+  {
+    icon: MonitorPlay,
+    title: "Watch it live",
+    body: "On the venue Wi-Fi, your game's page shows the court live. Missed a point? Rewind up to 50 seconds.",
+  },
   {
     icon: Camera,
     title: "Save a great rally",
-    body: "Tap Save on your game's page, and the last few minutes are kept as their own video, up to 5 per game.",
+    body: "Tap Save a part of your game and set its start and end. It's its own video in a few minutes, up to 5 per game.",
   },
   {
     icon: Radio,
-    title: "Go live on your own page",
-    body: "Scan the code on the courtside device, add your Facebook or YouTube stream key, and play live: Cam 1, Cam 2 or both.",
-  },
-  {
-    icon: MonitorPlay,
-    title: "Watch from the bench",
-    body: "The paired phone or tablet shows the court live, so you can switch cameras between points.",
+    title: "Go live",
+    body: "Add your Facebook or YouTube stream key on your game's page and stream your game: Cam 1, Cam 2 or both.",
   },
 ];
 
 /** What a venue gets — only what the product does today. */
 const VENUE_FEATURES = [
   {
-    icon: Camera,
-    title: "Two cameras per court",
-    body: "One behind each baseline. Replays show both ends stacked, so every shot is in the frame.",
-  },
-  {
-    icon: ImageIcon,
-    title: "Your logo on every replay",
-    body: "Each clip a player shares carries your venue's logo.",
+    icon: CalendarCheck,
+    title: "Online booking and payment",
+    body: "Players book from your booking link and pay with GCash, Maya or a card, or at the desk. They can cancel or move before your cut-off.",
   },
   {
     icon: QrCode,
-    title: "Players start their own games",
-    body: "A QR sign on each court lets players start recording themselves, so the front desk doesn't have to.",
+    title: "Check-in at the court",
+    body: "Players scan the court's QR sign and enter their booking code, and recording starts by itself. No front-desk work.",
   },
   {
-    icon: HandCoins,
-    title: "Games free or paid",
-    body: "Games players start from the court QR are free. For a game staff set up, unlock its videos when the player pays at the front desk.",
+    icon: Camera,
+    title: "Two cameras per court",
+    body: "One behind each baseline, so every shot is in the frame. Each game is one video per camera.",
   },
   {
     icon: CloudUpload,
-    title: "Copies in your Google Drive",
-    body: "Connect a court to a Drive account and every replay and game video is copied there.",
+    title: "Videos straight to your Google Drive",
+    body: "Your recorder box sends each game to the court's Google Drive. Players get a Drive link; videos never pass through our servers.",
+  },
+  {
+    icon: Tv,
+    title: "Court board on your TV",
+    body: "Show today's courts on a TV at your venue: what's playing, what's booked and what's free. No names or codes on screen.",
+  },
+  {
+    icon: HandCoins,
+    title: "Payments in one place",
+    body: "See every booking and payment, record desk payments, and refund cancelled online bookings from the web.",
   },
   {
     icon: RadioTower,
@@ -223,10 +231,11 @@ const NavLink = ({ href, children }) => (
 
 /**
  * Public home page (CR-011, after the "Improve UI and UX" design): a navy hero
- * with the brand court on a tilted card, how a game is recorded (ask the desk →
- * pairing key → pair and play → video), what players can do during it, a navy
- * call-out for venues, what venues get, and the privacy note. CR-030: Book a
- * court in the top bar and the hero opens /book.
+ * with the brand court on a tilted card, how a game is recorded (book → check in
+ * at the court with the booking code → play, watch, save → Google Drive), what
+ * players can do during it, a navy call-out for venues, what venues get, and the
+ * privacy note. CR-030: Book a court in the top bar and the hero opens /book.
+ * CR-042: the words follow today's flow (CR-034 check-in, CR-040 Drive only).
  */
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -283,8 +292,8 @@ const LandingPage = () => {
                 style={{ ...bodyStyle, fontSize: 16.5, color: "rgb(255 255 255 / 0.74)" }}
               >
                 Book a court, scan its code and enter your booking code — the whole game records.
-                Watch it live, save your best rallies, and get every minute on your phone. Nothing
-                to install.
+                Watch it live, save your best rallies, and get every minute from Google Drive on
+                your phone. Nothing to install.
               </p>
               <div className="flex items-center gap-2.5 mt-9 flex-wrap">
                 <Button size="lg" className="btn-on-navy" asChild>
@@ -316,7 +325,7 @@ const LandingPage = () => {
             <SectionHead
               eyebrow="Four steps. That's it."
               title="Your whole game, without stopping play."
-              body="Ask the front desk and you're set. DGSports records in the background so you can stay focused on the game, not the camera."
+              body="Book online, check in at the court, and play. DGSports records in the background so you can stay focused on the game, not the camera."
             />
             <ItemRow items={STEPS} numbered />
           </div>
@@ -332,7 +341,7 @@ const LandingPage = () => {
             <SectionHead
               eyebrow="During your game"
               title="Great shot? Keep it on the spot."
-              body="The court's cameras are always rolling, so the best moments are never missed, with or without a booked game."
+              body="The cameras roll from the moment you check in, so the best moments are never missed. Everything is on your game's page."
             />
             <ItemRow items={DURING_GAME} />
           </div>
@@ -363,7 +372,7 @@ const LandingPage = () => {
             <SectionHead
               eyebrow="For venues"
               title="Everything your front desk needs."
-              body="A small recorder box at your venue runs the cameras. Your staff manage courts, games, replays and payments from the web."
+              body="A small recorder box at your venue runs the cameras and sends every game to your Google Drive. Your staff manage bookings, courts, games and payments from the web."
             />
             <ul className="m-0 mt-12 p-0 list-none grid sm:grid-cols-2 lg:grid-cols-3 gap-x-10">
               {VENUE_FEATURES.map((feature) => (
@@ -399,10 +408,11 @@ const LandingPage = () => {
               style={{ color: "var(--color-link)" }}
             />
             <p className="m-0 max-w-3xl" style={{ ...bodyStyle, fontSize: 14 }}>
-              Courts are recorded all the time, but only what players choose to save is kept.
-              Everything else is recorded over within minutes, and saved replays and game videos
-              are deleted 7 days after they&apos;re saved (unless the venue chooses otherwise).
-              Any copy in the venue&apos;s Google Drive goes after 2 days.
+              Courts are recorded all the time, but only booked games and the parts players save
+              are kept. Everything else is recorded over within minutes. Videos never pass through
+              our servers: the venue&apos;s recorder box sends them straight to the court&apos;s
+              Google Drive, and they are deleted 7 days after the game (unless the venue chooses
+              otherwise).
             </p>
           </div>
         </section>

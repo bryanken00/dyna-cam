@@ -49,9 +49,8 @@ const Login = () => {
   return (
     <AuthLayout>
       <AuthHeading
-        icon={Shield}
         title="Staff sign in"
-        subtitle="Manage your venues' courts, games and replays."
+        subtitle="Manage your venues' bookings, courts, games and payments."
       />
 
       <Form {...form}>

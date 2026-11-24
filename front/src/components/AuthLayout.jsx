@@ -48,7 +48,7 @@ const AuthLayout = ({ children }) => (
               color: "var(--color-brand-on-court)",
             }}
           >
-            Courts, games, replays and payments, all in one place.
+            Bookings, courts, games and payments, all in one place.
           </p>
         </div>
       </div>
