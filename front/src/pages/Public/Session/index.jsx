@@ -681,6 +681,9 @@ const StreamBlock = ({ stream, onOpen, opening, onStop, stopping }) => {
   );
 };
 
+// CR-035: a wide screen's column — its first part needs no top gap
+const columnClass = "min-w-0 [&>*:first-child]:mt-0";
+
 const SessionPage = () => {
   const {
     session,
@@ -718,6 +721,7 @@ const SessionPage = () => {
     loadError,
     refetch,
     handleShare,
+    wide,
   } = useSessionPageHooks();
 
   if (isLoading) {
@@ -760,8 +764,96 @@ const SessionPage = () => {
 
   const logo = getImageUrl(session.venueLogoUrl);
 
+  // CR-025: what the court device shows while recording — paid or not.
+  // CR-028: with the device's other controls — the player's own stream and
+  // End game. CR-035: built once, placed by screen width in the return.
+  const liveBlock = isRecording && <LivePanel live={live} />;
+  const saveBlock = isRecording && (
+    <SaveStretch capture={capture} since={since} save={saveCapture} preview={previewStretch} />
+  );
+  const endBlock = isRecording && (
+    <Button
+      variant="destructive"
+      size="lg"
+      className="h-16 w-full mt-4 text-lg font-bold rounded-(--radius-card)"
+      onClick={handleEndGame}
+      disabled={isEnding}
+    >
+      {isEnding ? <Loader2 className="size-5 animate-spin" /> : <Square className="size-5" fill="currentColor" />}
+      End game
+    </Button>
+  );
+  // Secondary, below End game — as on the device
+  const streamBlock = canStream && (
+    <StreamBlock
+      stream={stream}
+      onOpen={handleOpenStream}
+      opening={isOpeningStream}
+      onStop={handleStopStream}
+      stopping={isStoppingStream}
+    />
+  );
+  const lockedBlock = session.locked && (
+    <LockedGame session={session} videos={videos} captures={captures} />
+  );
+  // CR-001: the whole game's folder in the venue's Google Drive
+  const driveBlock = !session.locked && session.driveUrl && (
+    <Button asChild variant="outline" size="lg" className="h-12 w-full mt-4">
+      <a href={session.driveUrl} target="_blank" rel="noopener noreferrer">
+        <Cloud />
+        Open the whole game in Google Drive
+      </a>
+    </Button>
+  );
+  // CR-003: the whole game, one video per camera (once it's made)
+  const videoBlock = !session.locked && !saving && activeVideo && (
+    <>
+      {videos.length > 1 && <CameraTabs videos={videos} active={activeVideo} onSelect={setCameraTab} />}
+      <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />
+    </>
+  );
+  // CR-013: the stretches saved from the courtside device
+  const savesBlock = !session.locked && captures.length > 0 && (
+    <div className="mt-6">
+      <h2 className="m-0 mb-3 font-semibold" style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}>
+        Your saves
+      </h2>
+      <div className="space-y-3">
+        {captures.map((capture) => (
+          <CaptureCard
+            key={`${capture.number}-${capture.savedAt}`}
+            capture={capture}
+            onDelete={handleDeleteCapture}
+            deleting={deletingNumber === capture.number}
+          />
+        ))}
+      </div>
+    </div>
+  );
+  // Only a game recorded before whole videos still lists its pieces
+  const partsBlock = !session.locked && parts.length > 0 && (
+    <div className="mt-4 space-y-3">
+      {parts.map((part) => (
+        <PartCard key={`${part.partIndex}-${part.camera ?? 0}`} part={part} />
+      ))}
+    </div>
+  );
+  const shareBlock = !session.locked && readyCount > 0 && (
+    <div className="mt-4">
+      <Button size="lg" className="h-12 w-full" onClick={handleShare}>
+        <Share2 />
+        Share this session
+      </Button>
+      {expiresAt && (
+        <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+          Available until {formatDateTime(expiresAt)} — download it before then. It&apos;s deleted after that.
+        </p>
+      )}
+    </div>
+  );
+
   return (
-    <PublicLayout>
+    <PublicLayout wide={wide}>
       {/* Heading */}
       <div className="flex items-center gap-3 mb-1 min-w-0">
         {logo && (
@@ -820,136 +912,40 @@ const SessionPage = () => {
       <StatusNotice session={session} />
       {saving && <SavingProgress percent={saving.percent} />}
 
-      {/* CR-025: what the court device shows while recording — paid or not.
-          CR-028: with the device's other controls — the player's own
-          stream and End game. */}
-      {isRecording && (
-        <>
-          <LivePanel live={live} />
-          <SaveStretch
-            capture={capture}
-            since={since}
-            save={saveCapture}
-            preview={previewStretch}
-          />
-        </>
-      )}
-      {isRecording && (
-        <Button
-          variant="destructive"
-          size="lg"
-          className="h-16 w-full mt-4 text-lg font-bold rounded-(--radius-card)"
-          onClick={handleEndGame}
-          disabled={isEnding}
-        >
-          {isEnding ? (
-            <Loader2 className="size-5 animate-spin" />
-          ) : (
-            <Square className="size-5" fill="currentColor" />
-          )}
-          End game
-        </Button>
-      )}
-      {/* Secondary, below End game — as on the device */}
-      {canStream && (
-        <StreamBlock
-          stream={stream}
-          onOpen={handleOpenStream}
-          opening={isOpeningStream}
-          onStop={handleStopStream}
-          stopping={isStoppingStream}
-        />
-      )}
-
-      {session.locked && (
-        <LockedGame session={session} videos={videos} captures={captures} />
-      )}
-
-      {!session.locked && (
-        <>
-          {/* CR-001: the whole game's folder in the venue's Google Drive */}
-          {session.driveUrl && (
-            <Button
-              asChild
-              variant="outline"
-              size="lg"
-              className="h-12 w-full mt-4"
-            >
-              <a
-                href={session.driveUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Cloud />
-                Open the whole game in Google Drive
-              </a>
-            </Button>
-          )}
-
-          {/* CR-003: the whole game, one video per camera (once it's made) */}
-          {!saving && videos.length > 1 && (
-            <CameraTabs
-              videos={videos}
-              active={activeVideo}
-              onSelect={setCameraTab}
-            />
-          )}
-          {!saving && activeVideo && (
-            <WholeVideoCard video={activeVideo} twoCameras={twoCameras} />
-          )}
-
-          {/* CR-013: the stretches saved from the courtside device */}
-          {captures.length > 0 && (
-            <div className="mt-6">
-              <h2
-                className="m-0 mb-3 font-semibold"
-                style={{ fontSize: 15.5, color: "var(--color-text-dark)" }}
-              >
-                Your saves
-              </h2>
-              <div className="space-y-3">
-                {captures.map((capture) => (
-                  <CaptureCard
-                    key={`${capture.number}-${capture.savedAt}`}
-                    capture={capture}
-                    onDelete={handleDeleteCapture}
-                    deleting={deletingNumber === capture.number}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Only a game recorded before whole videos still lists its pieces */}
-          {parts.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {parts.map((part) => (
-                <PartCard
-                  key={`${part.partIndex}-${part.camera ?? 0}`}
-                  part={part}
-                />
-              ))}
-            </div>
-          )}
-
-          {readyCount > 0 && (
-            <div className="mt-4">
-              <Button size="lg" className="h-12 w-full" onClick={handleShare}>
-                <Share2 />
-                Share this session
-              </Button>
-              {expiresAt && (
-                <p
-                  className="m-0 mt-3 text-center"
-                  style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
-                >
-                  Available until {formatDateTime(expiresAt)} — download it
-                  before then. It&apos;s deleted after that.
-                </p>
-              )}
-            </div>
-          )}
-        </>
+      {/* CR-035: each part built once below; phones keep today's order,
+          wide screens put the video on the left and the rest on the right */}
+      {wide && (liveBlock || lockedBlock || videoBlock || partsBlock) ? (
+        <div className="mt-4 grid gap-6 grid-cols-[minmax(0,1fr)_380px] items-start">
+          <div className={columnClass}>
+            {liveBlock}
+            {lockedBlock}
+            {videoBlock}
+            {partsBlock}
+          </div>
+          <div className={columnClass}>
+            {saveBlock}
+            {endBlock}
+            {streamBlock}
+            {driveBlock}
+            {savesBlock}
+            {shareBlock}
+          </div>
+        </div>
+      ) : (
+        // Phones — and a wide screen with nothing for the left yet (no live
+        // view, no video): one column, kept phone-width
+        <div className={wide ? "max-w-md" : undefined}>
+          {liveBlock}
+          {saveBlock}
+          {endBlock}
+          {streamBlock}
+          {lockedBlock}
+          {driveBlock}
+          {videoBlock}
+          {savesBlock}
+          {partsBlock}
+          {shareBlock}
+        </div>
       )}
     </PublicLayout>
   );
