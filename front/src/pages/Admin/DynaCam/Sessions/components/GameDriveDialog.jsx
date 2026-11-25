@@ -47,7 +47,7 @@ const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
         if (!next) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-105">
+      <DialogContent className="sm:max-w-115">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Cloud className="w-4.5 h-4.5" />
