@@ -1,0 +1,8 @@
+Environment: dev
+Date:        2026-11-25 16:31:52 +0800
+Commit:      b4e36cbb14157257b5c9fb3d873ad55b8cec271d
+Previous:    3685776d2a6eb6c5e6db729eb1572a39aaf77351
+By:          bryanken01230@gmail.com
+
+Commits since last deploy:
+  b4e36cb 2026-11-25 fix: adjust Game in Google Drive dialog width to prevent button overflow
