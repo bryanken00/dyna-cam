@@ -73,7 +73,7 @@ Fixed 2026-11-25, in three places:
 - **Shared dialog and confirm dialog.** Both now give their one column a width it can't grow past
   (`grid-cols-[minmax(0,1fr)]`), so nothing inside can widen the box. From 640 px up, their footers
   wrap a button row that doesn't fit (`sm:flex-wrap`), instead of pushing the dialog wider.
-- **Game in Google Drive.** The dialog is now 460 px wide (`sm:max-w-115`), so its three buttons
+- **Game in Google Drive.** The dialog is now 500 px wide (`sm:max-w-125`; 460 px still wrapped), so its three buttons
   stay on one line.
 
 Every other dialog looks the same as before. Unreleased: the dialog's own changelog entry (CR-018)

@@ -1,0 +1,9 @@
+Environment: dev
+Date:        2026-11-25 16:28:42 +0800
+Commit:      3685776d2a6eb6c5e6db729eb1572a39aaf77351
+Previous:    29ce83c954881ce11ddb8caddfb2c0b75b104697
+By:          bryanken01230@gmail.com
+
+Commits since last deploy:
+  3685776 2026-11-25 fix: resolve dialog content overflow issue in Game in Google Drive
+  cd4472d 2026-11-25 chore: commit the deploy logs

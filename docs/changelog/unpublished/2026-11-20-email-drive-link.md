@@ -32,7 +32,7 @@ and venue alerts, are now sent through SendGrid.
 - back/: new `POST /api/v1/admin/sessions/:sessionId/drive-upload` (`clips` write) re-queues the
   game's kept videos whose Drive upload failed, was skipped or never ran; sessions include
   `driveUpload` (status, error, canReupload).
-- front/: BUG-010 — the Google Drive QR dialog is wider (`sm:max-w-115`) so **Email it · Copy link ·
+- front/: BUG-010 — the Google Drive QR dialog is wider (`sm:max-w-125`, 500 px) so **Email it · Copy link ·
   Open in Google Drive** fit on one line; the shared `Dialog` / `AlertDialog` now keep content inside
   the box (`grid-cols-[minmax(0,1fr)]`) and wrap a too-wide button row (`sm:flex-wrap`).
 - app/, edge/: no change.

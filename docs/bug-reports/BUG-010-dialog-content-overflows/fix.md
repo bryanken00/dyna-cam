@@ -12,7 +12,7 @@
 - [x] `components/ui/dialog.jsx`: `DialogContent` gets one column that can't grow past the box
       (`grid-cols-[minmax(0,1fr)]`); `DialogFooter` wraps its buttons (`sm:flex-wrap`)
 - [x] `components/ui/alert-dialog.jsx`: the same for `AlertDialogContent` and `AlertDialogFooter`
-- [x] `GameDriveDialog.jsx`: wide enough for its three buttons on one line (`sm:max-w-115`)
+- [x] `GameDriveDialog.jsx`: wide enough for its three buttons on one line (`sm:max-w-125`, 500 px)
 
 ## Check nothing else broke
 

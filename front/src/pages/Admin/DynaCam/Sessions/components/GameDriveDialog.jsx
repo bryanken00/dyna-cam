@@ -47,7 +47,8 @@ const GameDriveDialog = ({ open, onClose, session, canWrite = false }) => {
         if (!next) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-115">
+      {/* Wide enough for Email it · Copy link · Open in Google Drive on one line */}
+      <DialogContent className="sm:max-w-125">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Cloud className="w-4.5 h-4.5" />
