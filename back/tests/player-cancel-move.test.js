@@ -319,7 +319,8 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
       [{ date: day(4), startTime: "19:00" }, 409, /costs ₱500/], // pricier: ₱0 → evening
       [{ date: day(4), startTime: "12:00" }, 409, /just taken/],
       [{ date: day(4), startTime: "23:00" }, 409, /opening hours/],
-      [{ date: day(20), startTime: "10:00" }, 400, /14 days/],
+      // CR-043: past the confirmed week (next Sunday) before the 14-day limit
+      [{ date: day(20), startTime: "10:00" }, 400, /aren't open yet/],
     ];
     for (const [body, status, message] of cases) {
       const res = await pub("POST", `/public/bookings/${b.manageToken}/move`, body);

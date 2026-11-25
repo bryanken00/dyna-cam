@@ -1,7 +1,9 @@
 import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  confirmScheduleWeekApi,
   getBookingSettingsApi,
+  getScheduleRemindersApi,
   issueBookingLinkApi,
   turnOffBookingLinkApi,
   updateBookingSettingsApi,
@@ -96,6 +98,33 @@ export const useTurnOffDisplayLink = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to turn the TV board off");
+    },
+  });
+};
+
+// Query: CR-043 — venues whose next week isn't confirmed (the Dashboard notice) → data.reminders
+export const useGetScheduleReminders = (options = {}) => {
+  return useQuery({
+    queryKey: ["bookingSettings", "scheduleReminders"],
+    queryFn: getScheduleRemindersApi,
+    staleTime: 60 * 1000, // 1 minute
+    ...options,
+  });
+};
+
+// Mutation: CR-043 — confirm next week's schedule so players can book it online
+export const useConfirmScheduleWeek = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: confirmScheduleWeekApi,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Next week's schedule is confirmed");
+      // Both the venue's settings and the Dashboard's reminders
+      queryClient.invalidateQueries({ queryKey: ["bookingSettings"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to confirm next week's schedule");
     },
   });
 };

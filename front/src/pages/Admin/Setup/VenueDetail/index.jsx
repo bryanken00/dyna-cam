@@ -235,6 +235,8 @@ const VenueDetailPage = () => {
               settings={booking.settings}
               canWrite={booking.canWriteBookings}
               onEdit={booking.handleEditSettings}
+              isConfirmingWeek={booking.isConfirmingWeek}
+              onConfirmWeek={booking.handleConfirmWeek}
             />
             <ClosuresSection
               closures={booking.closures}

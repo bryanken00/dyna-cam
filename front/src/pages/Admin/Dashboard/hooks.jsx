@@ -18,6 +18,10 @@ import {
   useGetDashboardInsights,
   useGetDashboardVenues,
 } from "../../../services/requests/admin/dashboard";
+import {
+  useConfirmScheduleWeek,
+  useGetScheduleReminders,
+} from "../../../services/requests/admin/bookingSettings";
 import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
 
 const ICON = { className: "w-4.25 h-4.25", strokeWidth: 1.8 };
@@ -297,6 +301,14 @@ export const useDashboardHooks = () => {
   // CR-023: the last 7 / 30 days
   const insights = useInsights();
   const alertsQuery = useGetDashboardAlerts({ enabled: canSeeAlerts });
+  // CR-043: venues whose next week isn't confirmed (bookings permission)
+  const canSeeSchedule = hasPermission("bookings", null, "read");
+  const canConfirmSchedule = hasPermission("bookings", null, "write");
+  const remindersQuery = useGetScheduleReminders({
+    enabled: canSeeSchedule,
+    refetchInterval: 5 * 60 * 1000, // the notice turns to a warning as the week runs out
+  });
+  const confirmWeekMutation = useConfirmScheduleWeek();
 
   const venues = venuesQuery.data?.data?.venues;
 
@@ -346,9 +358,17 @@ export const useDashboardHooks = () => {
     [alertsQuery.data]
   );
 
+  // apiData = { success, message, data: { reminders } }
+  const scheduleReminders = useMemo(
+    () => (canSeeSchedule ? remindersQuery.data?.data?.reminders ?? [] : []),
+    [canSeeSchedule, remindersQuery.data]
+  );
+  const handleConfirmWeek = (venueId) => confirmWeekMutation.mutate(venueId);
+
   const refetch = () => {
     venuesQuery.refetch();
     if (canSeeAlerts) alertsQuery.refetch();
+    if (canSeeSchedule) remindersQuery.refetch();
     insights.refetch();
   };
 
@@ -363,6 +383,10 @@ export const useDashboardHooks = () => {
     alertsLoading: canSeeAlerts && alertsQuery.isLoading,
     alertsError: alertsQuery.error,
     insights,
+    scheduleReminders,
+    canConfirmSchedule,
+    confirmingVenueId: confirmWeekMutation.isPending ? confirmWeekMutation.variables : null,
+    handleConfirmWeek,
     isLoading: venuesQuery.isLoading,
     isFetching: venuesQuery.isFetching || alertsQuery.isFetching || insights.isFetching,
     error: venuesQuery.error,

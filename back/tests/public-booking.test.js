@@ -89,9 +89,11 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     );
     assert.ok(courts.every((c) => /^[a-f0-9]{16}$/.test(c.key)));
     assert.equal(today, at(0).slice(0, 10));
+    // CR-043: today + 14 days, capped by the confirmed week — a new booking link
+    // confirms through next week's Sunday, which always comes first
     assert.equal(
       lastDate,
-      moment.tz(today, "YYYY-MM-DD", "Asia/Manila").add(14, "days").format("YYYY-MM-DD")
+      moment.tz(today, "YYYY-MM-DD", "Asia/Manila").isoWeekday(7).add(7, "days").format("YYYY-MM-DD")
     );
     assert.equal(rules.deskHoldMinutes, 30);
     assert.deepEqual(openDays, EVERY_DAY);

@@ -6,6 +6,7 @@ import Spinner from "../../../components/Spinner";
 import PageHeader from "../../../components/PageHeader";
 import StatCard from "../../../components/StatCard";
 import StatusDot from "../../../components/StatusDot";
+import ScheduleWeekNotice from "../../../components/ScheduleWeekNotice";
 import CourtBoard from "./components/CourtBoard";
 import InsightsSection from "./components/InsightsSection";
 import { durationText, useDashboardHooks } from "./hooks";
@@ -186,6 +187,10 @@ const Dashboard = () => {
     alertsLoading,
     alertsError,
     insights,
+    scheduleReminders,
+    canConfirmSchedule,
+    confirmingVenueId,
+    handleConfirmWeek,
     isLoading,
     isFetching,
     error,
@@ -212,6 +217,23 @@ const Dashboard = () => {
         subtitle={`${dateText ? `${dateText} · ` : ""}Every court, camera and replay at your venues. Updates every 30 seconds.`}
         actions={<RefreshButton onRefresh={refetch} isFetching={isFetching} />}
       />
+
+      {/* CR-043: next week's schedule to confirm, the most urgent first */}
+      {scheduleReminders.length > 0 && (
+        <div className="space-y-2.5">
+          {scheduleReminders.map((reminder) => (
+            <ScheduleWeekNotice
+              key={reminder.venueId}
+              schedule={reminder}
+              venueName={reminder.venueName}
+              reviewTo={`/admin/setup/venues/${reminder.venueId}#booking-rules`}
+              canConfirm={canConfirmSchedule}
+              isConfirming={confirmingVenueId === reminder.venueId}
+              onConfirm={() => handleConfirmWeek(reminder.venueId)}
+            />
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-24">

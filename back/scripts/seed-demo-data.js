@@ -505,7 +505,11 @@ const priceFor = (venue, courtKey, start, hours) => {
 
 async function seedVenues(conn) {
   const created = NOW.clone().subtract(45, "days");
-  for (const venue of VENUES) {
+  // CR-043: the first venue's next week isn't confirmed yet (the Dashboard shows its
+  // notice); the others are confirmed through the end of next week.
+  const thisSunday = NOW.clone().isoWeekday(7).format("YYYY-MM-DD");
+  const nextSunday = NOW.clone().isoWeekday(7).add(7, "days").format("YYYY-MM-DD");
+  for (const [index, venue] of VENUES.entries()) {
     venue.venueId = await uuid(conn);
     await insert(conn, "venues", {
       venueId: venue.venueId,
@@ -515,6 +519,7 @@ async function seedVenues(conn) {
       clipRetentionDays: 7,
       clipPrice: venue.clipPrice,
       bookingToken: venue.onlineBooking ? randomToken() : null,
+      scheduleConfirmedUntil: index === 0 ? thisSunday : nextSunday,
       ...venue.rules,
       status: "Active",
       dateCreated: fmt(created),

@@ -13,6 +13,7 @@ import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { loadVenueHours } from "../../../utils/courtTimeline.js";
+import { isPastConfirmed, NOT_OPEN_MESSAGE, playerLastDate } from "../../../utils/scheduleWeeks.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import {
   cancelBooking,
@@ -84,7 +85,8 @@ const moveCourtKey = (manageToken, courtId) =>
 const findVenue = async (db, bookingToken) => {
   const rows = await db.query(
     `SELECT venueId, name, address, phone, logoUrl, maxBookingMinutes, bookingDaysAhead,
-            deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes
+            deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes,
+            scheduleConfirmedUntil
      FROM venues
      WHERE bookingToken = ? AND status = 'Active'
      LIMIT 1`,
@@ -99,21 +101,26 @@ const activeCourts = (db, venueId) =>
     [venueId]
   );
 
-/** The first and last date a player may book (today … bookingDaysAhead). */
+/**
+ * The first and last date a player may book: today … bookingDaysAhead, capped by
+ * the week staff last confirmed (CR-043). lastDate < today: nothing is open.
+ */
 const bookableDates = (venue) => {
   const today = getTodayDateLocal();
-  const lastDate = moment
-    .tz(today, "YYYY-MM-DD", TIMEZONE)
-    .add(venue.bookingDaysAhead, "days")
-    .format("YYYY-MM-DD");
-  return { today, lastDate };
+  return { today, lastDate: playerLastDate(venue, today) };
 };
+
+/** Why a date after lastDate can't be picked. */
+const pastWindowMessage = (venue, date) =>
+  isPastConfirmed(venue, date)
+    ? NOT_OPEN_MESSAGE
+    : `You can book up to ${venue.bookingDaysAhead} days ahead`;
 
 /** Why a date or length can't be booked, or null. */
 const dateProblem = (venue, date, durationMinutes) => {
   const { today, lastDate } = bookableDates(venue);
   if (date < today) return "That date has passed";
-  if (date > lastDate) return `You can book up to ${venue.bookingDaysAhead} days ahead`;
+  if (date > lastDate) return pastWindowMessage(venue, date);
   if (durationMinutes > venue.maxBookingMinutes) {
     return `Bookings here are at most ${venue.maxBookingMinutes / 60} hours`;
   }
@@ -428,7 +435,8 @@ const BOOKING_PAGE_SELECT = `SELECT b.bookingId, b.bookingCode, b.startAt, b.end
               b.email, b.price, b.paymentStatus, b.payMethod, b.holdExpiresAt, b.checkoutId,
               b.status, b.cancelledAt, b.cancelledBy, b.rescheduledCount, b.venueId, b.courtId,
               c.name AS courtName, v.name, v.address, v.phone, v.logoUrl, v.cancelCutoffHours,
-              v.checkInEarlyMinutes, v.bookingDaysAhead, s.shareToken AS gameShareToken,
+              v.checkInEarlyMinutes, v.bookingDaysAhead, v.scheduleConfirmedUntil,
+              s.shareToken AS gameShareToken,
               EXISTS (SELECT 1 FROM payments p
                       WHERE p.bookingId = b.bookingId AND p.status = 'Paid' AND p.method = 'CASH')
                 AS paidCash
@@ -662,9 +670,7 @@ router.get(
     const { date } = req.query;
     if (date < today || date > lastDate) {
       return res.sendError(
-        date < today
-          ? "That date has passed"
-          : `You can book up to ${b.bookingDaysAhead} days ahead`,
+        date < today ? "That date has passed" : pastWindowMessage(b, date),
         400
       );
     }

@@ -9,6 +9,7 @@ import { copyText } from "../../../../utils/clipboard";
 import { bookingSignPath, formatTimeRange } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import {
+  useConfirmScheduleWeek,
   useGetBookingSettings,
   useIssueBookingLink,
   useTurnOffBookingLink,
@@ -64,6 +65,7 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
   );
 
   const issueLinkMutation = useIssueBookingLink();
+  const confirmWeekMutation = useConfirmScheduleWeek();
   const turnOffLinkMutation = useTurnOffBookingLink();
   const deleteClosureMutation = useDeleteClosure();
 
@@ -110,6 +112,11 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
   const handlePrintSign = useCallback(() => {
     window.open(bookingSignPath(venueId), "_blank", "noopener");
   }, [venueId]);
+
+  // ─── CR-043: confirm next week's schedule ──────────────────────────
+  const handleConfirmWeek = useCallback(() => {
+    confirmWeekMutation.mutate(venueId);
+  }, [confirmWeekMutation, venueId]);
 
   // ─── Settings drawer ───────────────────────────────────────────────
   const handleEditSettings = useCallback(() => setSettingsDrawerOpen(true), []);
@@ -247,6 +254,8 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
     settingsDrawerEntity,
     handleEditSettings,
     handleSettingsDrawerClose,
+    isConfirmingWeek: confirmWeekMutation.isPending,
+    handleConfirmWeek,
     // closures — apiData = { success, message, data: { closures, pagination } }
     closures,
     closuresPagination: {

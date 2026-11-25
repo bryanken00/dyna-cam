@@ -1,6 +1,6 @@
 import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { bookingPageUrl, courtBoardUrl } from "../../../utils/clips.js";
@@ -8,17 +8,52 @@ import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { toRate } from "../../../utils/bookingPrice.js";
 import { hoursList, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { updateBookingSettingsSchema } from "../../../validators/booking-settings.validator.js";
+import { confirmTarget, scheduleStatus } from "../../../utils/scheduleWeeks.js";
 
 /**
  * PLAN-003 Phase A — a venue's court-booking setup: the online booking link,
  * the rules (longest booking, days ahead, holds, cut-off, early check-in), the
- * weekly opening hours and the hourly rates.
+ * weekly opening hours and the hourly rates. CR-043: those open for online
+ * booking one week at a time — staff confirm next week (`/confirm-week`), and
+ * `/schedule-reminders` feeds the Dashboard notice.
  * Permission: bookings.
  */
 const router = express.Router();
 
 const RULE_COLUMNS = `v.maxBookingMinutes, v.bookingDaysAhead, v.deskHoldMinutes,
-  v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes`;
+  v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes, v.scheduleConfirmedUntil`;
+
+/** The level order for the Dashboard: the most urgent first. */
+const LEVEL_ORDER = { closed: 0, soon: 1, due: 2, ok: 3 };
+
+/**
+ * GET /schedule-reminders
+ * CR-043: every Active venue with online booking on whose next week isn't
+ * confirmed yet, the most urgent first — the Dashboard's notice.
+ */
+router.get(
+  "/schedule-reminders",
+  checkPermission("bookings", null, "read"),
+  catchAsync(async (req, res) => {
+    const venues = await req.db.query(
+      `SELECT venueId, name, scheduleConfirmedUntil
+       FROM venues
+       WHERE status = 'Active' AND bookingToken IS NOT NULL
+       ORDER BY name ASC`
+    );
+    const now = getCurrentTimestampLocal();
+    const reminders = venues
+      .map((v) => ({
+        venueId: v.venueId,
+        venueName: v.name,
+        ...scheduleStatus(v.scheduleConfirmedUntil, now),
+      }))
+      .filter((r) => r.level !== "ok")
+      .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+
+    return res.sendSuccess("Schedule reminders retrieved successfully", { reminders });
+  })
+);
 
 /** "17:00" → "17:00:00" for a TIME column. */
 const toTime = (hhmm) => `${hhmm}:00`;
@@ -84,6 +119,8 @@ router.get(
         onlineHoldMinutes: venue.onlineHoldMinutes,
         cancelCutoffHours: venue.cancelCutoffHours,
         checkInEarlyMinutes: venue.checkInEarlyMinutes,
+        // CR-043: how far the weekly schedule is confirmed, and what's due
+        schedule: scheduleStatus(venue.scheduleConfirmedUntil),
         hours: hoursList(hours),
         rates: rates.map(toRate),
       },
@@ -240,8 +277,41 @@ router.put(
 );
 
 /**
+ * POST /:venueId/confirm-week
+ * CR-043: confirm the weekly schedule through the end of next week, so players
+ * can book it online. If this week wasn't confirmed either, it opens too. Next
+ * week already confirmed → 200, nothing changes.
+ */
+router.post(
+  "/:venueId/confirm-week",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    const through = confirmTarget(getTodayDateLocal());
+    const result = await req.db.query(
+      `UPDATE venues SET scheduleConfirmedUntil = ?, dateUpdated = ?
+       WHERE venueId = ? AND status != 'Deleted'
+         AND (scheduleConfirmedUntil IS NULL OR scheduleConfirmedUntil < ?)`,
+      [through, getCurrentTimestampLocal(), req.params.venueId, through]
+    );
+
+    const venue = await findVenue(req.db, req.params.venueId);
+    if (!venue) {
+      return res.sendError("Venue not found", 404);
+    }
+    return res.sendSuccess(
+      result.affectedRows > 0
+        ? "Next week's schedule is confirmed — players can book it now"
+        : "Next week is already confirmed",
+      { schedule: scheduleStatus(venue.scheduleConfirmedUntil) }
+    );
+  })
+);
+
+/**
  * POST /:venueId/link
  * Turn online booking on with a new link. A link shared before stops working.
+ * CR-043: a venue that never confirmed its schedule counts as confirmed through
+ * the end of next week, so the new link works at once.
  */
 router.post(
   "/:venueId/link",
@@ -249,9 +319,16 @@ router.post(
   catchAsync(async (req, res) => {
     const bookingToken = randomToken();
     const result = await req.db.query(
-      `UPDATE venues SET bookingToken = ?, dateUpdated = ?
+      `UPDATE venues
+       SET bookingToken = ?, scheduleConfirmedUntil = COALESCE(scheduleConfirmedUntil, ?),
+           dateUpdated = ?
        WHERE venueId = ? AND status != 'Deleted'`,
-      [bookingToken, getCurrentTimestampLocal(), req.params.venueId]
+      [
+        bookingToken,
+        confirmTarget(getTodayDateLocal()),
+        getCurrentTimestampLocal(),
+        req.params.venueId,
+      ]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);

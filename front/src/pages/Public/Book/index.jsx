@@ -161,6 +161,20 @@ const BookPage = () => {
               description="Please call the venue to book."
             />
           </div>
+        ) : dates.length === 0 ? (
+          // CR-043: the venue hasn't opened this week for online booking yet
+          <div className="p-6" style={cardStyle}>
+            <ResultState
+              status="404"
+              icon={<CalendarClock className="w-6 h-6" strokeWidth={1.8} />}
+              title="Online booking isn't open yet"
+              description={
+                page.venue.phone
+                  ? `The venue opens each week for booking soon — check back, or call ${formatPhoneDisplay(page.venue.phone)} to book.`
+                  : "The venue opens each week for booking soon — check back, or call the venue to book."
+              }
+            />
+          </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6">
             {/* Left: date, length, court and start time */}

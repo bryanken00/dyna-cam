@@ -35,3 +35,15 @@ export const turnOffDisplayLinkApi = async (venueId) => {
   const response = await api.delete(`/api/v1/admin/booking-settings/${venueId}/display-link`);
   return response.data;
 };
+
+// CR-043: confirm the weekly schedule through the end of next week → { schedule }
+export const confirmScheduleWeekApi = async (venueId) => {
+  const response = await api.post(`/api/v1/admin/booking-settings/${venueId}/confirm-week`);
+  return response.data;
+};
+
+// CR-043: venues with online booking whose next week isn't confirmed → { reminders }
+export const getScheduleRemindersApi = async () => {
+  const response = await api.get(`/api/v1/admin/booking-settings/schedule-reminders`);
+  return response.data;
+};
