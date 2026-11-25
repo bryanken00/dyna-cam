@@ -1,6 +1,8 @@
 # Logs
 logs
 *.log
+# …except the deploy logs push.sh writes (one per deploy), which are committed
+!deploy-logs/*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

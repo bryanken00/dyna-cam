@@ -20,6 +20,3 @@ node_modules/
 
 # package-lock.json is committed on purpose (front/ and back/): it pins the
 # exact dependency versions, and CI installs with `npm ci`, which needs it.
-
-# Local deploy logs written by front/push.sh and back/push.sh (one per deploy)
-deploy-logs/

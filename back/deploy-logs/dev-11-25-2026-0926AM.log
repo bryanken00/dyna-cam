@@ -1,0 +1,11 @@
+Environment: dev
+Date:        2026-11-25 09:26:36 +0800
+Commit:      29ce83c954881ce11ddb8caddfb2c0b75b104697
+Previous:    23127ff446d27dc4878df4958cf662b26fa57459
+By:          bryanken01230@gmail.com
+Install:     true | Migrate: true
+
+Commits since last deploy:
+  29ce83c 2026-11-25 CR-043: undo next week's confirmation while nobody has booked it
+  d272de6 2026-11-25 chore: ignore deploy-logs/ and untrack the committed log
+  4c11c6f 2026-11-25 chore: add initial deployment log for development environment
