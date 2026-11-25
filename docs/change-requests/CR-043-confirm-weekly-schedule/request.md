@@ -40,6 +40,10 @@ change (a tournament, new prices) is never missed, and wants a clear reminder to
 - **Confirm next week** (Setup → venue → Booking rules, and on the Dashboard): confirms the
   schedule through the end of next week. If this week wasn't confirmed either, it opens too.
   Only next week can be confirmed. The week after can be confirmed from its Monday before.
+- **Undo confirmation** (Setup → venue → Booking rules): while **nobody has booked next week**
+  (no live booking, online or at the desk), staff can take next week's confirmation back, and
+  players can't book it online again until it's confirmed. Once anyone has booked it, the
+  confirmation stays. This week can't be undone.
 - **Players** (booking page, Move): can pick a date only up to the confirmed date, and still no
   further than *Book up to … days ahead*. When nothing more is open, the booking page says
   bookings for that week aren't open yet and shows the venue's phone.
@@ -72,6 +76,9 @@ change (a tournament, new prices) is never missed, and wants a clear reminder to
   warning colour from Friday, red once a week has started unconfirmed. Confirm on the notice
   clears it.
 - Someone without the bookings permission doesn't see the notice.
+- With next week confirmed and nobody booked in it, Booking rules offers **Undo confirmation**;
+  after it, players can't book next week online and the Dashboard asks to confirm it again.
+- With a booking in next week, Undo isn't offered and the API refuses it.
 
 ## Impact
 
@@ -80,7 +87,7 @@ change (a tournament, new prices) is never missed, and wants a clear reminder to
 | Screens | Dashboard (new notice); Setup → venue → Booking rules (confirmed-through date, Confirm button); player booking page (dates stop at the confirmed week, "not open yet" message) |
 | Data | `venues.scheduleConfirmedUntil DATE NULL` — new migration `040`, backfilled to the end of next week for every venue |
 | Build / rollout | None beyond the usual: run `npm run db:migrate` on the server, rebuild the front end |
-| Permissions | None new: `bookings` read sees the notice, `bookings` write confirms |
+| Permissions | None new: `bookings` read sees the notice, `bookings` write confirms and undoes |
 | Existing users | **Behaviour changes for staff and players:** online booking past the confirmed week closes until staff confirm it each week. A release note must say so (`major`). |
 | Size | M — one column, one endpoint, the window check in three places, the Dashboard notice and the Setup button |
 
@@ -94,3 +101,8 @@ change (a tournament, new prices) is never missed, and wants a clear reminder to
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-25 | asked directly; both choices above picked by the requester |
+
+## Revisions
+
+- 2026-11-25: requester — "The next week must still can cancel if no one booked". Added **Undo
+  confirmation** for next week, allowed only while it has no live booking (online or desk).

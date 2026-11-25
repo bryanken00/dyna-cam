@@ -31,7 +31,8 @@ const Heading = ({ children }) => (
 /**
  * PLAN-003: a summary of the venue's booking rules, opening hours and hourly
  * rates; Edit opens BookingSettingsFormDrawer. CR-043: with online booking on,
- * how far the weekly schedule is confirmed, and Confirm next week.
+ * how far the weekly schedule is confirmed, Confirm next week, and Undo while
+ * nobody has booked next week.
  */
 const BookingRulesSection = ({
   settings,
@@ -39,6 +40,8 @@ const BookingRulesSection = ({
   onEdit,
   isConfirmingWeek = false,
   onConfirmWeek,
+  isUnconfirmingWeek = false,
+  onUnconfirmWeek,
 }) => {
   const byDay = new Map(settings.hours.map((h) => [h.dayOfWeek, h]));
 
@@ -63,6 +66,8 @@ const BookingRulesSection = ({
             canConfirm={canWrite}
             isConfirming={isConfirmingWeek}
             onConfirm={onConfirmWeek}
+            isUndoing={isUnconfirmingWeek}
+            onUndo={onUnconfirmWeek}
           />
         </div>
       )}

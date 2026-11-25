@@ -47,3 +47,9 @@ export const getScheduleRemindersApi = async () => {
   const response = await api.get(`/api/v1/admin/booking-settings/schedule-reminders`);
   return response.data;
 };
+
+// CR-043: undo next week's confirmation while nobody has booked it → { schedule }
+export const unconfirmScheduleWeekApi = async (venueId) => {
+  const response = await api.post(`/api/v1/admin/booking-settings/${venueId}/unconfirm-week`);
+  return response.data;
+};

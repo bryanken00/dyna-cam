@@ -243,4 +243,82 @@ describe("weekly schedule confirmation (CR-043)", () => {
     assert.equal(res.status, 403);
     assert.equal(await confirmedOf(venue.venueId), thisSunday());
   });
+
+  describe("Undo confirmation", () => {
+    const undo = (venueId, token = admin.token) =>
+      call("POST", `/admin/booking-settings/${venueId}/unconfirm-week`, undefined, token);
+    const deskBooking = (venue, date, startTime = "12:00") =>
+      call("POST", "/admin/bookings", {
+        courtId: venue.courtId,
+        date,
+        startTime,
+        durationMinutes: 60,
+        playerName: "Desk Player",
+        payment: "Free",
+      });
+
+    it("takes next week back while nobody has booked it", async () => {
+      const venue = await setupVenue("Undo Courts");
+      const before = await call("GET", `/admin/booking-settings/${venue.venueId}`);
+      assert.equal(before.data.settings.schedule.nextWeekBookings, 0);
+
+      const res = await undo(venue.venueId);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal(res.data.schedule.confirmedUntil, thisSunday());
+      assert.notEqual(res.data.schedule.level, "ok");
+      assert.equal(await confirmedOf(venue.venueId), thisSunday());
+
+      // Players can't book next week online again, and the Dashboard asks for it
+      assert.equal((await pub("GET", `/public/book/${venue.token}`)).data.lastDate, thisSunday());
+      const refused = await bookOnline(venue, nextMonday());
+      assert.equal(refused.status, 400);
+      assert.match(refused.body.message, /aren't open yet/);
+      assert.ok((await reminders()).data.reminders.some((r) => r.venueId === venue.venueId));
+
+      // Confirm again works as before
+      await call("POST", `/admin/booking-settings/${venue.venueId}/confirm-week`);
+      assert.equal(await confirmedOf(venue.venueId), nextSunday());
+    });
+
+    it("keeps the confirmation once next week has a booking (desk or online)", async () => {
+      const venue = await setupVenue("Booked Courts");
+      const desk = await deskBooking(venue, nextMonday());
+      assert.equal(desk.status, 201, JSON.stringify(desk.body));
+
+      const settings = await call("GET", `/admin/booking-settings/${venue.venueId}`);
+      assert.equal(settings.data.settings.schedule.nextWeekBookings, 1);
+      const res = await undo(venue.venueId);
+      assert.equal(res.status, 409);
+      assert.match(res.body.message, /1 booking/);
+      assert.equal(await confirmedOf(venue.venueId), nextSunday());
+
+      const online = await setupVenue("Booked Online Courts");
+      assert.equal((await bookOnline(online, nextMonday())).status, 201);
+      assert.equal((await undo(online.venueId)).status, 409);
+      assert.equal(await confirmedOf(online.venueId), nextSunday());
+    });
+
+    it("has nothing to undo when next week isn't confirmed", async () => {
+      const venue = await setupVenue("Unconfirmed Courts");
+      await setConfirmed(venue.venueId, thisSunday());
+      const res = await undo(venue.venueId);
+      assert.equal(res.status, 409);
+      assert.match(res.body.message, /isn't confirmed/);
+      assert.equal(await confirmedOf(venue.venueId), thisSunday());
+    });
+
+    it("returns 404 for a Deleted venue and leaves it unchanged", async () => {
+      const venue = await setupVenue("Gone Undo Courts");
+      assert.equal((await call("DELETE", `/admin/venues/${venue.venueId}`)).status, 200);
+      assert.equal((await undo(venue.venueId)).status, 404);
+      assert.equal(await confirmedOf(venue.venueId), nextSunday());
+    });
+
+    it("needs bookings write", async () => {
+      const venue = await setupVenue("Read Only Undo Courts");
+      const reader = await ctx.createStaff("Undo Reader", { access: "read" });
+      assert.equal((await undo(venue.venueId, reader.token)).status, 403);
+      assert.equal(await confirmedOf(venue.venueId), nextSunday());
+    });
+  });
 });

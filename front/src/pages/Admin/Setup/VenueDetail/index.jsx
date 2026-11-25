@@ -237,6 +237,8 @@ const VenueDetailPage = () => {
               onEdit={booking.handleEditSettings}
               isConfirmingWeek={booking.isConfirmingWeek}
               onConfirmWeek={booking.handleConfirmWeek}
+              isUnconfirmingWeek={booking.isUnconfirmingWeek}
+              onUnconfirmWeek={booking.handleUnconfirmWeek}
             />
             <ClosuresSection
               closures={booking.closures}

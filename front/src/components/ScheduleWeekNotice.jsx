@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button";
  * week isn't confirmed: online booking is closed now, red) or "ok" (Setup only).
  *
  * Props: `schedule`; `venueName` (the Dashboard names the venue); `reviewTo` (a
- * link to the venue's hours); `canConfirm`, `isConfirming`, `onConfirm`.
+ * link to the venue's hours); `canConfirm`, `isConfirming`, `onConfirm`; `onUndo`,
+ * `isUndoing` (Setup: Undo confirmation, offered while `schedule.nextWeekBookings`
+ * is 0 — the API checks again).
  */
 const TONES = {
   due: { color: "var(--color-link)", icon: CalendarClock },
@@ -44,11 +46,17 @@ const wording = (schedule, venueName) => {
         title: "Confirm next week's schedule",
         body: `${at}Players can book ${week} online once you confirm its hours and prices. ${daysText(schedule.daysLeft)} left.`,
       };
-    default:
+    default: {
+      const booked = schedule.nextWeekBookings || 0;
+      const stays =
+        booked > 0
+          ? ` Next week has ${booked} booking${booked === 1 ? "" : "s"}, so it stays confirmed.`
+          : "";
       return {
         title: `Confirmed through ${day(schedule.confirmedUntil)}`,
-        body: `${at}Players can book online up to then. The week after can be confirmed from ${day(schedule.nextWeekStart)}.`,
+        body: `${at}Players can book online up to then. The week after can be confirmed from ${day(schedule.nextWeekStart)}.${stays}`,
       };
+    }
   }
 };
 
@@ -59,11 +67,15 @@ const ScheduleWeekNotice = ({
   canConfirm = false,
   isConfirming = false,
   onConfirm,
+  isUndoing = false,
+  onUndo,
 }) => {
   const tone = TONES[schedule.level] || TONES.due;
   const Icon = tone.icon;
   const { title, body } = wording(schedule, venueName);
   const due = schedule.level !== "ok";
+  // Next week confirmed and nobody has booked it yet → it can be taken back
+  const canUndo = !due && canConfirm && !!onUndo && (schedule.nextWeekBookings ?? 0) === 0;
 
   return (
     <div
@@ -104,6 +116,11 @@ const ScheduleWeekNotice = ({
             </Button>
           )}
         </div>
+      )}
+      {canUndo && (
+        <Button variant="outline" size="sm" className="shrink-0" onClick={onUndo} disabled={isUndoing}>
+          {isUndoing ? "Undoing…" : "Undo confirmation"}
+        </Button>
       )}
     </div>
   );

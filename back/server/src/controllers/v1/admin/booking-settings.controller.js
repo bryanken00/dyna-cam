@@ -1,14 +1,14 @@
 import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { bookingPageUrl, courtBoardUrl } from "../../../utils/clips.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { toRate } from "../../../utils/bookingPrice.js";
-import { hoursList, loadVenueHours } from "../../../utils/courtTimeline.js";
+import { hoursList, LIVE_BOOKING, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { updateBookingSettingsSchema } from "../../../validators/booking-settings.validator.js";
-import { confirmTarget, scheduleStatus } from "../../../utils/scheduleWeeks.js";
+import { confirmTarget, scheduleStatus, sundayOf } from "../../../utils/scheduleWeeks.js";
 
 /**
  * PLAN-003 Phase A — a venue's court-booking setup: the online booking link,
@@ -55,6 +55,33 @@ router.get(
   })
 );
 
+/**
+ * CR-043: live bookings (any source) starting in next week at a venue. `run` is
+ * `req.db.query` (rows) or a transaction's `conn.execute` (wrapped to rows).
+ */
+const countNextWeekBookings = async (run, venueId, schedule, now) => {
+  const afterEnd = moment(schedule.nextWeekEnd, "YYYY-MM-DD").add(1, "day").format("YYYY-MM-DD");
+  const rows = await run(
+    `SELECT COUNT(*) AS n FROM bookings b
+     WHERE b.venueId = ? AND ${LIVE_BOOKING} AND b.startAt >= ? AND b.startAt < ?`,
+    [venueId, now, `${schedule.nextWeekStart} 00:00:00`, `${afterEnd} 00:00:00`]
+  );
+  return Number(rows[0]?.n || 0);
+};
+
+/** Where the venue's schedule stands, plus how many bookings next week already has. */
+const scheduleWithBookings = async (db, venue) => {
+  const now = getCurrentTimestampLocal();
+  const schedule = scheduleStatus(venue.scheduleConfirmedUntil, now);
+  const nextWeekBookings = await countNextWeekBookings(
+    (sql, params) => db.query(sql, params),
+    venue.venueId,
+    schedule,
+    now
+  );
+  return { ...schedule, nextWeekBookings };
+};
+
 /** "17:00" → "17:00:00" for a TIME column. */
 const toTime = (hhmm) => `${hhmm}:00`;
 
@@ -84,7 +111,7 @@ router.get(
       return res.sendError("Venue not found", 404);
     }
 
-    const [hours, rates, courts] = await Promise.all([
+    const [hours, rates, courts, schedule] = await Promise.all([
       loadVenueHours(req.db, venue.venueId),
       req.db.query(
         `SELECT r.rateId, r.name, r.courtId, c.name AS courtName, r.daysOfWeek, r.startTime,
@@ -101,6 +128,7 @@ router.get(
          ORDER BY name ASC`,
         [venue.venueId]
       ),
+      scheduleWithBookings(req.db, venue),
     ]);
 
     return res.sendSuccess("Booking settings retrieved successfully", {
@@ -119,8 +147,9 @@ router.get(
         onlineHoldMinutes: venue.onlineHoldMinutes,
         cancelCutoffHours: venue.cancelCutoffHours,
         checkInEarlyMinutes: venue.checkInEarlyMinutes,
-        // CR-043: how far the weekly schedule is confirmed, and what's due
-        schedule: scheduleStatus(venue.scheduleConfirmedUntil),
+        // CR-043: how far the weekly schedule is confirmed, what's due, and
+        // whether next week has bookings (then its confirmation can't be undone)
+        schedule,
         hours: hoursList(hours),
         rates: rates.map(toRate),
       },
@@ -302,8 +331,70 @@ router.post(
       result.affectedRows > 0
         ? "Next week's schedule is confirmed — players can book it now"
         : "Next week is already confirmed",
-      { schedule: scheduleStatus(venue.scheduleConfirmedUntil) }
+      { schedule: await scheduleWithBookings(req.db, venue) }
     );
+  })
+);
+
+/**
+ * POST /:venueId/unconfirm-week
+ * CR-043: take next week's confirmation back while nobody has booked it (no live
+ * booking, online or desk), so players can't book it online until it's confirmed
+ * again. The venue row is locked first: an online booking locks it too (through
+ * its court), so the two can't pass each other.
+ */
+router.post(
+  "/:venueId/unconfirm-week",
+  checkPermission("bookings", null, "write"),
+  catchAsync(async (req, res) => {
+    const now = getCurrentTimestampLocal();
+
+    let conn;
+    try {
+      conn = await req.db.beginTransaction();
+
+      const [venues] = await conn.execute(
+        `SELECT venueId, scheduleConfirmedUntil FROM venues
+         WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
+        [req.params.venueId]
+      );
+      if (venues.length === 0) {
+        await req.db.rollback(conn);
+        return res.sendError("Venue not found", 404);
+      }
+      const schedule = scheduleStatus(venues[0].scheduleConfirmedUntil, now);
+      if (!schedule.confirmedUntil || schedule.confirmedUntil < schedule.nextWeekEnd) {
+        await req.db.rollback(conn);
+        return res.sendError("Next week isn't confirmed, so there's nothing to undo", 409);
+      }
+      const booked = await countNextWeekBookings(
+        async (sql, params) => (await conn.execute(sql, params))[0],
+        req.params.venueId,
+        schedule,
+        now
+      );
+      if (booked > 0) {
+        await req.db.rollback(conn);
+        return res.sendError(
+          `Next week already has ${booked} booking${booked === 1 ? "" : "s"}, so its confirmation stays`,
+          409
+        );
+      }
+
+      await conn.execute(
+        `UPDATE venues SET scheduleConfirmedUntil = ?, dateUpdated = ? WHERE venueId = ?`,
+        [sundayOf(now.slice(0, 10)), now, req.params.venueId]
+      );
+      await req.db.commit(conn);
+    } catch (err) {
+      await req.db.rollback(conn);
+      throw err;
+    }
+
+    const venue = await findVenue(req.db, req.params.venueId);
+    return res.sendSuccess("Next week's confirmation is undone — players can't book it online", {
+      schedule: await scheduleWithBookings(req.db, venue),
+    });
   })
 );
 

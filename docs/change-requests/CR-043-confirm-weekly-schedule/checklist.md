@@ -20,6 +20,9 @@
 - [x] Front: Booking rules section shows the date and Confirm next week
 - [x] Front: Dashboard notice (plain / warning / red) with Confirm
 - [x] Front: booking page message when no date is open
+- [x] Undo: `POST /admin/booking-settings/:venueId/unconfirm-week` (bookings write) — next week confirmed and no live booking in it, venue row locked; settings report `nextWeekBookings`
+- [x] Undo tests: works with no bookings, 409 with one, 409 when next week isn't confirmed, 404 Deleted, read-only 403
+- [x] Front: Undo confirmation in Booking rules (asks first; not offered with bookings)
 
 ## Acceptance
 
@@ -29,6 +32,8 @@
 - [x] The desk can book next week before it's confirmed (tested)
 - [ ] Dashboard notice: plain Mon–Thu, warning from Friday, red when a week started unconfirmed; Confirm clears it
 - [x] No notice without the bookings permission (tested: 403)
+- [ ] Undo is offered with next week confirmed and empty, and closes next week online again
+- [x] No Undo once next week has a booking (tested: 409, and Setup hides the button)
 
 ## Wrap-up
 

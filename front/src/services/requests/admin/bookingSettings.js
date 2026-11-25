@@ -4,6 +4,7 @@ import {
   confirmScheduleWeekApi,
   getBookingSettingsApi,
   getScheduleRemindersApi,
+  unconfirmScheduleWeekApi,
   issueBookingLinkApi,
   turnOffBookingLinkApi,
   updateBookingSettingsApi,
@@ -125,6 +126,22 @@ export const useConfirmScheduleWeek = () => {
     },
     onError: (error) => {
       toast.error(error.response?.data?.message || "Failed to confirm next week's schedule");
+    },
+  });
+};
+
+// Mutation: CR-043 — undo next week's confirmation (only while nobody has booked it)
+export const useUnconfirmScheduleWeek = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: unconfirmScheduleWeekApi,
+    onSuccess: (data) => {
+      toast.success(data?.message || "Next week's confirmation is undone");
+      queryClient.invalidateQueries({ queryKey: ["bookingSettings"] });
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || "Failed to undo next week's confirmation");
     },
   });
 };
