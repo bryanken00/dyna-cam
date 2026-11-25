@@ -258,12 +258,13 @@ If it still says *Live view needs the venue Wi-Fi*, see Part I.
    pm2 install pm2-logrotate
    ```
 
-2. Start it when Windows signs in — **Admin PowerShell**, signed in as the box's user:
+2. Start it when Windows signs in — **PowerShell**, signed in as the box's user (pm2 doesn't need
+   admin rights, so the task runs without them):
 
    ```powershell
    $action  = New-ScheduledTaskAction -Execute "$env:APPDATA\npm\pm2.cmd" -Argument "resurrect"
    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-   Register-ScheduledTask -TaskName "DGSports recorder box" -Action $action -Trigger $trigger -RunLevel Highest
+   Register-ScheduledTask -TaskName "DGSports recorder box" -Action $action -Trigger $trigger -RunLevel Limited
    ```
 
 3. Make Windows sign in by itself after a restart or power cut:
@@ -279,6 +280,15 @@ If it still says *Live view needs the venue Wi-Fi*, see Part I.
    | See the log | `pm2 logs dyna-cam-edge` |
    | Restart | `pm2 restart dyna-cam-edge` |
    | Stop | `pm2 stop dyna-cam-edge` |
+
+---
+
+## Part G½ — Lock it down
+
+Once the box records and starts on boot, harden it with
+[Recorder box security](recorder-box-security.md): enrolment off again, its own Standard account,
+firewall, updates, cameras. After the next restart, `pm2 logs dyna-cam-edge` should show no
+`security:` lines.
 
 ---
 

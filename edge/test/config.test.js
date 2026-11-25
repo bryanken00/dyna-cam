@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import {
   ConfigError,
+  isThisMachine,
   leftoverWarnings,
   loadConfig,
   parseEnrollment,
@@ -115,15 +116,57 @@ describe("loadConfig", () => {
     assert.equal(cfg.maxStackedStreams, 2);
   });
 
-  it("turns the button listener on by default and off with an empty/0 port", () => {
+  it("has no court-button listener any more; leftover BUTTON_* lines are only warned about (CR-044)", () => {
     const cfg = loadConfig(base);
-    assert.equal(cfg.buttonPort, 8089);
-    assert.equal(cfg.buttonHost, "0.0.0.0");
-    assert.equal(cfg.buttonKey, "");
-    assert.equal(loadConfig({ ...base, BUTTON_PORT: "" }).buttonPort, 0);
-    assert.equal(loadConfig({ ...base, BUTTON_PORT: "0" }).buttonPort, 0);
-    assert.equal(loadConfig({ ...base, BUTTON_PORT: "9000", BUTTON_KEY: " k " }).buttonKey, "k");
-    assert.throws(() => loadConfig({ ...base, BUTTON_PORT: "70000" }), /BUTTON_PORT/);
+    assert.equal(cfg.buttonPort, undefined);
+    assert.equal(cfg.ignoredButtons, false);
+    assert.deepEqual(leftoverWarnings(cfg), []);
+    for (const name of ["BUTTON_PORT", "BUTTON_HOST", "BUTTON_KEY"]) {
+      const old = loadConfig({ ...base, [name]: "" });
+      assert.equal(old.ignoredButtons, true, name);
+      assert.match(leftoverWarnings(old).join("\n"), /no longer used — court buttons/);
+    }
+  });
+
+  it("only talks to the API over HTTPS — plain http only on this machine (CR-044)", () => {
+    const interfaces = () => ({
+      lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+      en0: [
+        { address: "192.168.2.180", family: "IPv4", internal: false },
+        { address: "fe80::1", family: "IPv6", internal: false },
+      ],
+    });
+    const load = (url) => loadConfig({ ...base, API_URL: url }, { interfaces });
+    for (const bad of ["http://api.example.com", "http://192.168.1.10:4021", "ftp://x"]) {
+      assert.throws(
+        () => load(bad),
+        (err) => err instanceof ConfigError && /must start with https/.test(err.message),
+        bad
+      );
+    }
+    for (const ok of [
+      "http://localhost:4021",
+      "http://127.0.0.1:4021",
+      "http://[::1]:4021",
+      "http://192.168.2.180:4021",
+      "http://[fe80::1]:4021",
+      "https://api.example.com:1342",
+    ]) {
+      assert.equal(load(ok).apiUrl, ok, ok);
+    }
+    assert.equal(isThisMachine("192.168.2.180", interfaces), true);
+    assert.equal(isThisMachine("192.168.2.181", interfaces), false);
+  });
+
+  it("refuses to start with HTTPS certificate checks turned off (CR-044)", () => {
+    assert.throws(
+      () => loadConfig({ ...base, NODE_TLS_REJECT_UNAUTHORIZED: "0" }),
+      /NODE_TLS_REJECT_UNAUTHORIZED/
+    );
+    assert.equal(
+      loadConfig({ ...base, NODE_TLS_REJECT_UNAUTHORIZED: "1" }).apiUrl,
+      "https://api.example.com"
+    );
   });
 
   it("rejects bad values", () => {

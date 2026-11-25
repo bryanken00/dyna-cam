@@ -10,8 +10,6 @@ import { backoffMs, safeId, sleep, truncate } from "./util.js";
 export const STALE_MS = 15 * 60_000;
 /** A cut clip is retried until the server answers; an offline box gives up after this. */
 export const UPLOAD_GIVE_UP_MS = 60 * 60_000;
-/** The API refuses a button press older than 2 min; stop retrying a bit before that. */
-export const PRESS_RELAY_MAX_AGE_MS = 100_000;
 const LONG_POLL_SECONDS = 25;
 const MAX_CUT_ATTEMPTS = 2;
 /** Copying a game is retried this often before the game video is reported as failed. */
@@ -76,11 +74,10 @@ export class JobRunner {
       cut: settings.clipConcurrency ?? 1,
       upload: settings.uploadConcurrency ?? 1,
       report: 2,
-      press: 4,
       // Whole-game videos: one at a time, beside the clips (never instead of them)
       game: 1,
     };
-    this.busy = { cut: 0, upload: 0, report: 0, press: 0, game: 0 };
+    this.busy = { cut: 0, upload: 0, report: 0, game: 0 };
     this.active = new Map();
     this.abort = new AbortController();
     this.stopped = false;
@@ -107,7 +104,11 @@ export class JobRunner {
   async recover() {
     for (const entry of this.queue.list()) {
       entry.nextAttemptAt = 0;
-      if (isOldSessionPart(entry)) {
+      if (entry.state === "press") {
+        // CR-044: court buttons are gone (CR-027) and the box no longer listens for them
+        this.log.info(`dropping a court button press from an older box (${entry.buttonCode})`);
+        await this.drop(entry);
+      } else if (isOldSessionPart(entry)) {
         this.log.info(
           `dropping session part ${entry.clipId} from an older box — games are uploaded as one file per camera now`
         );
@@ -277,7 +278,7 @@ export class JobRunner {
       if (this.active.has(queueKey(entry)) || (entry.nextAttemptAt || 0) > now) continue;
       const kind = isGameJob(entry)
         ? "game"
-        : { ready: "upload", failing: "report", press: "press" }[entry.state] || "cut";
+        : { ready: "upload", failing: "report" }[entry.state] || "cut";
       if (this.busy[kind] >= this.limits[kind]) continue;
       this.busy[kind] += 1;
       const run = this.step(entry)
@@ -293,7 +294,6 @@ export class JobRunner {
 
   /** Do the next thing for one entry (always returns a promise). Exposed for tests. */
   step(entry) {
-    if (entry.state === "press") return this.relayPress(entry);
     if (isGameJob(entry)) return this.gameStep(entry);
     const age = this.now() - entry.requestedAtMs;
     const limit = entry.state === "waiting" ? STALE_MS : UPLOAD_GIVE_UP_MS;
@@ -803,68 +803,6 @@ export class JobRunner {
       nextAttemptAt: 0,
     });
     this.wake();
-  }
-
-  // ─── Court buttons ─────────────────────────────────────────────────────────
-
-  /**
-   * A button press from the LAN listener (buttons.js). Persisted first, so a
-   * restart does not lose it, then relayed to the API by the work loop.
-   */
-  async addPress({ buttonCode, pressedAtMs }) {
-    const entry = {
-      pressId: `press-${buttonCode}-${pressedAtMs}`,
-      buttonCode,
-      requestedAtMs: pressedAtMs,
-      state: "press",
-      attempts: 0,
-      nextAttemptAt: 0,
-    };
-    await this.queue.put(entry);
-    this.wake();
-    return entry;
-  }
-
-  /** POST /buttons/:code/press. 404/409/422/400 are final; anything else is retried while the press is young. */
-  async relayPress(entry) {
-    const code = entry.buttonCode;
-    const age = this.now() - entry.requestedAtMs;
-    if (age > PRESS_RELAY_MAX_AGE_MS) {
-      this.log.warn(
-        `button ${code}: could not reach the API within ${Math.round(age / 1000)}s — press dropped`
-      );
-      return this.drop(entry);
-    }
-    try {
-      const data = await this.api.pressButton(code, entry.requestedAtMs, this.abort.signal);
-      this.log.info(
-        `button ${code}: ${data.merged ? "joined the clip already being saved" : "clip saved"} ` +
-          `${data.clipId} — ${data.shareUrl}`
-      );
-      return this.drop(entry);
-    } catch (err) {
-      if (this.stopped) return undefined;
-      const final = {
-        404: `Button code ${code} is not set on any court of this venue — set it in Admin → Courts`,
-        409: `button ${code}: its court has no camera configured`,
-        422: `button ${code}: press is too old for the recorder buffer`,
-        400: `button ${code}: the API rejected the code (${err.detail})`,
-      }[err.status];
-      if (final) {
-        this.log.warn(final);
-        return this.drop(entry);
-      }
-      const attempts = (entry.attempts || 0) + 1;
-      const delay = Math.min(this.retryDelay(err, attempts, 1000, 15_000), 15_000);
-      if (err.status !== 401) {
-        this.log.warn(
-          `button ${code}: relay failed, retrying in ${Math.round(delay / 1000)}s`,
-          err
-        );
-      }
-      await this.queue.update(queueKey(entry), { attempts, nextAttemptAt: this.now() + delay });
-      return undefined;
-    }
   }
 }
 

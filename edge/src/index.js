@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createApi } from "./api.js";
-import { startButtonServer } from "./buttons.js";
 import { PreviewSender } from "./camera.js";
 import { detectEncoder, makeClip } from "./clipper.js";
 import {
   AGENT_VERSION,
   ConfigError,
+  ENV_FILE,
   leftoverWarnings,
   loadConfig,
   loadEnvFile,
@@ -15,6 +15,7 @@ import {
 import { CredentialsError, markRevoked, resolveCredentials } from "./credentials.js";
 import { ffmpegMajorVersion } from "./ffmpeg.js";
 import { makeGameFile } from "./game.js";
+import { makePrivate, PRIVATE_UMASK, setupWarnings } from "./hardening.js";
 import { sampleHealth } from "./health.js";
 import { JobRunner } from "./jobs.js";
 import { LiveView } from "./live.js";
@@ -28,8 +29,8 @@ import { VideoStore } from "./videos.js";
 
 /**
  * Dyna Cam recorder box: config sync + heartbeat, one recorder per court, and
- * the clip job loop. The API is reached over outbound HTTPS only; the two
- * listeners (court buttons, live view) are for the venue LAN.
+ * the clip job loop. The API is reached over outbound HTTPS only; the one
+ * listener (the live view) is for the venue LAN.
  */
 /**
  * A person has to act (revoked box, refused or missing ENROLL_KEY / VENUE_ID):
@@ -63,6 +64,29 @@ async function checkFfmpeg(settings, log) {
   }
   if (major < 5) log.warn(`ffmpeg ${major}.x is old — version 5 or newer is recommended`);
   return major;
+}
+
+/**
+ * CR-044: `.env` and DATA_DIR private to this account (they hold the enrol key,
+ * the token, camera passwords and players' videos), then say what else is unsafe.
+ */
+async function secureSetup(settings, log) {
+  const { fixed, warnings } = await makePrivate([
+    { path: ENV_FILE, mode: 0o600 },
+    { path: settings.dataDir, mode: 0o700 },
+  ]);
+  for (const target of fixed) log.info(`made ${target} private to this account`);
+  let procMounts = null;
+  if (process.platform === "linux") {
+    procMounts = await fs.promises.readFile("/proc/mounts", "utf8").catch(() => null);
+  }
+  const facts = {
+    settings,
+    platform: process.platform,
+    uid: process.getuid?.() ?? null,
+    procMounts,
+  };
+  for (const line of [...warnings, ...setupWarnings(facts)]) log.warn(`security: ${line}`);
 }
 
 /** The parts that talk to the API: previews, config/heartbeat sync and the job loop. */
@@ -165,6 +189,8 @@ async function startLiveView(settings, recorders, encoder) {
 }
 
 async function main() {
+  // CR-044: everything this process and its ffmpegs create is private to this account
+  process.umask(PRIVATE_UMASK);
   loadEnvFile();
   let settings;
   try {
@@ -189,6 +215,7 @@ async function main() {
   for (const dir of [settings.dataDir, jobsDir, path.join(settings.dataDir, "buffer")]) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  await secureSetup(settings, log);
 
   const encoder = await detectEncoder({
     ffmpegPath: settings.ffmpegPath,
@@ -223,7 +250,6 @@ async function main() {
   const services = { settings, api, recorders, encoder, jobsDir, live, streams };
   const { preview, sync, jobs, videos } = createServices(services);
 
-  let buttons = null;
   const previewTimer = setInterval(() => {
     preview.tick().catch((err) => log.warn("preview failed", err));
   }, 5000);
@@ -247,7 +273,6 @@ async function main() {
   const stopWork = async () => {
     sync.stop();
     clearInterval(previewTimer);
-    buttons?.close();
     await streams.stopAll();
     live.close();
     await jobs.stop();
@@ -281,15 +306,6 @@ async function main() {
   await jobs.start();
   videos.start();
   sync.startTimers();
-  if (settings.buttonPort && !shuttingDown) {
-    buttons = await startButtonServer({
-      host: settings.buttonHost,
-      port: settings.buttonPort,
-      key: settings.buttonKey,
-      log: createLogger("buttons"),
-      onPress: (press) => jobs.addPress(press),
-    });
-  }
 }
 
 main().catch((err) => {

@@ -413,7 +413,11 @@ describe("CR-029 replay links", () => {
     assert.equal(check({ to: String(T0 + 8) }), "bad", "another stretch");
     assert.equal(check({ from: String(T0 + 2) }), "bad");
     assert.equal(check({ courtId: "court-2" }), "bad");
-    assert.equal(check({ sig: signLive(KEY, "court-1", exp) }), "bad", "a live link is not a replay link");
+    assert.equal(
+      check({ sig: signLive(KEY, "court-1", exp) }),
+      "bad",
+      "a live link is not a replay link"
+    );
     assert.equal(check({ from: null }), "bad");
     assert.equal(check({ from: "abc" }), "bad");
   });
@@ -434,7 +438,10 @@ describe("CR-029 replay links", () => {
   });
 
   it("routes replay.m3u8 with its stretch", () => {
-    const r = routeLive("GET", `/live/court-1/cam2/replay.m3u8?from=${from}&to=${to}&exp=${exp}&sig=${sig}`);
+    const r = routeLive(
+      "GET",
+      `/live/court-1/cam2/replay.m3u8?from=${from}&to=${to}&exp=${exp}&sig=${sig}`
+    );
     assert.equal(r.kind, "replay");
     assert.equal(r.camera, 2);
     assert.equal(r.from, from);
@@ -762,9 +769,8 @@ describe("config", () => {
     const rel = loadConfig({ ...base, CERT_PATH: "./certs" }).certPath;
     assert.ok(path.isAbsolute(rel) && rel.endsWith(`${path.sep}certs`), rel);
   });
-  it("rejects a bad port or host, and the button port", () => {
+  it("rejects a bad port or host", () => {
     assert.throws(() => loadConfig({ ...base, LIVE_PORT: "70000" }), /LIVE_PORT/);
-    assert.throws(() => loadConfig({ ...base, LIVE_PORT: "8089" }), /must differ/);
     for (const bad of ["http://1.2.3.4", "1.2.3.4:8090", "a/b", "x y"]) {
       assert.throws(() => loadConfig({ ...base, LIVE_HOST: bad }), /LIVE_HOST/, bad);
     }

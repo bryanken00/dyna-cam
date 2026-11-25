@@ -12,8 +12,8 @@ const MB = 1024 * 1024;
 
 /**
  * What is still waiting in the job queue: clips not yet uploaded, game videos
- * not yet sent, and the age of the oldest one. Button presses don't count —
- * they are retried for under two minutes and then dropped.
+ * not yet sent, and the age of the oldest one. Anything else (an old button
+ * press) doesn't count.
  *
  * @param {object[]} entries queue.json entries (JobQueue.list())
  * @param {number} now epoch ms
@@ -24,7 +24,6 @@ export function queueBacklog(entries, now) {
   let pendingGames = 0;
   let oldest = null;
   for (const entry of entries || []) {
-    if (entry?.state === "press") continue;
     if (entry?.type === "game") pendingGames += 1;
     else if (entry?.clipId) pendingClips += 1;
     else continue;

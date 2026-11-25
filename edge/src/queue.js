@@ -14,14 +14,14 @@ import { readJson, writeJsonAtomic } from "./util.js";
  *               videoPath?, thumbnailPath?, sizeBytes?, durationSeconds?, gaps?,
  *               failReason?, attempts, nextAttemptAt, receivedAt } — one camera's
  *               whole-game video (CR-006).
- * Press entry: { pressId, buttonCode, requestedAtMs (= pressedAtMs), state: "press",
- *               attempts, nextAttemptAt } — a court button press not yet relayed.
+ * Press entry: { pressId, buttonCode, state: "press", … } — a court button press
+ *               left by a box from before CR-044; JobRunner.recover() drops it.
  */
 
 /** Queue key of a game video: its id, prefixed so it never meets a clip id. */
 export const gameKey = (sessionVideoId) => `game:${sessionVideoId}`;
 
-/** Queue key: a press's own id, a clip's id, or a game video's gameKey. */
+/** Queue key: a clip's id, a game video's gameKey, or an old press's own id. */
 export const queueKey = (entry) =>
   entry?.pressId ??
   entry?.clipId ??

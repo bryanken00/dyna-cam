@@ -2,9 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isLoopbackHost } from "./util.js";
 
 /** edge/ — .env and the default DATA_DIR resolve from here, not from the cwd. */
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** The box's settings file (holds ENROLL_KEY until the box has enrolled). */
+export const ENV_FILE = path.join(ROOT_DIR, ".env");
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
 export const AGENT_VERSION = pkg.version;
@@ -31,7 +34,7 @@ export const ENCODERS = ["auto", "libx264", "h264_qsv", "h264_vaapi", "h264_vide
 export class ConfigError extends Error {}
 
 /** Load edge/.env into process.env (real environment variables win). */
-export function loadEnvFile(file = path.join(ROOT_DIR, ".env")) {
+export function loadEnvFile(file = ENV_FILE) {
   try {
     process.loadEnvFile(file);
   } catch (err) {
@@ -108,6 +111,9 @@ export function leftoverWarnings(settings) {
       `DEVICE_TOKEN in .env is no longer used — ${hint}. You can delete the DEVICE_TOKEN line.`,
     settings.ignoredPairingCode &&
       `PAIRING_CODE in .env is no longer used — ${hint}. You can delete the PAIRING_CODE line.`,
+    settings.ignoredButtons &&
+      "BUTTON_PORT / BUTTON_HOST / BUTTON_KEY in .env are no longer used — court buttons were " +
+        "removed and the box no longer listens for them. You can delete those lines.",
   ].filter(Boolean);
 }
 
@@ -126,8 +132,23 @@ export function parseLiveHost(raw) {
   return host;
 }
 
+/**
+ * Is `hostname` (`new URL(…).hostname`) this machine — loopback or one of its own
+ * addresses? Plain http:// to the API is allowed only then: the traffic never
+ * leaves the machine (`./run.sh edge` points the box at the local API by LAN IP).
+ */
+export function isThisMachine(hostname, interfaces = os.networkInterfaces) {
+  if (isLoopbackHost(hostname)) return true;
+  const host = String(hostname)
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase();
+  return Object.values(interfaces() || {})
+    .flat()
+    .some((entry) => String(entry?.address ?? "").toLowerCase() === host);
+}
+
 /** Read and check the settings. Throws ConfigError with a message meant for a person. */
-export function loadConfig(env = process.env) {
+export function loadConfig(env = process.env, { interfaces = os.networkInterfaces } = {}) {
   const apiUrl = String(env.API_URL ?? "")
     .trim()
     .replace(/\/+$/, "");
@@ -135,6 +156,8 @@ export function loadConfig(env = process.env) {
   // index.js only warns when one is still set
   const ignoredDeviceToken = String(env.DEVICE_TOKEN ?? "").trim() !== "";
   const ignoredPairingCode = String(env.PAIRING_CODE ?? "").trim() !== "";
+  // CR-044: the court-button listener is gone (CR-027 removed the buttons)
+  const ignoredButtons = ["BUTTON_PORT", "BUTTON_HOST", "BUTTON_KEY"].some((name) => name in env);
   if (!apiUrl) {
     throw new ConfigError(
       "Missing API_URL. Copy .env.example to .env and set API_URL, ENROLL_KEY and VENUE_ID."
@@ -146,8 +169,21 @@ export function loadConfig(env = process.env) {
   } catch (_err) {
     throw new ConfigError(`API_URL is not a valid URL (got "${apiUrl}")`);
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new ConfigError("API_URL must start with https:// (or http:// for local testing)");
+  // CR-044: the token, camera passwords and stream keys travel on this link —
+  // plain http only to an API on this same machine (local testing)
+  const sameMachine = parsed.protocol === "http:" && isThisMachine(parsed.hostname, interfaces);
+  if (parsed.protocol !== "https:" && !sameMachine) {
+    throw new ConfigError(
+      `API_URL must start with https:// (got "${parsed.protocol}//${parsed.host}"). ` +
+        "Plain http:// is only allowed for an API on this same machine (local testing)."
+    );
+  }
+  // Certificate checks stay on: a box that trusts any certificate can be fooled into
+  // sending its token and the camera passwords to someone else
+  if (String(env.NODE_TLS_REJECT_UNAUTHORIZED ?? "").trim() === "0") {
+    throw new ConfigError(
+      "NODE_TLS_REJECT_UNAUTHORIZED=0 turns off HTTPS certificate checks — remove it from the environment / .env"
+    );
   }
 
   const encoder = String(env.ENCODER || "auto").trim();
@@ -156,11 +192,7 @@ export function loadConfig(env = process.env) {
   }
   const logLevel = String(env.LOG_LEVEL || "info").trim();
   // Live view on the LAN: unset → 8090; set to "" or 0 → off
-  const buttonPort = env.BUTTON_PORT === undefined ? 8089 : int(env, "BUTTON_PORT", 0, 0, 65535);
   const livePort = env.LIVE_PORT === undefined ? 8090 : int(env, "LIVE_PORT", 0, 0, 65535);
-  if (livePort && livePort === buttonPort) {
-    throw new ConfigError(`LIVE_PORT and BUTTON_PORT must differ (both are ${livePort})`);
-  }
   const liveHost = parseLiveHost(env.LIVE_HOST);
   const bufferSeconds = int(env, "BUFFER_SECONDS", 180, 90, 3600);
   // HTTPS live view (CR-002): a folder with privkey.pem, cert.pem (+ chain.pem), like back's certPath
@@ -173,6 +205,7 @@ export function loadConfig(env = process.env) {
     apiUrl,
     ignoredDeviceToken,
     ignoredPairingCode,
+    ignoredButtons,
     enrollKey,
     venueId,
     boxName,
@@ -193,10 +226,6 @@ export function loadConfig(env = process.env) {
     // Free space in DATA_DIR: warn below, stop keeping game footage below critical
     diskWarnGb: int(env, "DISK_WARN_GB", 2, 0, 10_000),
     diskCriticalMb: int(env, "DISK_CRITICAL_MB", 500, 0, 1_000_000),
-    // Court buttons on the LAN: unset → 8089; set to "" or 0 → off
-    buttonPort,
-    buttonHost: String(env.BUTTON_HOST || "0.0.0.0").trim(),
-    buttonKey: String(env.BUTTON_KEY ?? "").trim(),
     livePort,
     liveHost,
     certPath,

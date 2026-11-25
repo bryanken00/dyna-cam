@@ -6,8 +6,9 @@ it makes the video, **keeps it on its own disk** for the venue's keep time and *
 to the court's Google Drive**, where players open it (CR-040). The cloud never holds a video file.
 
 The box only makes **outbound** HTTPS calls — to the API, and to Google for the video bytes. The venue needs no port-forwarding and no
-public IP. It listens only on the venue LAN: a small port for the court buttons and one for the
-[live view](#live-view-on-the-venue-wi-fi) on session devices. See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
+public IP. It listens only on the venue LAN, on one port: the
+[live view](#live-view-on-the-venue-wi-fi) for session devices. How to lock a box down is in
+[Security](#security). See [PLAN-001](../docs/plans/PLAN-001-court-replay-cameras/plan.md) for the whole
 product.
 
 **Stack:** Node 20.12+ (plain ESM JavaScript, no runtime dependencies) · ffmpeg 5+ · pm2.
@@ -114,11 +115,12 @@ delete `data/revoked.json` and run `pm2 restart dyna-cam-edge`: it enrols again 
 **A stolen box** holds the enrol key. Revoke it **and** rotate the key: set a new
 `RECORDER_ENROLL_KEY` in `back/.env` (`openssl rand -hex 32`) and restart the API. Enrolled boxes
 keep working (they don't need the key again); update `ENROLL_KEY` in the other boxes' `.env` so
-they can enrol again after a reset.
+they can enrol again after a reset. The whole runbook (camera passwords, stream keys, the
+replacement box) is in [docs/recorder-box-security.md](../docs/recorder-box-security.md#8-a-box-is-stolen-lost-or-tampered-with).
 
 | Variable | Default | What |
 | --- | --- | --- |
-| `API_URL` | — (required) | Base URL of the API, without `/api` |
+| `API_URL` | — (required) | Base URL of the API, without `/api`. Must be `https://`; plain `http://` only to an API on this same machine (`localhost` or its own LAN IP, as `./run.sh edge` sets), for testing. |
 | `ENROLL_KEY` | — (required until enrolled) | The API's `RECORDER_ENROLL_KEY` (at least 32 characters). Never logged. |
 | `VENUE_ID` | — (required with `ENROLL_KEY`) | The venue's ID: Admin → Setup → Venues → the venue → **Copy ID** |
 | `BOX_NAME` | the hostname | How the box is named in the API (≤ 100 characters) |
@@ -133,10 +135,7 @@ they can enrol again after a reset.
 | `CONFIG_REFRESH_SECONDS` | `60` | How often courts, camera URLs and the logo are re-read |
 | `DISK_WARN_GB` | `2` | Log a warning when free space in `DATA_DIR` drops below this |
 | `DISK_CRITICAL_MB` | `500` | Below this, game footage is no longer kept beyond the rolling buffer, so live recording goes on |
-| `BUTTON_PORT` | `8089` | LAN port for court buttons. Set it empty or `0` to turn buttons off. |
-| `BUTTON_HOST` | `0.0.0.0` | Address the button listener binds to |
-| `BUTTON_KEY` | — | If set, buttons must send `?key=<BUTTON_KEY>`. Strongly recommended. |
-| `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. Must differ from `BUTTON_PORT`. |
+| `LIVE_PORT` | `8090` | LAN port of the [live view](#live-view-on-the-venue-wi-fi). Set it empty or `0` to turn it off. |
 | `MAX_STACKED_STREAMS` | `2` | Stacked (two-camera, re-encoded) live streams at once, court and player streams together. `0` = never stack. |
 | `LIVE_HOST` | detected | The box's LAN address as phones reach it (e.g. `192.168.1.50`). Leave empty to detect it; set it when the box has several networks (Docker, VPN) or detection picks the wrong one. |
 | `LIVE_DVR_SECONDS` | `60` | How far back the session device can rewind the live view (⟲ 10 s, CR-014). The live stream lists this much of the buffer; nothing extra is stored. Kept 30 s inside `BUFFER_SECONDS`. |
@@ -144,7 +143,28 @@ they can enrol again after a reset.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | If they're not on `PATH` |
 
-The box refuses to start without `API_URL`, or without any credentials (above), and says why.
+The box refuses to start without `API_URL`, with an `http://` one that isn't this machine, with
+`NODE_TLS_REJECT_UNAUTHORIZED=0` (no certificate checks), or without any credentials (above), and
+says why. `BUTTON_PORT`, `BUTTON_HOST` and `BUTTON_KEY` from before CR-044 are only warned about:
+court buttons are gone (CR-027) and the box no longer listens for them.
+
+## Security
+
+The box holds its venue's camera passwords and stream keys, its own token and days of players'
+game videos, so (CR-044):
+
+- **HTTPS only** to the API, with certificate checks on (see above). The device token goes only
+  to the API's own address; Drive uploads only to `https://` addresses.
+- **Private files.** Everything the box and its ffmpegs create is readable by the box's account
+  only (umask `077`: files `600`, folders `700`). At start it makes `.env` `600` and `DATA_DIR`
+  `700` if they aren't, and warns with the `chmod` to run if it can't.
+- **Start-up warnings** (`security: …` in the log; the box keeps recording): running as root; the
+  live view on plain HTTP (no `CERT_PATH`); on Linux, `/proc` mounted without `hidepid`, which lets
+  any account read the camera passwords and stream keys on ffmpeg's command line.
+- **One LAN port:** the live view (`8090`), which only plays links the API signed.
+
+The machine itself (its own account, firewall, SSH, updates, disk, cameras, and what to do when a
+box is stolen) is set up with [docs/recorder-box-security.md](../docs/recorder-box-security.md).
 
 ## Run
 
@@ -450,7 +470,7 @@ load plain-HTTP video.
 - **Unreadable certificate:** the box logs *"live view off — could not read privkey.pem and
   cert.pem in CERT_PATH …"* and keeps recording, without live view.
 - Court and player live streams keep reading the box's own live view over plain HTTP on
-  `127.0.0.1` (a second listener, loopback only). The court-button listener stays plain HTTP.
+  `127.0.0.1` (a second listener, loopback only).
 
 Check it from a laptop on the venue Wi-Fi (with a link from the API, which carries the signature):
 `ffplay '<hlsUrl>'`. Note that ffmpeg tools need `-extension_picky 0` for segment links that end
@@ -500,82 +520,11 @@ Things to know:
   warn about or play silent). It's one small mono track, so it costs almost no CPU. (Not yet tried
   against the real services.)
 
-## Court buttons
-
-A Wi-Fi button at each court saves the replay just like the QR code does. The button calls the
-box on the LAN, and the box notes the press time the moment the request arrives. It answers `202`
-at once, so the button never waits on the internet, and then relays the press to the API. If the
-internet is slow or down, the press is kept in `data/queue.json` and retried for about 100 s
-(the API refuses presses older than 2 minutes).
-
-```
-GET  http://<box-ip>:8089/press/<buttonCode>?key=<BUTTON_KEY>     (POST works too)
-GET  http://<box-ip>:8089/health
-```
-
-- **Button code:** set it per court in the **Admin portal → Courts** (3–32 letters, digits, `-`
-  or `_`, for example `court-1`). One code per button.
-- **Key:** set `BUTTON_KEY` in `.env` to a long random string (`openssl rand -hex 16`). Without a
-  key, anyone on the venue Wi-Fi can save clips.
-- **Box address:** give the box a fixed LAN IP (a DHCP reservation in the router), like the
-  cameras.
-- **Bounces:** a second press of the same button within 3 s is ignored. The API also merges
-  presses on one court within 20 s into the same clip.
-- **Answers:**
-
-  | Status | Meaning |
-  | --- | --- |
-  | `202 {"ok":true}` | Accepted |
-  | `202 {"ok":true,"duplicate":true}` | Bounce, ignored |
-  | `400` | Bad code |
-  | `401` | Wrong or missing key |
-  | `404` | Unknown path |
-
-- **The log** shows each press and its result:
-  - `button court-1: clip saved <clipId> — <share link>`;
-  - `Button code X is not set on any court of this venue — set it in Admin → Courts` (404);
-  - court has no camera (409), or press too old (422).
-
-### Shelly Button 1
-
-1. Add the button to the venue Wi-Fi with the Shelly app (or its own access point at
-   `192.168.33.1`).
-2. Open the button's web UI → **Actions** → **Button Short Press URL**, and enter
-   `http://<box-ip>:8089/press/court-1?key=<BUTTON_KEY>`. Enable it and save.
-3. Press it. The box log shows `button court-1 pressed`, and the clip appears in the Admin portal.
-
-The Shelly Button 1 sleeps between presses and needs a second or two to join Wi-Fi. The press time
-is when the request reaches the box, so the clip ends that much later. Every clip already
-includes 5 s after the press.
-
-### ESP32 (outline)
-
-Any ESP32 with a momentary push button works:
-
-```cpp
-#include <WiFi.h>
-#include <HTTPClient.h>
-const char* URL = "http://192.168.1.10:8089/press/court-1?key=YOUR_BUTTON_KEY";
-const int PIN = 0;                       // button to GND, internal pull-up
-void setup() { pinMode(PIN, INPUT_PULLUP); WiFi.begin("venue-ssid", "wifi-password"); }
-void loop() {
-  if (digitalRead(PIN) == LOW) {         // pressed
-    HTTPClient http; http.begin(URL); http.setTimeout(3000);
-    http.POST("");                       // 202 = accepted
-    http.end();
-    delay(3000);                         // simple debounce (the box debounces too)
-  }
-  delay(20);
-}
-```
-
-Keep the board on wired USB power. Reconnect Wi-Fi in `loop()` if `WiFi.status() != WL_CONNECTED`.
-
 ## Test without real hardware
 
 ```bash
 npm run lint
-npm test          # node:test, no internet: window math, segment selection, game files + resumable upload, ffmpeg args, masking, queue, job loop, buttons, API client
+npm test          # node:test, no internet: window math, segment selection, game files + resumable upload, ffmpeg args, masking, queue, job loop, start-up security checks, API client
 npm run smoke     # ~2 min, ffmpeg only, no API, no camera (includes camera details + preview, and a local RTMP streaming test)
 ```
 
@@ -652,8 +601,8 @@ clip from the court's QR page.
 - **Streams** (`src/restream.js`): one ffmpeg per venue court stream and per player stream,
   reading the box's own live view: one camera copied, or both stacked and encoded; backoff,
   status, caps and key masking.
-- **Buttons** (`src/buttons.js`): a `node:http` listener on the LAN. It stamps the press, answers
-  202, and the job loop relays the press with `pressedAtMs`.
+- **Security** (`src/hardening.js`): the private umask, tightening `.env` / `DATA_DIR`, and the
+  start-up `security:` warnings.
 - **Jobs** (`src/jobs.js`):
   1. Long-poll `GET /jobs?wait=25`.
   2. Persist the job to `data/queue.json`, then claim it.
@@ -691,7 +640,6 @@ clip from the court's QR page.
 | `box clock is …s behind/ahead of the server` | NTP isn't working: `chronyc tracking`, `timedatectl` |
 | Clips cut a few seconds off | Check the clock (above), then the camera's own time. |
 | Slow cuts / high CPU | Check that the startup log says `h264_qsv`/`h264_vaapi`, and that `vainfo` works |
-| Button does nothing | `curl "http://<box-ip>:8089/health"` from the same Wi-Fi. Is the box firewall open on 8089 (`sudo ufw allow 8089/tcp`)? Check `pm2 logs` for `401` (key) or "not set on any court". |
 | Device shows *Live view needs the venue Wi-Fi* | Device on the same Wi-Fi as the box (not a guest network with client isolation)? Box firewall open on 8090 (`sudo ufw allow 8090/tcp`)? Does the startup log say `live view on http://<ip>:8090` with the right address (else set `LIVE_HOST`)? Is the court recording? |
 | Player stream *refused the stream key* | The player pasted an old or wrong key, or ended the live video in their Facebook/YouTube app. They paste a new key on their phone. |
 | Player stream *Can't reach facebook.com / youtube.com* | Venue internet up? Some networks block outgoing RTMP (port 1935) or RTMPS (443 to `live-api-s.facebook.com`). |

@@ -1,20 +1,20 @@
 ---
 name: edge-conventions
-description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the LAN court-button listener and press relay, session retention and whole-game files (stream copy, kept on the box and sent straight to the court's Google Drive — CR-040), two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, buttons, api client, config, tests, smoke script, pm2 or .env files.
+description: The non-negotiable conventions for the Dyna Cam recorder box in edge/ (Node 20 + ffmpeg, run under pm2 at each venue) — module layout, the device API contract (/api/v1/device, Device token, User-Agent, envelope, 401/404/409 handling), the rolling-buffer recorder (stream-copy video, AAC audio, RTSP over TCP, credential masking), segment timing (segments.csv + mtime anchor, irregular keyframe-cut segments), clip cutting/watermark/encoder rules, the box's security rules (HTTPS-only API, private files, start-up security warnings — CR-044), session retention and whole-game files (stream copy, kept on the box and sent straight to the court's Google Drive — CR-040), two cameras per court (per-camera recorders, stacked clips), every live stream as a restream of the box's own live view (venue court streams and players' own, Cam 1 / Cam 2 / stacked), the signed LAN HLS live view for session devices, camera-setup details and previews, enrolment from .env (ENROLL_KEY + VENUE_ID) and revoked boxes, the persisted job queue, and the verification commands. Load BEFORE writing, editing, reviewing or explaining anything under edge/ — recorder, clipper, jobs, hardening, api client, config, tests, smoke script, pm2 or .env files.
 ---
 
 # Edge conventions (`edge/`)
 
 Node 20.12+ · plain ESM JavaScript · **no runtime dependencies, never add one** · ffmpeg 5+ · pm2 ·
 `node:test`. The box records each court's RTSP camera into a rolling buffer and cuts the replays
-players save. API calls are **outbound** only; the two listeners are LAN-only (court buttons, live view); player streams push RTMP(S) out.
+players save. API calls are **outbound** only (HTTPS); the one listener is the LAN live view; player streams push RTMP(S) out.
 Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1/device/`.
 
 ## Module layout (`src/`)
 
 | File | Owns |
 | --- | --- |
-| `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid (`ENROLL_KEY` ≥ 32 + `VENUE_ID` required until `device.json` exists); `USER_AGENT`, `AGENT_VERSION`; warnings for leftover `DEVICE_TOKEN` / `PAIRING_CODE` |
+| `config.js` | `.env` → frozen settings; `ConfigError` for anything missing or invalid (`ENROLL_KEY` ≥ 32 + `VENUE_ID` required until `device.json` exists; `API_URL` `https://` unless `isThisMachine`; `NODE_TLS_REJECT_UNAUTHORIZED=0` refused); `USER_AGENT`, `AGENT_VERSION`, `ENV_FILE`; warnings for leftover `DEVICE_TOKEN` / `PAIRING_CODE` / `BUTTON_*` |
 | `credentials.js` | Token: `device.json` (0600) → enrol once with `ENROLL_KEY` + `VENUE_ID` + `BOX_NAME` (`POST /pair/enroll`, no auth); refused pairs remembered as hashes (`enroll-refused.json`); revoked → `revoked.json`, no re-enrol (PLAN-002 Phase I) |
 | `api.js` | The only place that calls `fetch`. Auth header, UA, timeouts (AbortController), envelope unwrap, `ApiError` |
 | `recorder.js` | One ffmpeg per court **camera** (`CourtRecorder`; camera 2 in `buffer/<safeId>~cam2`), restart/backoff, stall watchdog, pruning, heartbeat status with `camera` (`RecorderManager`) |
@@ -25,7 +25,7 @@ Context: PLAN-001 ("Recorder box"); server half: `back/server/src/controllers/v1
 | `drive.js` | CR-040: `sendToDrive` — drive-session → status PUT → chunks to Google's resumable session → drive-done (`driveChunkBytes`: 256 KiB multiples) |
 | `videos.js` | CR-040: `VideoStore` — game files kept in `DATA_DIR/videos/` (`videos.json`), keep times from `/config` `keepVideos`, expiry, disk-critical removal, `box-deleted` reports |
 | `queue.js` | `data/queue.json`: atomic, ordered writes |
-| `buttons.js` | LAN listener `GET\|POST /press/:code[?key=]`: stamp `Date.now()` first, 202 at once, code regex, constant-time key, 3 s debounce |
+| `hardening.js` | CR-044: `PRIVATE_UMASK` (077, set first in `index.js`), `makePrivate` (`.env` 600, `DATA_DIR` 700; not on Windows), `setupWarnings` (root, live view without `CERT_PATH`, Linux `/proc` without `hidepid`) → `security: …` log lines, never a stop |
 | `restream.js` | Every live stream (`Restreams`): venue court streams + players' own, one ffmpeg each reading the box's live HLS on 127.0.0.1; CAM1/CAM2 copied, STACKED encoded; backoff, status, caps, heartbeat `sessionStreams` + camera 1's `streamStatus` |
 | `live.js` | LAN live view (HTTP, or HTTPS with `CERT_PATH`) `GET\|HEAD /live/:courtId/[cam2/]{index.m3u8,<epoch>.ts}?exp&sig`: signed HLS of the newest closed segments, timestamp shift, `live-key`, LAN address, heartbeat `live` |
 | `stream.js` | Stream-key masking (`maskStreamKey`, `maskStreamUrl`) and `parseLogLine` |
@@ -123,18 +123,16 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
 - Heartbeat `system` (CR-008, `health.js` `sampleHealth`, optional on the API): `diskFreeMb`/`diskTotalMb`
   (`fs.statfs` of `DATA_DIR`), `memFreeMb`/`memTotalMb`, `load1`, `cpus`, `uptimeSeconds`, `clockOffsetMs`
   (server − box, from `/config` and the heartbeat reply's `serverTime`), `pendingClips`/`pendingGames`/
-  `oldestPendingSeconds` (presses don't count). Whole non-negative numbers (`load1` and `clockOffsetMs`
+  `oldestPendingSeconds` (clips and games only). Whole non-negative numbers (`load1` and `clockOffsetMs`
   aside); a value that can't be read is left out, a failed sample sends the heartbeat without `system`.
 - Heartbeat body always has `capabilities: DEVICE_CAPABILITIES` (`config.js`; today
   `["game-file", "drive-direct"]`). `system` adds `localVideos` / `localVideoMb` (CR-040, the video store).
   `/config` `sessions` keep their segments (± 10 s) **for as long as they are listed** — the API keeps a
   finished game listed until its videos are uploaded, so there is no box-side cut-off
   (`retentionWindows`); dropped below `DISK_CRITICAL_MB` so recording never stops.
-- Button press: `POST /buttons/:code/press {pressedAtMs}` → 201/200 (merged), queued (`state: "press"`),
-  retried while < 100 s old (API refuses > 120 s); 404/409/422/400 final, logged in words.
-  **CR-027: the API no longer has this route** — court buttons and 60-second clips are gone (the
-  court QR starts a game). Every press now gets 404, which the box drops; the listener and relay
-  are dead code kept so old boxes need no update. Don't build on them; remove them in a box release.
+- **No court buttons** (CR-027 removed them from the API; CR-044 from the box): no listener on 8089,
+  no press relay. A `state: "press"` entry left in an older box's `queue.json` is dropped at
+  start-up with a log line; leftover `BUTTON_PORT/HOST/KEY` in `.env` are only warned about.
 - Setup (PLAN-002): heartbeat entries add `video {codec,width,height,fps}` + `audio {codec,sampleRate}|null`
   (probed ≤ every 30 s, counted fps beats the claim) + the running recorder's `cameraVersion` + `camera: 1 | 2`
   (one entry per camera). `/config` court `previewWanted` → one JPEG per camera per ~30 s to
@@ -209,7 +207,7 @@ Pure functions + injected side effects (`api`, `clip`, `spawnImpl`, `now`): `tes
   LIVE_PORT is HTTPS, `url` is `https://`. One `createLiveHandler` shared by that server and a loopback-only plain-HTTP
   listener (127.0.0.1, ephemeral port) that `localPlaylistUrl` uses, so restreams never need TLS. Unreadable/unusable
   cert → warn, live view off, recording goes on. Warn on expiry or a cert not covering LIVE_HOST (or the detected IP).
-  Renewals: file stamps checked every 6 h → `setSecureContext`; a broken one keeps the old. Buttons stay plain HTTP.
+  Renewals: file stamps checked every 6 h → `setSecureContext`; a broken one keeps the old.
 
 ## Streams (`restream.js`, PLAN-002 §6.1, §7.3)
 
@@ -252,8 +250,8 @@ written is never used. Clips tolerate holes ≤ 7 s; the window must end in a cl
 `DATA_DIR` holds `buffer/<courtId>/` and `buffer/<courtId>~cam2/` (segments, csv, index, run, pid; camera 2's
 pruned, kept for sessions and aged out like camera 1's), `jobs/<clipId>/` and
 `jobs/<sessionVideoId>/` (segments hard-linked into `parts/` while ffmpeg reads them, so pruning can't
-pull them away; a game folder keeps `game.mp4` + `thumb.jpg` until `/finish`), `queue.json` (clips,
-game jobs with their phase, and button presses),
+pull them away; a game folder keeps `game.mp4` + `thumb.jpg` until `/finish`), `queue.json` (clips and
+game jobs with their phase),
 `videos/` (CR-040: kept game files + `videos.json`), `config.json` (mode 600, holds camera passwords), `device.json` (0600, the token), `enroll-refused.json`
 (hashes), `revoked.json` (0600, blocks enrolment until a person deletes it), `live-key` (mode 600) and `logo/`. Every JSON write is atomic
 (`writeJsonAtomic`). Folder names from IDs go through `safeId`.
@@ -276,5 +274,5 @@ Unit-test every new pure function and API error path; report what can't be verif
 
 ## Related
 
-- README: install, Tapo, setup preview, sessions, streaming, buttons, troubleshooting, load test. The server side is backend work; a contract change updates both sides.
+- README: install, security, Tapo, setup preview, sessions, streaming, troubleshooting, load test; machine hardening and the stolen-box runbook are `docs/recorder-box-security.md`. The server side is backend work; a contract change updates both sides.
 - Shipped changes get a `changelog` entry; plans/CRs/bugs live in the repo-root `docs/`.

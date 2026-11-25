@@ -116,7 +116,7 @@ Copy `back/.env.example` to `back/.env`, then set at least these. Generate secre
 | `ISSUER` / `AUDIENCE` | e.g. `dgsports` / `dgsports-users` | JWT claims. |
 | `CSRF_SECRET`, `LOG_SALT`, `UPLOAD_URL_SECRET` | random, 32+ chars | Required; placeholders are refused in production. |
 | `DEVICE_SECRET_KEY` | random, 32+ chars | Encrypts camera passwords and Drive sign-ins. **Never change it later** — stored camera URLs become unreadable. Back it up. |
-| `RECORDER_ENROLL_KEY` | random, 32+ chars | Every venue's box enrols with it (§7). |
+| `RECORDER_ENROLL_KEY` | random, 32+ chars | A box enrols with it (§7). Set it only while installing a box, then clear it — see [Recorder box security](recorder-box-security.md#1-enrol-keys-on-only-while-installing). |
 | `SENDGRID_API_KEY` / `MAIL_FROM` | your key / `DGSports <no-reply@dgsports.ph>` | Verify the sender (or the domain) in SendGrid first. |
 | `XENDIT_SECRET_KEY` / `XENDIT_CALLBACK_TOKEN` | live key / webhook verification token | See §6. |
 | `PAYMENT_SANDBOX` | `false` | |
@@ -260,7 +260,8 @@ Box setup step by step: [Windows PC](recorder-box-installation-windows.md) or [M
 
 4. **Start it:** `npm run pm2:start && pm2 save && pm2 startup`. On first start the box enrols
    itself and keeps its own token in `data/device.json`; `ENROLL_KEY` / `VENUE_ID` aren't needed
-   after that.
+   after that — delete `ENROLL_KEY` from its `.env`, clear `RECORDER_ENROLL_KEY` on the server
+   and harden the box: [Recorder box security](recorder-box-security.md).
 5. **Check:** on the server, `cd back && npm run boxes` lists the box with its venue and last
    heartbeat; in the Admin, the venue's courts show their cameras recording (Dashboard / venue
    health). A box can be revoked with `npm run boxes:revoke -- <name or id>`.

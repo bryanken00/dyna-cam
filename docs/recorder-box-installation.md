@@ -226,6 +226,15 @@ If it still says *Live view needs the venue Wi-Fi*, see Part I.
 
 ---
 
+## Part G½ — Lock it down
+
+Once the box records and starts on boot, harden it with
+[Recorder box security](recorder-box-security.md): enrolment off again, its own Standard account,
+firewall, updates, cameras. After the next restart, `pm2 logs dyna-cam-edge` should show no
+`security:` lines.
+
+---
+
 ## Part H — Regular jobs
 
 | When | What | How |

@@ -30,13 +30,6 @@ before(async () => {
       }
       if (req.url.startsWith("/api/v1/device/jobs"))
         return send(200, { success: true, message: "Jobs", data: { jobs: [] } });
-      if (req.url === "/api/v1/device/buttons/court-1/press") {
-        return send(201, {
-          success: true,
-          message: "Saving the clip",
-          data: { clipId: "c9", shareUrl: "https://app/clip/t", merged: false },
-        });
-      }
       if (req.url.startsWith("/api/v1/device/courts/court-1/snapshot")) {
         return send(200, { success: true, message: "Snapshot saved", data: { snapshotAt: "x" } });
       }
@@ -91,12 +84,6 @@ describe("device API client", () => {
     const req = seen.at(-1);
     assert.equal(req.headers.authorization, "Device tok-123");
     assert.equal(req.headers["user-agent"], "DynaCamRecorder/1.0.0");
-  });
-
-  it("relays a button press with pressedAtMs", async () => {
-    const data = await api().pressButton("court-1", 1794881000123);
-    assert.equal(data.shareUrl, "https://app/clip/t");
-    assert.deepEqual(JSON.parse(seen.at(-1).body), { pressedAtMs: 1794881000123 });
   });
 
   it("enrols without an Authorization header, then uses the new token", async () => {

@@ -43,6 +43,13 @@ export function maskCredentials(text) {
   );
 }
 
+/**
+ * This machine, as a URL's hostname (`new URL(…).hostname`): the only place plain
+ * http:// is allowed — for the API (CR-044) and for Drive uploads (tests).
+ */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+export const isLoopbackHost = (hostname) => LOOPBACK_HOSTS.has(String(hostname).toLowerCase());
+
 /** A business ID that is safe as a folder name; anything else is hashed. */
 export function safeId(id) {
   const value = String(id ?? "");

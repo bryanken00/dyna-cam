@@ -45,15 +45,12 @@ esac
 BACK_PORT="$(sed -n 's/^PORT=\([0-9][0-9]*\).*/\1/p' back/.env 2>/dev/null | tr -d '\r' | tail -n 1)"
 BACK_PORT="${BACK_PORT:-4021}"
 
-# The recorder box (edge/) has no web page; it serves the live view on LIVE_PORT
-# from edge/.env (8090 if unset) and court buttons on BUTTON_PORT (8089). The
-# live port is the one checked and freed below — the button port when the live
-# view is turned off (LIVE_PORT empty or 0).
+# The recorder box (edge/) has no web page; its one port is the live view on
+# LIVE_PORT from edge/.env (8090 if unset) — the one checked and freed below.
+# With the live view turned off (LIVE_PORT empty or 0) it listens on nothing,
+# and 8090 is still the port named here (CR-044 removed the court-button port).
 EDGE_PORT="$(sed -n 's/^LIVE_PORT=\([0-9]*\).*/\1/p' edge/.env 2>/dev/null | tr -d '\r' | tail -n 1)"
-if grep -q '^LIVE_PORT=' edge/.env 2>/dev/null && { [ -z "$EDGE_PORT" ] || [ "$EDGE_PORT" = "0" ]; }; then
-  EDGE_PORT="$(sed -n 's/^BUTTON_PORT=\([0-9][0-9]*\).*/\1/p' edge/.env 2>/dev/null | tr -d '\r' | tail -n 1)"
-  EDGE_PORT="${EDGE_PORT:-8089}"
-fi
+[ "$EDGE_PORT" = "0" ] && EDGE_PORT=""
 EDGE_PORT="${EDGE_PORT:-8090}"
 
 # name : port : ANSI colour

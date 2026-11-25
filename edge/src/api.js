@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { truncate } from "./util.js";
+import { isLoopbackHost, truncate } from "./util.js";
 
 /**
  * Error from the device API. `status` is the HTTP status, or 0 when the
@@ -182,7 +182,6 @@ function gameVideoCalls(request) {
  * hands the box its address; the address itself is the credential, so no
  * token is sent to Google. Never log the address — only its path.
  */
-const DRIVE_LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const DRIVE_BUSY_REASONS = new Set(["rateLimitExceeded", "userRateLimitExceeded", "backendError"]);
 
 /** The upload address, if the box will send a game there (https; plain http only on loopback, for tests). */
@@ -195,7 +194,7 @@ function driveUrl(uploadUrl) {
   }
   const usable =
     url &&
-    (url.protocol === "https:" || (url.protocol === "http:" && DRIVE_LOOPBACK.has(url.hostname)));
+    (url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname)));
   if (!usable) {
     throw new ApiError("Drive upload: the API sent an unusable upload address", {
       status: 502,
@@ -384,14 +383,6 @@ export function createApi({
       request("GET", "/jobs", { query: { wait }, timeoutMs: (wait + 15) * 1000, signal }),
 
     claimClip: (clipId) => request("POST", clipPath(clipId, "processing")),
-
-    /** A court button press, with the box's receipt time. → { clipId, shareUrl, merged } */
-    pressButton: (buttonCode, pressedAtMs, signal) =>
-      request("POST", `/buttons/${encodeURIComponent(buttonCode)}/press`, {
-        json: { pressedAtMs },
-        timeoutMs: 10_000,
-        signal,
-      }),
 
     failClip: (clipId, reason) =>
       request("POST", clipPath(clipId, "fail"), { json: { reason: truncate(reason, 255) } }),
