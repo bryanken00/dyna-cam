@@ -89,8 +89,7 @@ describe("player booking entry points (CR-030)", () => {
       playerName: "Bea Santos",
       phone,
       email,
-      payMethod: "Desk",
-    });
+          });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     return res.data;
   };

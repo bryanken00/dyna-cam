@@ -127,8 +127,15 @@ export const loadTestEnv = (overrides = {}) => {
     XENDIT_SECRET_KEY: "",
     XENDIT_CALLBACK_TOKEN: "",
     XENDIT_API_URL: "http://127.0.0.1:9",
-    // CR-033: a developer's PAYMENT_SANDBOX=true must not turn payment on in every test
-    PAYMENT_SANDBOX: "",
+    // CR-046: booking is paid online only, so every test runs with the built-in test
+    // checkout on (its own store file per process); a test of real Xendit sets
+    // PAYMENT_SANDBOX: "" and points XENDIT_API_URL at a fake. ctx.payBooking() pays.
+    PAYMENT_SANDBOX: "true",
+    PAYMENT_SANDBOX_FILE: path.join(
+      os.tmpdir(),
+      `tpl-sandbox-${process.pid}-${crypto.randomBytes(4).toString("hex")}.json`
+    ),
+    RATE_LIMIT_PUBLIC_PAY_POINTS: "1000",
     OWNER_EMAIL: OWNER.email,
     OWNER_PASSWORD: OWNER.password,
     // The app runs from a temp directory, so key paths must be absolute
@@ -392,6 +399,26 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
   };
 
   /**
+   * CR-046: a game paid at the desk before cash was removed — as it's stored
+   * (a CASH payment, the game Paid). The API can't record one any more.
+   */
+  const markGamePaid = async (sessionId, amount = 300) => {
+    const [result] = await sql.query(
+      `UPDATE recording_sessions SET paymentStatus = 'Paid' WHERE sessionId = ?`,
+      [sessionId]
+    );
+    if (result.affectedRows !== 1) throw new Error(`markGamePaid: no game ${sessionId}`);
+    const now = "UTC_TIMESTAMP() + INTERVAL 8 HOUR";
+    await sql.query(
+      `INSERT INTO payments
+         (paymentId, sessionId, venueId, amount, method, status, paidAt, dateCreated, dateUpdated)
+       SELECT UUID(), sessionId, venueId, ?, 'CASH', 'Paid', ${now}, ${now}, ${now}
+       FROM recording_sessions WHERE sessionId = ?`,
+      [amount, sessionId]
+    );
+  };
+
+  /**
    * PLAN-006: a player signed in with Google. Google's own answer is skipped —
    * the player is made (or found) exactly as the callback does it, and the
    * sign-in code is traded through POST /player/session like the sign-in page.
@@ -435,6 +462,31 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     return { token, refreshToken: res.data.refreshToken.token, email };
   };
 
+  /**
+   * CR-046: pay a held booking online, the way a player does — open its checkout
+   * from its booking page (POST /public/bookings/:manageToken/pay), pay it in the
+   * test checkout, then settle it as reading the invoice back does
+   * (utils/bookingPayments.js settleInvoice). The booking is then Confirmed / Paid.
+   */
+  const payBooking = async (bookingId) => {
+    const [[row]] = await sql.query(`SELECT manageToken FROM bookings WHERE bookingId = ?`, [
+      bookingId,
+    ]);
+    if (!row) throw new Error(`payBooking(${bookingId}): no such booking`);
+    const pay = await api("POST", `/public/bookings/${row.manageToken}/pay`);
+    if (pay.status !== 200) {
+      throw new Error(`payBooking(${bookingId}) → ${pay.status}: ${JSON.stringify(pay.body)}`);
+    }
+    if (pay.data.paid) return;
+    const checkoutId = pay.data.checkoutUrl.split("/").pop();
+    const paid = await api("POST", `/public/payment-sandbox/${checkoutId}/pay`);
+    if (paid.status !== 200) {
+      throw new Error(`payBooking(${bookingId}) sandbox → ${paid.status}: ${JSON.stringify(paid.body)}`);
+    }
+    const { settleInvoice } = await importFromBack("server/src/utils/bookingPayments.js");
+    await settleInvoice(db, checkoutId);
+  };
+
   const stop = async () => {
     server.closeAllConnections(); // fetch keeps connections alive; don't wait for them
     await new Promise((resolve) => server.close(resolve));
@@ -454,7 +506,9 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     createStaff,
     pairBox,
     makeUnpaid,
+    markGamePaid,
     signInPlayer,
+    payBooking,
     issueResetToken,
     sql,
     db,

@@ -54,7 +54,7 @@ import {
  *   (CR-045 removed CR-030's POST /bookings/find: players find bookings in My games, PLAN-006)
  *   GET  /book/:bookingToken                     the venue, its courts and booking rules
  *   GET  /book/:bookingToken/availability        free hours per court for a date and length
- *   POST /book/:bookingToken/bookings            book a slot: pay at the desk, or online (Phase F);
+ *   POST /book/:bookingToken/bookings            book a slot, paid online (CR-046: no pay at the desk);
  *                                                PLAN-006: only a player signed in with Google
  *   GET  /bookings/:manageToken                  one booking: status, code, what can be done now
  *   POST /bookings/:manageToken/pay              Phase F: the booking's Xendit checkout
@@ -296,12 +296,15 @@ router.post(
         ERROR_CODES.PROFILE_INCOMPLETE
       );
     }
-    const { date, startTime, durationMinutes, payMethod } = req.body;
+    const { date, startTime, durationMinutes } = req.body;
     const { playerId, name: playerName, email } = req.player;
     const phone = req.body.phone || req.player.phone;
-    const online = payMethod === "Online";
-    if (online && !isOnlinePaymentOn()) {
-      return res.sendError("Online payment isn't available here — choose Pay at the desk", 409);
+    // CR-046: pay first to reserve — no pay at the counter
+    if (!isOnlinePaymentOn()) {
+      return res.sendError(
+        "Online payment isn't available right now, so the court can't be booked online — please call the venue",
+        409
+      );
     }
     const problem = dateProblem(venue, date, durationMinutes);
     if (problem) {
@@ -328,7 +331,7 @@ router.post(
         playerName,
         phone,
         email,
-        payment: online ? "Online" : "Hold",
+        payment: "Online",
         source: "Online",
         playerId,
       });
@@ -351,7 +354,7 @@ router.post(
 
     // Phase F: the slot is held; now open its Xendit checkout (outside the
     // transaction — it's a call to Xendit). If that fails, the hold is let go.
-    if (online && result.status === "Pending") {
+    if (result.status === "Pending") {
       const checkout = await openCheckout(req.db, { bookingId: result.bookingId });
       if (!checkout.ok) {
         await releaseHold(req.db, result.bookingId);
@@ -360,15 +363,9 @@ router.post(
       reply.checkoutUrl = checkout.checkoutUrl;
       return res.sendSuccess("Booked — pay now to confirm it", reply, 201);
     }
-    // Phase G: a desk hold → the pay-by email; free → the confirmation
+    // Phase G: free (nothing to pay) → the confirmation
     await sendCreatedEmail(req.db, result);
-    return res.sendSuccess(
-      result.status === "Pending"
-        ? "Booked — pay at the desk to confirm it"
-        : "Booked — you're all set",
-      reply,
-      201
-    );
+    return res.sendSuccess("Booked — you're all set", reply, 201);
   })
 );
 
@@ -505,7 +502,7 @@ router.get(
         price: Number(b.price),
         paymentStatus: b.paymentStatus,
         payMethod: b.payMethod,
-        // Pay by then (at the desk, or online), or the slot is released
+        // Pay by then (online — CR-046), or the slot is released
         payBy: b.status === "Pending" ? b.holdExpiresAt : null,
         // Phase F: a checkout is open — the page polls until the payment lands
         checkoutOpen: b.status === "Pending" && Boolean(b.checkoutId),

@@ -96,6 +96,8 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
       env: {
         XENDIT_SECRET_KEY: SECRET,
         XENDIT_CALLBACK_TOKEN: CALLBACK_TOKEN,
+        // CR-046: this file tests real Xendit (a fake), not the built-in test checkout
+        PAYMENT_SANDBOX: "",
         XENDIT_API_URL: `http://127.0.0.1:${xendit.server.address().port}`,
         APP_URL: "http://web.test",
         RATE_LIMIT_PUBLIC_BOOK_POINTS: "1000",
@@ -450,11 +452,11 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
     assert.equal(pay.status, 200, JSON.stringify(pay.body));
     assert.notEqual(invoiceIdOf(pay.data.checkoutUrl), moved.invoiceId);
 
-    // Cash at the desk closes it too
+    // CR-046: no cash at the desk — the route is gone and the checkout stays open
     const desk = await bookOnline(44);
     const cash = await call("POST", `/admin/bookings/${desk.bookingId}/payments`, {});
-    assert.equal(cash.status, 201, JSON.stringify(cash.body));
-    assert.equal(xendit.invoices.get(desk.invoiceId).status, "EXPIRED");
+    assert.equal(cash.status, 404);
+    assert.notEqual(xendit.invoices.get(desk.invoiceId).status, "EXPIRED");
   });
 
   it("Pay reopens the open checkout, or opens a new one while the hold lasts", async () => {
@@ -482,8 +484,7 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
       durationMinutes: 60,
       playerName: "Bea Santos",
       email: "bea@example.com",
-      payMethod: "Desk",
-    });
+          });
     const deskPay = await pub("POST", `/public/bookings/${deskHold.data.manageToken}/pay`);
     assert.equal(deskPay.status, 200, JSON.stringify(deskPay.body));
     assert.ok(deskPay.data.checkoutUrl);
@@ -519,29 +520,15 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
     assert.equal(res.data.outcome, "REFUNDED");
   });
 
-  it("Payments → Online settlement: each venue's online money for a date range", async () => {
+  it("CR-046: Payments → Online settlement and Take payment are gone", async () => {
     const today = now().slice(0, 10);
-    const res = await call("GET", `/admin/payments/settlement?dateFrom=${today}&dateTo=${today}`);
-    assert.equal(res.status, 200, JSON.stringify(res.body));
-    const venue = res.data.venues.find((v) => v.venueId === home.venueId);
-    assert.ok(venue);
-    const [[expected]] = await ctx.sql.query(
-      `SELECT COUNT(*) AS n, SUM(amount) AS collected,
-              SUM(CASE WHEN status = 'Refunded' THEN amount ELSE 0 END) AS refunded
-       FROM payments WHERE method = 'ONLINE' AND venueId = ?`,
-      [home.venueId]
+    assert.equal(
+      (await call("GET", `/admin/payments/settlement?dateFrom=${today}&dateTo=${today}`)).status,
+      404
     );
-    assert.equal(venue.payments, Number(expected.n));
-    assert.equal(venue.collected, Number(expected.collected));
-    assert.equal(venue.refunded, Number(expected.refunded));
-    assert.equal(venue.net, venue.collected - venue.refunded - venue.refundFailed);
-    // Cash isn't on the statement
-    assert.equal(res.data.totals.collected, venue.collected);
-
-    const viewer = await ctx.createStaff("No payments");
-    const refused = await ctx.api("GET", "/admin/payments/settlement", { token: viewer.token });
-    assert.equal(refused.status, 403);
-    const bad = await call("GET", `/admin/payments/settlement?dateFrom=${today}&dateTo=2000-01-01`);
-    assert.equal(bad.status, 400);
+    assert.equal((await call("GET", "/admin/payments/lookup?payCode=ABC123")).status, 404);
+    assert.equal((await call("POST", "/admin/payments", { payCode: "ABC123" })).status, 404);
+    // The payments list stays
+    assert.equal((await call("GET", `/admin/payments?venueId=${home.venueId}`)).status, 200);
   });
 });

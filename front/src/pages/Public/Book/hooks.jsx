@@ -38,7 +38,7 @@ const bookErrorMessage = (error) => {
 /**
  * `/book/:bookingToken` (PLAN-003 Phase C): pick a date, a length, a court and
  * a start time, add who's playing, and book. Phase F: pay now online (the
- * player is sent to Xendit's checkout) or at the desk. PLAN-006: booking needs
+ * player is sent to Xendit's checkout; CR-046: always — no pay at the desk). PLAN-006: booking needs
  * a Google sign-in — the picks ride along in the URL (?date&len&court&time),
  * so the player comes back from Google to the same slot.
  */
@@ -74,7 +74,6 @@ export const useBookPageHooks = () => {
   });
   const [bookError, setBookError] = useState("");
   // "Online" | "Desk" — null until the player picks (Online first when it's on)
-  const [pickedPayMethod, setPickedPayMethod] = useState(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   // A date from the URL counts only if it can still be booked
@@ -85,7 +84,7 @@ export const useBookPageHooks = () => {
   const payOnline = !!pageData?.payOnline;
   // CR-033: online payment is the built-in test checkout, not Xendit
   const paymentSandbox = !!pageData?.paymentSandbox;
-  const payMethod = payOnline ? pickedPayMethod || "Online" : "Desk";
+  // CR-046: pay first to reserve — always online (no pay at the desk)
 
   // Every date from today to the last bookable one, and whether the venue opens then
   const dates = useMemo(() => {
@@ -142,11 +141,6 @@ export const useBookPageHooks = () => {
     setBookError("");
   }, []);
 
-  const handlePickPayMethod = useCallback((method) => {
-    setPickedPayMethod(method);
-    setBookError("");
-  }, []);
-
   const handlePickSlot = useCallback((courtKey, startTime) => {
     setSlot({ courtKey, startTime });
     setBookError("");
@@ -180,7 +174,7 @@ export const useBookPageHooks = () => {
             startTime: slot.startTime,
             durationMinutes,
             phone: values.phone.trim() || null,
-            payMethod,
+            payMethod: "Online",
           },
         },
         {
@@ -213,7 +207,7 @@ export const useBookPageHooks = () => {
         },
       );
     },
-    [slot, bookMutation, bookingToken, date, durationMinutes, payMethod, navigate, refetchAvailability, refetch],
+    [slot, bookMutation, bookingToken, date, durationMinutes, navigate, refetchAvailability, refetch],
   );
 
   // Where Google brings a signed-out player back to: this page with their picks
@@ -261,8 +255,6 @@ export const useBookPageHooks = () => {
     handleBook: form.handleSubmit(handleBook),
     payOnline,
     paymentSandbox,
-    payMethod,
-    handlePickPayMethod,
     isBooking: bookMutation.isPending || isRedirecting,
     bookError,
   };

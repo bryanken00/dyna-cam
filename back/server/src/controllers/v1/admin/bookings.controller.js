@@ -8,6 +8,7 @@ import { bookingManageUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
+import { isOnlinePaymentOn } from "../../../lib/payments/xendit.js";
 import {
   describeSlot,
   sendBookingEmail,
@@ -21,11 +22,9 @@ import {
   expireHolds,
   markNoShow,
   moveBooking,
-  recordBookingPayment,
   toStartLocal,
 } from "../../../utils/bookings.js";
 import {
-  bookingPaymentSchema,
   cancelBookingSchema,
   createBookingSchema,
   dayQuerySchema,
@@ -67,9 +66,6 @@ const toBooking = (row) => ({
 });
 
 /** Only "Paid now (cash)" takes money — that also needs payments write. */
-const paymentsWriteForCash = (req, res, next) =>
-  req.body?.payment === "Cash" ? checkPermission("payments", null, "write")(req, res, next) : next();
-
 const peso = (amount) => `₱${amount.toLocaleString("en-PH")}`;
 
 /** What a cancel did with the money: cash to hand back, online refunds sent or failed. */
@@ -400,17 +396,22 @@ router.get(
 
 /**
  * POST /
- * A desk booking. payment: Cash (paid now — also needs payments write) ·
- * Hold (pay at the desk by startAt − the venue's deskHoldMinutes) · Free.
+ * A desk booking. CR-046: no payment at the counter — payment: Hold (a pay link:
+ * the player pays online by the venue's pay-by time; 409 while online payment is
+ * off) · Free (a comp).
  */
 router.post(
   "/",
   checkPermission("bookings", null, "write"),
-  paymentsWriteForCash,
   validateBody(createBookingSchema),
   catchAsync(async (req, res) => {
-    const { courtId, date, startTime, durationMinutes, playerName, phone, email, payment, note } =
-      req.body;
+    const { courtId, date, startTime, durationMinutes, playerName, phone, email, payment } = req.body;
+    if (payment === "Hold" && !isOnlinePaymentOn()) {
+      return res.sendError(
+        "Online payment isn't set up, so the player can't pay a link — make it Free, or set up online payment",
+        409
+      );
+    }
     const result = await inTransaction(req, (conn) =>
       createBooking(conn, {
         courtId,
@@ -423,7 +424,6 @@ router.post(
         source: "Desk",
         ignoreHours: req.body.ignoreHours,
         accountId: req.user.accountId,
-        note,
       })
     );
     if (!result.ok) {
@@ -431,7 +431,9 @@ router.post(
     }
     await sendCreatedEmail(req.db, result);
     return res.sendSuccess(
-      result.status === "Pending" ? "Booking held — waiting for payment at the desk" : "Booking confirmed",
+      result.status === "Pending"
+        ? "Booking held — the player pays online with the link we sent"
+        : "Booking confirmed",
       {
         bookingId: result.bookingId,
         bookingCode: result.bookingCode,
@@ -653,35 +655,6 @@ router.post(
       return res.sendError(result.message, result.status);
     }
     return res.sendSuccess("Marked as a no-show");
-  })
-);
-
-/**
- * POST /:bookingId/payments
- * The player paid a held booking at the desk (its price, in cash) → Confirmed.
- */
-router.post(
-  "/:bookingId/payments",
-  checkPermission("payments", null, "write"),
-  validateBody(bookingPaymentSchema),
-  catchAsync(async (req, res) => {
-    const result = await inTransaction(req, (conn) =>
-      recordBookingPayment(conn, {
-        bookingId: req.params.bookingId,
-        accountId: req.user.accountId,
-        note: req.body.note,
-      })
-    );
-    if (!result.ok) {
-      return res.sendError(result.message, result.status);
-    }
-    await runPaymentFollowUps(req.db, result.followUp);
-    await sendBookingEmail(req.db, req.params.bookingId, "Confirmed");
-    return res.sendSuccess(
-      "Payment recorded — the booking is confirmed",
-      { paymentId: result.paymentId, amount: result.amount },
-      201
-    );
   })
 );
 

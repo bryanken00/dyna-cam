@@ -129,7 +129,7 @@ const BookingSignPage = () => {
           </p>
         </div>
         <p className="m-0 mt-1.5" style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-          Pay online or at the desk. Your game is recorded when you check in.
+          Pay online to reserve. Your game is recorded when you check in.
         </p>
 
         {/* Desk + brand */}

@@ -235,20 +235,20 @@ export const bookingConfirmedEmail = (b) => ({
 });
 
 /**
- * Held, waiting for payment at the desk.
- * @param {BookingEmailFacts & { payBy: string, payOnline?: boolean }} b
- *   payBy: "4:30 PM, Tue Nov 24"
+ * Held from the desk (CR-046: a pay link — no payment at the counter): pay
+ * online by the deadline, or the court is released.
+ * @param {BookingEmailFacts & { payBy: string }} b - payBy: "4:30 PM, Tue Nov 24"
  */
-export const bookingPayAtDeskEmail = (b) => ({
+export const bookingPayLinkEmail = (b) => ({
   subject: `Pay by ${b.payBy} to keep your court — ${b.venueName}`,
   html: layout(
     "Pay to confirm your booking",
     `${p(`${hi(b.playerName)} we're holding ${escapeHtml(b.courtName)} for you. Pay
-       <strong>${escapeHtml(b.price)}</strong> at the front desk${b.payOnline ? " (or online from your booking page)" : ""}
-       by <strong>${escapeHtml(b.payBy)}</strong> — after that the court is released.`)}
+       <strong>${escapeHtml(b.price)}</strong> online by <strong>${escapeHtml(b.payBy)}</strong>
+       — after that the court is released.`)}
      ${bookingFacts(b)}
-     ${muted("Give your name at the desk when you pay.")}
-     ${manageLink(b)}`
+     ${muted("Pay with GCash, Maya or a card from your booking page. Payment isn't taken at the counter.")}
+     ${manageLink(b, "Pay now")}`
   ),
 });
 

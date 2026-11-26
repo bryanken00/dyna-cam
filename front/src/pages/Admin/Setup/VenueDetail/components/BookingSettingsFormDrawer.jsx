@@ -62,7 +62,7 @@ const settingsSchema = z
   .object({
     maxBookingMinutes: z.string(),
     bookingDaysAhead: wholeNumber("Days ahead", 1, 90),
-    deskHoldMinutes: wholeNumber("Pay-at-desk deadline", 0, 1440),
+    deskHoldMinutes: wholeNumber("Pay-link deadline", 0, 1440),
     onlineHoldMinutes: wholeNumber("Online payment hold", 5, 60),
     cancelCutoffHours: wholeNumber("Cancel cut-off", 0, 168),
     checkInEarlyMinutes: wholeNumber("Early check-in", 0, 60),
@@ -417,9 +417,9 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
                 <NumberField
                   form={form}
                   name="deskHoldMinutes"
-                  label="Pay-at-desk deadline"
+                  label="Pay-link deadline"
                   suffix="min before the start"
-                  description="An unpaid pay-at-desk booking is released then."
+                  description="A booking staff make with a pay link is held until then, and released if it isn't paid online. (No payment at the counter.)"
                 />
                 <NumberField
                   form={form}

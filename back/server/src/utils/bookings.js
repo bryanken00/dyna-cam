@@ -154,19 +154,20 @@ const insertCashPayment = async (conn, { booking, accountId, note, now }) => {
 
 /**
  * A new booking's status, payment status and hold for how it's paid:
- * Cash / Free → Confirmed; Hold → Pending until deskHoldMinutes before the
- * start; Online → Pending for the checkout (onlineHoldMinutes, never past the start).
+ * Cash / Free → Confirmed; Online → Pending for the checkout (onlineHoldMinutes,
+ * never past the start); Hold → CR-046: a pay link sent from the desk, Pending
+ * until the venue's pay-by time (deskHoldMinutes before the start) — or, for a
+ * game about to start (a walk-in), for onlineHoldMinutes from now, never past
+ * its end. Players pay online only (CR-046): no one pays at the counter.
  */
-const paymentTerms = ({ kind, court, startLocal, now, online }) => {
+const paymentTerms = ({ kind, court, startLocal, endLocal, now }) => {
   if (kind === "Hold") {
-    const holdExpiresAt = addMinutesTo(startLocal, -court.deskHoldMinutes);
-    if (holdExpiresAt <= now) {
-      return fail(
-        400,
-        online
-          ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
-          : `It starts in less than ${court.deskHoldMinutes} minutes — take the payment now instead of holding it`
-      );
+    const payBy = addMinutesTo(startLocal, -court.deskHoldMinutes);
+    const soon = addMinutesTo(now, court.onlineHoldMinutes);
+    let holdExpiresAt = payBy;
+    if (payBy < soon) holdExpiresAt = soon < endLocal ? soon : endLocal;
+    if (minutesBetween(now, holdExpiresAt) * 60 < MIN_CHECKOUT_SECONDS) {
+      return fail(400, "That's too late to pay online for this time — pick a later time, or make it Free");
     }
     return { ok: true, status: "Pending", paymentStatus: "Unpaid", holdExpiresAt };
   }
@@ -249,7 +250,7 @@ export const createBooking = async (
   // Nothing to pay: a "paid now" or "hold" of ₱0 is simply free
   const kind = price === 0 ? "Free" : payment;
 
-  const terms = paymentTerms({ kind, court, startLocal, now, online });
+  const terms = paymentTerms({ kind, court, startLocal, endLocal, now });
   if (!terms.ok) return terms;
   const { status, paymentStatus, holdExpiresAt } = terms;
 
@@ -422,7 +423,7 @@ const movedPrice = async (conn, { booking, courtId, startLocal, durationMinutes,
   return { ok: true, price: q.price };
 };
 
-/** A desk hold follows the new start (deskHoldMinutes before it); other holds keep theirs. */
+/** A pay-link hold (CR-046) follows the new start (deskHoldMinutes before it); other holds keep theirs. */
 const movedHold = ({ booking, court, startLocal, now, asPlayer }) => {
   if (booking.status !== "Pending" || booking.payMethod !== "Desk") {
     return { ok: true, holdExpiresAt: booking.holdExpiresAt };
@@ -432,8 +433,8 @@ const movedHold = ({ booking, court, startLocal, now, asPlayer }) => {
     return fail(
       400,
       asPlayer
-        ? `That's too soon to pay at the desk — pick a time at least ${court.deskHoldMinutes} minutes from now`
-        : "That's too soon to keep it unpaid — take the payment first"
+        ? `That's too soon — pick a time at least ${court.deskHoldMinutes} minutes from now, or pay first`
+        : "That's too soon to keep it unpaid — the player pays online first"
     );
   }
   return { ok: true, holdExpiresAt };

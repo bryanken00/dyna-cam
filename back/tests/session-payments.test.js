@@ -13,7 +13,6 @@ import { startTestApp } from "./helpers/testApp.js";
 describe("game payments", () => {
   let ctx;
   let admin;
-  let viewer;
   let courtCount = 0;
   let venueId;
 
@@ -51,15 +50,14 @@ describe("game payments", () => {
 
   const page = async (shareUrl) =>
     (await ctx.api("GET", `/public/sessions/${shareUrl.split("/").pop()}`)).data.session;
-  const pay = (sessionId, amount, who = admin) =>
-    call("POST", "/admin/payments", { sessionId, amount }, who);
+  // CR-046: the removed Record payment route (it must stay gone)
+  const pay = (sessionId, amount) => call("POST", "/admin/payments", { sessionId, amount });
 
   before(async () => {
     ctx = await startTestApp({
       env: { RATE_LIMIT_PAIR_POINTS: "1000", RATE_LIMIT_PAIR_HOURLY_POINTS: "1000" },
     });
     admin = await ctx.createStaff("Admin", { access: "write" });
-    viewer = await ctx.createStaff("Viewer", { access: "read" });
     venueId = (await call("POST", "/admin/venues", { name: "Pay Courts" })).data.venueId;
   });
   after(() => ctx?.stop());
@@ -117,27 +115,15 @@ describe("game payments", () => {
       assert.equal(res.data.game.sessionId, undefined, "no IDs on a public route");
     });
 
-    it("needs the amount, and the payments permission to write", async () => {
-      const noAmount = await call("POST", "/admin/payments", { sessionId: game.sessionId });
-      assert.equal(noAmount.status, 400);
-      const negative = await pay(game.sessionId, -5);
-      assert.equal(negative.status, 400);
-      const both = await call("POST", "/admin/payments", {
-        sessionId: game.sessionId,
-        clipId: "x",
-        amount: 100,
-      });
-      assert.equal(both.status, 400);
-      assert.equal((await pay(game.sessionId, 300, viewer)).status, 403);
+    it("CR-046: takes no cash for it — no Record payment, no Take payment lookup", async () => {
+      assert.equal((await pay(game.sessionId, 300)).status, 404);
+      assert.equal((await call("GET", `/admin/payments/lookup?payCode=${game.payCode}`)).status, 404);
       const one = await call("GET", `/admin/sessions/${game.sessionId}`);
       assert.equal(one.data.session.paymentStatus, "Unpaid", "nothing recorded");
     });
 
-    it("recording the payment opens the device, the page and Find a game", async () => {
-      const res = await pay(game.sessionId, "350.50");
-      assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.data.amount, 350.5);
-      assert.equal(res.data.sessionId, game.sessionId);
+    it("one paid at the desk before CR-046 opens the device, the page and Find a game", async () => {
+      await ctx.markGamePaid(game.sessionId, 350.5);
 
       const onDevice = await device.app("GET", "/app/session");
       assert.equal(onDevice.data.session.shareUrl, game.shareUrl);
@@ -154,27 +140,6 @@ describe("game payments", () => {
       const one = await call("GET", `/admin/sessions/${game.sessionId}`);
       assert.equal(one.data.session.paymentStatus, "Paid");
       assert.equal(one.data.session.paidAmount, 350.5);
-    });
-
-    it("Take payment on the Payments page finds the game by its code", async () => {
-      const spaced = `${game.payCode.slice(0, 3).toLowerCase()} ${game.payCode.slice(3)}`;
-      const res = await call("GET", `/admin/payments/lookup?payCode=${encodeURIComponent(spaced)}`);
-      assert.equal(res.status, 200, JSON.stringify(res.body));
-      assert.equal(res.data.kind, "Game");
-      assert.equal(res.data.clip, undefined);
-      assert.equal(res.data.game.sessionId, game.sessionId);
-      assert.equal(res.data.game.paymentStatus, "Paid");
-      assert.equal(res.data.game.paidAmount, 350.5);
-      assert.equal(res.data.game.venueName, "Pay Courts");
-      const none = await call("GET", "/admin/payments/lookup?payCode=ZZZZZZ");
-      assert.equal(none.status, 404);
-      assert.match(none.body.message, /clip or game/);
-    });
-
-    it("a second payment is refused", async () => {
-      const again = await pay(game.sessionId, 100);
-      assert.equal(again.status, 409);
-      assert.match(again.body.message, /already paid/);
     });
 
     it("is listed on the Payments page and counts in the totals", async () => {
@@ -201,35 +166,22 @@ describe("game payments", () => {
       const onDevice = await device.app("GET", "/app/session");
       assert.equal(onDevice.data.session.shareUrl, null);
       assert.equal(onDevice.data.session.payment.payCode, game.payCode);
-      // …and it can be paid again
-      assert.equal((await pay(game.sessionId, 300)).status, 201);
     });
   });
 
-  describe("games that can't be paid", () => {
-    it("a cancelled game: 409, nothing recorded; Find a game doesn't know it", async () => {
+  describe("free games", () => {
+    it("a cancelled game: Find a game doesn't know it", async () => {
       const game = await newGame();
       assert.equal((await call("POST", `/admin/sessions/${game.sessionId}/cancel`)).status, 200);
-      const res = await pay(game.sessionId, 300);
-      assert.equal(res.status, 409);
-      assert.match(res.body.message, /cancelled/);
-      const [[row]] = await ctx.sql.query(
-        `SELECT paymentStatus FROM recording_sessions WHERE sessionId = ?`,
-        [game.sessionId]
-      );
-      assert.equal(row.paymentStatus, "Unpaid");
       assert.equal((await ctx.api("GET", `/public/games/${game.payCode}`)).status, 404);
     });
 
-    it("a game from before payments (Free) stays open and can't be paid", async () => {
+    it("a Free game stays open", async () => {
       const game = await newGame();
       await ctx.sql.query(
         `UPDATE recording_sessions SET paymentStatus = 'Free', payCode = NULL WHERE sessionId = ?`,
         [game.sessionId]
       );
-      const res = await pay(game.sessionId, 300);
-      assert.equal(res.status, 409);
-      assert.match(res.body.message, /free/);
       const session = await page(game.shareUrl);
       assert.equal(session.locked, false);
       assert.equal(session.payCode, null);
@@ -250,7 +202,6 @@ describe("game payments", () => {
         assert.equal(res.data.payCode, null, JSON.stringify(body));
         const one = await call("GET", `/admin/sessions/${res.data.sessionId}`);
         assert.equal(one.data.session.paymentStatus, "Free", JSON.stringify(body));
-        assert.equal((await pay(res.data.sessionId, 300)).status, 409);
       }
     });
 
@@ -270,11 +221,6 @@ describe("game payments", () => {
       assert.equal((await page(res.data.shareUrl)).locked, false);
       const one = await call("GET", `/admin/sessions/${res.data.sessionId}`);
       assert.equal(one.data.session.paymentStatus, "Free");
-      assert.equal((await pay(res.data.sessionId, 300)).status, 409);
-    });
-
-    it("an unknown game is 404", async () => {
-      assert.equal((await pay("no-such-game", 300)).status, 404);
     });
   });
 

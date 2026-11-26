@@ -119,8 +119,8 @@ describe("game time (CR-016)", () => {
 
   it("adds time: the end moves later, the total is kept, the payment stays", async () => {
     const game = await newGame(60);
-    const pay = await call("POST", "/admin/payments", { sessionId: game.sessionId, amount: 300 });
-    assert.equal(pay.status, 201, JSON.stringify(pay.body));
+    // A game paid at the desk before CR-046 (no cash payments since)
+    await ctx.markGamePaid(game.sessionId, 300);
     const before = await row(game.sessionId);
     assert.equal(before.paymentStatus, "Paid");
 

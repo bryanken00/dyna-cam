@@ -86,6 +86,8 @@ What `startTestApp()` returns:
 | `ownerRoleId()` | The Owner role's ID, for asserting it can't be reached or assigned. |
 | `createStaff(label, { access })` | A role (`"<label> staff"`) and a staff user with it, created through the API as the Owner. `access: "read"` or `"write"` grants the role every permission at that level; omitted, it gets none. The helper also does the user's forced first password change, so the password is `STAFF_PASSWORD` and the session is ready to use. Returns `{ accountId, email, roleId, token, refreshToken, user }`. |
 | `signInPlayer({ email, name, phone, sub, completeProfile })` | PLAN-006: a player signed in with Google (Google's own answer skipped; the same email is the same player), with the first-sign-in profile saved (`name` split into first/last, `phone`) unless `completeProfile: false`. Returns `{ token, refreshToken, email }`; pass `player: token` to `api()` to send `Authorization: Player …`. Booking online needs one with a complete profile. |
+| `markGamePaid(sessionId, amount)` | CR-046: a game paid in cash at the desk before cash was removed, stored directly (a `CASH` payment, the game Paid) — the API can't record one any more. |
+| `payBooking(bookingId)` | CR-046: pay a held booking online the way a player does (its booking page's Pay → the built-in test checkout → settled), so it's Confirmed / Paid. There's no cash: staff bookings are `payment: "Hold"` (a pay link) or `"Free"`. |
 | `login(email, password)` | Sign in as anyone; throws if it fails. Returns `{ token, refreshToken, user }`. |
 | `issueResetToken(accountId)` | Store a password-reset link for the account, as forgot-password would have emailed it, and return the token to send to `/auth/reset-password`. |
 | `sql` | A raw `mysql2` connection to the test database — for checking what was (not) written. |
@@ -141,6 +143,8 @@ Before reporting a fix done, confirm the new test fails on the old code and pass
 
 - `DISABLE_CSRF=true` — CSRF uses its own cookie flow; these tests exercise the API rules.
 - Rate limits raised to 1000, so repeated logins in a test are not throttled.
+- CR-046: the built-in test checkout is on (`PAYMENT_SANDBOX=true`, a store file per process), since
+  booking is paid online only. A file that fakes Xendit sets `PAYMENT_SANDBOX: ""`.
 - A random `UPLOAD_URL_SECRET`, and `SENDGRID_API_KEY=""` so no email is ever sent (a test that
   needs SendGrid points `SENDGRID_API_URL` at a fake — see `tests/drive-email.test.js`).
 - The first Owner is `owner@template.com` with a fixed test password (`OWNER_EMAIL` /

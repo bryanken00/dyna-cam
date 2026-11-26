@@ -116,8 +116,12 @@ export const publicBookingSchema = z.object({
   // PLAN-006: the name and email are the signed-in player's (an old page's
   // playerName / email are dropped here, unknown keys being stripped)
   phone: optionalPhone(),
-  // Phase F: Online = a Xendit checkout (refused with 409 while online payment is off)
-  payMethod: z.enum(["Desk", "Online"]),
+  // CR-046: pay first to reserve — always a checkout (409 while online payment is off);
+  // "Desk" (pay at the counter) is gone
+  payMethod: z
+    .enum(["Online"], { message: "Booking online is paid online — pay at the counter is no longer offered" })
+    .optional()
+    .default("Online"),
 });
 
 // GET /bookings/:manageToken/move-options?date= — PLAN-003 Phase H

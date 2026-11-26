@@ -5,11 +5,10 @@ import {
   bookingConfirmedEmail,
   bookingGameStartedEmail,
   bookingMovedEmail,
-  bookingPayAtDeskEmail,
+  bookingPayLinkEmail,
   bookingPaymentRefundedEmail,
   bookingReminderEmail,
 } from "../lib/mailer/templates.js";
-import { isOnlinePaymentOn } from "../lib/payments/xendit.js";
 import { bookingManageUrl, sessionShareUrl } from "./clips.js";
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 
@@ -18,7 +17,8 @@ import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
  * (SendGrid when SENDGRID_API_KEY is set; otherwise written to the log).
  *
  *   Confirmed        the booking is paid or free             once (confirmationSentAt)
- *   PayAtDesk        held, to pay at the desk by a deadline   at creation
+ *   PayAtDesk        held from the desk: a pay link, to pay      at creation
+ *                    online by a deadline (CR-046)
  *   Reminder         BOOKING_REMINDER_MINUTES before          once (reminderSentAt) — the job
  *   Cancelled        by staff, a closure (later: the player)  once (cancelledEmailSentAt)
  *   Released         an unpaid hold ran out                   once (cancelledEmailSentAt) — the job
@@ -149,10 +149,9 @@ const BUILDERS = {
       : null,
   PayAtDesk: (db, b, f) =>
     b.status === "Pending" && b.payMethod === "Desk" && b.holdExpiresAt
-      ? bookingPayAtDeskEmail({
+      ? bookingPayLinkEmail({
           ...f,
           payBy: local(b.holdExpiresAt).format("h:mm A, ddd MMM D"),
-          payOnline: isOnlinePaymentOn(),
         })
       : null,
   Reminder: (db, b, f, extra) =>

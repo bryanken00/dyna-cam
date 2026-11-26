@@ -40,8 +40,10 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
     return { courtId: res.data.courtId };
   };
 
-  const book = (courtId, hoursFromNow, body = {}, who = admin) =>
-    call(
+  // CR-046: no cash — a pay link (Hold), paid online here unless the test picks how
+  // it's paid; a refused booking comes back as it is
+  const book = async (courtId, hoursFromNow, body = {}, who = admin) => {
+    const res = await call(
       "POST",
       "/admin/bookings",
       {
@@ -51,11 +53,14 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
         playerName: "Ana Reyes",
         phone: "09123456789",
         email: "ana@example.com",
-        payment: "Cash",
+        payment: "Hold",
         ...body,
       },
       who
     );
+    if (res.status === 201 && !body.payment) await ctx.payBooking(res.data.bookingId);
+    return res;
+  };
 
   const row = async (bookingId) =>
     (
@@ -120,11 +125,12 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
   after(() => ctx?.stop());
 
   describe("creating", () => {
-    it("books paid now: confirmed, with the cash payment at the hourly price", async () => {
+    it("books with a pay link paid online: confirmed, with the online payment at the hourly price", async () => {
       const { courtId } = await newCourt();
       const res = await book(courtId, 30, { durationMinutes: 120 });
       assert.equal(res.status, 201, JSON.stringify(res.body));
-      assert.equal(res.data.status, "Confirmed");
+      // Held when made (CR-046: no cash); book() then pays it online
+      assert.equal(res.data.status, "Pending");
       assert.equal(res.data.price, 800);
       assert.match(res.data.bookingCode, /^[A-Z0-9]{6}$/);
 
@@ -136,7 +142,7 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       const paid = await payments(res.data.bookingId);
       assert.equal(paid.length, 1);
       assert.equal(Number(paid[0].amount), 800);
-      assert.equal(paid[0].method, "CASH");
+      assert.equal(paid[0].method, "ONLINE");
 
       const one = await call("GET", `/admin/bookings/${res.data.bookingId}`);
       assert.equal(one.status, 200);
@@ -149,7 +155,7 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       assert.ok(list.data.stats.revenueToday >= 800);
     });
 
-    it("holds a pay-at-desk booking until the deadline, then takes the payment", async () => {
+    it("holds a pay link until the pay-by time; it's paid online, never at the counter", async () => {
       const { courtId } = await newCourt();
       const res = await book(courtId, 30, { payment: "Hold" });
       assert.equal(res.status, 201, JSON.stringify(res.body));
@@ -161,15 +167,14 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
         moment.tz(at(30), FORMAT, "Asia/Manila").subtract(30, "minutes").format(FORMAT)
       );
 
-      const paid = await call("POST", `/admin/bookings/${res.data.bookingId}/payments`, {});
-      assert.equal(paid.status, 201, JSON.stringify(paid.body));
-      assert.equal(paid.data.amount, 400);
+      // CR-046: Record payment (cash) is gone
+      assert.equal((await call("POST", `/admin/bookings/${res.data.bookingId}/payments`, {})).status, 404);
+      await ctx.payBooking(res.data.bookingId);
       r = await row(res.data.bookingId);
       assert.equal(r.status, "Confirmed");
       assert.equal(r.paymentStatus, "Paid");
       assert.equal(r.holdExpiresAt, null);
-
-      assert.equal((await call("POST", `/admin/bookings/${res.data.bookingId}/payments`, {})).status, 409);
+      assert.equal(Number((await payments(res.data.bookingId))[0].amount), 400);
     });
 
     it("books free (staff comp) with no payment", async () => {
@@ -183,20 +188,27 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       assert.equal((await payments(res.data.bookingId)).length, 0);
     });
 
-    it("won't hold a booking that starts before its pay-at-desk deadline", async () => {
+    it("a pay link for a game about to start (a walk-in) holds it for the online hold from now", async () => {
       const { courtId } = await newCourt();
+      const before = moment().tz("Asia/Manila").format(FORMAT);
       const res = await book(courtId, 0, { payment: "Hold" });
-      assert.equal(res.status, 400);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      const { holdExpiresAt } = await row(res.data.bookingId);
+      const latest = moment().tz("Asia/Manila").add(16, "minutes").format(FORMAT);
+      assert.ok(holdExpiresAt > before && holdExpiresAt <= latest, holdExpiresAt);
     });
 
-    it("needs payments write to take cash, but not to hold or comp", async () => {
+    it("takes no cash (CR-046); a pay link or a comp needs only bookings write", async () => {
       const { courtId } = await newCourt();
-      assert.equal((await book(courtId, 40, {}, desk)).status, 403);
+      const cash = await book(courtId, 40, { payment: "Cash" });
+      assert.equal(cash.status, 400);
+      assert.match(JSON.stringify(cash.body), /payments are online only/);
       const held = await book(courtId, 40, { payment: "Hold" }, desk);
       assert.equal(held.status, 201, JSON.stringify(held.body));
+      assert.equal((await book(courtId, 41, { payment: "Free" }, desk)).status, 201);
       assert.equal(
         (await call("POST", `/admin/bookings/${held.data.bookingId}/payments`, {}, desk)).status,
-        403
+        404
       );
     });
 
@@ -364,7 +376,9 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
         reason: "Rained out",
       });
       assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
-      assert.equal(cancelled.data.refunded, 400);
+      // Paid online (CR-046), so refunded online — no cash to hand back
+      assert.equal(cancelled.data.refunded, 0);
+      assert.equal(cancelled.data.refundedOnline, 400);
 
       const r = await row(res.data.bookingId);
       assert.equal(r.status, "Cancelled");
@@ -418,7 +432,8 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
       ]);
       const one = await call("GET", `/admin/bookings/${res.data.bookingId}`);
       assert.equal(one.data.booking.status, "Expired");
-      assert.equal((await call("POST", `/admin/bookings/${res.data.bookingId}/payments`, {})).status, 409);
+      const manageToken = (await ctx.sql.query(`SELECT manageToken FROM bookings WHERE bookingId = ?`, [res.data.bookingId]))[0][0].manageToken;
+      assert.equal((await ctx.api("POST", `/public/bookings/${manageToken}/pay`)).status, 409);
       assert.equal((await book(courtId, 140)).status, 201);
     });
 

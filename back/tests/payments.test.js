@@ -9,10 +9,9 @@ import { after, before, describe, it } from "node:test";
 import { startTestApp } from "./helpers/testApp.js";
 import { insertLegacyClip, readyLegacyClip } from "./helpers/legacyClip.js";
 
-describe("clip payments (cash)", () => {
+describe("clip payments (CR-046: no cash; old ones listed and refundable)", () => {
   let ctx;
   let admin;
-  let viewer;
   const paid = {}; // a venue that charges
   const free = {}; // a venue that doesn't
 
@@ -56,7 +55,6 @@ describe("clip payments (cash)", () => {
   before(async () => {
     ctx = await startTestApp();
     admin = await ctx.createStaff("Admin", { access: "write" });
-    viewer = await ctx.createStaff("Viewer", { access: "read" });
     await setupVenue(paid, "Paid Courts", 50);
     await setupVenue(free, "Free Courts", 0);
   });
@@ -81,58 +79,37 @@ describe("clip payments (cash)", () => {
     assert.ok(adminView.data.clip.driveUrl, "staff can still check the clip in Drive");
   });
 
-  it("finds the clip by its pay code, however it is typed", async () => {
+  it("CR-046: takes no cash — no pay-code lookup, no payment for a clip", async () => {
     const typed = `${payCode.slice(0, 3).toLowerCase()} ${payCode.slice(3)}`;
-    const found = await call("GET", `/admin/payments/lookup?payCode=${encodeURIComponent(typed)}`);
-    assert.equal(found.status, 200, JSON.stringify(found.body));
-    assert.equal(found.data.clip.clipId, clip.clipId);
-    assert.equal(found.data.clip.price, 50);
-    assert.equal(found.data.clip.courtName, "Court 1");
-    assert.equal((await call("GET", "/admin/payments/lookup?payCode=ZZZZZZ")).status, 404);
-  });
-
-  it("records the cash payment and unlocks the clip — once", async () => {
-    assert.equal(
-      (await call("POST", "/admin/payments", { payCode }, viewer)).status,
-      403,
-      "read access can't take payments"
-    );
-    const payment = await call("POST", "/admin/payments", { payCode, note: "Paid at desk" });
-    assert.equal(payment.status, 201, JSON.stringify(payment.body));
-    assert.equal(payment.data.amount, 50);
-    clip.paymentId = payment.data.paymentId;
-
-    const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
-    assert.equal(page.data.clip.locked, false);
-    assert.equal(page.data.clip.payCode, null);
-    assert.ok(page.data.clip.driveUrl);
-
-    assert.equal((await call("POST", "/admin/payments", { payCode })).status, 409);
-
-    const list = await call("GET", "/admin/payments");
-    assert.equal(list.status, 200);
-    assert.equal(list.data.totals.today, 50);
-    assert.equal(list.data.totals.countToday, 1);
-    assert.equal(list.data.payments[0].method, "CASH");
-    assert.ok(list.data.payments[0].receivedBy);
-  });
-
-  it("locks the clip again on refund", async () => {
-    const refund = await call("POST", `/admin/payments/${clip.paymentId}/refund`, {});
-    assert.equal(refund.status, 200);
+    assert.equal((await call("GET", `/admin/payments/lookup?payCode=${encodeURIComponent(typed)}`)).status, 404);
+    assert.equal((await call("POST", "/admin/payments", { payCode })).status, 404);
+    assert.equal((await call("POST", "/admin/payments", { clipId: clip.clipId })).status, 404);
     const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
     assert.equal(page.data.clip.locked, true);
-    assert.equal(page.data.clip.driveUrl, null);
-    assert.equal((await call("POST", `/admin/payments/${clip.paymentId}/refund`, {})).status, 409);
-    const list = await call("GET", "/admin/payments");
-    assert.equal(list.data.totals.today, 0);
   });
 
-  it("can take payment from the clip itself (Clips page)", async () => {
-    const payment = await call("POST", "/admin/payments", { clipId: clip.clipId });
-    assert.equal(payment.status, 201);
+  it("a clip paid in cash before CR-046 is listed, and a refund locks it again", async () => {
+    // As it's stored: paid at the desk before cash was removed
+    await ctx.sql.query(`UPDATE clips SET paymentStatus = 'Paid' WHERE clipId = ?`, [clip.clipId]);
+    await ctx.sql.query(
+      `INSERT INTO payments (paymentId, clipId, venueId, amount, method, status, paidAt, dateCreated, dateUpdated)
+       SELECT UUID(), clipId, venueId, 50, 'CASH', 'Paid', UTC_TIMESTAMP() + INTERVAL 8 HOUR,
+              UTC_TIMESTAMP() + INTERVAL 8 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR
+       FROM clips WHERE clipId = ?`,
+      [clip.clipId]
+    );
+    const list = await call("GET", "/admin/payments");
+    assert.equal(list.status, 200);
+    const listed = list.data.payments.find((p) => p.clipId === clip.clipId) || list.data.payments[0];
+    assert.equal(listed.method, "CASH");
+    const unlocked = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
+    assert.equal(unlocked.data.clip.locked, false);
+
+    const refund = await call("POST", `/admin/payments/${listed.paymentId}/refund`, {});
+    assert.equal(refund.status, 200, JSON.stringify(refund.body));
     const page = await ctx.api("GET", `/public/clips/${clip.shareToken}`);
-    assert.equal(page.data.clip.locked, false);
+    assert.equal(page.data.clip.locked, true);
+    assert.equal((await call("POST", `/admin/payments/${listed.paymentId}/refund`, {})).status, 409);
   });
 
   it("keeps free venues and staff saves free", async () => {
@@ -142,16 +119,6 @@ describe("clip payments (cash)", () => {
     assert.equal(page.data.clip.paymentStatus, "Free");
     assert.equal(page.data.clip.payCode, null);
     assert.ok(page.data.clip.driveUrl);
-    assert.equal((await call("POST", "/admin/payments", { clipId: freeClip.clipId })).status, 409);
-  });
-
-  it("won't take payment for a clip that failed", async () => {
-    const row = await insertLegacyClip(ctx.sql, { courtId: paid.courtId });
-    await ctx.sql.query(
-      `UPDATE clips SET status = 'Failed', failureReason = 'x' WHERE clipId = ?`,
-      [row.clipId]
-    );
-    assert.equal((await call("POST", "/admin/payments", { clipId: row.clipId })).status, 409);
   });
 
   it("gives the Payments filter its venues under the payments permission alone", async () => {
@@ -168,10 +135,6 @@ describe("clip payments (cash)", () => {
       (await ctx.api("GET", "/admin/clips/options", { token: cashier.token })).status,
       403
     );
-    const found = await ctx.api("GET", `/admin/payments/lookup?payCode=${payCode}`, {
-      token: cashier.token,
-    });
-    assert.equal(found.status, 200);
   });
 
   it("shows the venue's clip price", async () => {

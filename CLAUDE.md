@@ -186,7 +186,11 @@ reports `drive-direct`. The app keeps its token
   (`GET /player/games`, `utils/players.js`) also lists older bookings with the player's verified
   email. Off unless `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_LOGIN_REDIRECT_URI` are
   set — and then nobody books online (the desk still can). A booking must be `Paid` or
-  `Free` to check in. **Online payment** goes through Dyna Cam's one Xendit account
+  `Free` to check in. CR-046: **no payment at the counter** — players always pay online, staff
+  bookings are a pay link (`payment: "Hold"`, the player pays online by the venue's pay-by time) or
+  Free; there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
+  payment, no Online settlement report; migration 042 made old unpaid games and clips Free).
+  **Online payment** goes through Dyna Cam's one Xendit account
   (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
   `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the
   credential, and a payment is believed only after reading the invoice back from Xendit, never

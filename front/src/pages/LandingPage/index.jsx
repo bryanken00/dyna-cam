@@ -31,7 +31,7 @@ const STEPS = [
   {
     icon: CalendarCheck,
     title: "Book your court",
-    body: "Pick a venue, a court and a time, and sign in with Google to book. Pay online with GCash, Maya or a card, or at the desk. Your booking is in My games and your email.",
+    body: "Pick a venue, a court and a time, and sign in with Google to book. Pay online with GCash, Maya or a card to reserve it. Your booking is in My games and your email.",
   },
   {
     icon: Play,
@@ -74,7 +74,7 @@ const VENUE_FEATURES = [
   {
     icon: CalendarCheck,
     title: "Online booking and payment",
-    body: "Players book from your booking link and pay with GCash, Maya or a card, or at the desk. They can cancel or move before your cut-off.",
+    body: "Players book from your booking link and pay first with GCash, Maya or a card — no payment at the counter. They can cancel or move before your cut-off.",
   },
   {
     icon: Play,

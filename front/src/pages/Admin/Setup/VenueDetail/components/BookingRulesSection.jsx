@@ -82,7 +82,7 @@ const BookingRulesSection = ({
                 value: `${settings.bookingDaysAhead} days ahead, in confirmed weeks`,
               },
               {
-                label: "Pay at the desk by",
+                label: "Pay links due",
                 value: `${formatMinutes(settings.deskHoldMinutes)} before the start`,
               },
               { label: "Online payment hold", value: formatMinutes(settings.onlineHoldMinutes) },

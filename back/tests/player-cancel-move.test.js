@@ -136,6 +136,8 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
       env: {
         XENDIT_SECRET_KEY: XENDIT_TEST_SECRET,
         XENDIT_CALLBACK_TOKEN: XENDIT_TEST_CALLBACK_TOKEN,
+        // CR-046: this file tests real Xendit (a fake), not the built-in test checkout
+        PAYMENT_SANDBOX: "",
         XENDIT_API_URL: `http://127.0.0.1:${xendit.server.address().port}`,
         APP_URL: "http://web.test",
         RATE_LIMIT_PUBLIC_BOOK_POINTS: "1000",
@@ -204,8 +206,20 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
     assert.equal((await pub("POST", `/public/bookings/${b.manageToken}/cancel`)).status, 409);
   });
 
-  it("a booking paid in cash is cancelled at the desk, not online", async () => {
-    const b = await deskBooking({ payment: "Cash" });
+  it("a booking paid in cash (before CR-046) is cancelled at the desk, not online", async () => {
+    // No new cash payments (CR-046) — one paid at the desk before then, as it's stored
+    const b = await deskBooking({ payment: "Hold" });
+    await ctx.sql.query(
+      `UPDATE bookings SET status = 'Confirmed', paymentStatus = 'Paid', holdExpiresAt = NULL
+       WHERE bookingId = ?`,
+      [b.bookingId]
+    );
+    await ctx.sql.query(
+      `INSERT INTO payments (paymentId, bookingId, venueId, amount, method, status, paidAt, dateCreated, dateUpdated)
+       SELECT UUID(), bookingId, venueId, price, 'CASH', 'Paid', dateCreated, dateCreated, dateCreated
+       FROM bookings WHERE bookingId = ?`,
+      [b.bookingId]
+    );
     const p = await page(b.manageToken);
     assert.equal(p.paidAtDesk, true);
     assert.equal(p.actions.cancel, false);

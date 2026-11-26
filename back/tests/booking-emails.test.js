@@ -87,11 +87,20 @@ describe("booking emails (PLAN-003 Phase G)", () => {
       ...slot(hoursFromNow),
       durationMinutes: 60,
       playerName: "Bea Santos",
-      payment: "Cash",
+      // CR-046: no cash — a pay link, paid online below (unless a test picks how it's paid)
+      payment: "Hold",
       ...body,
       email,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    if (!body.payment) {
+      await ctx.payBooking(res.data.bookingId);
+      // Paid straight away: drop its pay-link email, so a test counts what follows
+      sendgrid.state.messages = sendgrid.state.messages.filter(
+        (m) =>
+          !(m.subject.startsWith("Pay by") && m.personalizations[0].to.some((t) => t.email === email))
+      );
+    }
     return { ...res.data, email, courtId };
   };
 
@@ -138,7 +147,7 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     await new Promise((resolve) => sendgrid?.server.close(resolve));
   });
 
-  it("a paid desk booking sends the confirmation once, with the player's link and how to start recording", async () => {
+  it("a desk booking paid online sends the confirmation once, with the player's link and how to start recording", async () => {
     const b = await book(30);
     const [mail, ...more] = mailsTo(b.email);
     assert.equal(more.length, 0);
@@ -149,7 +158,7 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     assert.match(mail.text, /I'm at the court — start recording/);
     const row = await bookingRow(b.bookingId);
     assert.ok(mail.html.includes(`http://web.test/booking/${row.manageToken}`));
-    assert.match(mail.text, /Paid ₱500 at the desk/);
+    assert.match(mail.text, /Paid ₱500 online/);
     assert.ok(row.confirmationSentAt);
 
     // A booking without an email gets nothing
@@ -158,31 +167,37 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     assert.equal(sendgrid.state.messages.length, before);
   });
 
-  it("a desk hold sends the pay-by email; paying sends the confirmation", async () => {
+  it("a desk pay link sends the pay-by email (online, no counter); paying online sends the confirmation", async () => {
     const b = await book(32, { payment: "Hold" });
     const [hold] = mailsTo(b.email);
     assert.match(hold.subject, /^Pay by/);
-    assert.match(hold.text, /Pay ₱500 at the front desk/);
+    assert.match(hold.text, /Pay ₱500 online by/);
+    assert.doesNotMatch(hold.text, /front desk/);
 
-    assert.equal((await call("POST", `/admin/bookings/${b.bookingId}/payments`, {})).status, 201);
-    assert.equal((await call("POST", `/admin/bookings/${b.bookingId}/payments`, {})).status, 409);
+    // CR-046: no cash at the counter
+    assert.equal((await call("POST", `/admin/bookings/${b.bookingId}/payments`, {})).status, 404);
+    await ctx.payBooking(b.bookingId);
     const mails = mailsTo(b.email);
     assert.equal(mails.length, 2);
     assert.match(mails[1].subject, /^Booked:/);
   });
 
-  it("a player's own desk booking sends the pay-by email too", async () => {
+  it("a player's online booking sends nothing until it's paid, then the confirmation", async () => {
     const link = await call("POST", `/admin/booking-settings/${home.venueId}/link`);
     const token = link.data.bookingUrl.split("/book/")[1];
     const courtKey = (await ctx.api("GET", `/public/book/${token}`)).data.courts[0].key;
     const ana = await ctx.signInPlayer({ email: "online.ana@example.test", name: "Online Ana" });
     const res = await ctx.api("POST", `/public/book/${token}/bookings`, {
       player: ana.token,
-      body: { courtKey, ...slot(33), durationMinutes: 60, payMethod: "Desk" },
+      body: { courtKey, ...slot(33), durationMinutes: 60 },
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.ok(res.data.checkoutUrl, "sent to pay");
+    assert.equal(mailsTo("online.ana@example.test").length, 0);
+    const row = (await ctx.sql.query(`SELECT bookingId FROM bookings WHERE bookingCode = ?`, [res.data.bookingCode]))[0][0];
+    await ctx.payBooking(row.bookingId);
     const [mail] = mailsTo("online.ana@example.test");
-    assert.match(mail.subject, /^Pay by/);
+    assert.match(mail.subject, /^Booked:/);
     assert.ok(mail.html.includes(res.data.manageUrl));
   });
 
@@ -276,7 +291,7 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     assert.equal(mails.length, 2);
     assert.match(mails[1].subject, /^Your booking was cancelled/);
     assert.match(mails[1].text, /the venue cancelled your booking/);
-    assert.match(mails[1].text, /₱500 paid at the desk is refunded/);
+    assert.match(mails[1].text, /₱500 is being refunded to the account you paid with/);
     // Staff's own reason stays internal
     assert.ok(!mails[1].text.includes("Asked to"));
     assert.ok((await bookingRow(b.bookingId)).cancelledEmailSentAt);

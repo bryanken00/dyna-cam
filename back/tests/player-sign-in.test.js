@@ -329,7 +329,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
       assert.equal(me.data.player.lastName, "Lim");
       const refused = await ctx.api("POST", `/public/book/${home.token}/bookings`, {
         player: jo.token,
-        body: { courtKey: home.courtKey, ...slot(100), durationMinutes: 60, payMethod: "Desk" },
+        body: { courtKey: home.courtKey, ...slot(100), durationMinutes: 60 },
       });
       assert.equal(refused.status, 409);
       assert.equal(refused.body.code, "PROFILE_INCOMPLETE");
@@ -418,8 +418,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
           playerName: "Someone Else",
           email: "someone@example.test",
           phone: "09171234567",
-          payMethod: "Desk",
-        },
+                  },
       });
       assert.equal(res.status, 201, JSON.stringify(res.body));
       const [[row]] = await ctx.sql.query(
@@ -437,7 +436,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
       // No phone on the booking: the profile's
       const second = await ctx.api("POST", `/public/book/${home.token}/bookings`, {
         player: gia.token,
-        body: { courtKey: home.courtKey, ...slot(32), durationMinutes: 60, payMethod: "Desk" },
+        body: { courtKey: home.courtKey, ...slot(32), durationMinutes: 60 },
       });
       assert.equal(second.status, 201, JSON.stringify(second.body));
       const [[again]] = await ctx.sql.query(`SELECT phone FROM bookings WHERE bookingCode = ?`, [
@@ -452,7 +451,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
       // Booked online while signed in
       const online = await ctx.api("POST", `/public/book/${home.token}/bookings`, {
         player: hana.token,
-        body: { courtKey: home.courtKey, ...slot(50), durationMinutes: 60, payMethod: "Desk" },
+        body: { courtKey: home.courtKey, ...slot(50), durationMinutes: 60 },
       });
       assert.equal(online.status, 201, JSON.stringify(online.body));
       // Booked at the desk earlier with her email (any case), and played: a game with a Drive folder
@@ -462,9 +461,10 @@ describe("player sign-in with Google (PLAN-006)", () => {
         durationMinutes: 60,
         playerName: "Hana",
         email: "HANA@example.test",
-        payment: "Cash",
+        payment: "Hold",
       });
       assert.equal(desk.status, 201, JSON.stringify(desk.body));
+      await ctx.payBooking(desk.data.bookingId);
       const detail = await call("GET", `/admin/bookings/${desk.data.bookingId}`);
       const manageToken = detail.data.booking.manageUrl.split("/booking/")[1];
       const checkIn = await ctx.api("POST", `/public/bookings/${manageToken}/check-in`);
@@ -481,7 +481,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
         durationMinutes: 60,
         playerName: "Ivan",
         email: "ivan@example.test",
-        payment: "Cash",
+        payment: "Free",
       });
       assert.equal(other.status, 201);
 
@@ -509,7 +509,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
       await completeProfile(ivy);
       const made = await ctx.api("POST", `/public/book/${home.token}/bookings`, {
         player: ivy.token,
-        body: { courtKey: home.courtKey, ...slot(90), durationMinutes: 60, payMethod: "Desk" },
+        body: { courtKey: home.courtKey, ...slot(90), durationMinutes: 60 },
       });
       assert.equal(made.status, 201, JSON.stringify(made.body));
       const before = await ctx.api("GET", "/player/games", { player: ivy.token });

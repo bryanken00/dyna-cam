@@ -3,7 +3,6 @@ import {
   emptyToUndefined,
   optionalEmail,
   optionalPhone,
-  optionalString,
   queryEnum,
   queryEnumDefault,
   queryInt,
@@ -61,10 +60,11 @@ export const createBookingSchema = z.object({
   playerName: z.string().trim().min(1, "Name is required").max(100),
   phone: optionalPhone(),
   email: optionalEmail(255),
-  // Cash = paid now at the desk · Hold = pay at the desk later · Free = comp
-  payment: z.enum(["Cash", "Hold", "Free"]),
-  // A note on the cash payment
-  note: optionalString(255),
+  // CR-046: no payment at the counter — Hold = a pay link (the player pays online
+  // by the venue's pay-by time) · Free = comp. ("Cash" is refused.)
+  payment: z.enum(["Hold", "Free"], {
+    message: "Choose Send a pay link or Free — payments are online only",
+  }),
   // Staff may book outside the venue's opening hours
   ignoreHours: z.boolean().optional().default(false),
 });
@@ -84,11 +84,6 @@ export const cancelBookingSchema = z.object({
   reason: z.string().trim().min(1, "Say why it's cancelled").max(255),
   // Refund what was paid (all of it)
   refund: z.boolean().optional().default(true),
-});
-
-// POST /:bookingId/payments
-export const bookingPaymentSchema = z.object({
-  note: optionalString(255),
 });
 
 // GET /

@@ -45,9 +45,11 @@ describe("resume a booked game ended early (CR-041)", () => {
       durationMinutes: 120,
       playerName: "Carlo Cruz",
       email: "carlo@example.com",
-      payment: "Cash",
+      // CR-046: no cash — a pay link, paid online
+      payment: "Hold",
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    await ctx.payBooking(res.data.bookingId);
     const detail = await call("GET", `/admin/bookings/${res.data.bookingId}`);
     const manageToken = detail.data.booking.manageUrl.split("/booking/")[1];
     return { bookingId: res.data.bookingId, bookingCode: res.data.bookingCode, manageToken };

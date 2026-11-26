@@ -60,7 +60,7 @@ const FindBookingCard = () => (
 const HOW_IT_WORKS = [
   { icon: LogIn, text: "Sign in with Google — your bookings and game videos stay with your account." },
   { icon: CalendarCheck, text: "Pick a venue, then a day, a court and a time." },
-  { icon: CreditCard, text: "Pay online, or at the front desk before your hold runs out." },
+  { icon: CreditCard, text: "Pay online to reserve it — GCash, Maya or a card. No payment at the counter." },
   { icon: Play, text: "At the court, open your booking and tap “I'm at the court — start recording”." },
 ];
 

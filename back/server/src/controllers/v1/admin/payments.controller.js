@@ -2,38 +2,22 @@ import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
-import { recordCashPayment, recordGamePayment } from "../../../utils/payments.js";
-import {
-  createPaymentSchema,
-  listPaymentsQuerySchema,
-  lookupPaymentQuerySchema,
-  refundPaymentSchema,
-  settlementQuerySchema,
-} from "../../../validators/payments.validator.js";
+import { listPaymentsQuerySchema, refundPaymentSchema } from "../../../validators/payments.validator.js";
 import { REFUND_SENDING } from "../../../utils/bookingPayments.js";
 
 /**
- * Payments — cash taken at the front desk for players' clips (PLAN-001
- * Phase 4; online payment deferred). Permission: payments.
+ * Payments — every payment recorded (permission: payments): online booking
+ * payments, and the cash taken for clips, games and bookings before CR-046.
  *
- * A priced clip is Unpaid until a payment is recorded here, by the pay code
- * the player shows or from the clip itself. Refunding locks the clip again.
- * CR-015: a game is paid here too (from Admin → Sessions, staff type the
- * amount); its videos open, and a refund locks them again.
+ *   GET  /                      the list, with totals
+ *   GET  /options               venues for the filter
+ *   POST /:paymentId/refund     an old cash payment refunded, or a failed online
+ *                               refund repaid by hand
+ *
+ * CR-046 (no payment at the counter) removed Take payment (GET /lookup,
+ * POST /) and the online settlement report (GET /settlement).
  */
 const router = express.Router();
-
-const CLIP_FOR_PAYMENT = `
-  SELECT cl.clipId, cl.venueId, v.name AS venueName, c.name AS courtName, cl.source,
-         cl.requestedAt, cl.price, cl.paymentStatus, cl.payCode, cl.status
-  FROM clips cl
-  JOIN venues v ON v.venueId = cl.venueId
-  JOIN courts c ON c.courtId = cl.courtId`;
-
-const toClipSummary = (clip) => ({
-  ...clip,
-  price: Number(clip.price),
-});
 
 /**
  * GET /
@@ -130,70 +114,6 @@ router.get(
 );
 
 /**
- * GET /settlement?dateFrom&dateTo
- * PLAN-003 Phase F: every venue's online (Xendit) booking money paid in the
- * range — all of it lands in Dyna Cam's one Xendit balance, and this is the
- * statement Dyna Cam settles with each venue from. Defaults to this month.
- *   collected: every online payment; refunded: given back through Xendit (or by
- *   hand); refundFailed: still owed back to a player; net = collected − refunded − refundFailed
- */
-router.get(
-  "/settlement",
-  checkPermission("payments", null, "read"),
-  validateQuery(settlementQuerySchema),
-  catchAsync(async (req, res) => {
-    const today = getTodayDateLocal();
-    const dateFrom = req.query.dateFrom || `${today.slice(0, 8)}01`;
-    const dateTo = req.query.dateTo || today;
-
-    const rows = await req.db.query(
-      `SELECT v.venueId, v.name AS venueName,
-              COUNT(*) AS payments,
-              COALESCE(SUM(p.amount), 0) AS collected,
-              COALESCE(SUM(CASE WHEN p.status = 'Refunded' THEN p.amount END), 0) AS refunded,
-              COALESCE(SUM(CASE WHEN p.status = 'Paid' AND p.refundError IS NOT NULL
-                                THEN p.amount END), 0) AS refundFailed,
-              SUM(p.status = 'Paid' AND p.refundError IS NOT NULL) AS refundFailedCount
-       FROM payments p
-       JOIN venues v ON v.venueId = p.venueId
-       WHERE p.method = 'ONLINE' AND p.paidAt >= ? AND p.paidAt <= ?
-       GROUP BY v.venueId, v.name
-       ORDER BY v.name ASC`,
-      [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]
-    );
-
-    const venues = rows.map((r) => {
-      const collected = Number(r.collected);
-      const refunded = Number(r.refunded);
-      const refundFailed = Number(r.refundFailed);
-      return {
-        venueId: r.venueId,
-        venueName: r.venueName,
-        payments: Number(r.payments),
-        collected,
-        refunded,
-        refundFailed,
-        refundFailedCount: Number(r.refundFailedCount || 0),
-        net: Math.round((collected - refunded - refundFailed) * 100) / 100,
-      };
-    });
-    const sum = (key) => Math.round(venues.reduce((t, v) => t + v[key], 0) * 100) / 100;
-    return res.sendSuccess("Online settlement", {
-      dateFrom,
-      dateTo,
-      venues,
-      totals: {
-        payments: sum("payments"),
-        collected: sum("collected"),
-        refunded: sum("refunded"),
-        refundFailed: sum("refundFailed"),
-        net: sum("net"),
-      },
-    });
-  })
-);
-
-/**
  * GET /options
  * Venues for the Payments filter — under the payments permission.
  */
@@ -205,107 +125,6 @@ router.get(
       `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
     );
     return res.sendSuccess("Payment filter options", { venues });
-  })
-);
-
-/**
- * GET /lookup?payCode=K7QM2P
- * Find the clip a player wants to pay for, so staff can check it (court, time,
- * thumbnail, price) before taking the cash. CR-015: or the game — the code on
- * the courtside device / the game's page — whose amount staff type.
- *   { kind: "Clip", clip } | { kind: "Game", game }
- */
-router.get(
-  "/lookup",
-  checkPermission("payments", null, "read"),
-  validateQuery(lookupPaymentQuerySchema),
-  catchAsync(async (req, res) => {
-    const rows = await req.db.query(
-      `${CLIP_FOR_PAYMENT} WHERE cl.payCode = ? AND cl.status != 'Deleted' LIMIT 1`,
-      [req.query.payCode]
-    );
-    if (rows.length > 0) {
-      return res.sendSuccess("Clip found", { kind: "Clip", clip: toClipSummary(rows[0]) });
-    }
-
-    const games = await req.db.query(
-      `SELECT s.sessionId, s.venueId, v.name AS venueName, c.name AS courtName, s.startAt,
-              s.endAt, s.openEnded, s.status, s.paymentStatus, s.payCode,
-              (SELECT SUM(p.amount) FROM payments p
-               WHERE p.sessionId = s.sessionId AND p.status = 'Paid') AS paidAmount
-       FROM recording_sessions s
-       JOIN venues v ON v.venueId = s.venueId
-       JOIN courts c ON c.courtId = s.courtId
-       WHERE s.payCode = ?
-       LIMIT 1`,
-      [req.query.payCode]
-    );
-    if (games.length === 0) {
-      return res.sendError("No clip or game has that pay code", 404);
-    }
-    const { openEnded, paidAmount, ...game } = games[0];
-    const open = Number(openEnded) === 1 && ["Waiting", "Recording"].includes(game.status);
-    return res.sendSuccess("Game found", {
-      kind: "Game",
-      game: {
-        ...game,
-        startAt: game.status === "Waiting" ? null : game.startAt,
-        endAt: open ? null : game.endAt,
-        paidAmount: paidAmount === null || paidAmount === undefined ? null : Number(paidAmount),
-      },
-    });
-  })
-);
-
-/**
- * POST /
- * Record a cash payment for a clip (by pay code or clipId) — the clip unlocks.
- */
-router.post(
-  "/",
-  checkPermission("payments", null, "write"),
-  validateBody(createPaymentSchema),
-  catchAsync(async (req, res) => {
-    const { payCode, clipId, sessionId, amount, note } = req.body;
-
-    let conn;
-    let result;
-    try {
-      conn = await req.db.beginTransaction();
-      result = sessionId
-        ? await recordGamePayment(conn, {
-            sessionId,
-            amount,
-            note,
-            accountId: req.user.accountId,
-          })
-        : await recordCashPayment(conn, {
-            payCode,
-            clipId,
-            note,
-            accountId: req.user.accountId,
-          });
-      if (result.ok) await req.db.commit(conn);
-      else await req.db.rollback(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    if (!result.ok) {
-      return res.sendError(result.message, result.status);
-    }
-    return sessionId
-      ? res.sendSuccess(
-          "Payment recorded — the game's videos are open",
-          { paymentId: result.paymentId, sessionId: result.sessionId, amount: result.amount },
-          201
-        )
-      : res.sendSuccess(
-          "Payment recorded — the clip is unlocked",
-          { paymentId: result.paymentId, clipId: result.clipId, amount: result.amount },
-          201
-        );
   })
 );
 

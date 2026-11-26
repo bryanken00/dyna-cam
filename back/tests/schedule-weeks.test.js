@@ -80,8 +80,7 @@ describe("weekly schedule confirmation (CR-043)", () => {
       playerName: "Bea Santos",
       phone: "0917 123 4567",
       email: "bea@example.com",
-      payMethod: "Desk",
-    });
+          });
   const reminders = (token = admin.token) =>
     call("GET", "/admin/booking-settings/schedule-reminders", undefined, token);
 

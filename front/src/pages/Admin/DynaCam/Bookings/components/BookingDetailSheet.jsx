@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CircleAlert,
   Copy,
+  Link2,
   Mail,
   Play,
   RotateCcw,
@@ -47,7 +48,6 @@ import {
   useDeleteBooking,
   useGetBookingById,
   useMarkNoShow,
-  useRecordBookingPayment,
   useResendBookingEmail,
   useRetryBookingRefund,
 } from "../../../../../services/requests/admin/bookings";
@@ -70,7 +70,6 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
   const { data, isLoading, error } = useGetBookingById(bookingId, { enabled: open });
   const booking = data?.data?.booking || null;
 
-  const payMutation = useRecordBookingPayment();
   const noShowMutation = useMarkNoShow();
   const deleteMutation = useDeleteBooking();
   const checkInMutation = useCheckInBooking();
@@ -91,18 +90,6 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
     !!booking.game &&
     !["Waiting", "Scheduled", "Recording"].includes(booking.game.status) &&
     nowLocal < booking.endAt;
-
-  const handleRecordPayment = async () => {
-    const ok = await confirm({
-      title: "Record payment",
-      description: `Take ${formatPeso(booking.price)} cash from ${decodeHTML(
-        booking.playerName,
-      )} for booking ${formatPayCode(booking.bookingCode)}? The booking is confirmed.`,
-      confirmText: `Record ${formatPeso(booking.price)}`,
-      cancelText: "Cancel",
-    });
-    if (ok) payMutation.mutate({ bookingId: booking.bookingId, payment: {} });
-  };
 
   // The player's own booking page — for a phone booking, send it to them
   const handleCopyLink = async () => {
@@ -154,7 +141,7 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
 
   const holdLine =
     booking?.status === "Pending" && booking.holdExpiresAt
-      ? `Held until ${formatDateTime(booking.holdExpiresAt)} — released if not paid by then`
+      ? `Held until ${formatDateTime(booking.holdExpiresAt)} — the player pays online from the link we emailed (or Copy pay link); released if not paid by then`
       : null;
 
   return (
@@ -241,7 +228,7 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                 {holdLine && (
                   <Alert className="mb-5">
                     <Banknote />
-                    <AlertTitle>Waiting for payment at the desk</AlertTitle>
+                    <AlertTitle>Waiting for online payment</AlertTitle>
                     <AlertDescription>{holdLine}</AlertDescription>
                   </Alert>
                 )}
@@ -468,10 +455,11 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                   Resume recording
                 </Button>
               )}
-              {booking.status === "Pending" && booking.paymentStatus === "Unpaid" && canTakePayments && (
-                <Button type="button" onClick={handleRecordPayment} disabled={payMutation.isPending}>
-                  <Banknote />
-                  Record {formatPeso(booking.price)} cash
+              {/* CR-046: no cash at the counter — the player pays online from the booking's link */}
+              {booking.status === "Pending" && booking.paymentStatus === "Unpaid" && (
+                <Button type="button" onClick={handleCopyLink}>
+                  <Link2 />
+                  Copy pay link
                 </Button>
               )}
             </div>

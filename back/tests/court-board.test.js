@@ -81,9 +81,11 @@ describe("TV court board (CR-038)", () => {
       playerName: "Secret Player",
       phone: "0917 123 4567",
       email: "secret@example.com",
-      payment: "Cash",
+      // CR-046: no cash — a pay link, paid online
+      payment: "Hold",
     });
     assert.equal(booked.status, 201, JSON.stringify(booked.body));
+    await ctx.payBooking(booked.data.bookingId);
     const closure = await call("POST", "/admin/closures", {
       venueId: home.venueId,
       startAt: at(2),

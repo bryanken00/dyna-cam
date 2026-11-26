@@ -143,7 +143,7 @@ const BoardPage = () => {
           </span>
         ))}
         <span className="ml-auto" style={{ fontSize: "clamp(13px, 1.1vw, 17px)", color: "var(--color-text-muted)" }}>
-          Book a court at the front desk or online
+          Book a court online
         </span>
       </div>
 

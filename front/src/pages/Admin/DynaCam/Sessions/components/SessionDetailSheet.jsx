@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Ban,
-  Banknote,
   Cloud,
   Copy,
   Film,
@@ -26,14 +25,12 @@ import {
 import AddTimeFormModal from "./AddTimeFormModal";
 import GameDriveDialog from "./GameDriveDialog";
 import SessionEmailFormModal from "./SessionEmailFormModal";
-import GamePaymentFormModal from "./GamePaymentFormModal";
 import SessionDevices from "./SessionDevices";
 import SessionStreamLine from "./SessionStreamLine";
 import DescriptionList from "../../../../../components/DescriptionList";
 import PaymentStatusChip from "../../../../../components/PaymentStatusChip";
 import Spinner from "../../../../../components/Spinner";
 import StatusDot from "../../../../../components/StatusDot";
-import { usePermissions } from "../../../../../hooks/usePermissions";
 import { confirm } from "../../../../../store/confirmStore";
 import { copyText } from "../../../../../utils/clipboard";
 import { decodeHTML } from "../../../../../utils/decode-html";
@@ -257,8 +254,6 @@ const SessionDetailSheet = ({
   const endMutation = useEndSession();
 
   // CR-015: the game's videos open once its payment is recorded here (Payments permission)
-  const { hasPermission } = usePermissions();
-  const [payOpen, setPayOpen] = useState(false);
   // CR-016: more time for a recording game with a game time
   const [addTimeOpen, setAddTimeOpen] = useState(false);
   // CR-001: the game's Google Drive folder as a QR + link (paid or free games)
@@ -271,10 +266,6 @@ const SessionDetailSheet = ({
   const canSendEmail =
     canWrite && !!session?.email && DRIVE_EMAIL_SENDABLE.includes(session?.driveEmail?.status);
   const canAddTime = canWrite && session?.status === "Recording" && !!session?.endAt;
-  const canTakePayment =
-    hasPermission("payments", null, "write") &&
-    session?.paymentStatus === "Unpaid" &&
-    !["Cancelled", "Failed"].includes(session?.status);
 
   const handleCopy = async () => {
     const ok = await copyText(session?.shareUrl);
@@ -783,33 +774,17 @@ const SessionDetailSheet = ({
                 <Button
                   type="button"
                   size="lg"
-                  variant={canTakePayment ? "outline" : "default"}
+                  variant="default"
                   onClick={handleCopy}
                 >
                   <Copy />
                   Copy player link
                 </Button>
               )}
-              {canTakePayment && (
-                <Button
-                  type="button"
-                  size="lg"
-                  onClick={() => setPayOpen(true)}
-                >
-                  <Banknote />
-                  Record payment
-                </Button>
-              )}
             </div>
           )}
         </div>
       </SheetContent>
-      <GamePaymentFormModal
-        open={payOpen}
-        onClose={() => setPayOpen(false)}
-        onSuccess={() => setPayOpen(false)}
-        session={session}
-      />
       <GameDriveDialog
         open={driveOpen}
         onClose={() => setDriveOpen(false)}

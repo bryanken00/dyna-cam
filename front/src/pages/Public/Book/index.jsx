@@ -8,7 +8,6 @@ import {
   LogIn,
   Phone,
   RotateCcw,
-  Store,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -93,8 +92,6 @@ const BookPage = () => {
     handleBook,
     payOnline,
     paymentSandbox,
-    payMethod,
-    handlePickPayMethod,
     isBooking,
     bookError,
   } = useBookPageHooks();
@@ -140,7 +137,6 @@ const BookPage = () => {
   }
 
   const logo = getImageUrl(page.venue.logoUrl);
-  const holdMinutes = page.rules.deskHoldMinutes;
 
   return (
     <PublicLayout footer={FOOTER} wide signIn={signInAvailable}>
@@ -164,7 +160,7 @@ const BookPage = () => {
           )}
         </div>
 
-        {!signInAvailable ? (
+        {!signInAvailable || !payOnline ? (
           // PLAN-006: booking online needs a Google sign-in, which this server doesn't have
           <div className="p-6" style={cardStyle}>
             <ResultState
@@ -329,34 +325,9 @@ const BookPage = () => {
                           />
                         </div>
 
-                        {payOnline && (
-                          <>
-                            <div className="mt-5">
-                              <SectionLabel>How you&apos;ll pay</SectionLabel>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2" role="group" aria-label="How you'll pay">
-                              <PickChip
-                                selected={payMethod === "Online"}
-                                onClick={() => handlePickPayMethod("Online")}
-                                className="flex items-center gap-2 px-3 py-3 text-left"
-                              >
-                                <CreditCard className="size-4.5 shrink-0" />
-                                <span style={{ fontSize: 13.5, fontWeight: 600 }}>Pay now</span>
-                              </PickChip>
-                              <PickChip
-                                selected={payMethod === "Desk"}
-                                onClick={() => handlePickPayMethod("Desk")}
-                                className="flex items-center gap-2 px-3 py-3 text-left"
-                              >
-                                <Store className="size-4.5 shrink-0" />
-                                <span style={{ fontSize: 13.5, fontWeight: 600 }}>At the desk</span>
-                              </PickChip>
-                            </div>
-                          </>
-                        )}
-
+                        {/* CR-046: pay first to reserve — always online, no pay at the desk */}
                         <div
-                          className="mt-3 flex items-start gap-2.5 p-3"
+                          className="mt-5 flex items-start gap-2.5 p-3"
                           style={{
                             background: "var(--color-surface-sunken)",
                             border: "1px solid var(--color-line)",
@@ -365,34 +336,17 @@ const BookPage = () => {
                             color: "var(--color-text-dark)",
                           }}
                         >
-                          {payMethod === "Online" ? (
-                            <>
-                              <CreditCard
-                                className="size-4.5 shrink-0 mt-0.5"
-                                style={{ color: "var(--color-text-secondary)" }}
-                              />
-                              <span>
-                                {paymentSandbox
-                                  ? `Pay ${formatPeso(picked.price)} on a test checkout — no real money moves.`
-                                  : `Pay ${formatPeso(picked.price)} with GCash, Maya or a card on Xendit's secure page.`}{" "}
-                                We hold the court for {page.rules.onlineHoldMinutes} minutes while you pay. Cancel up to{" "}
-                                {page.rules.cancelCutoffHours} hours before for a full refund.
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <Store
-                                className="size-4.5 shrink-0 mt-0.5"
-                                style={{ color: "var(--color-text-secondary)" }}
-                              />
-                              <span>
-                                Pay {formatPeso(picked.price)} at the front desk to confirm. We hold the court for you
-                                until {picked.start.subtract(holdMinutes, "minute").format("h:mm A")}
-                                {picked.start.isSame(dates[0]?.day, "day") ? " today" : ` on ${picked.start.format("MMM D")}`}
-                                ; after that it&apos;s released.
-                              </span>
-                            </>
-                          )}
+                          <CreditCard
+                            className="size-4.5 shrink-0 mt-0.5"
+                            style={{ color: "var(--color-text-secondary)" }}
+                          />
+                          <span>
+                            {paymentSandbox
+                              ? `Pay ${formatPeso(picked.price)} on a test checkout — no real money moves.`
+                              : `Pay ${formatPeso(picked.price)} with GCash, Maya or a card on Xendit's secure page.`}{" "}
+                            The court is yours once it&apos;s paid — we hold it for {page.rules.onlineHoldMinutes} minutes
+                            while you pay. Cancel up to {page.rules.cancelCutoffHours} hours before for a full refund.
+                          </span>
                         </div>
 
                         <Button
@@ -402,9 +356,7 @@ const BookPage = () => {
                           disabled={isBooking || playerLoading || !player}
                         >
                           {isBooking ? <Loader2 className="animate-spin" /> : <CalendarCheck />}
-                          {payMethod === "Online"
-                            ? `Book ${picked.courtName}, pay ${formatPeso(picked.price)} now`
-                            : `Book ${picked.courtName}, pay at the desk`}
+                          {`Book ${picked.courtName}, pay ${formatPeso(picked.price)} now`}
                         </Button>
                       </form>
                     </Form>

@@ -34,7 +34,8 @@ describe("booking maintenance job (PLAN-003 Phase E)", () => {
     return res.data.courtId;
   };
 
-  const book = async (courtId, hoursFromNow, payment = "Cash") => {
+  // CR-046: no cash — "Paid" is a pay link (Hold) paid online through the test checkout
+  const book = async (courtId, hoursFromNow, payment = "Paid") => {
     const s = at(hoursFromNow);
     const res = await call("POST", "/admin/bookings", {
       courtId,
@@ -42,9 +43,10 @@ describe("booking maintenance job (PLAN-003 Phase E)", () => {
       startTime: s.slice(11, 16),
       durationMinutes: 60,
       playerName: "Dina Lim",
-      payment,
+      payment: payment === "Paid" ? "Hold" : payment,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    if (payment === "Paid") await ctx.payBooking(res.data.bookingId);
     return res.data.bookingId;
   };
 

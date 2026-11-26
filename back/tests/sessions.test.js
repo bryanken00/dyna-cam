@@ -200,11 +200,8 @@ describe("recording sessions", () => {
       assert.match(locked.data.session.payCode, /^[A-Z0-9]{6}$/);
       assert.equal(locked.data.session.videos[0].driveUrl, null);
       assert.equal("videoUrl" in locked.data.session.videos[0], false, "never a file link");
-      const paid = await call("POST", "/admin/payments", {
-        sessionId: finished.sessionId,
-        amount: 300,
-      });
-      assert.equal(paid.status, 201, JSON.stringify(paid.body));
+      // Paid at the desk before CR-046 (the API can't take cash any more)
+      await ctx.markGamePaid(finished.sessionId, 300);
 
       const page = await ctx.api("GET", `/public/sessions/${token}`);
       assert.equal(page.data.session.locked, false);

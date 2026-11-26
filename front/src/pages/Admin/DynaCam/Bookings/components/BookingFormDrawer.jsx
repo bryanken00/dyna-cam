@@ -29,7 +29,6 @@ import DatePicker from "../../../../../components/DatePicker";
 import SectionLabel from "../../../../../components/SectionLabel";
 import StatusToggle from "../../../../../components/StatusToggle";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
-import { usePermissions } from "../../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import {
   PHONE_MAX_LENGTH,
@@ -63,12 +62,12 @@ const bookingSchema = z.object({
     .trim()
     .max(255, "Email must not exceed 255 characters")
     .refine((v) => v === "" || z.string().email().safeParse(v).success, "Enter a valid email"),
-  payment: z.enum(["Cash", "Hold", "Free"]),
-  note: z.string().trim().max(255, "Keep the note under 255 characters"),
+  // CR-046: no payment at the counter — a pay link (paid online) or a comp
+  payment: z.enum(["Hold", "Free"]),
   ignoreHours: z.boolean(),
 });
 
-const emptyValues = (entity, canTakeCash) => ({
+const emptyValues = (entity) => ({
   courtId: entity?.courtId || "",
   date: entity?.date || "",
   startTime: entity?.startTime || "",
@@ -76,8 +75,7 @@ const emptyValues = (entity, canTakeCash) => ({
   playerName: "",
   phone: "",
   email: "",
-  payment: canTakeCash ? "Cash" : "Hold",
-  note: "",
+  payment: "Hold",
   ignoreHours: false,
 });
 
@@ -88,14 +86,11 @@ const emptyValues = (entity, canTakeCash) => ({
  */
 const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   const req = <span style={{ color: "var(--color-error)" }}>*</span>;
-  const { hasPermission } = usePermissions();
-  // Taking cash is a payment — it needs the payments permission too
-  const canTakeCash = hasPermission("payments", null, "write");
   const courts = entity?.courts || [];
 
   const form = useForm({
     resolver: zodResolver(bookingSchema),
-    defaultValues: emptyValues(null, canTakeCash),
+    defaultValues: emptyValues(null),
   });
   const {
     formState: { isDirty, isSubmitSuccessful },
@@ -107,8 +102,8 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
 
   useEffect(() => {
     if (!open) return;
-    form.reset(emptyValues(entity, canTakeCash));
-  }, [open, entity, canTakeCash, form]);
+    form.reset(emptyValues(entity));
+  }, [open, entity, form]);
 
   const { data: quoteData, isFetching: quoteFetching } = useGetBookingQuote(
     open ? { courtId, date, startTime, durationMinutes } : null,
@@ -120,7 +115,7 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   const isPending = createMutation.isPending;
 
   const handleClose = () => {
-    form.reset(emptyValues(null, canTakeCash));
+    form.reset(emptyValues(null));
     onClose();
   };
 
@@ -144,7 +139,6 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         phone: values.phone || null,
         email: values.email || null,
         payment: values.payment,
-        note: values.payment === "Cash" ? values.note || null : null,
         ignoreHours: values.ignoreHours,
       });
       markSaved();
@@ -155,9 +149,9 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
     }
   };
 
+  // CR-046: no payment at the counter
   const paymentOptions = [
-    ...(canTakeCash ? [{ v: "Cash", label: "Paid now (cash)" }] : []),
-    { v: "Hold", label: "Pay at the desk later" },
+    { v: "Hold", label: "Send a pay link" },
     { v: "Free", label: "Free" },
   ];
 
@@ -462,31 +456,14 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                     <FormItem>
                       <StatusToggle value={field.value} onChange={field.onChange} options={paymentOptions} />
                       <FormDescription>
-                        {field.value === "Cash" &&
-                          "Take the cash now — the booking is confirmed and the payment is recorded."}
                         {field.value === "Hold" &&
-                          "The slot is held until shortly before it starts; it's released if not paid by then."}
+                          "The player pays online (GCash, Maya or a card) from the link we email them, or the one you share from the booking. The court is held until shortly before it starts — released if not paid. No payment at the counter."}
                         {field.value === "Free" && "No payment — the booking is confirmed."}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                {payment === "Cash" && (
-                  <FormField
-                    control={form.control}
-                    name="note"
-                    render={({ field }) => (
-                      <FormItem className="mt-5">
-                        <FormLabel>Payment note</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Optional, e.g. paid by Juan" className="h-10" maxLength={255} {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
               </div>
 
             </div>
@@ -504,8 +481,8 @@ const BookingFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
               </Button>
               <Button type="submit" size="lg" disabled={isPending || blocked}>
                 {isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-                {payment === "Cash" && q?.bookable && !blocked
-                  ? `Book and take ${formatPeso(q.price)}`
+                {payment === "Hold" && q?.bookable && !blocked
+                  ? `Book and send a ${formatPeso(q.price)} pay link`
                   : "Book court"}
               </Button>
             </div>

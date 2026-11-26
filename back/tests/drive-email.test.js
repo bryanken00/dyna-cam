@@ -114,7 +114,8 @@ describe("Google Drive link by email (CR-018)", () => {
     return shown.data.session;
   };
 
-  const pay = (sessionId) => call("POST", "/admin/payments", { sessionId, amount: 300 });
+  // A game paid at the desk before CR-046 (no cash payments since; old unpaid ones were made Free)
+  const pay = (sessionId) => ctx.markGamePaid(sessionId, 300);
   const state = async (sessionId) =>
     (await call("GET", `/admin/sessions/${sessionId}`)).data.session.driveEmail;
   const mailsTo = (sessionId) =>
@@ -163,7 +164,7 @@ describe("Google Drive link by email (CR-018)", () => {
     assert.equal((await state(sessionId)).status, "WaitingForPayment");
     assert.deepEqual(await runDriveEmails(ctx.db), {}, "not while unpaid");
 
-    assert.equal((await pay(sessionId)).status, 201);
+    await pay(sessionId);
     assert.equal((await state(sessionId)).status, "Queued");
     assert.deepEqual(await runDriveEmails(ctx.db), { sent: 1 });
 

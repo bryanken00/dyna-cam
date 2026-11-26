@@ -17,7 +17,6 @@ import {
   getBookingsApi,
   markNoShowApi,
   moveBookingApi,
-  recordBookingPaymentApi,
   retryBookingRefundApi,
   resendBookingEmailApi,
 } from "../../api/admin/bookings";
@@ -142,19 +141,6 @@ export const useMarkNoShow = () => {
       invalidateBookings(queryClient);
     },
     onError: errorToast("Failed to mark the no-show"),
-  });
-};
-
-// Mutation: the player paid a held booking at the desk
-export const useRecordBookingPayment = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ bookingId, payment }) => recordBookingPaymentApi(bookingId, payment),
-    onSuccess: () => {
-      toast.success("Payment recorded — the booking is confirmed");
-      invalidateBookings(queryClient);
-    },
-    onError: errorToast("Failed to record the payment"),
   });
 };
 

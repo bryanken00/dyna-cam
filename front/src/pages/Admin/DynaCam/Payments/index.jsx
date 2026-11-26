@@ -1,10 +1,8 @@
 import { useState } from "react";
 import {
-  Banknote,
   CalendarRange,
   CircleAlert,
   Filter,
-  Landmark,
   Receipt,
   Wallet,
 } from "lucide-react";
@@ -18,8 +16,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { usePaymentHooks } from "./hooks";
-import TakePaymentFormModal from "./components/TakePaymentFormModal";
-import OnlineSettlementSheet from "./components/OnlineSettlementSheet";
 import PageHeader from "../../../../components/PageHeader";
 import PaginationFooter from "../../../../components/PaginationFooter";
 import StatCard from "../../../../components/StatCard";
@@ -42,19 +38,12 @@ const PaymentsPage = () => {
     isFetching,
     error,
     refetch,
-    canWrite,
     canListVenues,
     venueOptions,
     columns,
     handleTableChange,
     handleFilterChange,
     handleClearFilters,
-    takePaymentOpen,
-    handleOpenTakePayment,
-    handleCloseTakePayment,
-    settlementOpen,
-    handleOpenSettlement,
-    handleCloseSettlement,
   } = usePaymentHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -84,21 +73,7 @@ const PaymentsPage = () => {
       {/* 1. HEADER */}
       <PageHeader
         title="Payments"
-        subtitle="Cash taken at the front desk, and court bookings paid online."
-        actions={
-          <>
-            <Button variant="outline" onClick={handleOpenSettlement}>
-              <Landmark />
-              Online settlement
-            </Button>
-            {canWrite && (
-              <Button onClick={handleOpenTakePayment}>
-                <Banknote />
-                Take payment
-              </Button>
-            )}
-          </>
-        }
+        subtitle="Court bookings paid online, and cash taken before payments went online-only (CR-046)."
       />
 
       {/* 2. STAT CARDS */}
@@ -224,14 +199,8 @@ const PaymentsPage = () => {
             <p style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
               {hasActiveFilters
                 ? "No payments match these filters"
-                : "No payments yet — they appear here when staff take cash for a clip"}
+                : "No payments yet — they appear here when players pay for their bookings online"}
             </p>
-            {canWrite && !hasActiveFilters && (
-              <Button onClick={handleOpenTakePayment}>
-                <Banknote />
-                Take payment
-              </Button>
-            )}
           </div>
         ) : (
           <>
@@ -251,13 +220,6 @@ const PaymentsPage = () => {
         )}
       </div>
 
-      {/* 4. TAKE PAYMENT */}
-      <TakePaymentFormModal
-        open={takePaymentOpen}
-        onClose={handleCloseTakePayment}
-        onSuccess={handleCloseTakePayment}
-      />
-      <OnlineSettlementSheet open={settlementOpen} onClose={handleCloseSettlement} />
     </div>
   );
 };

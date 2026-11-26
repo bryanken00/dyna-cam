@@ -52,18 +52,11 @@ describe("game videos", () => {
       durationMinutes: 5,
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
-    // CR-039: New game is always free; this test is about an unpaid game (one made before)
-    await ctx.makeUnpaid(created.data.sessionId);
     await ctx.sql.query(
       `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
       [await manila(startMinutes), await manila(endMinutes), created.data.sessionId]
     );
-    // CR-015: paid at the desk, so the player's page plays the videos
-    const paid = await call("POST", "/admin/payments", {
-      sessionId: created.data.sessionId,
-      amount: 300,
-    });
-    assert.equal(paid.status, 201, JSON.stringify(paid.body));
+    // CR-039 / CR-046: games are free, so the player's page plays the videos
     const jobs = await gameJobs(ctx, target.token, created.data.sessionId);
     return { ...created.data, token: created.data.shareUrl.split("/").pop(), jobs };
   };

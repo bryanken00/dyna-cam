@@ -70,8 +70,7 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
         ...slot(hoursFromNow),
         durationMinutes: 60,
         phone: "0917 123 4567",
-        payMethod: "Desk",
-        ...rest,
+                ...rest,
       },
     });
   };
@@ -158,7 +157,7 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     assert.ok(!text.includes(booked.data.bookingCode));
   });
 
-  it("books to pay at the desk: a hold, its own page, and the desk sees it", async () => {
+  it("books and pays online (CR-046: no pay at the desk): a hold, its own page, and the desk sees it", async () => {
     const { courts } = (await page(home.token)).data;
     // 10:00 three days ahead: a 2-hour slot that can't run past midnight
     const date = at(72).slice(0, 10);
@@ -169,6 +168,8 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.match(res.data.manageUrl, /\/booking\/[\w-]{16,}$/);
+    // Always sent to pay: the court is held only for the checkout
+    assert.ok(res.data.checkoutUrl, "a checkout to pay");
 
     const own = await pub("GET", `/public/bookings/${res.data.manageToken}`);
     assert.equal(own.status, 200, JSON.stringify(own.body));
@@ -179,10 +180,8 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     assert.equal(b.price, 700);
     assert.equal(b.durationMinutes, 120);
     assert.equal(b.paymentStatus, "Unpaid");
-    assert.equal(
-      b.payBy,
-      `${date} 09:30:00`
-    );
+    // Held for the online hold (15 min), not until a desk deadline
+    assert.ok(b.payBy && b.payBy < `${date} 09:30:00`, b.payBy);
 
     // The desk sees it, made online, and its link
     const list = await call("GET", `/admin/bookings?venueId=${home.venueId}&search=${res.data.bookingCode}`);
@@ -191,8 +190,10 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     const detail = await call("GET", `/admin/bookings/${listed.bookingId}`);
     assert.equal(detail.data.booking.manageUrl, res.data.manageUrl);
 
-    // Paid at the desk → confirmed on the player's page
-    assert.equal((await call("POST", `/admin/bookings/${listed.bookingId}/payments`, {})).status, 201);
+    // No cash at the desk any more (CR-046)…
+    assert.equal((await call("POST", `/admin/bookings/${listed.bookingId}/payments`, {})).status, 404);
+    // …paid online → confirmed on the player's page
+    await ctx.payBooking(listed.bookingId);
     const paid = await pub("GET", `/public/bookings/${res.data.manageToken}`);
     assert.equal(paid.data.booking.status, "Confirmed");
     assert.equal(paid.data.booking.payBy, null);
@@ -216,8 +217,7 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
       durationMinutes: 60,
       playerName: "Bea Santos",
       email: "bea@example.com",
-      payMethod: "Desk",
-    });
+          });
     assert.equal(anonymous.status, 401);
     assert.equal(anonymous.body.code, "PLAYER_SIGN_IN_REQUIRED");
 

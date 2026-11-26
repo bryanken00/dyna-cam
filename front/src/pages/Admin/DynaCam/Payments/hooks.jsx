@@ -34,11 +34,6 @@ export const usePaymentHooks = () => {
 
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
   const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [takePaymentOpen, setTakePaymentOpen] = useState(false);
-  // PLAN-003 Phase F: the online (Xendit) settlement statement
-  const [settlementOpen, setSettlementOpen] = useState(false);
-  const handleOpenSettlement = useCallback(() => setSettlementOpen(true), []);
-  const handleCloseSettlement = useCallback(() => setSettlementOpen(false), []);
 
   // ─── API Hooks ─────────────────────────────────────────────────────
   const {
@@ -79,12 +74,6 @@ export const usePaymentHooks = () => {
     setFilters(EMPTY_FILTERS);
     setPagination((prev) => ({ ...prev, current: 1 }));
   }, []);
-
-  const handleOpenTakePayment = useCallback(() => setTakePaymentOpen(true), []);
-  const handleCloseTakePayment = useCallback(
-    () => setTakePaymentOpen(false),
-    [],
-  );
 
   // Phase F: Xendit refused a booking's online refund; staff repaid the player by hand
   const handleMarkRepaid = useCallback(
@@ -358,11 +347,5 @@ export const usePaymentHooks = () => {
     handleTableChange,
     handleFilterChange,
     handleClearFilters,
-    takePaymentOpen,
-    handleOpenTakePayment,
-    handleCloseTakePayment,
-    settlementOpen,
-    handleOpenSettlement,
-    handleCloseSettlement,
   };
 };

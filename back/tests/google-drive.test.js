@@ -66,9 +66,7 @@ describe("Google Drive per court", () => {
     });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const { sessionId, shareUrl } = created.data;
-    // CR-039: New game is always free; these games are paid at the desk (CR-015)
-    await ctx.makeUnpaid(sessionId);
-    assert.equal((await call("POST", "/admin/payments", { sessionId, amount: 250 })).status, 201);
+    // CR-039 / CR-046: games are free — nothing to pay before the videos open
     await ctx.sql.query(
       `UPDATE recording_sessions SET startAt = ?, endAt = ? WHERE sessionId = ?`,
       [await manila(-12), await manila(-2), sessionId]

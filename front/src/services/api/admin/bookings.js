@@ -49,11 +49,6 @@ export const markNoShowApi = async (bookingId) => {
   return response.data;
 };
 
-export const recordBookingPaymentApi = async (bookingId, payment = {}) => {
-  const response = await api.post(`/api/v1/admin/bookings/${bookingId}/payments`, payment);
-  return response.data;
-};
-
 export const deleteBookingApi = async (bookingId) => {
   const response = await api.delete(`/api/v1/admin/bookings/${bookingId}`);
   return response.data;

@@ -71,10 +71,12 @@ describe("booking check-in (PLAN-003 Phase D)", () => {
       durationMinutes: 60,
       playerName: "Carlo Cruz",
       email: "carlo@example.com",
-      payment: "Cash",
+      // CR-046: no cash — a pay link, paid online below (unless a test picks how it's paid)
+      payment: "Hold",
       ...body,
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
+    if (!body.payment) await ctx.payBooking(res.data.bookingId);
     const detail = await call("GET", `/admin/bookings/${res.data.bookingId}`);
     const manageToken = detail.data.booking.manageUrl.split("/booking/")[1];
     return { bookingId: res.data.bookingId, bookingCode: res.data.bookingCode, manageToken };

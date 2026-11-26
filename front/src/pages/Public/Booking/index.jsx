@@ -9,7 +9,6 @@ import {
   Loader2,
   Play,
   RotateCcw,
-  Store,
   UserX,
   Video,
 } from "lucide-react";
@@ -38,7 +37,7 @@ const cardStyle = {
 
 /** What the status card says, per booking status. */
 const STATUS = {
-  Pending: { icon: Store, title: "Pay at the desk to confirm", tone: "var(--color-warning)" },
+  Pending: { icon: CreditCard, title: "Pay now to confirm", tone: "var(--color-warning)" },
   Confirmed: { icon: CalendarCheck, title: "You're booked", tone: "var(--color-success)" },
   CheckedIn: { icon: CalendarCheck, title: "You're checked in", tone: "var(--color-success)" },
   Completed: { icon: CalendarCheck, title: "Played — thanks for coming", tone: "var(--color-text-muted)" },
@@ -142,9 +141,9 @@ const BookingPage = () => {
     );
   }
 
-  // Phase F: a booking made to pay online waits on its checkout, not the desk
+  // CR-046: every unpaid booking is paid online (no pay at the desk)
   const status =
-    booking.status === "Pending" && booking.payMethod === "Online"
+    booking.status === "Pending"
       ? { icon: CreditCard, title: awaitingPayment ? "Checking your payment…" : "Pay now to confirm", tone: "var(--color-warning)" }
       : STATUS[booking.status] || STATUS.Confirmed;
   const StatusIcon = status.icon;
@@ -201,9 +200,7 @@ const BookingPage = () => {
             )}
             {booking.status === "Pending" && booking.payBy && !awaitingPayment && (
               <p className="m-0 mt-3" style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
-                {booking.payMethod === "Online"
-                  ? `Pay ${formatPeso(booking.price)} online by `
-                  : `Pay ${formatPeso(booking.price)} at the front desk${booking.actions.payOnline ? " or online" : ""} by `}
+                {`Pay ${formatPeso(booking.price)} online by `}
                 <strong>{dayjs(booking.payBy).format("h:mm A, ddd MMM D")}</strong>, or the court is released.
               </p>
             )}
@@ -227,7 +224,7 @@ const BookingPage = () => {
               <Button
                 type="button"
                 size="lg"
-                variant={booking.payMethod === "Online" ? "default" : "outline"}
+                variant="default"
                 className="w-full h-12 text-base font-semibold"
                 onClick={handlePay}
                 disabled={isPaying}
@@ -318,9 +315,7 @@ const BookingPage = () => {
               {formatPeso(booking.price)}
               {" · "}
               {booking.paymentStatus === "Unpaid"
-                ? booking.payMethod === "Online"
-                  ? "to pay online"
-                  : "to pay at the desk"
+                ? "to pay online"
                 : booking.paymentStatus === "Free"
                   ? "free"
                   : booking.paymentStatus === "Paid" && booking.payMethod === "Online"

@@ -68,10 +68,8 @@ describe("dashboard insights (CR-023)", () => {
     games.long = await playedGame("Court A", 180, 90);
     // Yesterday: 30 min, then paid ₱300 at the desk
     games.short = await playedGame("Court B", 24 * 60 + 120, 30);
-    assert.equal(
-      (await call("POST", "/admin/payments", { sessionId: games.short, amount: 300 })).status,
-      201
-    );
+    // Paid at the desk before CR-046 (no cash payments since)
+    await ctx.markGamePaid(games.short, 300);
     // 10 days ago: 60 min, free — in the last 30 days, and the 7 days before the last 7
     games.old = await playedGame("Court C", 10 * 24 * 60, 60, { paymentStatus: "Free" });
     // Cancelled before it recorded — never counted
