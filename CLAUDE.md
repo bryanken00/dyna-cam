@@ -191,7 +191,11 @@ reports `drive-direct`. The app keeps its token
   booking, several bookings are an order (`booking_orders`, `bookings.orderId`) paid by one Xendit
   invoice `order-<orderCode>` with one payment row per booking (each cancels / refunds alone), and the
   running hour is bookable in its first 30 minutes (`runningHourBookable`); no longest booking —
-  only opening hours limit a player's booking (`venues.maxBookingMinutes` is unused); there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
+  only opening hours limit a player's booking (`venues.maxBookingMinutes` is unused); CR-049: a
+  day may close the next morning (`venue_hours.closesAt` up to 24 h after opening, e.g. `25:00` =
+  1 AM) — those late hours belong to the evening's date: availability lists them as `"24:00"`,
+  `"25:00"`… (`nextDay`), `toStartLocal()` turns them into real times, `withinHours()` also checks
+  the previous day's late window, and `firstBookableDate()` is last night's date while they run; there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
   payment, no Online settlement report; migration 042 made old unpaid games and clips Free).
   **Online payment** goes through Dyna Cam's one Xendit account
   (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):

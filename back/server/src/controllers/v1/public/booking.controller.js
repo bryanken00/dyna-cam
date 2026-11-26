@@ -5,7 +5,7 @@ import {
   validateParams,
   validateQuery,
 } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { hashToken, randomPayCode } from "../../../utils/crypto/tokens.js";
@@ -13,7 +13,7 @@ import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
-import { loadVenueHours } from "../../../utils/courtTimeline.js";
+import { firstBookableDate, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import {
   cancelBooking,
@@ -113,9 +113,10 @@ const activeCourts = (db, venueId) =>
  * Why a date can't be booked, or null. CR-047: no longest booking — a game can
  * run as long as the venue is open (findConflict refuses hours it's closed).
  */
-const dateProblem = (date) => {
-  // CR-048: no booking window — any day from today on
-  if (date < getTodayDateLocal()) return "That date has passed";
+const dateProblem = (date, today) => {
+  // CR-048: no booking window — any day from today on (CR-049: or last night's, while
+  // its hours past midnight still run)
+  if (date < today) return "That date has passed";
   return null;
 };
 
@@ -184,7 +185,7 @@ router.get(
       activeCourts(req.db, venue.venueId),
       loadVenueHours(req.db, venue.venueId),
     ]);
-    const today = getTodayDateLocal();
+    const today = firstBookableDate(hours);
 
     return res.sendSuccess("Booking page", {
       venue: venueView(venue),
@@ -225,7 +226,7 @@ router.get(
       return res.sendError("This booking link isn't valid", 404);
     }
     const { date, durationMinutes } = req.query;
-    const problem = dateProblem(date);
+    const problem = dateProblem(date, firstBookableDate(await loadVenueHours(req.db, venue.venueId)));
     if (problem) {
       return res.sendError(problem, 400);
     }
@@ -301,13 +302,14 @@ router.post(
       ? joinPickedHours(req.body.slots)
       : [{ courtKey: req.body.courtKey, startTime: req.body.startTime, durationMinutes: req.body.durationMinutes }];
     const courts = await activeCourts(req.db, venue.venueId);
+    const today = firstBookableDate(await loadVenueHours(req.db, venue.venueId));
     const planned = [];
     for (const run of runs) {
       const court = courts.find((c) => courtKey(bookingToken, c.courtId) === run.courtKey);
       if (!court) {
         return res.sendError("That court isn't taking bookings — reload the page and pick again", 400);
       }
-      const problem = dateProblem(date);
+      const problem = dateProblem(date, today);
       if (problem) {
         return res.sendError(runs.length > 1 ? `${court.name} at ${hourLabel(run.startTime)}: ${problem}` : problem, 400);
       }
@@ -404,8 +406,9 @@ router.post(
   })
 );
 
-/** "18:00" → "6 PM". */
-const hourLabel = (startTime) => moment(`2000-01-01 ${startTime}`, "YYYY-MM-DD HH:mm").format("h A");
+/** "18:00" → "6 PM"; CR-049: "25:00" (past midnight) → "1 AM". */
+const hourLabel = (startTime) =>
+  moment("2000-01-01", "YYYY-MM-DD").add(Number(startTime.slice(0, 2)), "hours").format("h A");
 
 /**
  * CR-047: picked hours → runs: per court, neighbouring hours joined into one
@@ -758,12 +761,7 @@ router.get(
     if (refusal) {
       return res.sendError(refusal, 409);
     }
-    const today = getTodayDateLocal();
     const { date } = req.query;
-    if (date < today) {
-      return res.sendError("That date has passed", 400);
-    }
-
     const durationMinutes = moment
       .tz(b.endAt, FORMAT, TIMEZONE)
       .diff(moment.tz(b.startAt, FORMAT, TIMEZONE), "minutes");
@@ -771,6 +769,10 @@ router.get(
       activeCourts(req.db, b.venueId),
       loadVenueHours(req.db, b.venueId),
     ]);
+    const today = firstBookableDate(hours);
+    if (date < today) {
+      return res.sendError("That date has passed", 400);
+    }
     const day = await dayAvailability(req.db, {
       venueId: b.venueId,
       courts,

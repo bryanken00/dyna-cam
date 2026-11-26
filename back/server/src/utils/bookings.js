@@ -36,8 +36,17 @@ export const runningHourBookable = (startLocal, now) =>
 /** Desk bookings can be up to this long (CR-047: a player's, as long as the venue is open). */
 export const DESK_MAX_BOOKING_MINUTES = 360;
 
-/** "2026-11-24" + "17:00" → "2026-11-24 17:00:00". */
-export const toStartLocal = (date, startTime) => `${date} ${startTime}:00`;
+/**
+ * "2026-11-24" + "17:00" → "2026-11-24 17:00:00". CR-049: an hour past midnight of
+ * the evening's day is "24:00", "25:00", … → "2026-11-25 00:00:00", "… 01:00:00".
+ */
+export const toStartLocal = (date, startTime) => {
+  const [h, m] = String(startTime).split(":").map(Number);
+  return moment
+    .tz(`${date} 00:00:00`, FORMAT, TIMEZONE)
+    .add(h * 60 + (m || 0), "minutes")
+    .format(FORMAT);
+};
 
 export const addMinutesTo = (local, minutes) =>
   moment.tz(local, FORMAT, TIMEZONE).add(minutes, "minutes").format(FORMAT);

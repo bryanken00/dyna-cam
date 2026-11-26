@@ -5,8 +5,8 @@ import { decodeHTML } from "../utils/decode-html";
 import {
   BOARD_TONE,
   BOOKING_STATUS_LABEL,
-  formatHour,
   formatPayCode,
+  formatSlotHour,
   formatTimeRange,
   manilaNow,
 } from "../utils/dynaCam";
@@ -37,12 +37,18 @@ const BAR = {
 
 const hourOf = (hhmm) => Number(String(hhmm).slice(0, 2));
 
-/** Minutes since the day's 00:00 for a "YYYY-MM-DD HH:mm:ss" on `date` (clamped to the day). */
+/**
+ * Minutes since the day's 00:00 for a "YYYY-MM-DD HH:mm:ss" (clamped to the day
+ * — CR-049: which runs into the next morning when the venue closes late).
+ */
 const minuteOfDay = (local, date) => {
   const d = dayjs(local);
   const start = dayjs(`${date} 00:00:00`);
-  return Math.max(0, Math.min(1440, d.diff(start, "minute")));
+  return Math.max(0, Math.min(2880, d.diff(start, "minute")));
 };
+
+/** "HH:00" for grid hour `h` (CR-049: 24+ are the next morning's). */
+const hourText = (h) => `${String(h).padStart(2, "0")}:00`;
 
 /**
  * The hours to draw: the venue's opening hours that day (or 6 AM – 10 PM when
@@ -134,9 +140,12 @@ const CourtDayGrid = ({ day, canWrite, onCellClick, onBookingClick, display = fa
   const hours = Array.from({ length: to - from }, (_, i) => from + i);
   const span = (to - from) * 60;
   const now = manilaNow();
+  // CR-049: past midnight, the evening's day is still on — its now line runs on
+  const nextDate = dayjs(day.date).add(1, "day").format("YYYY-MM-DD");
+  const clockMinute = hourOf(now.time) * 60 + Number(now.time.slice(3, 5));
   const nowMinute =
-    now.date === day.date ? hourOf(now.time) * 60 + Number(now.time.slice(3, 5)) : null;
-  const isPastDay = day.date < now.date;
+    now.date === day.date ? clockMinute : now.date === nextDate && to > 24 ? clockMinute + 1440 : null;
+  const isPastDay = day.date < now.date && nowMinute === null;
 
   const labelWidth = display ? 250 : LABEL_WIDTH;
 
@@ -216,7 +225,7 @@ const CourtDayGrid = ({ day, canWrite, onCellClick, onBookingClick, display = fa
                   borderLeft: "1px solid var(--color-line-soft)",
                 }}
               >
-                {formatHour(`${String(h).padStart(2, "0")}:00`)}
+                {formatSlotHour(hourText(h))}
               </div>
             ))}
           </div>
@@ -272,8 +281,12 @@ const CourtDayGrid = ({ day, canWrite, onCellClick, onBookingClick, display = fa
                       <button
                         key={h}
                         type="button"
-                        aria-label={`New booking on ${decodeHTML(court.name)} at ${formatHour(`${String(h).padStart(2, "0")}:00`)}`}
-                        onClick={() => onCellClick(court.courtId, `${String(h).padStart(2, "0")}:00`)}
+                        aria-label={`New booking on ${decodeHTML(court.name)} at ${formatSlotHour(hourText(h))}${h >= 24 ? " (next day)" : ""}`}
+                        onClick={() =>
+                          h >= 24
+                            ? onCellClick(court.courtId, hourText(h - 24), nextDate)
+                            : onCellClick(court.courtId, hourText(h))
+                        }
                         className="group flex items-center justify-center cursor-pointer transition-colors hover:bg-(--color-surface-sunken)"
                         style={{ borderLeft: "1px solid var(--color-line-soft)" }}
                       >

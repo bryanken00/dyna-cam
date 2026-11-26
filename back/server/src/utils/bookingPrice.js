@@ -14,7 +14,7 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 /** The booking grid: whole hours, for every venue (decided 2026-11-23). */
 export const BOOKING_SLOT_MINUTES = 60;
 
-/** "17:00:00" / "17:00" → 1020; "24:00:00" → 1440. */
+/** "17:00:00" / "17:00" → 1020; "24:00:00" → 1440; "25:00:00" (1 AM the next day, CR-049) → 1500. */
 export const timeToMinutes = (value) => {
   const [h, m] = String(value).split(":").map(Number);
   return h * 60 + (m || 0);

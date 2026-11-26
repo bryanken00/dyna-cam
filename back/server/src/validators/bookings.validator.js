@@ -24,11 +24,12 @@ const isRealDate = (value) => {
 export const bookingDate = () =>
   z.string().trim().regex(YMD, "Use a YYYY-MM-DD date").refine(isRealDate, "That date doesn't exist");
 
+// CR-049: "24:00" … "47:00" are hours past midnight of the evening's day (late opening hours)
 export const startTime = () =>
   z
     .string()
     .trim()
-    .regex(/^([01]\d|2[0-3]):00$/, "Bookings start on the hour, e.g. 17:00");
+    .regex(/^([0-3]\d|4[0-7]):00$/, "Bookings start on the hour, e.g. 17:00");
 
 export const bookingLength = (max) =>
   z.coerce

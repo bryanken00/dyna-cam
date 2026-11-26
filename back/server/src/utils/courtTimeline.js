@@ -23,7 +23,14 @@ export const LIVE_BOOKING = `(b.status IN ('Confirmed', 'CheckedIn')
 /** A game that occupies its window (alias `s`). */
 const LIVE_GAME = `s.status NOT IN ('Cancelled', 'Failed')`;
 
-/** A venue's opening hours: Map dayOfWeek → { opensAt, closesAt } in minutes. */
+/** Minutes in a day: a closesAt past this runs into the next morning (CR-049). */
+export const DAY_MINUTES = 24 * 60;
+
+/**
+ * A venue's opening hours: Map dayOfWeek → { opensAt, closesAt } in minutes from
+ * that day's midnight. CR-049: closesAt may pass 1440 (1500 = 1 AM the next day),
+ * up to 24 hours after opensAt — those late hours belong to the evening's day.
+ */
 export const loadVenueHours = async (db, venueId) => {
   const rows = await selectRows(
     db,
@@ -50,17 +57,34 @@ export const hoursList = (hours) =>
     }));
 
 /**
- * Whether [startLocal, endLocal) lies inside one day's opening hours. A
- * window may end exactly at midnight (closesAt 24:00) but not run past it.
+ * Whether [startLocal, endLocal) lies inside one day's opening hours: its own
+ * day's, or (CR-049) the late hours of the day before that run past midnight.
  */
 export const withinHours = (hours, startLocal, endLocal) => {
   const start = moment.tz(startLocal, FORMAT, TIMEZONE);
   const end = moment.tz(endLocal, FORMAT, TIMEZONE);
-  const day = hours.get(start.day());
-  if (!day) return false;
   const startMinutes = start.hours() * 60 + start.minutes();
   const minutesLong = end.diff(start, "minutes");
-  return day.opensAt <= startMinutes && startMinutes + minutesLong <= day.closesAt;
+  const inside = (day, from) => Boolean(day) && day.opensAt <= from && from + minutesLong <= day.closesAt;
+  return (
+    inside(hours.get(start.day()), startMinutes) ||
+    inside(hours.get((start.day() + 6) % 7), startMinutes + DAY_MINUTES)
+  );
+};
+
+/**
+ * CR-049: the first date a player can pick — today, or yesterday while its late
+ * hours (past midnight) are still running, so 12:30 AM still shows last night.
+ */
+export const firstBookableDate = (hours, nowLocal = getCurrentTimestampLocal()) => {
+  const now = moment.tz(nowLocal, FORMAT, TIMEZONE);
+  const yesterday = now.clone().subtract(1, "day");
+  const late = hours.get(yesterday.day());
+  const minuteOfDay = now.hours() * 60 + now.minutes();
+  if (late && late.closesAt > DAY_MINUTES && minuteOfDay < late.closesAt - DAY_MINUTES) {
+    return yesterday.format("YYYY-MM-DD");
+  }
+  return now.format("YYYY-MM-DD");
 };
 
 /**

@@ -1,4 +1,5 @@
 import { Navigate } from "react-router";
+import dayjs from "dayjs";
 import {
   CalendarCheck,
   CalendarClock,
@@ -40,6 +41,10 @@ import {
 } from "../../../utils/phoneFormat";
 
 const FOOTER = "Your game is recorded only once you check in at the court.";
+
+/** CR-049: "11:00 PM", or "Fri 1:00 AM" for a time past midnight of the page's date. */
+const runClock = (time, date) =>
+  time.format("YYYY-MM-DD") === date ? time.format("h:mm A") : time.format("ddd h:mm A");
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -229,7 +234,7 @@ const BookPage = () => {
                         className="px-3.5 pt-3 flex items-center justify-between"
                         style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
                       >
-                        <span>{picked.runs[0].start.format("ddd, MMM D")}</span>
+                        <span>{dayjs(date).format("ddd, MMM D")}</span>
                         <button type="button" onClick={handleClearPicks} className="hover:underline">
                           Clear
                         </button>
@@ -245,7 +250,8 @@ const BookPage = () => {
                                 {run.courtName}
                               </div>
                               <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-                                {run.start.format("h:mm A")} – {run.end.format("h:mm A")}
+                                {/* CR-049: an hour past midnight names its day */}
+                                {runClock(run.start, date)} – {runClock(run.end, date)}
                               </div>
                             </div>
                             <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>

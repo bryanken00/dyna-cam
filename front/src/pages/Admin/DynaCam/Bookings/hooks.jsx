@@ -184,8 +184,9 @@ export const useBookingHooks = () => {
   );
 
   // A free hour in the day grid → New booking for that court and hour
+  // CR-049: a cell past midnight (late opening hours) books on the next date
   const handleCellClick = useCallback(
-    (courtId, startTime) => handleNewBooking({ courtId, date, startTime }),
+    (courtId, startTime, cellDate = date) => handleNewBooking({ courtId, date: cellDate, startTime }),
     [handleNewBooking, date],
   );
 

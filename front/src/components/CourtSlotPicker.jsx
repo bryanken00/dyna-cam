@@ -1,7 +1,16 @@
+import dayjs from "dayjs";
 import PickChip from "./PickChip";
 import Spinner from "./Spinner";
 import { decodeHTML } from "../utils/decode-html";
-import { formatHour, formatMinutes, formatPeso } from "../utils/dynaCam";
+import { formatMinutes, formatPeso, formatSlotHour } from "../utils/dynaCam";
+
+/** CR-049: why an hour can't be picked (from the API's `reason`) → its label. */
+const REASON_LABEL = {
+  taken: "Taken",
+  closed: "Closed",
+  past: "Past",
+  noPrice: "Not open",
+};
 
 /**
  * PLAN-003: each court's start times for a day, with prices — the grid on the
@@ -13,6 +22,8 @@ import { formatHour, formatMinutes, formatPeso } from "../utils/dynaCam";
  *   slots: [{ startTime, available, price, current?, now? }] }] }`; slot: `{ courtKey, startTime }`.
  * CR-047: `isPicked(courtKey, startTime)` makes it a multi-pick (the booking
  * page: tap any hours on any courts); `now` marks the hour that's running.
+ * CR-049: `nextDay` slots ("24:00", "25:00", …) are the evening's hours past
+ * midnight — shown as "12 AM · Fri" (the weekday from `availability.date`).
  */
 const CourtSlotPicker = ({
   availability,
@@ -61,6 +72,11 @@ const CourtSlotPicker = ({
     );
   }
 
+  // CR-049: "12 AM · Fri" for an hour past midnight
+  const nextWeekday = availability.date ? dayjs(availability.date).add(1, "day").format("ddd") : "next day";
+  const hourLabel = (s) => `${formatSlotHour(s.startTime)}${s.nextDay ? ` · ${nextWeekday}` : ""}`;
+  const whyNot = (s) => REASON_LABEL[s.reason] || unavailableLabel;
+
   return (
     <div className="space-y-5">
       {availability.courts.map((court) => (
@@ -89,12 +105,12 @@ const CourtSlotPicker = ({
                   }
                   disabled={!s.available}
                   onClick={() => onPick(court.key, s.startTime)}
-                  label={`${decodeHTML(court.name)} at ${formatHour(s.startTime)}${
+                  label={`${decodeHTML(court.name)} at ${hourLabel(s)}${
                     s.current
                       ? ", your booking"
                       : s.available
                         ? ""
-                        : `, ${unavailableLabel.toLowerCase()}`
+                        : `, ${whyNot(s).toLowerCase()}`
                   }`}
                   className="py-2 flex flex-col items-center"
                 >
@@ -102,11 +118,14 @@ const CourtSlotPicker = ({
                     style={{
                       fontSize: 14,
                       fontWeight: 500,
+                      // Struck through only when something's on it (taken / closed)
                       textDecoration:
-                        s.available || s.current ? "none" : "line-through",
+                        s.available || s.current || s.reason === "past" || s.reason === "noPrice"
+                          ? "none"
+                          : "line-through",
                     }}
                   >
-                    {formatHour(s.startTime)}
+                    {hourLabel(s)}
                   </span>
                   <span
                     style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}
@@ -115,7 +134,7 @@ const CourtSlotPicker = ({
                       ? "Yours"
                       : s.available
                         ? `${s.now ? "Now · " : ""}${formatPeso(s.price)}`
-                        : unavailableLabel}
+                        : whyNot(s)}
                   </span>
                 </PickChip>
               ))}

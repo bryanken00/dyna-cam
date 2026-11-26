@@ -8,10 +8,11 @@ import { useGetPublicVenues } from "../../../services/requests/public/bookings";
 import { useProfileRedirect } from "../../../services/requests/public/player";
 import { usePlayerSignedIn } from "../../../store/playerStore";
 
-/** "06:00" → "6 AM", "17:30" → "5:30 PM", "24:00" → "midnight". */
+/** "06:00" → "6 AM", "17:30" → "5:30 PM", "24:00" → "midnight", CR-049: "25:00" → "1 AM". */
 const clock = (hhmm) => {
   if (hhmm === "24:00") return "midnight";
-  const time = dayjs(`2000-01-01 ${hhmm}`);
+  const [h, m] = hhmm.split(":").map(Number);
+  const time = dayjs("2000-01-01").add(h * 60 + m, "minute");
   return time.format(time.minute() ? "h:mm A" : "h A");
 };
 

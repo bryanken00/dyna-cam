@@ -3,7 +3,7 @@ import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsy
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { minutesToTime, quote } from "../../../utils/bookingPrice.js";
-import { findConflict, loadVenueHours } from "../../../utils/courtTimeline.js";
+import { DAY_MINUTES, findConflict, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { bookingManageUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
@@ -237,12 +237,17 @@ router.get(
     }
     await expireHolds(req.db, { venueId });
 
+    // CR-049: the day runs to its closing — the next morning when it closes late
+    const hours = await loadVenueHours(req.db, venueId);
+    const day = hours.get(moment.tz(date, "YYYY-MM-DD", TIMEZONE).day());
     const dayStart = `${date} 00:00:00`;
-    const dayEnd = moment.tz(date, "YYYY-MM-DD", TIMEZONE).add(1, "day").format(FORMAT);
+    const dayEnd = moment
+      .tz(dayStart, FORMAT, TIMEZONE)
+      .add(Math.max(day?.closesAt || 0, DAY_MINUTES), "minutes")
+      .format(FORMAT);
     const window = [dayEnd, dayStart];
 
-    const [hours, courts, bookings, games, closures] = await Promise.all([
-      loadVenueHours(req.db, venueId),
+    const [courts, bookings, games, closures] = await Promise.all([
       req.db.query(
         `SELECT courtId, name, status FROM courts
          WHERE venueId = ? AND status != 'Deleted'
@@ -273,7 +278,6 @@ router.get(
       ),
     ]);
 
-    const day = hours.get(moment.tz(date, "YYYY-MM-DD", TIMEZONE).day());
     return res.sendSuccess("Day retrieved successfully", {
       date,
       venueName: venues[0].name,

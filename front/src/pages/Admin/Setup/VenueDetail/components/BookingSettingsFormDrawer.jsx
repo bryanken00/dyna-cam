@@ -39,6 +39,7 @@ import {
   WEEKDAY_NAMES,
   WEEKDAY_SHORT,
   WEEK_ORDER,
+  closeHourOptions,
   formatHour,
 } from "../../../../../utils/dynaCam";
 import { useUpdateBookingSettings } from "../../../../../services/requests/admin/bookingSettings";
@@ -74,6 +75,11 @@ const settingsSchema = z
         .refine((h) => !h.open || hourOf(h.opensAt) < hourOf(h.closesAt), {
           message: "Closes before it opens",
           path: ["closesAt"],
+        })
+        // CR-049: it may close the next morning, up to 24 hours after it opens
+        .refine((h) => !h.open || hourOf(h.closesAt) - hourOf(h.opensAt) <= 24, {
+          message: "Open at most 24 hours",
+          path: ["closesAt"],
         }),
     ),
     rates: z.array(
@@ -98,6 +104,21 @@ const settingsSchema = z
     ),
   })
   .superRefine((values, ctx) => {
+    // CR-049: a day's hours past midnight can't run into the next day's opening
+    const open = values.hours.filter((h) => h.open);
+    for (const h of open) {
+      const lateUntil = hourOf(h.closesAt) - 24;
+      const next = open.find((n) => n.dayOfWeek === (h.dayOfWeek + 1) % 7);
+      if (lateUntil > 0 && next && hourOf(next.opensAt) < lateUntil) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["hours", values.hours.indexOf(next), "closesAt"],
+          message: `Opens before ${WEEKDAY_NAMES[h.dayOfWeek]}'s hours end (${formatHour(h.closesAt)})`,
+        });
+        return;
+      }
+    }
+
     const { rates } = values;
     for (let i = 0; i < rates.length; i += 1) {
       for (let j = i + 1; j < rates.length; j += 1) {
@@ -159,14 +180,33 @@ const toFormValues = (settings) => {
   };
 };
 
-const HourSelect = ({ value, onChange, options, disabled, label }) => (
+/** The choices plus the saved value, so a Select never shows blank (sorted by hour). */
+const withCurrent = (options, value) =>
+  !value || options.includes(value) ? options : [...options, value].sort((a, b) => hourOf(a) - hourOf(b));
+
+/**
+ * CR-049: the open neighbours of a day in the form's hours — its late hours can't
+ * run into the next day's opening. → { lateFromBefore, nextOpens } in hours:
+ * how long the day before runs into this one, and when the next day opens.
+ */
+const neighbourLimits = (hours, dayOfWeek) => {
+  const openDay = (d) => hours?.find((h) => h.open && h.dayOfWeek === d);
+  const before = openDay((dayOfWeek + 6) % 7);
+  const after = openDay((dayOfWeek + 1) % 7);
+  return {
+    lateFromBefore: before ? Math.max(0, hourOf(before.closesAt) - 24) : 0,
+    nextOpens: after ? hourOf(after.opensAt) : null,
+  };
+};
+
+const HourSelect = ({ value, onChange, options, disabled, label, isOptionDisabled }) => (
   <Select value={value} onValueChange={onChange} disabled={disabled}>
     <SelectTrigger className="h-10 w-full" aria-label={label}>
       <SelectValue />
     </SelectTrigger>
     <SelectContent>
       {options.map((h) => (
-        <SelectItem key={h} value={h}>
+        <SelectItem key={h} value={h} disabled={isOptionDisabled?.(h) && h !== value}>
           {formatHour(h)}
         </SelectItem>
       ))}
@@ -409,11 +449,15 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
               <div className="mt-8">
                 <SectionLabel>Opening hours</SectionLabel>
                 <p className="m-0 mb-3" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-                  Bookings fit inside these hours. Untick a day to close it.
+                  Bookings fit inside these hours. Untick a day to close it. A day can close the next
+                  morning (e.g. 1 AM next day) — those late hours are booked as part of that day.
                 </p>
                 <div className="space-y-2">
                   {WEEK_ORDER.map((day, index) => {
                     const isOpen = hours?.[index]?.open;
+                    // CR-049: no opening before the day before's late hours end, and no
+                    // late closing past the next day's opening
+                    const limits = neighbourLimits(hours, day);
                     return (
                       <div
                         key={day}
@@ -449,6 +493,7 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
                                 options={START_HOURS}
                                 disabled={!isOpen}
                                 label={`${WEEKDAY_NAMES[day]} opens`}
+                                isOptionDisabled={(h) => hourOf(h) < limits.lateFromBefore}
                               />
                             </FormItem>
                           )}
@@ -461,9 +506,12 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
                               <HourSelect
                                 value={field.value}
                                 onChange={field.onChange}
-                                options={END_HOURS}
+                                options={withCurrent(closeHourOptions(hours?.[index]?.opensAt ?? "00:00"), field.value)}
                                 disabled={!isOpen}
                                 label={`${WEEKDAY_NAMES[day]} closes`}
+                                isOptionDisabled={(h) =>
+                                  limits.nextOpens !== null && hourOf(h) - 24 > limits.nextOpens
+                                }
                               />
                               <FormMessage />
                             </FormItem>

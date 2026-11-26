@@ -6,6 +6,7 @@ import dayjs from "dayjs";
 import { z } from "zod";
 
 import { decodeHTML } from "../../../utils/decode-html";
+import { hourMinutes } from "../../../utils/dynaCam";
 import { zPhone } from "../../../utils/phoneFormat";
 import { useGetAvailability, useGetBookingPage } from "../../../services/requests/public/bookings";
 import {
@@ -71,7 +72,8 @@ const joinPicks = (picks, availability, date) => {
         run.price += s.price;
         run.end = run.end.add(60, "minute");
       } else {
-        const start = dayjs(`${date} ${s.startTime}`);
+        // CR-049: "24:00", "25:00", … are past midnight — the next date's hours
+        const start = dayjs(date).add(hourMinutes(s.startTime), "minute");
         run = {
           courtKey: court.key,
           courtName: decodeHTML(court.name),
@@ -238,8 +240,11 @@ export const useBookPageHooks = () => {
       setBookError("");
       const slots = [];
       for (const run of picked.runs) {
+        // The page's own hour labels ("24:00" past midnight — CR-049), not the clock time
+        const first = hourMinutes(run.startTime);
         for (let i = 0; i < run.hours; i += 1) {
-          slots.push({ courtKey: run.courtKey, startTime: run.start.add(i * 60, "minute").format("HH:mm") });
+          const minute = first + i * 60;
+          slots.push({ courtKey: run.courtKey, startTime: `${String(minute / 60).padStart(2, "0")}:00` });
         }
       }
       bookMutation.mutate(

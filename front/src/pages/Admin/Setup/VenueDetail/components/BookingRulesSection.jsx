@@ -1,16 +1,50 @@
-import { Pencil } from "lucide-react";
+import { Pencil, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SetupSection from "../../CourtSetup/components/SetupSection";
 import DescriptionList from "../../../../../components/DescriptionList";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import {
   WEEKDAY_NAMES,
+  WEEKDAY_SHORT,
   WEEK_ORDER,
   formatDays,
   formatHour,
   formatMinutes,
   formatPeso,
+  formatSlotHour,
+  hourMinutes,
 } from "../../../../../utils/dynaCam";
+
+/**
+ * CR-049: open hours no rate covers (so they can't be booked) — e.g. the late
+ * hours past midnight, priced by their real day and time. → ["Mon 12 AM – 1 AM (next day)", …]
+ */
+const unpricedHours = (hours, rates) => {
+  const covered = (weekday, minute) =>
+    rates.some(
+      (r) =>
+        r.daysOfWeek.includes(weekday) &&
+        hourMinutes(r.startTime) <= minute &&
+        minute < hourMinutes(r.endTime),
+    );
+  const gaps = [];
+  for (const day of WEEK_ORDER) {
+    const h = hours.find((x) => x.dayOfWeek === day);
+    if (!h) continue;
+    let from = null;
+    const close = hourMinutes(h.closesAt);
+    for (let m = hourMinutes(h.opensAt); m <= close; m += 60) {
+      const free = m < close && !covered((day + Math.floor(m / 1440)) % 7, m % 1440);
+      if (free && from === null) from = m;
+      if (!free && from !== null) {
+        const hhmm = (x) => `${String(x / 60).padStart(2, "0")}:00`;
+        gaps.push(`${WEEKDAY_SHORT[day]} ${formatSlotHour(hhmm(from))} – ${formatHour(hhmm(m))}`);
+        from = null;
+      }
+    }
+  }
+  return gaps;
+};
 
 const Muted = ({ children }) => (
   <p className="m-0" style={{ fontSize: 13.5, color: "var(--color-text-muted)" }}>
@@ -33,6 +67,7 @@ const Heading = ({ children }) => (
  */
 const BookingRulesSection = ({ settings, canWrite, onEdit }) => {
   const byDay = new Map(settings.hours.map((h) => [h.dayOfWeek, h]));
+  const gaps = settings.rates.length > 0 ? unpricedHours(settings.hours, settings.rates) : [];
 
   return (
     <SetupSection
@@ -48,6 +83,21 @@ const BookingRulesSection = ({ settings, canWrite, onEdit }) => {
         )
       }
     >
+      {gaps.length > 0 && (
+        <div
+          className="mb-5 flex items-start gap-2.5 px-3.5 py-3"
+          style={{ borderRadius: 10, border: "1px solid var(--color-line)", background: "var(--color-surface-sunken)" }}
+        >
+          <TriangleAlert className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-warning)" }} />
+          <div style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
+            <div className="font-semibold">Some open hours have no price, so nobody can book them</div>
+            <div style={{ color: "var(--color-text-secondary)" }}>
+              {gaps.join(" · ")}. Add a price that covers them (hours past midnight use the next
+              day&apos;s prices).
+            </div>
+          </div>
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-3">
         <div>
           <Heading>Rules</Heading>

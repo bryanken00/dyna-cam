@@ -1,9 +1,9 @@
 import express from "express";
 import { catchAsync, validateParams } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { hashToken } from "../../../utils/crypto/tokens.js";
 import { minutesToTime } from "../../../utils/bookingPrice.js";
-import { loadVenueHours } from "../../../utils/courtTimeline.js";
+import { DAY_MINUTES, firstBookableDate, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { expireHolds } from "../../../utils/bookings.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
@@ -50,13 +50,19 @@ router.get(
       advanceSessions(req.db, { venueId: venue.venueId }),
     ]);
 
-    const date = getTodayDateLocal();
+    // CR-049: "today" is last night's date while its hours past midnight still run,
+    // and the board runs to the day's closing (the next morning when it closes late)
+    const hours = await loadVenueHours(req.db, venue.venueId);
+    const date = firstBookableDate(hours);
+    const open = hours.get(moment.tz(date, "YYYY-MM-DD", TIMEZONE).day());
     const dayStart = `${date} 00:00:00`;
-    const dayEnd = moment.tz(date, "YYYY-MM-DD", TIMEZONE).add(1, "day").format(FORMAT);
+    const dayEnd = moment
+      .tz(dayStart, FORMAT, TIMEZONE)
+      .add(Math.max(open?.closesAt || 0, DAY_MINUTES), "minutes")
+      .format(FORMAT);
     const window = [dayEnd, dayStart];
 
-    const [hours, courts, bookings, games, closures] = await Promise.all([
-      loadVenueHours(req.db, venue.venueId),
+    const [courts, bookings, games, closures] = await Promise.all([
       req.db.query(
         `SELECT courtId, name FROM courts
          WHERE venueId = ? AND status = 'Active'
@@ -87,7 +93,6 @@ router.get(
     ]);
 
     const key = (courtId) => courtKey(displayToken, courtId);
-    const open = hours.get(moment.tz(date, "YYYY-MM-DD", TIMEZONE).day());
     return res.sendSuccess("Court board", {
       venue: { name: venue.name, logoUrl: signUploadUrl(venue.logoUrl) },
       date,

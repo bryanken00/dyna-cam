@@ -1,7 +1,7 @@
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { selectRows } from "./dbRows.js";
 import { BOOKING_SLOT_MINUTES, loadRates, minutesToTime, quoteFromRates } from "./bookingPrice.js";
-import { LIVE_BOOKING, loadVenueHours } from "./courtTimeline.js";
+import { DAY_MINUTES, LIVE_BOOKING, loadVenueHours } from "./courtTimeline.js";
 import { runningHourBookable } from "./bookings.js";
 
 /**
@@ -35,8 +35,12 @@ const overlaps = (item, startLocal, endLocal) => item.startAt < endLocal && item
  * @param {string} q.moving.startAt
  * @param {number} q.moving.maxPrice
  * @returns {Promise<{ hours: { opensAt, closesAt } | null,
- *   courts: Array<{ courtId, name, slots: Array<{ startTime, available, price, current? }> }> }>}
- *   price is null when the slot isn't available
+ *   courts: Array<{ courtId, name, slots: Array<{ startTime, available, price, current?, nextDay? }> }> }>}
+ *   price is null when the slot isn't available, and `reason` says why: "past", "taken"
+ *   (a booking or game), "closed" (a closure), "noPrice" (no rate covers it) or "pricier"
+ *   (moving: costs more than the booking). CR-049: hours past midnight (the
+ *   day's late opening) are "24:00", "25:00", … with `nextDay: true`; the date's own
+ *   early hours that belong to the day before aren't listed.
  */
 export const dayAvailability = async (
   db,
@@ -54,8 +58,8 @@ export const dayAvailability = async (
   }
 
   const from = dayStart.format(FORMAT);
-  // A slot can run up to midnight; anything starting after that can't touch the day
-  const to = dayStart.clone().add(1, "day").format(FORMAT);
+  // A slot runs at most to the day's closing — the next morning when it closes late (CR-049)
+  const to = dayStart.clone().add(Math.max(day.closesAt, DAY_MINUTES), "minutes").format(FORMAT);
 
   const [rates, bookings, games, closures] = await Promise.all([
     loadRates(db, venueId),
@@ -89,7 +93,7 @@ export const dayAvailability = async (
       const inTheWay = [
         ...bookings.filter((b) => b.courtId === court.courtId && b.bookingId !== moving?.bookingId),
         ...games.filter((g) => g.courtId === court.courtId),
-        ...closures.filter((c) => !c.courtId || c.courtId === court.courtId),
+        ...closures.filter((c) => !c.courtId || c.courtId === court.courtId).map((c) => ({ ...c, closure: true })),
       ];
       const slots = [];
       for (let minute = firstHour * 60; minute <= lastStartMinute; minute += BOOKING_SLOT_MINUTES) {
@@ -97,19 +101,30 @@ export const dayAvailability = async (
         const startLocal = start.format(FORMAT);
         const endLocal = start.clone().add(durationMinutes, "minutes").format(FORMAT);
         const running = allowRunning && runningHourBookable(startLocal, now);
-        const free =
-          (startLocal > now || running) && !inTheWay.some((item) => overlaps(item, startLocal, endLocal));
+        const notPast = startLocal > now || running;
+        const blocker = notPast ? inTheWay.find((item) => overlaps(item, startLocal, endLocal)) : null;
+        const free = notPast && !blocker;
         const price = free
           ? quoteFromRates(rates, { courtId: court.courtId, startLocal, durationMinutes })
           : null;
         const current = Boolean(moving) && court.courtId === moving.courtId && startLocal === moving.startAt;
         const available =
           Boolean(price?.bookable) && (!moving || (!current && price.price <= moving.maxPrice));
+        // Why it can't be booked — so the page doesn't call an unpriced or past hour "Taken"
+        let reason = null;
+        if (!available && !current) {
+          if (!notPast) reason = "past";
+          else if (blocker) reason = blocker.closure ? "closed" : "taken";
+          else if (!price?.bookable) reason = "noPrice";
+          else reason = "pricier";
+        }
         slots.push({
-          startTime: start.format("HH:mm"),
+          startTime: minutesToTime(minute),
+          ...(minute >= DAY_MINUTES ? { nextDay: true } : {}),
           available,
           price: available ? price.price : null,
           ...(current ? { current: true } : {}),
+          ...(reason ? { reason } : {}),
           // CR-047: the hour that's running now (bookable in its first half)
           ...(running ? { now: true } : {}),
         });

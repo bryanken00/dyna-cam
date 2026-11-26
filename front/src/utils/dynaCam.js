@@ -298,9 +298,23 @@ export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 export const formatHour = (hhmm) => {
   const hour = Number(String(hhmm).slice(0, 2));
   if (hour === 24) return "Midnight";
+  // CR-049: a closing time the next morning — "25:00" → "1 AM (next day)"
+  if (hour > 24) return `${formatSlotHour(hhmm)} (next day)`;
   const suffix = hour < 12 ? "AM" : "PM";
   return `${hour % 12 === 0 ? 12 : hour % 12} ${suffix}`;
 };
+
+/**
+ * CR-049: an hour on the booking grid, past midnight too — "18:00" → "6 PM",
+ * "24:00" → "12 AM", "25:00" → "1 AM" (the late hours of the evening's day).
+ */
+export const formatSlotHour = (hhmm) => {
+  const hour = Number(String(hhmm).slice(0, 2)) % 24;
+  return `${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? "AM" : "PM"}`;
+};
+
+/** CR-049: "25:00" → 1500 minutes from the evening's midnight. */
+export const hourMinutes = (hhmm) => Number(String(hhmm).slice(0, 2)) * 60 + Number(String(hhmm).slice(3, 5) || 0);
 
 /** Every bookable start ("00:00" … "23:00") and end ("01:00" … "24:00"). */
 export const START_HOURS = Array.from(
@@ -311,6 +325,15 @@ export const END_HOURS = Array.from(
   { length: 24 },
   (_, h) => `${String(h + 1).padStart(2, "0")}:00`,
 );
+
+/**
+ * CR-049: a day's closing choices after `opensAt` — the same day up to Midnight,
+ * then the next morning ("25:00" = 1 AM next day), up to 24 hours after it opens.
+ */
+export const closeHourOptions = (opensAt) => {
+  const open = Number(String(opensAt).slice(0, 2));
+  return Array.from({ length: 24 }, (_, i) => `${String(open + 1 + i).padStart(2, "0")}:00`);
+};
 
 /**
  * [1, 2, 3, 4, 5] → "Mon–Fri", [0, 6] → "Sat, Sun", all seven → "Every day".

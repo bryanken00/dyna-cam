@@ -5,7 +5,7 @@ import dayjs from "dayjs";
 
 import { confirm } from "../../../store/confirmStore";
 import { copyText } from "../../../utils/clipboard";
-import { formatPeso } from "../../../utils/dynaCam";
+import { formatPeso, hourMinutes } from "../../../utils/dynaCam";
 import { decodeHTML } from "../../../utils/decode-html";
 import {
   useCancelMyBooking,
@@ -118,7 +118,8 @@ export const useBookingPageHooks = () => {
     const court = moveOptions.courts.find((c) => c.key === moveSlot.courtKey);
     const slotInfo = court?.slots.find((x) => x.startTime === moveSlot.startTime);
     if (!court || !slotInfo?.available) return null;
-    const start = dayjs(`${moveDate} ${moveSlot.startTime}`);
+    // CR-049: "24:00", "25:00", … are past midnight
+    const start = dayjs(moveDate).add(hourMinutes(moveSlot.startTime), "minute");
     return { courtName: decodeHTML(court.name), start, end: start.add(moveOptions.durationMinutes, "minute") };
   }, [moveSlot, moveOptions, moveDate]);
 
