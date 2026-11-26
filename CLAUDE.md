@@ -1,8 +1,10 @@
 # DGSports
 
 The product was called **Dyna Cam** until CR-036 (2026-11-24); the repository, folders and code
-names (`DynaCam/`, `dynaCam.js`, `dyna-cam-api`) keep the old name, and the mobile app and
-recorder box are still branded Dyna Cam until their own rebuild.
+names (`DynaCam/`, `dynaCam.js`, `dyna-cam-api`) keep the old name, and the recorder box is still
+branded Dyna Cam until its own rebuild. PLAN-009 made the mobile app the **DGSports app** — a
+player app (Google sign-in, booking, open plays, communities) plus the courtside session device,
+chosen on first launch (its store IDs stay `com.dgsi.dynacam` so existing installs update).
 
 A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
 court (signed in with Google, PLAN-006), then start recording from their booking's page — "I'm at the
@@ -170,9 +172,12 @@ back after connecting a court's Google Drive (CR-001) — its encrypted, 10-minu
 credential, and the court's Drive refresh token is stored encrypted and never returned. CR-040: the
 API opens each Drive upload (`/device/game-videos/:id/drive-session`) and the box sends the bytes to
 Google itself; the API never stores or serves a video file, and gives game jobs only to a box that
-reports `drive-direct`. The app keeps its token
-  in `expo-secure-store`; the recorder box in `DATA_DIR/device.json`. The app is a session device
-  only — staff work, including payments, happens on the web.
+reports `drive-direct`. The app keeps its tokens
+  (the device's pairing, the player's sign-in) in `expo-secure-store`; the recorder box in
+  `DATA_DIR/device.json`. The app has no staff sign-in — staff work, including payments, happens on
+  the web. PLAN-009: the app signs players in through the same `/auth/google/*` with `?app=1` and a
+  PKCE-style challenge, back to `<APP_SCHEME>://signed-in` (default `dgsports`); that code redeems
+  only with its verifier.
 - **Court booking (PLAN-003):** players reserve court time ahead; a `bookings` row reserves it and
   only **check-in** creates its game (`utils/bookingCheckIn.js`). Games, live bookings (incl.
   unexpired `Pending` holds), closures and opening hours share one overlap rule,

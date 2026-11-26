@@ -1,7 +1,6 @@
-import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { secureStorage } from "./secureStorage";
 
 /**
  * Pairing store — the app's only credential (PLAN-002 Phase E).
@@ -25,23 +24,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
  * `hydrated` turns true once the secure store has been read (App.js holds the
  * splash until then).
  */
-
-/**
- * SecureStore as a zustand storage. It does not exist on web, where the
- * pairing simply isn't remembered.
- */
-const secureStorage =
-  Platform.OS === "web"
-    ? {
-        getItem: async () => null,
-        setItem: async () => {},
-        removeItem: async () => {},
-      }
-    : {
-        getItem: (name) => SecureStore.getItemAsync(name),
-        setItem: (name, value) => SecureStore.setItemAsync(name, value),
-        removeItem: (name) => SecureStore.deleteItemAsync(name),
-      };
 
 const EMPTY = { token: null, device: null, sessionId: null, sessionEnded: false };
 

@@ -3,6 +3,7 @@ import { logger } from "../../../../config/logger.js";
 import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import {
+  appSignedInUrl,
   DEFAULT_RETURN_PATH,
   exchangeLoginCode,
   GoogleSignInError,
@@ -35,6 +36,10 @@ import { googleStartQuerySchema } from "../../../validators/player.validator.js"
  *
  * The `state` (encrypted, authenticated) carries the return path and the
  * nonce the ID token must echo; the return path can only be a player page.
+ *
+ * PLAN-009: the mobile app starts with `?app=1&challenge=<base64url SHA-256 of a
+ * secret>` and comes back to `dgsports://signed-in?code=…` (or `?error=…`); its
+ * code is redeemable only with that secret (POST /player/session `verifier`).
  */
 const router = express.Router();
 
@@ -51,11 +56,15 @@ router.get(
   validateQuery(googleStartQuerySchema),
   catchAsync((req, res) => {
     const returnPath = safeReturnPath(req.query.return);
+    const fromApp = req.query.app === "1";
     if (!playerSignInConfigured()) {
-      return res.redirect(303, signedInUrl({ error: "off", next: returnPath }));
+      return res.redirect(
+        303,
+        fromApp ? appSignedInUrl({ error: "off" }) : signedInUrl({ error: "off", next: returnPath })
+      );
     }
     const nonce = newNonce();
-    const state = signLoginState({ returnPath, nonce });
+    const state = signLoginState({ returnPath, nonce, challenge: fromApp ? req.query.challenge : null });
     return res.redirect(303, signInUrl({ state, nonce }));
   })
 );
@@ -66,7 +75,9 @@ router.get(
   catchAsync(async (req, res) => {
     const state = readLoginState(req.query.state);
     const next = state?.returnPath || DEFAULT_RETURN_PATH;
-    const fail = (error) => res.redirect(303, signedInUrl({ error, next }));
+    const fromApp = Boolean(state?.challenge);
+    const back = (query) => (fromApp ? appSignedInUrl(query) : signedInUrl({ ...query, next }));
+    const fail = (error) => res.redirect(303, back({ error }));
 
     if (!state) return fail("expired");
     const code = typeof req.query.code === "string" ? req.query.code : "";
@@ -82,9 +93,9 @@ router.get(
       return fail(err.reason);
     }
 
-    const result = await signInFromGoogle(req.db, identity);
+    const result = await signInFromGoogle(req.db, identity, { challenge: state.challenge });
     if (result.blocked) return fail("refused");
-    return res.redirect(303, signedInUrl({ code: result.code, next }));
+    return res.redirect(303, back({ code: result.code }));
   })
 );
 

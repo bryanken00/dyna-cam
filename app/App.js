@@ -13,7 +13,9 @@ import Navigation from "./src/Navigation";
 import { CustomDialogProvider } from "./src/hooks/useCustomDialog";
 import { useAppFonts } from "./src/hooks/useAppFonts";
 import { initDatabase } from "./src/store/database/initDatabase";
+import { useAppModeStore } from "./src/store/useAppModeStore";
 import { usePairedStore } from "./src/store/usePairedStore";
+import { usePlayerStore } from "./src/store/usePlayerStore";
 import useThemeStore from "./src/store/useThemeStore";
 
 /**
@@ -44,6 +46,9 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* no-op — already hidden, or called twice on fast refresh */
 });
 
+/** PLAN-009: the stores read from the secure store at launch. */
+const SECURE_STORES = [useAppModeStore, usePairedStore, usePlayerStore];
+
 const AppContent = () => {
   const isDarkMode = useThemeStore((s) => s.isDarkMode);
   const [fontsLoaded, fontError] = useAppFonts();
@@ -61,16 +66,20 @@ const AppContent = () => {
     initDatabase();
   }, []);
 
-  // The paired-phone token is read from the secure store asynchronously.
-  // Hold the splash until it has been, so a paired phone opens straight on
-  // its courts instead of flashing "Pair this phone". If the store never
-  // answers, give up after a few seconds rather than hang on the splash.
+  // The app mode, the device's pairing and the player's sign-in are read from
+  // the secure store asynchronously (PLAN-009). Hold the splash until they
+  // have been, so the app opens straight on the right screen instead of
+  // flashing Welcome. If the store never answers, give up after a few seconds
+  // rather than hang on the splash.
+  const modeHydrated = useAppModeStore((s) => s.hydrated);
   const pairedHydrated = usePairedStore((s) => s.hydrated);
+  const playerHydrated = usePlayerStore((s) => s.hydrated);
+  const storesHydrated = modeHydrated && pairedHydrated && playerHydrated;
   useEffect(() => {
     const id = setTimeout(() => {
-      if (!usePairedStore.getState().hydrated) {
-        usePairedStore.setState({ hydrated: true });
-      }
+      SECURE_STORES.forEach((store) => {
+        if (!store.getState().hydrated) store.setState({ hydrated: true });
+      });
     }, 4000);
     return () => clearTimeout(id);
   }, []);
@@ -79,10 +88,10 @@ const AppContent = () => {
   // if a font fails we still show the app in a fallback face rather than
   // hanging on the splash forever.
   useEffect(() => {
-    if ((fontsLoaded || fontError) && pairedHydrated) {
+    if ((fontsLoaded || fontError) && storesHydrated) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsLoaded, fontError, pairedHydrated]);
+  }, [fontsLoaded, fontError, storesHydrated]);
 
   if (!fontsLoaded && !fontError) return null;
 

@@ -24,6 +24,8 @@ import { cn } from "@/lib/utils";
  * @param {React.ReactNode}     rightElement - optional trailing control
  * @param {object}              inputRef     - ref to the TextInput, for focus chaining
  * @param {string}              error        - message to show; also reddens the border
+ * @param {number}              maxLength    - passed to the TextInput
+ * @param {boolean}             editable     - false: shown, not typed in (e.g. a Google email)
  */
 const StyledInput = ({
   label,
@@ -43,6 +45,8 @@ const StyledInput = ({
   returnKeyType,
   inputRef,
   error,
+  maxLength,
+  editable = true,
   className,
 }) => {
   const colors = useThemeColors();
@@ -89,6 +93,8 @@ const StyledInput = ({
           textContentType={textContentType}
           autoCorrect={false}
           secureTextEntry={secureTextEntry}
+          maxLength={maxLength}
+          editable={editable}
           onFocus={(e) => {
             setFocused(true);
             onFocus?.(e);

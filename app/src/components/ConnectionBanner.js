@@ -31,7 +31,7 @@ const ConnectionBanner = ({ error, className }) => {
       <WifiOff size={18} color={colors.destructive} />
       <View className="min-w-0 flex-1">
         <Text className="text-destructive font-sans-semibold text-[14px]">
-          Can't reach Dyna Cam — retrying
+          Can't reach DGSports — retrying
         </Text>
         <Text className="text-muted-foreground text-[12px]">
           Check the device's Wi-Fi. It stays paired.

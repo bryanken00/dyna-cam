@@ -50,6 +50,24 @@ export const formatDay = (value) => {
   return `${MONTHS[p.mo - 1]} ${p.d}`;
 };
 
+/**
+ * A venue's clock time "HH:MM" → "6 AM" / "6:30 PM". CR-049: hours past
+ * midnight come as "24:00", "25:00"… (the evening's day) → "12 AM", "1 AM".
+ */
+export const formatClock = (hhmm) => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm ?? ""));
+  if (!m) return "-";
+  const h = Number(m[1]) % 24;
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}${m[2] === "00" ? "" : `:${m[2]}`} ${h < 12 ? "AM" : "PM"}`;
+};
+
+/** { opensAt, closesAt } → "6 AM – 1 AM"; "Open 24 hours" for 00:00–24:00. */
+export const formatHours = ({ opensAt, closesAt } = {}) => {
+  if (opensAt === "00:00" && closesAt === "24:00") return "Open 24 hours";
+  return `${formatClock(opensAt)} – ${formatClock(closesAt)}`;
+};
+
 /** A running timer / countdown: 754 → "12:34", 3754 → "1:02:34". */
 export const formatElapsed = (seconds) => {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));

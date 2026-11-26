@@ -32,14 +32,14 @@ const WRONG_KEY =
 export const pairErrorMessage = (error) => {
   const status = error?.response?.status;
   if (!status) {
-    return "Can't reach Dyna Cam. Check the device's Wi-Fi and try again.";
+    return "Can't reach DGSports. Check the device's Wi-Fi and try again.";
   }
   if (status === 429) {
     // "Too many pairing attempts — wait a minute…" / "Pairing is paused…"
     return error.response.data?.message || "Too many tries — wait a minute.";
   }
   if (status >= 500) {
-    return "Dyna Cam is having trouble right now. Try again in a minute.";
+    return "DGSports is having trouble right now. Try again in a minute.";
   }
   // 400: wrong, expired or used — or the session already ended
   return error.response.data?.message || WRONG_KEY;
@@ -80,10 +80,10 @@ const NO_GAME = "No game has that code — check it and try again.";
 /** What to say when Find a game fails (shown inline in the sheet). */
 export const findGameErrorMessage = (error) => {
   const status = error?.response?.status;
-  if (!status) return "Can't reach Dyna Cam. Check the device's Wi-Fi and try again.";
+  if (!status) return "Can't reach DGSports. Check the device's Wi-Fi and try again.";
   if (status === 404 || status === 400) return NO_GAME;
   if (status === 429) return error.response.data?.message || "Too many tries — wait a minute.";
-  return "Dyna Cam is having trouble right now. Try again in a minute.";
+  return "DGSports is having trouble right now. Try again in a minute.";
 };
 
 /**

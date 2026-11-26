@@ -26,7 +26,7 @@ const lengthText = (seconds) => {
 /** What to say when a save is refused or can't be sent. */
 const saveErrorText = (error) => {
   if (!error || error.response?.status === 401) return null; // unpaired — moving on
-  if (!error.response) return "Can't reach Dyna Cam — check the Wi-Fi and try again.";
+  if (!error.response) return "Can't reach DGSports — check the Wi-Fi and try again.";
   return error.response?.data?.message || "Couldn't save — try again.";
 };
 

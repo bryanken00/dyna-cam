@@ -48,7 +48,7 @@ router.post(
   sessionLimiter,
   validateBody(playerSessionSchema),
   catchAsync(async (req, res) => {
-    const tokens = await redeemSignInCode(req.db, req.body.code);
+    const tokens = await redeemSignInCode(req.db, req.body.code, req.body.verifier || null);
     if (!tokens) {
       return res.sendError("This sign-in link has expired — sign in again", 400);
     }

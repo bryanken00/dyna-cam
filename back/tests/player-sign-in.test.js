@@ -170,6 +170,7 @@ describe("player sign-in with Google (PLAN-006)", () => {
       assert.deepEqual(readLoginState(state), {
         returnPath: `/book/${home.token}?date=2026-12-01`,
         nonce,
+        challenge: null, // PLAN-009: only the mobile app sends one
       });
     });
 

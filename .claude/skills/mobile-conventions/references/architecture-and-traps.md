@@ -1,6 +1,6 @@
 # Mobile app: architecture and traps
 
-How the Expo app in `app/` — a Dyna Cam session device — is put together, and the traps that bite. Paths
+How the Expo app in `app/` — the DGSports app: a player app and a courtside session device — is put together, and the traps that bite. Paths
 are relative to `app/` unless they say otherwise. (This was `app/CLAUDE.md` before
 the app's docs moved into the `mobile-conventions` skill.)
 
@@ -13,25 +13,54 @@ the app's docs moved into the `mobile-conventions` skill.)
 
 ## What the app is
 
-A Dyna Cam **session device** (see `docs/plans/PLAN-002-setup-menu-device-pairing/`
-§5 at the repo root): a phone or tablet at the court, paired to ONE recording
-session with a 6-digit key that staff create on the web. It started as an
-Expo SDK 58 / React Native 0.88 starter, in plain JavaScript (no `.tsx`). UI
-is [React Native Reusables](https://reactnativereusables.com) on NativeWind
-(Tailwind v3).
+**One DGSports app with two modes** (PLAN-009, `docs/plans/PLAN-009-player-community/`),
+chosen on first launch and remembered in the secure store
+(`store/useAppModeStore.js`). `Navigation/index.js` swaps the whole navigator:
+
+```
+Welcome ──"I'm a player"──────────────▶ PlayerNavigator
+        ──"Set up a courtside device"─▶ DeviceNavigator
+```
+
+- **Player** (`Navigation/PlayerNavigator.js`, `Screens/Player/*`): Sign in with
+  Google → Complete your profile (first sign-in) → tabs Home · Book · Open plays ·
+  Communities · Me (Edit profile pushed from Me). Switched on `usePlayerStore`
+  like the device mode is on its pairing — nothing navigates between those by hand.
+- **Courtside device** (`Navigation/DeviceNavigator.js`, `Screens/Device/*`) — a
+  phone or tablet at the court, paired to ONE recording session with a 6-digit
+  key that staff create on the web (PLAN-002 §5):
 
 ```
 Pair this device ──key──▶ Session ──Stop / end time / web End──▶ Ended ──Done / 10 min──▶ Pair
                           live video · QR · REC timer · Stop       QR · saving progress · countdown
 ```
 
+A device paired before PLAN-009 has a pairing but no mode: it stays a courtside
+device. It started as an Expo SDK 58 / React Native 0.88 starter, in plain
+JavaScript (no `.tsx`). UI is [React Native Reusables](https://reactnativereusables.com)
+on NativeWind (Tailwind v3).
+
 Consequences for how you work here:
 
-- **There is no sign-in.** PLAN-001 Phase 6 and PLAN-002 Phases C–D built a
+- **Two credentials, never mixed.** The device's pairing token
+  (`usePairedStore`, `Authorization: App <token>`, no refresh) and the player's
+  tokens (`usePlayerStore`, `Authorization: Player <token>`, 15-minute access +
+  30-day rotating refresh — `createPlayerAxiosInstance` refreshes once on a 401
+  and signs out only when the refresh is refused). Both live in
+  **expo-secure-store** (`store/secureStorage.js`), never AsyncStorage, never logged.
+- **Player sign-in is PKCE-style.** `useGoogleSignIn` makes a secret (verifier)
+  and sends its SHA-256 (challenge) to `/api/v1/auth/google/start?app=1`; the
+  in-app browser (`expo-web-browser` `openAuthSessionAsync`) comes back to
+  `dgsports://signed-in?code=…`, and `POST /player/session { code, verifier }`
+  trades it — a code without its verifier is burnt. The scheme is `app.json`
+  `scheme` and the API's `APP_SCHEME`; change both together.
+- **There is no staff sign-in.** PLAN-001 Phase 6 and PLAN-002 Phases C–D built a
   staff-account app (Courts, Clips, Sessions, Take payment, Recorder boxes,
   Dashboard, a venue-wide paired mode); Phase E removed all of it — staff work
   happens on the web. Git history has it (up to `0fec6f7`) if it is ever
   needed again.
+- **Near me** (`hooks/useNearMe.js`, `expo-location`) asks for location only
+  when the player taps it, and the position never leaves the phone.
 - There are no local SQLite tables; the layer stays wired for the first
   offline feature. `constants/demo.js` backs demo mode — every request hook
   has a fixture branch, so the whole app runs with `EXPO_PUBLIC_DEMO_MODE=true`.

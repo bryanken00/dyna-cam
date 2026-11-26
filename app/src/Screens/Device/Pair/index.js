@@ -5,6 +5,7 @@ import LogoMark from "@/components/LogoMark";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { IS_DEMO } from "@/constants";
+import { APP_MODE, useAppModeStore } from "@/store/useAppModeStore";
 import { useThemeColors } from "@/hooks/useTheme";
 import FindGameSheet from "./FindGameSheet";
 import PairKeyInput from "./PairKeyInput";
@@ -30,6 +31,7 @@ const PairScreen = () => {
   const colors = useThemeColors();
   const m = usePairScreen();
   const find = useFindGameSheet();
+  const setMode = useAppModeStore((s) => s.setMode);
 
   return (
     <View className="bg-background flex-1">
@@ -44,7 +46,7 @@ const PairScreen = () => {
             <View className="bg-brand items-center px-5 pb-7 pt-8 sm:px-7">
               <LogoMark />
               <Text className="mt-[18px] font-sans-semibold text-[11.5px] uppercase tracking-[1.6px] text-brand-ball">
-                Dyna Cam
+                DGSports · Courtside
               </Text>
               <Text className="font-sans-bold mt-1.5 text-[26px] tracking-tight text-white">
                 Pair this device
@@ -130,6 +132,16 @@ const PairScreen = () => {
               >
                 <Search size={17} color={colors.foreground} />
                 <Text className="font-sans-semibold text-[15px]">Find a game by its code</Text>
+              </Button>
+              {/* PLAN-009: the same app is the player app */}
+              <Button
+                variant="ghost"
+                onPress={() => setMode(APP_MODE.player)}
+                className="mt-2 h-11"
+              >
+                <Text className="text-muted-foreground font-sans-medium text-[14px]">
+                  Use DGSports as a player instead
+                </Text>
               </Button>
             </View>
             </View>

@@ -112,6 +112,8 @@ describe("player booking entry points (CR-030)", () => {
       const listed = (await venues()).find((v) => v.name === "Entry Courts");
       assert.ok(listed, "the venue is listed");
       assert.equal(listed.bookingToken, home.token);
+      // PLAN-009: the app opens the booking page from here
+      assert.ok(listed.bookingUrl.endsWith(`/book/${home.token}`), listed.bookingUrl);
       assert.equal(listed.courtCount, 2);
       assert.deepEqual(listed.todayHours, { opensAt: "00:00", closesAt: "24:00" });
       // No business IDs anywhere

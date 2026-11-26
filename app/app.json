@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Dyna Cam",
+    "name": "DGSports",
     "slug": "dyna-cam",
     "version": "1.0.0",
     "orientation": "default",
@@ -24,7 +24,7 @@
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
-        "NSLocalNetworkUsageDescription": "Dyna Cam shows the court's live video from the venue's recorder box."
+        "NSLocalNetworkUsageDescription": "DGSports shows the court's live video from the venue's recorder box."
       }
     },
     "plugins": [
@@ -49,7 +49,15 @@
             "usesCleartextTraffic": true
           }
         }
+      ],
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DGSports uses your location to show the venues and open plays near you."
+        }
       ]
-    ]
+    ],
+    "scheme": "dgsports"
   }
 }

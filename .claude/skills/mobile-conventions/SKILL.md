@@ -1,6 +1,6 @@
 ---
 name: mobile-conventions
-description: The non-negotiable conventions for the Expo React Native app in app/ (app/src, app/App.js) — a Dyna Cam session device paired to one recording session with a 6-digit key — file naming, exports and imports, the library set, the services/api + services/requests split, React Query keys and invalidation, demo mode, the SQLite tables/endpoints/migrations layering, Zustand stores, navigation constants, NativeWind theme tokens and font families, the list-module pattern, the app's architecture and its traps. Load BEFORE writing or editing anything under app/ — any screen, hook, component, sheet, service, store, table, route, app.json or Metro/Tailwind/Babel config. Also load when reviewing app code, answering how the mobile app is structured, or deciding where a new file goes. Not for front/ (that is frontend-conventions).
+description: The non-negotiable conventions for the Expo React Native app in app/ (app/src, app/App.js) — the DGSports app: a player app (Google sign-in, booking, open plays, communities) and a courtside session device paired to one recording session with a 6-digit key — file naming, exports and imports, the library set, the services/api + services/requests split, React Query keys and invalidation, demo mode, the SQLite tables/endpoints/migrations layering, Zustand stores, navigation constants, NativeWind theme tokens and font families, the list-module pattern, the app's architecture and its traps. Load BEFORE writing or editing anything under app/ — any screen, hook, component, sheet, service, store, table, route, app.json or Metro/Tailwind/Babel config. Also load when reviewing app code, answering how the mobile app is structured, or deciding where a new file goes. Not for front/ (that is frontend-conventions).
 ---
 
 # Mobile conventions (`app/`)
@@ -10,21 +10,30 @@ TypeScript · React Native Reusables on NativeWind (Tailwind v3) ·
 lucide-react-native · Zustand · TanStack React Query 5 · axios · expo-sqlite ·
 React Navigation 7 (native stack).
 
-The app is a Dyna Cam **session device** (PLAN-002 Phase E): staff book a
-session on the web and pair a phone or tablet to THAT session with a 6-digit
-key. It shows the session — live video from the venue's recorder box, the
-download QR, a timer, Stop recording — then the QR with saving progress, and
-unpairs itself. CR-015: until staff record the game's payment on the web, the
-QR is replaced by the game's **pay code** (`session.payment.payCode`,
-`shareUrl` is null); the Pair screen's **Find a game** looks a code up
-(`GET /api/v1/public/games/:payCode`) and shows the QR once it's paid. There is
-**no sign-in and no staff-account app**: staff work happens on the web. Its
-only API is `/api/v1/pair/app`, `/api/v1/app/*` and that one public lookup.
+The app is **one DGSports app with two modes** (PLAN-009), chosen on first
+launch (`Screens/Welcome`, `store/useAppModeStore.js`):
+
+- **Player** (`Screens/Player/*`, `Navigation/PlayerNavigator.js`): Google
+  sign-in in the in-app browser (PKCE-style, back to `dgsports://signed-in`),
+  the profile (PLAN-006), then tabs Home · Book (venues, Near me, directions;
+  booking opens the venue's page until native booking lands) · Open plays ·
+  Communities · Me (profile, My games with Drive links, sign out). API:
+  `/api/v1/player/*` with `Authorization: Player <token>`, `/api/v1/public/venues`.
+- **Courtside device** (`Screens/Device/*`, `Navigation/DeviceNavigator.js`,
+  PLAN-002 Phase E): staff book a session on the web and pair a phone or tablet
+  to THAT session with a 6-digit key. It shows the session — live video from the
+  venue's recorder box, the download QR, a timer, Stop recording — then the QR
+  with saving progress, and unpairs itself. CR-015: until a game is paid the QR
+  is replaced by its **pay code**; Pair's **Find a game** looks a code up
+  (`GET /api/v1/public/games/:payCode`). API: `/api/v1/pair/app`, `/api/v1/app/*`.
+
+There is **no staff sign-in**: staff work happens on the web.
 Every path below is relative to `app/` unless it says otherwise.
 
 These rules are **non-negotiable** unless the user says otherwise. Reference
-implementations: `src/Screens/Pair/` for a standalone form screen,
-`src/Screens/Session/` for a polled, responsive screen (side by side on a
+implementations: `src/Screens/Device/Pair/` for a standalone form screen,
+`src/Screens/Device/Session/` for a polled, responsive screen, `src/Screens/Player/Book/`
+for a tab with a list and its `use<Screen>` hook (side by side on a
 landscape tablet, stacked on a phone) — copy their shape.
 
 ## Read the doc for the area you're touching
@@ -75,9 +84,10 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **Read Zustand with a selector** — `useStore((s) => s.field)`, never
   `useStore()`.
 - **Navigate with `SCREEN_NAVIGATION` constants**, never a string literal.
-  Today the app's three screens (Pair, Session, Ended) are switched by the
-  navigator itself, from the pairing and the session's state — nothing
-  navigates by hand. A pushed screen's `ScreenHeader` gets `onBack` because
+  The mode, the device's Pair / Session / Ended and the player's Sign in /
+  Complete profile / tabs are switched by the navigators from the stores —
+  nothing navigates between them by hand; only pushes inside the player app
+  (Edit profile) and tab jumps do. A pushed screen's `ScreenHeader` gets `onBack` because
   the stack has no header.
 - **`DataList` is a `FlatList`.** Never nest it in a `ScrollView`; put headers
   and stat cards in `ListHeaderComponent`.
@@ -95,12 +105,15 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **Phone is always `09XX XXXX XXX`** with the example `0912 3456 789` as the
   hint, same as the web app and the API. The app has no phone field today;
   if one comes back, port `front/src/utils/phoneFormat.js` (without zod).
-- **One credential: the device's pairing token.** `usePairedStore` keeps it
-  in **expo-secure-store**, never AsyncStorage; the device axios instance
-  sends `Authorization: App <token>` (no Bearer, CSRF or refresh). It is
-  cleared **only** by a 401 `TOKEN_INVALID`, Done, or the unpair countdown —
-  never by a network error or a 5xx. See architecture-and-traps.md.
-- **Never log a secret.** Not the token, not POST /pair/app's response, not
+- **Two credentials, one per mode.** The device's pairing token
+  (`usePairedStore`, `Authorization: App <token>`, no refresh; cleared **only**
+  by a 401 `TOKEN_INVALID`, Done, or the unpair countdown) and the player's
+  tokens (`usePlayerStore`, `Authorization: Player <token>`; the player axios
+  instance refreshes once on a 401 and signs out only when the refresh is
+  refused). Both in **expo-secure-store** (`store/secureStorage.js`), never
+  AsyncStorage; a network error or a 5xx never unpairs or signs out. See
+  architecture-and-traps.md.
+- **Never log a secret.** Not a token, not POST /pair/app's or /player/session's response, not
   an axios error (its `config.headers` holds the token), not `live.hlsUrl`
   (its `sig` is a signature).
 - **API timestamps are Manila wall-clock strings** with no zone. Format them

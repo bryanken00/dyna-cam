@@ -66,6 +66,18 @@ export const safeReturnPath = (value) => {
 /** The front page that finishes a sign-in: `/signed-in?code=…&next=…` or `?error=…&next=…`. */
 export const signedInUrl = (query) => `${appUrl()}/signed-in?${new URLSearchParams(query)}`;
 
+/**
+ * PLAN-009: the mobile app's return — `dgsports://signed-in?code=…` or `?error=…`
+ * (APP_SCHEME, default "dgsports", must match the app's `scheme` in app.json).
+ */
+export const appSignedInUrl = (query) => {
+  const scheme = (process.env.APP_SCHEME || "dgsports").replace(/[^a-z0-9.+-]/gi, "");
+  return `${scheme}://signed-in?${new URLSearchParams(query)}`;
+};
+
+/** PLAN-009: base64url SHA-256 of the app's secret — what the challenge must equal. */
+export const challengeOf = (verifier) => crypto.createHash("sha256").update(String(verifier)).digest("base64url");
+
 // ── state ───────────────────────────────────────────────────────────────────
 
 /**
@@ -73,18 +85,23 @@ export const signedInUrl = (query) => `${appUrl()}/signed-in?${new URLSearchPara
  * token must carry — encrypted and authenticated, valid 10 minutes. It's the
  * callback's only link to the start.
  */
-export const signLoginState = ({ returnPath, nonce }) =>
-  encryptSecret(JSON.stringify({ k: "player", r: returnPath, n: nonce, e: Date.now() + STATE_TTL_MS }));
+export const signLoginState = ({ returnPath, nonce, challenge = null }) =>
+  encryptSecret(
+    JSON.stringify({ k: "player", r: returnPath, n: nonce, c: challenge, e: Date.now() + STATE_TTL_MS })
+  );
 
-/** @returns {{ returnPath: string, nonce: string } | null} null when forged, garbled or expired */
+/**
+ * @returns {{ returnPath: string, nonce: string, challenge: string|null } | null} null when
+ *   forged, garbled or expired; `challenge` set = the mobile app started it (PLAN-009)
+ */
 export const readLoginState = (state) => {
   if (typeof state !== "string" || state.length > 2048) return null;
   const plain = decryptSecret(state);
   if (!plain) return null;
   try {
-    const { k, r, n, e } = JSON.parse(plain);
+    const { k, r, n, c, e } = JSON.parse(plain);
     if (k !== "player" || !n || typeof e !== "number" || e < Date.now()) return null;
-    return { returnPath: safeReturnPath(r), nonce: n };
+    return { returnPath: safeReturnPath(r), nonce: n, challenge: typeof c === "string" ? c : null };
   } catch {
     return null;
   }

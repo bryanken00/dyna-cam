@@ -9,7 +9,7 @@ import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { hashToken, randomPayCode } from "../../../utils/crypto/tokens.js";
-import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
+import { bookingManageUrl, bookingPageUrl, sessionShareUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
@@ -172,6 +172,8 @@ router.get(
       venues: paying.map((v) => ({
         ...venueView(v),
         bookingToken: v.bookingToken,
+        // PLAN-009: the venue's booking page, for the app to open
+        bookingUrl: bookingPageUrl(v.bookingToken),
         courtCount: Number(v.courtCount),
         // CR-050: the venue's public pin (null: none) — the page sorts by distance from the
         // player in the browser ("Near me"); the player's location never reaches the API

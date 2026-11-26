@@ -2,6 +2,15 @@ import { addMinutesLocal, getCurrentTimestampLocal, toTimestampLocal } from "./d
 import { hashToken, randomToken } from "./crypto/tokens.js";
 import { playerTokenPair, verifyPlayerToken } from "./playerTokens.js";
 import { bookingManageUrl, sessionShareUrl } from "./clips.js";
+import { challengeOf } from "./googleSignIn.js";
+import crypto from "node:crypto";
+
+/** Constant-time compare of two short strings (as SHA-256 digests, so lengths never leak). */
+const sameSecret = (a, b) =>
+  crypto.timingSafeEqual(
+    crypto.createHash("sha256").update(String(a)).digest(),
+    crypto.createHash("sha256").update(String(b)).digest()
+  );
 
 /**
  * PLAN-006: player accounts (one per Google account), their sign-in codes and
@@ -24,7 +33,7 @@ const DUPLICATE = "ER_DUP_ENTRY";
  * @param {{ sub, email, name, givenName, familyName, photoUrl }} identity  from utils/googleSignIn.js
  * @returns {Promise<{ code: string } | { blocked: true }>}
  */
-export const signInFromGoogle = async (db, identity, { retried = false } = {}) => {
+export const signInFromGoogle = async (db, identity, { retried = false, challenge = null } = {}) => {
   const now = getCurrentTimestampLocal();
   let conn;
   try {
@@ -83,9 +92,10 @@ export const signInFromGoogle = async (db, identity, { retried = false } = {}) =
 
     const code = randomToken(32);
     await conn.execute(
-      `INSERT INTO player_sign_in_codes (codeHash, playerId, expiresAt, dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?)`,
-      [hashToken(code), playerId, addMinutesLocal(1), now, now]
+      `INSERT INTO player_sign_in_codes (codeHash, playerId, challenge, expiresAt, dateCreated, dateUpdated)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      // PLAN-009: the mobile app's challenge — the code then needs its secret
+      [hashToken(code), playerId, challenge, addMinutesLocal(1), now, now]
     );
     await db.commit(conn);
     return { code };
@@ -93,7 +103,7 @@ export const signInFromGoogle = async (db, identity, { retried = false } = {}) =
     await db.rollback(conn);
     // Two first sign-ins of one account at the same moment: the other made the row
     if (err?.code === DUPLICATE && !retried) {
-      return signInFromGoogle(db, identity, { retried: true });
+      return signInFromGoogle(db, identity, { retried: true, challenge });
     }
     throw err;
   }
@@ -109,15 +119,18 @@ const saveRefresh = (conn, playerId, refreshToken, now) =>
 
 /**
  * Trade a sign-in code for tokens — once, within 60 s, for an Active player.
+ * PLAN-009: a code the mobile app started (it has a challenge) also needs the app's
+ * secret (`verifier`); without it, or with a wrong one, nothing is given (and the code
+ * is still burnt, so a caught redirect can't be retried).
  * @returns {Promise<{ accessToken, refreshToken } | null>} null: used, expired, unknown
  */
-export const redeemSignInCode = async (db, code) => {
+export const redeemSignInCode = async (db, code, verifier = null) => {
   const now = getCurrentTimestampLocal();
   let conn;
   try {
     conn = await db.beginTransaction();
     const [rows] = await conn.execute(
-      `SELECT c.playerId, c.expiresAt, c.usedAt, p.status
+      `SELECT c.playerId, c.challenge, c.expiresAt, c.usedAt, p.status
        FROM player_sign_in_codes c
        JOIN players p ON p.playerId = c.playerId
        WHERE c.codeHash = ?
@@ -133,6 +146,10 @@ export const redeemSignInCode = async (db, code) => {
       `UPDATE player_sign_in_codes SET usedAt = ?, dateUpdated = ? WHERE codeHash = ?`,
       [now, now, hashToken(code)]
     );
+    if (row.challenge && (!verifier || !sameSecret(challengeOf(verifier), row.challenge))) {
+      await db.commit(conn); // burnt: a caught app redirect is worthless without the secret
+      return null;
+    }
     const tokens = playerTokenPair(row.playerId);
     await saveRefresh(conn, row.playerId, tokens.refreshToken, now);
     await db.commit(conn);

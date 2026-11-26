@@ -56,7 +56,7 @@ export const useStreamSetup = (stream) => {
 
   const error = create.error
     ? isConnectionError(create.error)
-      ? "Can't reach Dyna Cam — check the Wi-Fi and try again."
+      ? "Can't reach DGSports — check the Wi-Fi and try again."
       : create.error.response?.data?.message || "Couldn't make a code — try again."
     : null;
 

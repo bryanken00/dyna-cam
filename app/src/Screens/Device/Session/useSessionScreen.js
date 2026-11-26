@@ -12,7 +12,7 @@ import { useStreamSetup } from "./useStreamSetup";
 const actionError = (error, what) => {
   if (!error || error.response?.status === 401) return null; // unpaired — moving on
   if (isConnectionError(error)) {
-    return `Can't reach Dyna Cam — check the Wi-Fi and ${what} again.`;
+    return `Can't reach DGSports — check the Wi-Fi and ${what} again.`;
   }
   return error.response?.data?.message || "Something went wrong — try again.";
 };

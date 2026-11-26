@@ -4,13 +4,23 @@ import { optionalPhone, optionalString, queryInt } from "./_helpers.js";
 /** PLAN-006: validators for player sign-in (controllers/v1/auth/google, controllers/v1/player). */
 
 // GET /auth/google/start?return=<player page> — checked again by safeReturnPath()
-export const googleStartQuerySchema = z.object({
-  return: z.string().max(300).optional(),
-});
+export const googleStartQuerySchema = z
+  .object({
+    return: z.string().max(300).optional(),
+    // PLAN-009: the mobile app — back to dgsports://signed-in, with a PKCE-style challenge
+    app: z.enum(["1"]).optional(),
+    challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Invalid challenge").optional(),
+  })
+  .refine((q) => !q.app || q.challenge, { message: "The app sends a challenge", path: ["challenge"] });
 
 // POST /player/session — the single-use code from the sign-in redirect (randomToken(32))
 export const playerSessionSchema = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{20,64}$/, "This sign-in link isn't valid"),
+  // PLAN-009: the mobile app's secret for a code it started (RFC 7636 verifier characters)
+  verifier: z
+    .string()
+    .regex(/^[A-Za-z0-9._~-]{43,128}$/, "This sign-in link isn't valid")
+    .optional(),
 });
 
 // POST /player/session/refresh, /player/session/logout
