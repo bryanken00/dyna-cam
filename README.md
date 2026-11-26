@@ -224,10 +224,11 @@ npm run keys
 # are skipped when already present.
 npm run db:setup
 
-# Optional, development only — ⚠️ EMPTIES THE DATABASE first (keeps only the
-# permissions and the Owner), then loads demo staff, venues, courts, rates, games,
-# bookings and payments (no video). DEMO_PASSWORD sets the demo logins' password
-# (else a random one is printed once).
+# Optional, development only — runs db:setup first (migrations, permissions, the super
+# admin), then ⚠️ EMPTIES THE DATABASE (keeps only the permissions and the super admins)
+# and loads 15 demo companies with their Owners, staff, 28 venues (with addresses and map
+# pins), courts, rates, games, bookings and payments (no video). DEMO_PASSWORD sets the
+# demo logins' password (else a random one is printed once).
 npm run db:data
 
 npm run dev                   # nodemon on http://localhost:4021  (API under /api/v1)

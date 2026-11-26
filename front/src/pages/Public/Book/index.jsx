@@ -7,6 +7,7 @@ import {
   CreditCard,
   Loader2,
   LogIn,
+  Navigation,
   Phone,
   RotateCcw,
 } from "lucide-react";
@@ -160,6 +161,19 @@ const BookPage = () => {
             <p className="m-0" style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
               {decodeHTML(page.venue.address)}
             </p>
+          )}
+          {/* CR-050: Google Maps directions to the venue's pin */}
+          {page.venue.directionsUrl && (
+            <a
+              href={page.venue.directionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 hover:underline"
+              style={{ fontSize: 13, fontWeight: 600, color: "var(--color-link)" }}
+            >
+              <Navigation className="h-3.5 w-3.5" />
+              Get directions
+            </a>
           )}
         </div>
 

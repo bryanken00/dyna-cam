@@ -21,7 +21,7 @@
     "db:migrate": "node scripts/migrate.js",
     "db:reset": "node scripts/reset-database.js",
     "db:check": "node scripts/check-database.js",
-    "db:data": "node scripts/seed-demo-data.js",
+    "db:data": "node scripts/setup-database.js && node scripts/seed-demo-data.js",
     "boxes": "node scripts/boxes.js",
     "boxes:revoke": "node scripts/boxes.js revoke",
     "keys": "node scripts/generate-keys.js"

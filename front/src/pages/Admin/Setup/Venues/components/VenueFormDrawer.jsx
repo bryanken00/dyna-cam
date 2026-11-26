@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import {
   ImageUp,
   Loader2,
   MapPin,
+  Navigation,
   Phone,
   Plus,
   Trash2,
@@ -33,10 +35,20 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+import SearchableSelect from "../../../../../components/SearchableSelect";
 import SectionLabel from "../../../../../components/SectionLabel";
+import VenueLocationPicker from "../../../../../components/VenueLocationPicker";
 import StatusToggle from "../../../../../components/StatusToggle";
 import { useDiscardGuard } from "../../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../../utils/decode-html";
+import {
+  buildAddress,
+  cityOptions,
+  loadBarangays,
+  loadPsgc,
+  provinceOptions,
+  regionOptions,
+} from "../../../../../utils/psgc";
 import {
   PHONE_MAX_LENGTH,
   PHONE_PLACEHOLDER,
@@ -57,8 +69,19 @@ import {
   useUploadImage,
 } from "../../../../../services/requests/upload";
 
+// CR-050: a coordinate typed or set by the pin — "" = none
+const coordinate = (label, limit) =>
+  z
+    .string()
+    .trim()
+    .refine((v) => v === "" || (Number.isFinite(Number(v)) && Math.abs(Number(v)) <= limit), {
+      message: `${label} must be a number between -${limit} and ${limit}`,
+    });
+
 // Mirrors venues.validator.js: name required (≤100), address/phone/logo
 // optional (NULL columns), retention 1–365 whole days (CR-017: 1 by default).
+// CR-050: the address is picked region → province → city → barangay (+ street);
+// `address` holds an older venue's typed address until a region is picked.
 const venueSchema = z.object({
   name: z
     .string()
@@ -66,6 +89,13 @@ const venueSchema = z.object({
     .min(1, "Name is required")
     .max(100, "Name must not exceed 100 characters"),
   address: z.string().max(255, "Address must not exceed 255 characters"),
+  regionCode: z.string(),
+  provinceCode: z.string(),
+  cityMunCode: z.string(),
+  barangayCode: z.string(),
+  street: z.string().max(120, "Street must not exceed 120 characters"),
+  latitude: coordinate("Latitude", 90),
+  longitude: coordinate("Longitude", 180),
   phone: zPhone,
   logoUrl: z.string(),
   clipRetentionDays: z
@@ -81,11 +111,31 @@ const venueSchema = z.object({
     .regex(/^\d+(\.\d{1,2})?$/, "Enter an amount like 50 or 49.50")
     .refine((v) => Number(v) <= 100000, "The price is too high"),
   status: z.enum(["Active", "Inactive"]),
+}).superRefine((v, ctx) => {
+  // Once a region is picked, the rest of the address is needed down to the barangay
+  if (v.regionCode) {
+    const missing = [
+      ["provinceCode", "Pick the province"],
+      ["cityMunCode", "Pick the city or municipality"],
+      ["barangayCode", "Pick the barangay"],
+    ].find(([key]) => !v[key]);
+    if (missing) ctx.addIssue({ code: "custom", path: [missing[0]], message: missing[1] });
+  }
+  if ((v.latitude === "") !== (v.longitude === "")) {
+    ctx.addIssue({ code: "custom", path: ["latitude"], message: "Set both, or clear the pin" });
+  }
 });
 
 const EMPTY = {
   name: "",
   address: "",
+  regionCode: "",
+  provinceCode: "",
+  cityMunCode: "",
+  barangayCode: "",
+  street: "",
+  latitude: "",
+  longitude: "",
   phone: "",
   logoUrl: "",
   clipRetentionDays: "7",
@@ -111,6 +161,49 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
   } = form;
   const currentLogo = useWatch({ control: form.control, name: "logoUrl" });
 
+  // ─── CR-050: the address lists and the pin ──────────────────────────
+  const [regionCode, provinceCode, cityMunCode, barangayCode, street, latitude, longitude, legacyAddress] =
+    useWatch({
+      control: form.control,
+      name: ["regionCode", "provinceCode", "cityMunCode", "barangayCode", "street", "latitude", "longitude", "address"],
+    });
+  const { data: psgc } = useQuery({
+    queryKey: ["psgc"],
+    queryFn: loadPsgc,
+    staleTime: Infinity,
+    enabled: open,
+  });
+  const { data: barangays = [], isFetching: barangaysLoading } = useQuery({
+    queryKey: ["psgc", "barangays", cityMunCode],
+    queryFn: () => loadBarangays(cityMunCode),
+    staleTime: Infinity,
+    enabled: open && !!cityMunCode,
+  });
+  const regions = useMemo(() => regionOptions(psgc), [psgc]);
+  const provinces = useMemo(() => provinceOptions(psgc, regionCode), [psgc, regionCode]);
+  const cities = useMemo(() => cityOptions(psgc, provinceCode), [psgc, provinceCode]);
+  const labelOf = (list, code) => list.find((o) => o.value === code)?.label || "";
+  const picked = {
+    province: labelOf(provinces, provinceCode),
+    city: labelOf(cities, cityMunCode),
+    barangay: labelOf(barangays, barangayCode),
+  };
+  const builtAddress = buildAddress({ street, ...picked });
+  // Where the map goes while there's no pin (the most precise level picked)
+  const focusQuery = [picked.barangay, picked.city, picked.province].filter(Boolean).join(", ");
+  const focusZoom = picked.barangay ? 16 : picked.city ? 14 : 11;
+
+  /** A level changed: the levels under it no longer fit. */
+  const pickLevel = (key, value) => {
+    const below = { regionCode: ["provinceCode", "cityMunCode", "barangayCode"], provinceCode: ["cityMunCode", "barangayCode"], cityMunCode: ["barangayCode"] };
+    form.setValue(key, value, { shouldDirty: true, shouldValidate: true });
+    for (const child of below[key] || []) form.setValue(child, "", { shouldDirty: true });
+  };
+  const setPin = (lat, lng) => {
+    form.setValue("latitude", lat === null ? "" : String(lat), { shouldDirty: true, shouldValidate: true });
+    form.setValue("longitude", lng === null ? "" : String(lng), { shouldDirty: true, shouldValidate: true });
+  };
+
   // Hydrate on open; map fields explicitly (API responses carry extra keys).
   useEffect(() => {
     if (!open) return;
@@ -119,6 +212,13 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         ? {
             name: decodeHTML(entity.name) ?? "",
             address: decodeHTML(entity.address) ?? "",
+            regionCode: entity.regionCode ?? "",
+            provinceCode: entity.provinceCode ?? "",
+            cityMunCode: entity.cityMunCode ?? "",
+            barangayCode: entity.barangayCode ?? "",
+            street: decodeHTML(entity.street) ?? "",
+            latitude: entity.latitude === null || entity.latitude === undefined ? "" : String(Number(entity.latitude)),
+            longitude: entity.longitude === null || entity.longitude === undefined ? "" : String(Number(entity.longitude)),
             phone: entity.phone ?? "",
             logoUrl: entity.logoUrl ?? "",
             clipRetentionDays: String(entity.clipRetentionDays ?? 7),
@@ -197,7 +297,15 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
 
       const payload = {
         name: values.name,
-        address: values.address.trim() || null,
+        // CR-050: built from the picked address; an older typed one stays until a region is picked
+        address: (values.regionCode ? builtAddress : values.address.trim()) || null,
+        regionCode: values.regionCode || null,
+        provinceCode: values.provinceCode || null,
+        cityMunCode: values.cityMunCode || null,
+        barangayCode: values.barangayCode || null,
+        street: values.street.trim() || null,
+        latitude: values.latitude === "" ? null : Number(values.latitude),
+        longitude: values.longitude === "" ? null : Number(values.longitude),
         phone: values.phone || null,
         logoUrl,
         clipRetentionDays: Number(values.clipRetentionDays),
@@ -328,25 +436,6 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
 
               <FormField
                 control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem className="mb-5">
-                    <FormLabel>Address</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="e.g., 12 Rizal Ave, Makati City"
-                        className="h-10"
-                        maxLength={255}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
@@ -375,6 +464,166 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
               />
 
               {/* Watermark logo */}
+              {/* CR-050: the address from the PH address list, then the map pin */}
+              <div className="mt-7">
+                <SectionLabel>Address</SectionLabel>
+                {isEditMode && legacyAddress && !regionCode && (
+                  <p className="m-0 mb-3" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                    Current address: <span style={{ color: "var(--color-text-dark)" }}>{legacyAddress}</span> — pick it
+                    below to replace it.
+                  </p>
+                )}
+                <div className="grid items-start gap-4 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="regionCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Region</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            className="h-10 w-full"
+                            value={field.value || undefined}
+                            onValueChange={(v) => pickLevel("regionCode", v)}
+                            options={regions}
+                            placeholder="Select region"
+                            searchPlaceholder="Type to search…"
+                            disabled={!psgc}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="provinceCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Province</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            className="h-10 w-full"
+                            value={field.value || undefined}
+                            onValueChange={(v) => pickLevel("provinceCode", v)}
+                            options={provinces}
+                            placeholder="Select province"
+                            searchPlaceholder="Type to search…"
+                            disabled={!regionCode}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="cityMunCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>City / Municipality</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            className="h-10 w-full"
+                            value={field.value || undefined}
+                            onValueChange={(v) => pickLevel("cityMunCode", v)}
+                            options={cities}
+                            placeholder="Select city or municipality"
+                            searchPlaceholder="Type to search…"
+                            disabled={!provinceCode}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="barangayCode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Barangay</FormLabel>
+                        <FormControl>
+                          <SearchableSelect
+                            className="h-10 w-full"
+                            value={field.value || undefined}
+                            onValueChange={(v) => pickLevel("barangayCode", v)}
+                            options={barangays}
+                            placeholder="Select barangay"
+                            searchPlaceholder="Type to search…"
+                            disabled={!cityMunCode || barangaysLoading}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="sm:col-span-2">
+                    <FormField
+                      control={form.control}
+                      name="street"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Street, building (optional)</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g., 12 Rizal Ave" className="h-10" maxLength={120} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+                {regionCode && builtAddress && (
+                  <p className="m-0 mt-3" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                    Shown to players as: <span style={{ color: "var(--color-text-dark)" }}>{builtAddress}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-7">
+                <SectionLabel>Map pin</SectionLabel>
+                <p className="m-0 mb-3" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
+                  <Navigation className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                  Players get Google Maps directions to this pin. The map moves to the barangay or city you pick.
+                </p>
+                <VenueLocationPicker
+                  latitude={latitude === "" ? null : Number(latitude)}
+                  longitude={longitude === "" ? null : Number(longitude)}
+                  onChange={setPin}
+                  focusQuery={focusQuery}
+                  focusZoom={focusZoom}
+                />
+                <div className="grid items-start gap-4 sm:grid-cols-2 mt-3">
+                  <FormField
+                    control={form.control}
+                    name="latitude"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Latitude</FormLabel>
+                        <FormControl>
+                          <Input inputMode="decimal" placeholder="e.g., 14.569231" className="h-10" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="longitude"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Longitude</FormLabel>
+                        <FormControl>
+                          <Input inputMode="decimal" placeholder="e.g., 121.132411" className="h-10" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+
               <div className="mt-7">
                 <SectionLabel>Watermark logo</SectionLabel>
                 <div className="flex items-center gap-4 flex-wrap">

@@ -1,4 +1,5 @@
 import { logger } from "../../config/logger.js";
+import { directionsUrl } from "./maps.js";
 import { sendgridConfigured, sendMail } from "../lib/mailer/mailer.js";
 import {
   bookingCancelledEmail,
@@ -59,7 +60,7 @@ const loadBooking = async (db, bookingId) => {
   const [row] = await db.query(
     `SELECT b.bookingId, b.bookingCode, b.manageToken, b.startAt, b.endAt, b.playerName, b.email,
             b.price, b.paymentStatus, b.payMethod, b.holdExpiresAt, b.status, b.cancelledBy,
-            c.name AS courtName, v.name AS venueName, v.checkInEarlyMinutes,
+            c.name AS courtName, v.name AS venueName, v.checkInEarlyMinutes, v.latitude, v.longitude,
             s.shareToken, s.status AS gameStatus
      FROM bookings b
      JOIN courts c ON c.courtId = b.courtId
@@ -82,6 +83,8 @@ const facts = (b) => ({
   bookingCode: b.bookingCode,
   price: peso(b.price),
   manageUrl: bookingManageUrl(b.manageToken),
+  // CR-050: Google Maps directions to the venue's pin (null: no pin)
+  directionsUrl: directionsUrl(b.latitude, b.longitude),
 });
 
 const checkInFrom = (b) =>
@@ -294,6 +297,7 @@ export const sendOrderConfirmedEmail = async (db, bookingIds) => {
     const mail = bookingOrderConfirmedEmail({
       playerName: mine[0].playerName,
       venueName: mine[0].venueName,
+      directionsUrl: directionsUrl(mine[0].latitude, mine[0].longitude),
       day: local(mine[0].startAt).format("ddd, MMM D, YYYY"),
       paidLine: `Paid ${peso(total)} online`,
       items: mine.map((b) => ({

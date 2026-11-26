@@ -19,7 +19,8 @@ import {
  */
 const router = express.Router();
 
-const VENUE_COLUMNS = `v.venueId, v.name, v.address, v.phone, v.logoUrl, v.clipRetentionDays,
+const VENUE_COLUMNS = `v.venueId, v.name, v.address, v.regionCode, v.provinceCode, v.cityMunCode,
+  v.barangayCode, v.street, v.latitude, v.longitude, v.phone, v.logoUrl, v.clipRetentionDays,
   v.clipPrice, v.status, v.dateCreated, v.dateUpdated`;
 
 // Courts and recorder boxes per venue, for the list and the detail view
@@ -31,7 +32,14 @@ const toVenue = (row) => ({
   ...row,
   clipPrice: Number(row.clipPrice),
   logoUrl: signUploadUrl(row.logoUrl),
+  // CR-050: the map pin (DECIMAL → number; null = no pin)
+  latitude: row.latitude === null || row.latitude === undefined ? null : Number(row.latitude),
+  longitude: row.longitude === null || row.longitude === undefined ? null : Number(row.longitude),
 });
+
+/** CR-050: the location columns from a validated body, in LOCATION_COLUMNS order. */
+const LOCATION_COLUMNS = ["regionCode", "provinceCode", "cityMunCode", "barangayCode", "street", "latitude", "longitude"];
+const locationValues = (body) => LOCATION_COLUMNS.map((key) => (body[key] === undefined ? null : body[key]));
 
 /** A client-sent logo path must be one the caller may use (see file-uploads.md). */
 const assertLogo = (req, logoUrl) => {
@@ -161,14 +169,15 @@ router.post(
 
       await conn.execute(
         `INSERT INTO venues
-           (venueId, companyId, name, address, phone, logoUrl, clipRetentionDays, clipPrice, status,
-            dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+           (venueId, companyId, name, address, ${LOCATION_COLUMNS.join(", ")}, phone, logoUrl,
+            clipRetentionDays, clipPrice, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           venueId,
           req.user.companyId,
           name,
           address || null,
+          ...locationValues(req.body),
           phone || null,
           logoUrl || null,
           clipRetentionDays,
@@ -227,12 +236,13 @@ router.put(
 
       await conn.execute(
         `UPDATE venues
-         SET name = ?, address = ?, phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?,
-             status = ?, dateUpdated = ?
+         SET name = ?, address = ?, ${LOCATION_COLUMNS.map((c) => `${c} = ?`).join(", ")},
+             phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?, status = ?, dateUpdated = ?
          WHERE venueId = ? AND companyId = ?`,
         [
           name,
           address || null,
+          ...locationValues(req.body),
           phone || null,
           logoUrl || null,
           clipRetentionDays,

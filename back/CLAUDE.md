@@ -60,9 +60,10 @@ every migration in order. Details: `schema-conventions.md` in the `backend-conve
 
 `npm run db:setup` creates only the first back-office super admin (`SUPERADMIN_EMAIL`, PLAN-008) —
 no company or Owner; companies and their Owners are onboarded in the back office.
-`npm run db:data` (`scripts/seed-demo-data.js`, PLAN-004) **empties the database** (every table
-except `_migrations`, `permissions` and the super admins) and loads two demo companies with their
-Owners, staff and demo data for
+`npm run db:data` runs `db:setup` first (migrations, permissions, the super admin), then
+`scripts/seed-demo-data.js` (PLAN-004), which **empties the database** (every table
+except `_migrations`, `permissions` and the super admins) and loads 15 demo companies (28 venues,
+`scripts/_demo-venues.js`) with their Owners, staff and demo data for
 development, with no video. It refuses `NODE_ENV=production`. A new table or
 status the Admin pages show is worth a few demo rows there.
 

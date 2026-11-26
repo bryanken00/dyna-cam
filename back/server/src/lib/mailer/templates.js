@@ -188,6 +188,7 @@ export const gameDriveEmail = ({ playerName, courtName, venueName, playedOn, dri
  * @property {string} time - "5:00 PM – 7:00 PM"
  * @property {string} price - "₱800"
  * @property {string} manageUrl - the player's booking page
+ * @property {string|null} [directionsUrl] - CR-050: Google Maps directions to the venue (null: no pin)
  */
 
 const p = (html, extra = "") =>
@@ -204,6 +205,12 @@ const bookingFacts = (b) => `
     <tr><td style="padding: 10px 14px; color: #71717a; border-top: 1px solid #e4e4e7;">When</td>
         <td style="padding: 10px 14px; text-align: right; border-top: 1px solid #e4e4e7;">${escapeHtml(b.day)}<br />${escapeHtml(b.time)}</td></tr>
   </table>`;
+
+/** CR-050: "Get directions" to the venue's pin (nothing without one). */
+const directionsLink = (url) =>
+  url
+    ? p(`<a href="${escapeHtml(url)}" style="color: #2563eb; font-weight: 600;">Get directions</a> to the venue (Google Maps)`)
+    : "";
 
 const manageLink = (b, label = "Open your booking") => `
   <p style="margin: 0 0 20px;">${button(escapeHtml(b.manageUrl), label)}</p>
@@ -229,6 +236,7 @@ export const bookingConfirmedEmail = (b) => ({
     "You're booked",
     `${p(`${hi(b.playerName)} your court is booked. ${escapeHtml(b.paidLine)}.`)}
      ${bookingFacts(b)}
+     ${directionsLink(b.directionsUrl)}
      ${howToRecord(b, b.checkInFrom)}
      ${manageLink(b)}`
   ),
@@ -262,6 +270,7 @@ export const bookingOrderConfirmedEmail = (o) => ({
      ${muted(`At the court${
        o.items[0]?.checkInFrom ? ` (from ${escapeHtml(o.items[0].checkInFrom)} for the first one)` : ""
      }, open that game's booking and tap <strong>I'm at the court — start recording</strong>. Each game is recorded for its booked time, and you get its video on your phone.`)}
+     ${directionsLink(o.directionsUrl)}
      ${muted("You can find all of them any time in My games.")}`
   ),
 });

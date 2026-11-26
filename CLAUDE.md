@@ -31,8 +31,8 @@ creates — comes from `SUPERADMIN_EMAIL` and `SUPERADMIN_PASSWORD` (both requir
 the installer's own password, so no forced change at first sign-in — super admins added in the back
 office get a temporary one); re-running setup also grants every
 company's Owner role any new permission (`scripts/_owner-permissions.js`). `npm run db:data` keeps
-the super admins and builds two demo companies with their Owners (Smash Point Group, slug
-`default`; Dink House Inc. owns Dink House Cebu).
+the super admins and builds 15 demo companies with 28 venues, each company with its Owner
+(Smash Point Group, slug `default`, has the demo staff; 13 come from `scripts/_demo-venues.js`).
 
 ## Repository layout
 

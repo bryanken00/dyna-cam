@@ -9,8 +9,9 @@
  * ⚠️  It EMPTIES THE DATABASE first: every table is truncated except
  * `_migrations`, `permissions` and the back office's super admins (PLAN-008).
  * Every company, Owner, staff account, venue, game, clip, booking, payment and
- * audit row is gone, then the demo is loaded: two companies (Smash Point Group,
- * slug "default", and Dink House Inc.), each with its own Owner. Re-run it any time for a fresh
+ * audit row is gone, then the demo is loaded: 15 companies with 28 venues, each company
+ * with its own Owner — Smash Point Group (slug "default", the staff below, BGC + Alabang),
+ * Dink House Inc. (Cebu), and 13 more from scripts/_demo-venues.js (25 venues). Re-run it any time for a fresh
  * demo. Video files on disk are not deleted. Refuses NODE_ENV=production.
  *
  * Usage:
@@ -19,7 +20,8 @@
  * Env (optional):
  *   DEMO_PASSWORD   password for every demo login — Owners and staff (default: random, printed once)
  *
- * Run `npm run db:setup` first (schema, permissions, the first super admin).
+ * `npm run db:data` runs `npm run db:setup` first (migrations, permissions, the first super
+ * admin — needs SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD), then this script.
  */
 
 import "dotenv/config";
@@ -27,6 +29,7 @@ import crypto from "node:crypto";
 import mysql from "mysql2/promise";
 import argon2 from "argon2";
 import moment from "moment-timezone";
+import { EXTRA_COMPANIES, EXTRA_VENUES } from "./_demo-venues.js";
 
 import { passwordProblem } from "../server/src/utils/passwordPolicy.js";
 import { encryptSecret } from "../server/src/utils/crypto/secretBox.js";
@@ -130,8 +133,13 @@ const DEMO_DAYS_AHEAD = 14;
 const VENUES = [
   {
     key: "bgc",
+    company: "first",
+    // CR-050: the venue's map pin (players get Google Maps directions)
+    pin: { latitude: 14.5507, longitude: 121.048 },
     name: "Smash Point Pickleball — BGC",
-    address: "32nd St cor. 9th Ave, Bonifacio Global City, Taguig",
+    // CR-050: built like the venue form does — "Street, Barangay, City, Province" from the PH address list
+    address: "32nd St cor. 9th Ave, Fort Bonifacio, Taguig City, NCR, Fourth District",
+    location: { regionCode: "13", provinceCode: "1376", cityMunCode: "137607", barangayCode: "137607020", street: "32nd St cor. 9th Ave" },
     phone: "0917 5550 101",
     clipPrice: 150,
     onlineBooking: true,
@@ -157,8 +165,13 @@ const VENUES = [
   },
   {
     key: "cebu",
+    company: "second",
+    // CR-050: the venue's map pin (players get Google Maps directions)
+    pin: { latitude: 10.3157, longitude: 123.8854 },
     name: "Dink House Cebu",
-    address: "Salinas Drive, Lahug, Cebu City",
+    // CR-050: built like the venue form does — "Street, Barangay, City, Province" from the PH address list
+    address: "Salinas Drive, Lahug (Pob.), Cebu City (Capital), Cebu",
+    location: { regionCode: "07", provinceCode: "0722", cityMunCode: "072217", barangayCode: "072217041", street: "Salinas Drive" },
     phone: "0932 4410 288",
     clipPrice: 120,
     onlineBooking: true,
@@ -182,8 +195,13 @@ const VENUES = [
   },
   {
     key: "alabang",
+    company: "first",
+    // CR-050: the venue's map pin (players get Google Maps directions)
+    pin: { latitude: 14.4195, longitude: 121.039 },
     name: "Kitchen Line Pickleball — Alabang",
-    address: "Madrigal Business Park, Alabang, Muntinlupa",
+    // CR-050: built like the venue form does — "Street, Barangay, City, Province" from the PH address list
+    address: "Madrigal Business Park, Alabang, City of Muntinlupa, NCR, Fourth District",
+    location: { regionCode: "13", provinceCode: "1376", cityMunCode: "137603", barangayCode: "137603001", street: "Madrigal Business Park" },
     phone: null,
     clipPrice: 100,
     onlineBooking: false, // booking link off: desk bookings only
@@ -203,6 +221,39 @@ const VENUES = [
     gamesPerCourtPerDay: [0, 2],
   },
 ];
+
+/**
+ * PLAN-008 / CR-050: the 25 generated venues of the 13 extra demo companies
+ * (scripts/_demo-venues.js) — 2 to 4 courts, one camera each (two on Court 1 of every
+ * third venue), a standard and a peak rate, quieter than the hand-made three.
+ */
+for (const v of EXTRA_VENUES) {
+  const courtCount = v.courts;
+  VENUES.push({
+    key: v.key,
+    company: v.company,
+    name: v.name,
+    address: v.address,
+    location: v.location,
+    pin: v.pin,
+    phone: v.phone,
+    clipPrice: v.clipPrice,
+    onlineBooking: v.onlineBooking,
+    rules: { deskHoldMinutes: 30, onlineHoldMinutes: 15, cancelCutoffHours: 24, checkInEarlyMinutes: 10 },
+    hours: v.hours,
+    courts: Array.from({ length: courtCount }, (_, i) => ({
+      key: `c${i + 1}`,
+      name: `Court ${i + 1}`,
+      cameras: i === 0 && Number(v.key.slice(1)) % 3 === 0 ? 2 : 1,
+    })),
+    rates: [
+      { name: "Standard", days: ALL_DAYS, start: 0, end: 17, price: v.base },
+      { name: "Peak", days: ALL_DAYS, start: 17, end: 24, price: v.peak },
+    ],
+    gamesPerCourtPerDay: [0, 1],
+    bookingsPerDay: v.onlineBooking ? [0, 2] : [0, 1],
+  });
+}
 
 const PLAYERS = [
   "Miguel Bautista",
@@ -310,10 +361,10 @@ async function uuid(conn) {
 const KEEP_TABLES = new Set(["_migrations", "permissions", "platform_admins", "platform_admin_refresh_tokens"]);
 
 /**
- * PLAN-008: the two demo companies, each with its own Owner (setup makes no company or
- * Owner — the back office onboards them; the demo does it here). The first has slug
- * "default", so it may use the .env Xendit keys in development (utils/companyPayments.js);
- * it owns the staff below and every venue but Dink House Cebu.
+ * PLAN-008: the two hand-made demo companies (13 more in scripts/_demo-venues.js), each
+ * with its own Owner (setup makes no company or Owner — the back office onboards them;
+ * the demo does it here). The first has slug "default", so it may use the .env Xendit keys
+ * in development (utils/companyPayments.js); it owns the staff below, BGC and Alabang.
  */
 const FIRST_COMPANY = {
   name: "Smash Point Group",
@@ -446,24 +497,23 @@ async function seedCompany(conn, password, { name, slug, owner }) {
   return { companyId, ownerEmail: email, ownerAccountId: accountId };
 }
 
-/** PLAN-008: both demo companies → { defaultId, secondId, firstOwner, secondOwner, secondOwnerAccountId } */
+/**
+ * PLAN-008: every demo company (the two hand-made ones + EXTRA_COMPANIES) →
+ * { defaultId, byKey: { first, second, rally, … → { companyId, name, ownerEmail, ownerAccountId } } }
+ */
 async function seedCompanies(conn, password) {
-  const first = await seedCompany(conn, password, FIRST_COMPANY);
-  const second = await seedCompany(conn, password, SECOND_COMPANY);
-  return {
-    defaultId: first.companyId,
-    firstOwner: first.ownerEmail,
-    secondId: second.companyId,
-    secondOwner: second.ownerEmail,
-    secondOwnerAccountId: second.ownerAccountId,
-  };
+  const byKey = {};
+  for (const [key, company] of [["first", FIRST_COMPANY], ["second", SECOND_COMPANY], ...EXTRA_COMPANIES.map((c) => [c.key, c])]) {
+    byKey[key] = { ...(await seedCompany(conn, password, company)), name: company.name };
+  }
+  return { defaultId: byKey.first.companyId, byKey };
 }
 
 /**
- * The seeders pick desk staff from the default company; at the second company's venue
+ * The seeders pick desk staff from the default company; at every other company's venues
  * its own Owner made those rows (no company sees another company's staff).
  */
-async function attributeSecondCompany(conn, companies) {
+async function attributeOtherCompanies(conn, companies) {
   const venueRows = `(SELECT venueId FROM venues WHERE companyId = ?)`;
   const columns = [
     ["court_closures", "createdByAccountId"],
@@ -472,11 +522,14 @@ async function attributeSecondCompany(conn, companies) {
     ["payments", "receivedByAccountId"],
     ["payments", "refundedByAccountId"],
   ];
-  for (const [table, column] of columns) {
-    await conn.query(
-      `UPDATE \`${table}\` SET \`${column}\` = ? WHERE \`${column}\` IS NOT NULL AND venueId IN ${venueRows}`,
-      [companies.secondOwnerAccountId, companies.secondId]
-    );
+  for (const [key, company] of Object.entries(companies.byKey)) {
+    if (key === "first") continue;
+    for (const [table, column] of columns) {
+      await conn.query(
+        `UPDATE \`${table}\` SET \`${column}\` = ? WHERE \`${column}\` IS NOT NULL AND venueId IN ${venueRows}`,
+        [company.ownerAccountId, company.companyId]
+      );
+    }
   }
 }
 
@@ -592,13 +645,16 @@ async function seedVenues(conn, companies) {
     await insert(conn, "venues", {
       venueId: venue.venueId,
       // PLAN-008: Dink House Cebu belongs to the second company
-      companyId: venue.key === "cebu" ? companies.secondId : companies.defaultId,
+      companyId: companies.byKey[venue.company].companyId,
       name: venue.name,
       address: venue.address,
       phone: venue.phone,
       clipRetentionDays: 7,
       clipPrice: venue.clipPrice,
       bookingToken: venue.onlineBooking ? randomToken() : null,
+      ...venue.location,
+      latitude: venue.pin?.latitude ?? null,
+      longitude: venue.pin?.longitude ?? null,
       ...venue.rules,
       status: "Active",
       dateCreated: fmt(created),
@@ -868,7 +924,7 @@ async function seedBookings(conn, staff) {
   };
 
   for (const venue of VENUES) {
-    const perDay = venue.onlineBooking ? [1, 3] : [0, 1];
+    const perDay = venue.bookingsPerDay || (venue.onlineBooking ? [1, 3] : [0, 1]);
     for (let day = -10; day <= DEMO_DAYS_AHEAD - 1; day += 1) {
       const count = randInt(...perDay);
       for (let i = 0; i < count; i += 1) {
@@ -1175,7 +1231,7 @@ async function main() {
     await seedBookings(conn, staff); // before walk-ins: bookings get the good slots
     await seedPastGames(conn, staff);
     await seedAuditTrail(conn, staff, companies.defaultId);
-    await attributeSecondCompany(conn, companies);
+    await attributeOtherCompanies(conn, companies);
 
     await conn.commit();
 
@@ -1187,14 +1243,17 @@ async function main() {
     );
 
     console.log("\n   📋 Demo staff logins (Admin portal):");
-    console.log(`      ${`Owner (${FIRST_COMPANY.name})`} ${companies.firstOwner}`);
+    console.log(`      ${`Owner (${FIRST_COMPANY.name})`} ${companies.byKey.first.ownerEmail}`);
     for (const person of STAFF) {
       const note = person.status === "Inactive" ? "  (Inactive — can't sign in)" : "";
       console.log(`      ${person.role.padEnd(14)} ${staffEmail(person)}${note}`);
     }
-    console.log(
-      `      Owner (${SECOND_COMPANY.name}) ${companies.secondOwner}   ← a second company: sees only Dink House Cebu`
-    );
+    console.log("\n   🏢 The other companies' Owners (each sees only its own venues):");
+    for (const [key, company] of Object.entries(companies.byKey)) {
+      if (key === "first") continue;
+      const venues = VENUES.filter((v) => v.company === key).length;
+      console.log(`      ${company.name.padEnd(26)} ${company.ownerEmail}  (${venues} venue${venues === 1 ? "" : "s"})`);
+    }
     console.log(
       generated
         ? `      Password: ${password}   ← generated now, shown only this once`
@@ -1206,8 +1265,8 @@ async function main() {
       [VENUES.map((v) => v.venueId)]
     );
     if (links.length) {
-      console.log("\n   🔗 Booking links (on the web app):");
-      links.forEach((v) => console.log(`      ${v.name}: /book/${v.bookingToken}`));
+      console.log(`\n   🔗 ${links.length} venues take online bookings — all on /book; for example:`);
+      links.slice(0, 3).forEach((v) => console.log(`      ${v.name}: /book/${v.bookingToken}`));
     }
 
     console.log(

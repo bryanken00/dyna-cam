@@ -13,6 +13,7 @@ import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
+import { directionsUrl } from "../../../utils/maps.js";
 import { firstBookableDate, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import {
@@ -96,7 +97,7 @@ const moveCourtKey = (manageToken, courtId) =>
  */
 const findVenue = async (db, bookingToken) => {
   const rows = await db.query(
-    `SELECT v.venueId, v.name, v.address, v.phone, v.logoUrl,
+    `SELECT v.venueId, v.name, v.address, v.latitude, v.longitude, v.phone, v.logoUrl,
             v.deskHoldMinutes, v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes
      FROM venues v
      INNER JOIN companies co ON co.companyId = v.companyId AND co.status = 'Active'
@@ -130,6 +131,8 @@ const venueView = (venue) => ({
   address: venue.address,
   phone: venue.phone,
   logoUrl: signUploadUrl(venue.logoUrl),
+  // CR-050: Google Maps directions to the venue's pin (null: no pin)
+  directionsUrl: directionsUrl(venue.latitude, venue.longitude),
 });
 
 /** "06:00:00" → "06:00"; "24:00:00" stays "24:00" (midnight). */
@@ -146,7 +149,7 @@ router.get(
   catchAsync(async (req, res) => {
     const today = moment().tz(TIMEZONE).day();
     const rows = await req.db.query(
-      `SELECT v.venueId, v.name, v.address, v.phone, v.logoUrl, v.bookingToken,
+      `SELECT v.venueId, v.name, v.address, v.latitude, v.longitude, v.phone, v.logoUrl, v.bookingToken,
               h.opensAt, h.closesAt,
               (SELECT COUNT(*) FROM courts c
                WHERE c.venueId = v.venueId AND c.status = 'Active') AS courtCount
@@ -170,6 +173,10 @@ router.get(
         ...venueView(v),
         bookingToken: v.bookingToken,
         courtCount: Number(v.courtCount),
+        // CR-050: the venue's public pin (null: none) — the page sorts by distance from the
+        // player in the browser ("Near me"); the player's location never reaches the API
+        latitude: v.latitude === null ? null : Number(v.latitude),
+        longitude: v.longitude === null ? null : Number(v.longitude),
         // null: closed today
         todayHours: v.opensAt ? { opensAt: hhmm(v.opensAt), closesAt: hhmm(v.closesAt) } : null,
       })),
@@ -541,7 +548,7 @@ const syncCheckout = async (db, checkoutId) => {
 const BOOKING_PAGE_SELECT = `SELECT b.bookingId, b.bookingCode, b.startAt, b.endAt, b.playerName,
               b.email, b.price, b.paymentStatus, b.payMethod, b.holdExpiresAt, b.checkoutId,
               b.status, b.cancelledAt, b.cancelledBy, b.rescheduledCount, b.venueId, b.courtId,
-              c.name AS courtName, v.name, v.address, v.phone, v.logoUrl, v.cancelCutoffHours,
+              c.name AS courtName, v.name, v.address, v.latitude, v.longitude, v.phone, v.logoUrl, v.cancelCutoffHours,
               v.checkInEarlyMinutes,
               s.shareToken AS gameShareToken,
               EXISTS (SELECT 1 FROM payments p

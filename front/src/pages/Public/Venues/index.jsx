@@ -5,8 +5,11 @@ import {
   Clock,
   CreditCard,
   LayoutGrid,
+  Loader2,
+  LocateFixed,
   LogIn,
   MapPin,
+  Navigation,
   Play,
   RotateCcw,
   Store,
@@ -103,6 +106,11 @@ const VenuesPage = () => {
     search,
     handleSearch,
     handleClearSearch,
+    nearMe,
+    locating,
+    locationError,
+    handleNearMe,
+    handleClearNearMe,
     isLoading,
     isFetching,
     loadError,
@@ -176,15 +184,35 @@ const VenuesPage = () => {
               </div>
             ) : (
               <>
-                {total > 3 && (
-                  <div className="sm:max-w-sm">
-                    <SearchInput
-                      value={search}
-                      onChange={handleSearch}
-                      placeholder="Search by venue or place"
-                      width="100%"
-                    />
-                  </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {total > 3 && (
+                    <div className="sm:max-w-sm sm:flex-1">
+                      <SearchInput
+                        value={search}
+                        onChange={handleSearch}
+                        placeholder="Search by venue or place"
+                        width="100%"
+                      />
+                    </div>
+                  )}
+                  {/* CR-050: sort by distance from the player (their location stays in the browser) */}
+                  {total > 1 && (
+                    <Button
+                      type="button"
+                      variant={nearMe ? "default" : "outline"}
+                      className="h-10 shrink-0"
+                      onClick={nearMe ? handleClearNearMe : handleNearMe}
+                      disabled={locating}
+                    >
+                      {locating ? <Loader2 className="animate-spin" /> : <LocateFixed />}
+                      {locating ? "Finding you…" : nearMe ? "Nearest first · Clear" : "Near me"}
+                    </Button>
+                  )}
+                </div>
+                {locationError && (
+                  <p className="m-0" style={{ fontSize: 13, color: "var(--color-error)" }}>
+                    {locationError}
+                  </p>
                 )}
 
                 {venues.length === 0 ? (
@@ -203,7 +231,7 @@ const VenuesPage = () => {
                 ) : (
                   <ul className="p-0 list-none space-y-3">
                     {venues.map((v) => (
-                      <li key={v.key} className="min-w-0">
+                      <li key={v.key} className="min-w-0 relative">
                         <Link
                           to={v.to}
                           className="h-full p-4 flex items-center gap-3.5"
@@ -227,7 +255,7 @@ const VenuesPage = () => {
                           </span>
                           <span className="min-w-0 flex-1 space-y-1">
                             <span
-                              className="block truncate"
+                              className={`block truncate ${v.directionsUrl ? "pr-24" : ""}`}
                               style={{ fontSize: 15.5, fontWeight: 600, color: "var(--color-text-dark)" }}
                             >
                               {v.name}
@@ -239,6 +267,12 @@ const VenuesPage = () => {
                               </span>
                             )}
                             <span className="flex items-center gap-x-3 gap-y-1 flex-wrap" style={metaStyle}>
+                              {v.distance && (
+                                <span className="inline-flex items-center gap-1.5" style={{ fontWeight: 600 }}>
+                                  <LocateFixed className={metaIcon} />
+                                  {v.distance}
+                                </span>
+                              )}
                               <span className="inline-flex items-center gap-1.5">
                                 <LayoutGrid className={metaIcon} />
                                 {v.courts}
@@ -260,6 +294,20 @@ const VenuesPage = () => {
                           </span>
                           <ChevronRight className="h-4 w-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
                         </Link>
+                        {/* CR-050: its own link (not inside the card's link) */}
+                        {v.directionsUrl && (
+                          <a
+                            href={v.directionsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-1 rounded-md transition-colors hover:bg-(--color-surface-sunken)"
+                            style={{ fontSize: 12, fontWeight: 600, color: "var(--color-link)", textDecoration: "none" }}
+                            aria-label={`Directions to ${v.name} (Google Maps)`}
+                          >
+                            <Navigation className="h-3.5 w-3.5" />
+                            Directions
+                          </a>
+                        )}
                       </li>
                     ))}
                   </ul>

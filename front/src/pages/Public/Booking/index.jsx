@@ -7,6 +7,7 @@ import {
   CreditCard,
   Link2,
   Loader2,
+  Navigation,
   Play,
   RotateCcw,
   UserX,
@@ -322,6 +323,21 @@ const BookingPage = () => {
                     : booking.paymentStatus.toLowerCase()}
             </Row>
             {booking.venue.address && <Row label="Where">{decodeHTML(booking.venue.address)}</Row>}
+            {/* CR-050: Google Maps directions to the venue's pin */}
+            {booking.venue.directionsUrl && (
+              <Row label="Directions">
+                <a
+                  href={booking.venue.directionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 hover:underline"
+                  style={{ color: "var(--color-link)" }}
+                >
+                  <Navigation className="h-3.5 w-3.5" />
+                  Get directions
+                </a>
+              </Row>
+            )}
           </div>
 
           {/* Phase H: cancel or move it yourself until the cut-off */}
