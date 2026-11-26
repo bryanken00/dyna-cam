@@ -58,17 +58,23 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
   const page = (token) => pub("GET", `/public/book/${token}`);
   const availability = (token, date, durationMinutes = 60) =>
     pub("GET", `/public/book/${token}/availability?date=${date}&durationMinutes=${durationMinutes}`);
-  const bookOnline = (token, courtKey, hoursFromNow, body = {}) =>
-    pub("POST", `/public/book/${token}/bookings`, {
-      courtKey,
-      ...slot(hoursFromNow),
-      durationMinutes: 60,
-      playerName: "Bea Santos",
-      phone: "0917 123 4567",
-      email: "bea@example.com",
-      payMethod: "Desk",
-      ...body,
+  // PLAN-006: booking online needs a player signed in with Google — the name and
+  // email are the player's, so `email` / `playerName` here pick which player books
+  const bookOnline = async (token, courtKey, hoursFromNow, body = {}) => {
+    const { email = "bea@example.com", playerName = "Bea Santos", ...rest } = body;
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", `/public/book/${token}/bookings`, {
+      player: player.token,
+      body: {
+        courtKey,
+        ...slot(hoursFromNow),
+        durationMinutes: 60,
+        phone: "0917 123 4567",
+        payMethod: "Desk",
+        ...rest,
+      },
     });
+  };
 
   before(async () => {
     ctx = await startTestApp({ env: { RATE_LIMIT_PUBLIC_BOOK_POINTS: "1000" } });
@@ -203,7 +209,17 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     // Starts within the pay-at-desk deadline
     assert.equal((await bookOnline(home.token, key, 0)).status, 400);
     assert.equal((await bookOnline(home.token, "0123456789abcdef", 70)).status, 400);
-    assert.equal((await bookOnline(home.token, key, 70, { email: "" })).status, 400);
+    // PLAN-006: nobody signed in → 401, and nothing is booked
+    const anonymous = await pub("POST", `/public/book/${home.token}/bookings`, {
+      courtKey: key,
+      ...slot(70),
+      durationMinutes: 60,
+      playerName: "Bea Santos",
+      email: "bea@example.com",
+      payMethod: "Desk",
+    });
+    assert.equal(anonymous.status, 401);
+    assert.equal(anonymous.body.code, "PLAYER_SIGN_IN_REQUIRED");
 
     const day = moment.tz(at(72), FORMAT, "Asia/Manila");
     const venue = await setupVenue("Morning Courts", {
@@ -217,14 +233,11 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
       avail.data.courts[0].slots.map((s) => s.startTime),
       ["06:00", "07:00", "08:00"]
     );
-    const evening = await pub("POST", `/public/book/${venue.token}/bookings`, {
-      courtKey: early,
+    const evening = await bookOnline(venue.token, early, 0, {
       date,
       startTime: "20:00",
-      durationMinutes: 60,
       playerName: "Late Player",
       email: "late@example.com",
-      payMethod: "Desk",
     });
     assert.equal(evening.status, 409);
     assert.match(evening.body.message, /opening hours/);

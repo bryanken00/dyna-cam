@@ -1,14 +1,14 @@
+import { Navigate } from "react-router";
 import {
   CalendarCheck,
   CalendarClock,
   CircleAlert,
   CreditCard,
   Loader2,
-  Mail,
+  LogIn,
   Phone,
   RotateCcw,
   Store,
-  User,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import Spinner from "../../../components/Spinner";
 import PickChip from "../../../components/PickChip";
 import BookingDateStrip from "../../../components/BookingDateStrip";
 import CourtSlotPicker from "../../../components/CourtSlotPicker";
+import GoogleSignInButton from "../../../components/player/GoogleSignInButton";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
 import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
@@ -57,11 +58,19 @@ const mutedIcon = { color: "var(--color-text-muted)" };
  * now sends the player to Xendit's checkout (GCash, Maya, card…); Pay at the
  * desk holds the court and lands them on their booking's own page. CR-032:
  * on wide screens the picker is the left column and the details card the
- * right one, kept in view; phones keep the single column.
+ * right one, kept in view; phones keep the single column. PLAN-006: booking
+ * needs a Google sign-in — anyone can browse the times; Book asks a signed-out
+ * player to sign in first (and brings them back to the same slot).
  */
 const BookPage = () => {
   const {
     page,
+    signedIn,
+    profileRedirect,
+    player,
+    playerLoading,
+    signInAvailable,
+    signInReturnPath,
     venueName,
     isLoading,
     isFetching,
@@ -89,6 +98,8 @@ const BookPage = () => {
     isBooking,
     bookError,
   } = useBookPageHooks();
+
+  if (profileRedirect) return <Navigate to={profileRedirect} replace />;
 
   if (isLoading) {
     return (
@@ -132,7 +143,7 @@ const BookPage = () => {
   const holdMinutes = page.rules.deskHoldMinutes;
 
   return (
-    <PublicLayout footer={FOOTER} wide>
+    <PublicLayout footer={FOOTER} wide signIn={signInAvailable}>
       <div className="space-y-4">
         {/* Venue */}
         <div className="p-6 flex flex-col items-center gap-2 text-center" style={cardStyle}>
@@ -153,7 +164,21 @@ const BookPage = () => {
           )}
         </div>
 
-        {page.courts.length === 0 ? (
+        {!signInAvailable ? (
+          // PLAN-006: booking online needs a Google sign-in, which this server doesn't have
+          <div className="p-6" style={cardStyle}>
+            <ResultState
+              status="404"
+              icon={<CalendarClock className="w-6 h-6" strokeWidth={1.8} />}
+              title="Online booking isn't available right now"
+              description={
+                page.venue.phone
+                  ? `Please call ${formatPhoneDisplay(page.venue.phone)} or book at the front desk.`
+                  : "Please call the venue or book at the front desk."
+              }
+            />
+          </div>
+        ) : page.courts.length === 0 ? (
           <div className="p-6" style={cardStyle}>
             <ResultState
               status="error"
@@ -245,60 +270,39 @@ const BookPage = () => {
                       </span>
                     </div>
 
+                    {!signedIn ? (
+                      // PLAN-006: signed out — sign in with Google first, then come back to this slot
+                      <div className="space-y-4">
+                        <div className="flex items-start gap-2.5" style={{ fontSize: 13.5, color: "var(--color-text-dark)" }}>
+                          <LogIn className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-secondary)" }} />
+                          <span>
+                            Sign in with Google to book. Your booking and the videos of your games are saved to
+                            your account — find them any time in My games.
+                          </span>
+                        </div>
+                        <GoogleSignInButton returnPath={signInReturnPath} className="w-full h-12" />
+                      </div>
+                    ) : (
                     <Form {...form}>
                       <form onSubmit={handleBook} noValidate>
                         <SectionLabel>Who&apos;s booking</SectionLabel>
                         <div className="space-y-4">
-                          <FormField
-                            control={form.control}
-                            name="playerName"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>
-                                  Name <span style={{ color: "var(--color-error)" }}>*</span>
-                                </FormLabel>
-                                <div className="relative">
-                                  <User className={iconPrefix} style={mutedIcon} />
-                                  <FormControl>
-                                    <Input
-                                      placeholder="e.g., Juan dela Cruz"
-                                      className="h-11 pl-9"
-                                      autoComplete="name"
-                                      maxLength={100}
-                                      {...field}
-                                    />
-                                  </FormControl>
+                          {/* PLAN-006: the name and email are the player's Google account */}
+                          <div
+                            className="p-3"
+                            style={{ border: "1px solid var(--color-line)", borderRadius: 12 }}
+                          >
+                            {playerLoading || !player ? (
+                              <span style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Loading your details…</span>
+                            ) : (
+                              <>
+                                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
+                                  {player.name}
                                 </div>
-                                <FormMessage />
-                              </FormItem>
+                                <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{player.email}</div>
+                              </>
                             )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="email"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>
-                                  Email <span style={{ color: "var(--color-error)" }}>*</span>
-                                </FormLabel>
-                                <div className="relative">
-                                  <Mail className={iconPrefix} style={mutedIcon} />
-                                  <FormControl>
-                                    <Input
-                                      type="email"
-                                      inputMode="email"
-                                      placeholder="e.g., juan@example.com"
-                                      className="h-11 pl-9"
-                                      autoComplete="email"
-                                      maxLength={255}
-                                      {...field}
-                                    />
-                                  </FormControl>
-                                </div>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                          </div>
                           <FormField
                             control={form.control}
                             name="phone"
@@ -391,7 +395,12 @@ const BookPage = () => {
                           )}
                         </div>
 
-                        <Button type="submit" size="lg" className="w-full mt-5 h-12" disabled={isBooking}>
+                        <Button
+                          type="submit"
+                          size="lg"
+                          className="w-full mt-5 h-12"
+                          disabled={isBooking || playerLoading || !player}
+                        >
                           {isBooking ? <Loader2 className="animate-spin" /> : <CalendarCheck />}
                           {payMethod === "Online"
                             ? `Book ${picked.courtName}, pay ${formatPeso(picked.price)} now`
@@ -399,6 +408,7 @@ const BookPage = () => {
                         </Button>
                       </form>
                     </Form>
+                    )}
                   </div>
                 </div>
               ) : (

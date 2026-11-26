@@ -24,6 +24,12 @@ describe("payment sandbox (CR-033)", () => {
 
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
   const pub = (method, url, body) => ctx.api(method, url, { body });
+  // PLAN-006: booking online needs a player signed in with Google — the body's
+  // email / playerName say which player books (their account gives both)
+  const bookAsPlayer = async (url, { email = "bea@example.com", playerName = "Bea Santos", ...body }) => {
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", url, { player: player.token, body });
+  };
 
   const slot = (hoursFromNow) => {
     const s = moment()
@@ -40,7 +46,7 @@ describe("payment sandbox (CR-033)", () => {
 
   /** A player books online → { bookingCode, manageToken, checkoutUrl, checkoutId, bookingId } */
   const bookOnline = async (hoursFromNow) => {
-    const res = await pub("POST", `/public/book/${home.token}/bookings`, {
+    const res = await bookAsPlayer(`/public/book/${home.token}/bookings`, {
       courtKey: home.courtKey,
       ...slot(hoursFromNow),
       durationMinutes: 60,

@@ -117,10 +117,9 @@ export const publicBookingSchema = z.object({
   date: bookingDate(),
   startTime: startTime(),
   durationMinutes: bookingLength(360),
-  playerName: z.string().trim().min(1, "Enter your name").max(100),
+  // PLAN-006: the name and email are the signed-in player's (an old page's
+  // playerName / email are dropped here, unknown keys being stripped)
   phone: optionalPhone(),
-  // Required online: it's how the player gets their booking link back
-  email: z.string().trim().email("Enter a valid email").max(255),
   // Phase F: Online = a Xendit checkout (refused with 409 while online payment is off)
   payMethod: z.enum(["Desk", "Online"]),
 });

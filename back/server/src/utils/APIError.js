@@ -77,6 +77,12 @@ export const ERROR_CODES = {
   DRIVE_UNAVAILABLE: 'DRIVE_UNAVAILABLE',
   // CR-040: an old recorder box tried the removed upload to the API
   BOX_UPDATE_REQUIRED: 'BOX_UPDATE_REQUIRED',
+  // PLAN-006: booking online needs a player signed in with Google
+  PLAYER_SIGN_IN_REQUIRED: 'PLAYER_SIGN_IN_REQUIRED',
+  // PLAN-006: Google sign-in for players isn't set up on this server
+  PLAYER_SIGN_IN_OFF: 'PLAYER_SIGN_IN_OFF',
+  // PLAN-006: a player must complete their profile (name, phone) before booking
+  PROFILE_INCOMPLETE: 'PROFILE_INCOMPLETE',
 
   // Server Errors (500)
   INTERNAL_ERROR: 'INTERNAL_ERROR',

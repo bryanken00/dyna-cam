@@ -1,13 +1,15 @@
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
 import {
   CalendarCheck,
   ChevronRight,
   Clock,
   CreditCard,
   LayoutGrid,
+  LogIn,
   MapPin,
   QrCode,
   RotateCcw,
+  Store,
   Ticket,
 } from "lucide-react";
 
@@ -18,6 +20,7 @@ import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import SearchInput from "../../../components/SearchInput";
 import Spinner from "../../../components/Spinner";
+import GoogleSignInButton from "../../../components/player/GoogleSignInButton";
 
 const cardStyle = {
   background: "var(--color-surface)",
@@ -55,6 +58,7 @@ const FindBookingCard = () => (
 
 /** CR-035: the three steps, beside the list on wide screens. */
 const HOW_IT_WORKS = [
+  { icon: LogIn, text: "Sign in with Google — your bookings and game videos stay with your account." },
   { icon: CalendarCheck, text: "Pick a venue, then a day, a court and a time." },
   { icon: CreditCard, text: "Pay online, or at the front desk before your hold runs out." },
   { icon: QrCode, text: "At the court, scan the QR sign and enter your booking code — your game records." },
@@ -86,9 +90,14 @@ const HowItWorksCard = () => (
  * player picks one and lands on its booking page (`/book/:bookingToken`).
  * CR-035: on wide screens the venues are the left column and "Already booked?"
  * plus how booking works sit beside them; phones keep the one column.
+ * PLAN-006: booking needs a Google sign-in, so a signed-out player sees the
+ * sign-in first and the venues once signed in.
  */
 const VenuesPage = () => {
   const {
+    signedIn,
+    profileRedirect,
+    signInAvailable,
     venues,
     total,
     search,
@@ -99,6 +108,8 @@ const VenuesPage = () => {
     loadError,
     refetch,
   } = useVenuesPageHooks();
+
+  if (profileRedirect) return <Navigate to={profileRedirect} replace />;
 
   return (
     <PublicLayout wide>
@@ -111,7 +122,9 @@ const VenuesPage = () => {
             Book a court
           </h1>
           <p className="m-0 mt-1.5" style={{ fontSize: 14, color: "var(--color-text-secondary)" }}>
-            Pick a venue, then a day, a court and a time.
+            {signedIn
+              ? "Pick a venue, then a day, a court and a time."
+              : "Sign in with Google, then pick a venue, a day, a court and a time."}
           </p>
         </div>
 
@@ -131,6 +144,26 @@ const VenuesPage = () => {
                       Try again
                     </Button>
                   }
+                />
+              </div>
+            ) : !signInAvailable ? (
+              // PLAN-006: no Google sign-in on this server → no online booking
+              <div style={cardStyle}>
+                <ResultState
+                  status="404"
+                  icon={<Store className="w-6 h-6" strokeWidth={1.8} />}
+                  title="Online booking isn't available right now"
+                  description="Please call the venue or book at the front desk."
+                />
+              </div>
+            ) : !signedIn ? (
+              <div style={cardStyle}>
+                <ResultState
+                  status="404"
+                  icon={<LogIn className="w-6 h-6" strokeWidth={1.8} />}
+                  title="Sign in to book a court"
+                  description="Use your Google account. Your bookings and the videos of every game you play are saved to it — find them any time in My games."
+                  action={<GoogleSignInButton returnPath="/book" />}
                 />
               </div>
             ) : total === 0 ? (

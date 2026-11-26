@@ -47,6 +47,14 @@ router.use("/v1/public/payment-sandbox", paymentSandboxRoute); // CR-033: test c
 router.use("/v1/public", bookingPublicRoute);
 router.use("/v1/public", publicRoute);
 
+// PLAN-006: players sign in with Google — Google redirects the browser here; the
+// encrypted `state` links the callback to its start (no login)
+import playerGoogleRoute from "../controllers/v1/auth/google.controller.js";
+router.use("/v1/auth/google", playerGoogleRoute);
+// PLAN-006: a signed-in player — Authorization: Player <token> (the session routes make one)
+import playerRoute from "../controllers/v1/player/player.controller.js";
+router.use("/v1/player", playerRoute);
+
 // PLAN-002 pairing — a 6-digit key is the credential, once (no login)
 import pairingRoute from "../controllers/v1/pairing/pairing.controller.js";
 router.use("/v1/pair", pairingRoute);

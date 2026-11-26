@@ -30,7 +30,7 @@ const STEPS = [
   {
     icon: CalendarCheck,
     title: "Book your court",
-    body: "Pick a venue, a court and a time. Pay online with GCash, Maya or a card, or at the desk. You get a booking code.",
+    body: "Pick a venue, a court and a time, and sign in with Google to book. Pay online with GCash, Maya or a card, or at the desk. You get a booking code.",
   },
   {
     icon: QrCode,
@@ -412,7 +412,9 @@ const LandingPage = () => {
               are kept. Everything else is recorded over within minutes. Videos never pass through
               our servers: the venue&apos;s recorder box sends them straight to the court&apos;s
               Google Drive, and they are deleted 7 days after the game (unless the venue chooses
-              otherwise).
+              otherwise). Booking online uses your Google sign-in: we keep your name, email and
+              photo from Google, and the phone you add, to hold your bookings and your game list.
+              Ask the venue to remove them.
             </p>
           </div>
         </section>

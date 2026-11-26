@@ -116,6 +116,9 @@ export const loadTestEnv = (overrides = {}) => {
     RATE_LIMIT_AUTH_POINTS: "1000",
     RATE_LIMIT_UPLOAD_POINTS: "1000",
     RATE_LIMIT_PWRESET_POINTS: "1000",
+    // PLAN-006: every online booking in the tests signs a player in first
+    RATE_LIMIT_PLAYER_SESSION_POINTS: "1000",
+    RATE_LIMIT_PLAYER_SIGN_IN_POINTS: "1000",
     UPLOAD_URL_SECRET: crypto.randomBytes(32).toString("hex"),
     // Recorder boxes enrol with this (PLAN-002 Phase I); ctx.pairBox() uses it
     RECORDER_ENROLL_KEY: TEST_ENROLL_KEY,
@@ -192,12 +195,14 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
    * @param {Array} [options.form] - multipart parts, in order:
    *   [name, value] or [name, Buffer, mimeType, filename]
    * @param {string} [options.token] - access token
+   * @param {string} [options.player] - PLAN-006: a player access token (`Authorization: Player …`)
    * @param {Object} [options.headers]
    * @returns {Promise<{ status: number, body: any, data: any }>}
    */
-  const api = async (method, url, { body, form, token, headers = {} } = {}) => {
+  const api = async (method, url, { body, form, token, player, headers = {} } = {}) => {
     const init = { method, headers: { ...headers } };
     if (token) init.headers.Authorization = `Bearer ${token}`;
+    if (player) init.headers.Authorization = `Player ${player}`;
 
     if (form) {
       const formData = new FormData();
@@ -386,6 +391,50 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     return payCode;
   };
 
+  /**
+   * PLAN-006: a player signed in with Google. Google's own answer is skipped —
+   * the player is made (or found) exactly as the callback does it, and the
+   * sign-in code is traded through POST /player/session like the sign-in page.
+   * The same email always gives the same player. Unless `completeProfile` is
+   * false, the first-sign-in profile is then saved (PATCH /player/me) with
+   * `name` split into first / last and `phone`, so the player can book.
+   * @returns {Promise<{ token: string, refreshToken: string, email: string }>}
+   */
+  const signInPlayer = async ({
+    email = "player@example.test",
+    name = "Test Player",
+    phone = "0917 000 0000",
+    sub,
+    completeProfile = true,
+  } = {}) => {
+    const { signInFromGoogle } = await importFromBack("server/src/utils/players.js");
+    const [first, ...rest] = name.split(" ");
+    const result = await signInFromGoogle(db, {
+      sub: sub || `google-${email.toLowerCase()}`,
+      email,
+      name,
+      givenName: first,
+      familyName: rest.join(" ") || null,
+      photoUrl: null,
+    });
+    if (!result.code) throw new Error(`signInPlayer(${email}): the player is blocked`);
+    const res = await api("POST", "/player/session", { body: { code: result.code } });
+    if (res.status !== 200) {
+      throw new Error(`signInPlayer(${email}) → ${res.status}: ${JSON.stringify(res.body)}`);
+    }
+    const token = res.data.accessToken.token;
+    if (completeProfile) {
+      const saved = await api("PATCH", "/player/me", {
+        player: token,
+        body: { firstName: first, lastName: rest.join(" ") || "Player", phone },
+      });
+      if (saved.status !== 200) {
+        throw new Error(`signInPlayer(${email}) profile → ${saved.status}: ${JSON.stringify(saved.body)}`);
+      }
+    }
+    return { token, refreshToken: res.data.refreshToken.token, email };
+  };
+
   const stop = async () => {
     server.closeAllConnections(); // fetch keeps connections alive; don't wait for them
     await new Promise((resolve) => server.close(resolve));
@@ -405,6 +454,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     createStaff,
     pairBox,
     makeUnpaid,
+    signInPlayer,
     issueResetToken,
     sql,
     db,

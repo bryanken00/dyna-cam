@@ -122,6 +122,7 @@ Copy `back/.env.example` to `back/.env`, then set at least these. Generate secre
 | `PAYMENT_SANDBOX` | `false` | |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from Google Cloud | Required: every court's videos go to its Google Drive. |
 | `GOOGLE_REDIRECT_URI` | `https://api.dgsports.ph/api/v1/oauth/google/callback` | Also add it in Google Cloud as an authorised redirect URI. |
+| `GOOGLE_LOGIN_REDIRECT_URI` | `https://api.dgsports.ph/api/v1/auth/google/callback` | PLAN-006: players sign in with Google to book online. **Required for online booking** — without it the booking page says "call the venue". Also an authorised redirect URI in Google Cloud. |
 | `ALERT_DISCORD_WEBHOOK_URL` | optional | Box offline / disk full / uploads piling up / box needs updating. |
 | `certPath` | **empty** | nginx handles HTTPS for the API. |
 | `RATE_LIMIT_STORE` | `memory` | Fine for one API process (the pm2 file runs one). |
@@ -223,7 +224,10 @@ the Owner's email and the printed password (you're asked to choose a new one).
   `XENDIT_SECRET_KEY`. Test once with the test-mode keys before switching to live ones.
 - **Google Cloud** (required — players get their games from Drive): enable the Drive API; OAuth consent screen External with
   `openid`, `email`, `.../auth/drive.file`, and **publish it** (in "Testing", sign-ins drop after
-  7 days); an OAuth client "Web application" with the redirect URI from §4.
+  7 days); an OAuth client "Web application" with the redirect URI from §4. PLAN-006 (players sign
+  in with Google): also add the scopes `.../auth/userinfo.email` and `.../auth/userinfo.profile`
+  (Data Access), the second redirect URI `GOOGLE_LOGIN_REDIRECT_URI`, and the Branding links
+  (home page, privacy policy, terms) — Google shows the app name on its sign-in screen.
 - **SendGrid**: verify `MAIL_FROM` (Single Sender) or authenticate `dgsports.ph`.
 
 Restart the API after changing `.env`: `cd back && npm run pm2:reload`.
@@ -383,7 +387,8 @@ in this order:
 - [ ] A test email arrives (Admin → forgot password, or a booking confirmation)
 - [ ] Venue, courts and cameras added; the box enrolled (`npm run boxes`) and its cameras show recording
 - [ ] Booking settings: opening hours and rates; online booking link turned on
-- [ ] A test booking paid online (Xendit test mode first): the booking turns Paid; Payments shows it
+- [ ] Sign in with Google on the venue's booking page; the account menu shows your photo
+- [ ] A test booking paid online (Xendit test mode first): the booking turns Paid; Payments shows it, and it's in My games
 - [ ] At the court, scan the QR and enter the code: the game starts and the game page shows it recording
 - [ ] Live view plays on a phone on the venue Wi-Fi (`https://<box>.live.dgsports.ph:8090`)
 - [ ] Each court's Google Drive connected (Admin → Setup → the court → Google Drive)

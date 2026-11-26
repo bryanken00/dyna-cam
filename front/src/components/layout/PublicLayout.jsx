@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import ThemeToggle from "../ThemeToggle";
+import PlayerAccountMenu from "../player/PlayerAccountMenu";
 import DGMark from "../brand/DGMark";
 import Wordmark from "../brand/Wordmark";
 
@@ -10,8 +11,10 @@ import Wordmark from "../brand/Wordmark";
  * footer slot for the privacy note. No login, no sidebar. CR-030: the brand
  * goes home. CR-032: `wide` widens the column for pages with a desktop
  * two-column layout (the venue booking page); phones see no difference.
+ * PLAN-006: a signed-in player's account menu sits beside the theme picker on
+ * every player page; `signIn` also offers "Sign in" to a signed-out visitor.
  */
-const PublicLayout = ({ children, footer, wide = false }) => {
+const PublicLayout = ({ children, footer, wide = false, signIn = false }) => {
   const width = wide ? "max-w-6xl" : "max-w-md";
 
   return (
@@ -29,7 +32,10 @@ const PublicLayout = ({ children, footer, wide = false }) => {
             <DGMark size={22} />
             <Wordmark size={15.5} />
           </Link>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <PlayerAccountMenu showSignIn={signIn} />
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 

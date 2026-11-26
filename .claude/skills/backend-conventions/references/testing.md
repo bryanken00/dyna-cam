@@ -80,11 +80,12 @@ What `startTestApp()` returns:
 
 | Helper | Use |
 | --- | --- |
-| `api(method, url, { body, form, token, headers })` | Call the API. `url` is the path below `/api/v1`. Returns `{ status, body, data }` (`data` is the envelope's `data`). `form` sends multipart: `[name, value]` or `[name, Buffer, mimeType, filename]`, in order. |
+| `api(method, url, { body, form, token, player, headers })` | Call the API. `url` is the path below `/api/v1`. Returns `{ status, body, data }` (`data` is the envelope's `data`). `form` sends multipart: `[name, value]` or `[name, Buffer, mimeType, filename]`, in order. |
 | `get(path)` | Fetch a non-API path, e.g. a signed upload link. Returns the raw `Response`. |
 | `owner()` | The seeded Owner's session `{ accountId, email, token, refreshToken, user }`, signed in once and reused. The Owner holds every permission but is hidden from the Admin portal's lists and by-ID endpoints. |
 | `ownerRoleId()` | The Owner role's ID, for asserting it can't be reached or assigned. |
 | `createStaff(label, { access })` | A role (`"<label> staff"`) and a staff user with it, created through the API as the Owner. `access: "read"` or `"write"` grants the role every permission at that level; omitted, it gets none. The helper also does the user's forced first password change, so the password is `STAFF_PASSWORD` and the session is ready to use. Returns `{ accountId, email, roleId, token, refreshToken, user }`. |
+| `signInPlayer({ email, name, phone, sub, completeProfile })` | PLAN-006: a player signed in with Google (Google's own answer skipped; the same email is the same player), with the first-sign-in profile saved (`name` split into first/last, `phone`) unless `completeProfile: false`. Returns `{ token, refreshToken, email }`; pass `player: token` to `api()` to send `Authorization: Player …`. Booking online needs one with a complete profile. |
 | `login(email, password)` | Sign in as anyone; throws if it fails. Returns `{ token, refreshToken, user }`. |
 | `issueResetToken(accountId)` | Store a password-reset link for the account, as forgot-password would have emailed it, and return the token to send to `/auth/reset-password`. |
 | `sql` | A raw `mysql2` connection to the test database — for checking what was (not) written. |

@@ -41,7 +41,7 @@ const shouldApplyIdempotencyKey = (config) => {
 };
 
 // Generate a unique idempotency key
-const generateIdempotencyKey = () => {
+export const generateIdempotencyKey = () => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 

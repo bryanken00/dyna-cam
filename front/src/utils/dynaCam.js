@@ -253,6 +253,26 @@ export const BOOKING_STATUS_TONE = {
   Expired: "muted",
   Deleted: "muted",
 };
+/** PLAN-006: booking status as the player reads it in their game log. */
+export const PLAYER_BOOKING_STATUS_LABEL = {
+  Pending: "Waiting for payment",
+  Confirmed: "Confirmed",
+  CheckedIn: "Checked in",
+  Completed: "Played",
+  NoShow: "Missed",
+  Cancelled: "Cancelled",
+};
+
+/** PLAN-006: a game's status as the player reads it in their game log. */
+export const PLAYER_GAME_STATUS_LABEL = {
+  Waiting: "Waiting to start",
+  Scheduled: "Starting soon",
+  Recording: "Recording now",
+  Processing: "Getting the videos ready",
+  Ready: "Videos ready",
+  Failed: "Videos couldn't be saved",
+};
+
 /** paymentStatus → label. */
 export const BOOKING_PAYMENT_LABEL = {
   Unpaid: "Unpaid",

@@ -20,6 +20,12 @@ describe("player booking entry points (CR-030)", () => {
 
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
   const pub = (method, url, body) => ctx.api(method, url, { body });
+  // PLAN-006: booking online needs a player signed in with Google — the body's
+  // email / playerName say which player books (their account gives both)
+  const bookAsPlayer = async (url, { email = "bea@example.com", playerName = "Bea Santos", ...body }) => {
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", url, { player: player.token, body });
+  };
 
   const settings = (hours = ALL_DAY) => ({
     maxBookingMinutes: 180,
@@ -76,7 +82,7 @@ describe("player booking entry points (CR-030)", () => {
       .startOf("hour")
       .add(hoursAhead, "hours")
       .format(FORMAT);
-    const res = await pub("POST", `/public/book/${token}/bookings`, {
+    const res = await bookAsPlayer(`/public/book/${token}/bookings`, {
       courtKey: courts[0].key,
       date: start.slice(0, 10),
       startTime: start.slice(11, 16),

@@ -21,6 +21,9 @@ const PublicVenues = lazy(() => import("../pages/Public/Venues"));
 const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
 const PublicPaymentSandbox = lazy(() => import("../pages/Public/PaymentSandbox")); // CR-033
 const PublicBoard = lazy(() => import("../pages/Public/Board")); // CR-038: a venue's TV court board
+const PublicSignedIn = lazy(() => import("../pages/Public/SignedIn")); // PLAN-006: back from Google
+const PublicMyGames = lazy(() => import("../pages/Public/MyGames")); // PLAN-006: the player's game log
+const PublicProfile = lazy(() => import("../pages/Public/Profile")); // PLAN-006: name + phone, first sign-in
 
 const RootRoutes = () => {
   return (
@@ -119,6 +122,30 @@ const RootRoutes = () => {
           element={
             <Suspense fallback={<ComponentLoader />}>
               <PublicBoard />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/signed-in"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicSignedIn />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/me/games"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicMyGames />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/me/profile"
+          element={
+            <Suspense fallback={<ComponentLoader />}>
+              <PublicProfile />
             </Suspense>
           }
         />

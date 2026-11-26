@@ -171,7 +171,19 @@ reports `drive-direct`. The app keeps its token
   their replies name courts by a hashed key, never a business ID. CR-030: players get in through
   `/book` (every Active venue with a booking link and an Active court, from `GET /public/venues`)
   and `/booking` (Find my booking: `POST /public/bookings/find`, booking code + the booking's phone
-  or email → its link; one 404 for every miss, rate-limited). A booking must be `Paid` or
+  or email → its link; one 404 for every miss, rate-limited). PLAN-006: **booking online needs a
+  player signed in with Google** — `/api/v1/auth/google/start|callback` (no login; the encrypted
+  `state` carries the return path and the ID-token nonce; the callback hands the browser a
+  single-use 60-second code, never a token, at `/signed-in`) and `/api/v1/player/*`
+  (`Authorization: Player <token>`, `middlewares/playerAuth.middleware.js`; tokens from
+  `utils/playerTokens.js` have their own audience, so staff and player tokens never pass each
+  other's check; `POST /player/session` trades the code, refresh tokens rotate). `players` is one
+  row per Google account; on the first sign-in the player completes a profile (first, middle
+  optional, last name, phone optional — `PATCH /player/me`, pre-filled from Google) and can't book until then (409
+  `PROFILE_INCOMPLETE`); a booking made online carries `bookings.playerId`, and the game log
+  (`GET /player/games`, `utils/players.js`) also lists older bookings with the player's verified
+  email. Off unless `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_LOGIN_REDIRECT_URI` are
+  set — and then nobody books online (the desk still can). A booking must be `Paid` or
   `Free` to check in. **Online payment** goes through Dyna Cam's one Xendit account
   (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
   `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the

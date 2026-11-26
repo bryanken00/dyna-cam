@@ -29,6 +29,12 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
 
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
   const pub = (method, url, body) => ctx.api(method, url, { body });
+  // PLAN-006: booking online needs a player signed in with Google — the body's
+  // email / playerName say which player books (their account gives both)
+  const bookAsPlayer = async (url, { email = "bea@example.com", playerName = "Bea Santos", ...body }) => {
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", url, { player: player.token, body });
+  };
   const webhook = (body, token = CALLBACK_TOKEN) =>
     ctx.api("POST", "/webhooks/xendit", {
       body,
@@ -55,7 +61,7 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
 
   /** A player books online → { bookingCode, manageToken, checkoutUrl, invoiceId, bookingId } */
   const bookOnline = async (hoursFromNow, body = {}) => {
-    const res = await pub("POST", `/public/book/${home.token}/bookings`, {
+    const res = await bookAsPlayer(`/public/book/${home.token}/bookings`, {
       courtKey: home.courtKey,
       ...slot(hoursFromNow),
       durationMinutes: 60,
@@ -137,7 +143,7 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
     process.env.XENDIT_SECRET_KEY = "";
     try {
       assert.equal((await pub("GET", `/public/book/${home.token}`)).data.payOnline, false);
-      const res = await pub("POST", `/public/book/${home.token}/bookings`, {
+      const res = await bookAsPlayer(`/public/book/${home.token}/bookings`, {
         courtKey: home.courtKey,
         ...slot(30),
         durationMinutes: 60,
@@ -470,7 +476,7 @@ describe("online payment through Xendit (PLAN-003 Phase F)", () => {
     assert.equal((await pub("POST", `/public/bookings/${booking.manageToken}/pay`)).status, 409);
 
     // A desk hold can be paid online too
-    const deskHold = await pub("POST", `/public/book/${home.token}/bookings`, {
+    const deskHold = await bookAsPlayer(`/public/book/${home.token}/bookings`, {
       courtKey: home.courtKey,
       ...slot(46),
       durationMinutes: 60,

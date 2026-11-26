@@ -172,15 +172,10 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     const link = await call("POST", `/admin/booking-settings/${home.venueId}/link`);
     const token = link.data.bookingUrl.split("/book/")[1];
     const courtKey = (await ctx.api("GET", `/public/book/${token}`)).data.courts[0].key;
+    const ana = await ctx.signInPlayer({ email: "online.ana@example.test", name: "Online Ana" });
     const res = await ctx.api("POST", `/public/book/${token}/bookings`, {
-      body: {
-        courtKey,
-        ...slot(33),
-        durationMinutes: 60,
-        playerName: "Online Ana",
-        email: "online.ana@example.test",
-        payMethod: "Desk",
-      },
+      player: ana.token,
+      body: { courtKey, ...slot(33), durationMinutes: 60, payMethod: "Desk" },
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const [mail] = mailsTo("online.ana@example.test");

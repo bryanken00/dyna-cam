@@ -35,7 +35,7 @@ const FindBookingPage = () => {
   const { form, handleFind, isFinding, findError } = useFindBookingPageHooks();
 
   return (
-    <PublicLayout>
+    <PublicLayout signIn>
       <div className="space-y-4">
         <div className="pt-2 pb-1">
           <h1
@@ -134,6 +134,13 @@ const FindBookingPage = () => {
           </Form>
         </div>
 
+        {/* PLAN-006: a signed-in player's bookings are all in My games */}
+        <p className="m-0 text-center" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+          Signed in with Google?{" "}
+          <Link to="/me/games" style={{ color: "var(--color-link)", fontWeight: 500 }}>
+            See all your bookings in My games
+          </Link>
+        </p>
         <p className="m-0 text-center" style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
           Not booked yet?{" "}
           <Link to="/book" style={{ color: "var(--color-link)", fontWeight: 500 }}>

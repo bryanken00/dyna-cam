@@ -1,7 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   checkInBookingApi,
-  createPublicBookingApi,
   getAvailabilityApi,
   getBookingPageApi,
   getMyBookingApi,
@@ -40,10 +39,7 @@ export const useGetAvailability = ({ bookingToken, date, durationMinutes }) => {
   });
 };
 
-// Mutation: book a slot. The page shows errors itself, so no toast here.
-export const useCreatePublicBooking = () => {
-  return useMutation({ mutationFn: createPublicBookingApi });
-};
+// Booking a slot: useCreatePlayerBooking (./player.js) — PLAN-006, signed in only
 
 // Query: one booking by its own link. While it's waiting for payment, check
 // again now and then so the page flips to Confirmed once the desk takes it —

@@ -6,6 +6,7 @@ import {
   validateQuery,
 } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
+import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { hashToken } from "../../../utils/crypto/tokens.js";
 import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
@@ -23,6 +24,8 @@ import {
   toStartLocal,
 } from "../../../utils/bookings.js";
 import { isOnlinePaymentOn, isPaymentSandbox } from "../../../lib/payments/xendit.js";
+import { requirePlayer } from "../../../middlewares/playerAuth.middleware.js";
+import { playerSignInConfigured } from "../../../utils/googleSignIn.js";
 import { describeSlot, sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
 import {
   MIN_CHECKOUT_SECONDS,
@@ -52,7 +55,8 @@ import {
  *   POST /bookings/find                          CR-030: a booking's own link from its code + phone/email
  *   GET  /book/:bookingToken                     the venue, its courts and booking rules
  *   GET  /book/:bookingToken/availability        free hours per court for a date and length
- *   POST /book/:bookingToken/bookings            book a slot: pay at the desk, or online (Phase F)
+ *   POST /book/:bookingToken/bookings            book a slot: pay at the desk, or online (Phase F);
+ *                                                PLAN-006: only a player signed in with Google
  *   GET  /bookings/:manageToken                  one booking: status, code, what can be done now
  *   POST /bookings/:manageToken/pay              Phase F: the booking's Xendit checkout
  *   POST /bookings/:manageToken/check-in         Phase D: start the booked game
@@ -168,6 +172,8 @@ router.get(
         // null: closed today
         todayHours: v.opensAt ? { opensAt: hhmm(v.opensAt), closesAt: hhmm(v.closesAt) } : null,
       })),
+      // PLAN-006: booking online needs a Google sign-in; off on this server → nobody books online
+      signInAvailable: playerSignInConfigured(),
     });
   })
 );
@@ -253,6 +259,9 @@ router.get(
       payOnline: isOnlinePaymentOn(),
       // CR-033: online payment is the built-in test checkout, not Xendit
       paymentSandbox: isPaymentSandbox(),
+      // PLAN-006: booking here needs a Google sign-in; off on this server → no online booking
+      signInRequired: true,
+      signInAvailable: playerSignInConfigured(),
     });
   })
 );
@@ -300,13 +309,19 @@ router.get(
 
 /**
  * POST /book/:bookingToken/bookings
- * Body: { courtKey, date, startTime, durationMinutes, playerName, phone?, email, payMethod }
+ * Authorization: Player <token> (PLAN-006 — 401 PLAYER_SIGN_IN_REQUIRED without one)
+ * Body: { courtKey, date, startTime, durationMinutes, phone?, payMethod }
+ * The name and email are the signed-in player's (profile and Google); the
+ * phone is the one given, else their profile's. A player who hasn't completed
+ * their profile yet (first sign-in) gets 409 PROFILE_INCOMPLETE. The booking
+ * is theirs (playerId).
  * Pay at the desk: the slot is held until deskHoldMinutes before the start.
  * 201 { bookingCode, manageToken, manageUrl } — the player's own booking page.
  */
 router.post(
   "/book/:bookingToken/bookings",
   createBookingLimiter,
+  requirePlayer,
   validateParams(bookingTokenParamsSchema),
   validateBody(publicBookingSchema),
   catchAsync(async (req, res) => {
@@ -315,7 +330,17 @@ router.post(
     if (!venue) {
       return res.sendError("This booking link isn't valid", 404);
     }
-    const { date, startTime, durationMinutes, playerName, phone, email, payMethod } = req.body;
+    if (!req.player.profileCompletedAt) {
+      return res.sendError(
+        "Complete your profile before booking",
+        null,
+        409,
+        ERROR_CODES.PROFILE_INCOMPLETE
+      );
+    }
+    const { date, startTime, durationMinutes, payMethod } = req.body;
+    const { playerId, name: playerName, email } = req.player;
+    const phone = req.body.phone || req.player.phone;
     const online = payMethod === "Online";
     if (online && !isOnlinePaymentOn()) {
       return res.sendError("Online payment isn't available here — choose Pay at the desk", 409);
@@ -347,6 +372,7 @@ router.post(
         email,
         payment: online ? "Online" : "Hold",
         source: "Online",
+        playerId,
       });
       if (result.ok) await req.db.commit(conn);
       else await req.db.rollback(conn);

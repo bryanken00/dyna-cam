@@ -198,6 +198,7 @@ const paymentTerms = ({ kind, court, startLocal, now, online }) => {
  * @param {boolean} [b.ignoreHours] - staff booking outside opening hours
  * @param {string|null} [b.accountId] - the staff account (desk)
  * @param {string|null} [b.note] - on the cash payment
+ * @param {string|null} [b.playerId] - PLAN-006: the signed-in player booking online
  * @returns {Promise<{ ok: true, bookingId, bookingCode, manageToken, status, price }
  *   | { ok: false, status: number, message: string, code?: string }>}
  */
@@ -215,6 +216,8 @@ export const createBooking = async (
     ignoreHours = false,
     accountId = null,
     note = null,
+    // PLAN-006: the signed-in player booking online
+    playerId = null,
   }
 ) => {
   const now = getCurrentTimestampLocal();
@@ -258,8 +261,8 @@ export const createBooking = async (
       `INSERT INTO bookings
          (bookingId, venueId, courtId, startAt, endAt, playerName, phone, email, price,
           paymentStatus, payMethod, source, bookingCode, manageToken, holdExpiresAt,
-          createdByAccountId, status, dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          createdByAccountId, playerId, status, dateCreated, dateUpdated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         bookingId,
         court.venueId,
@@ -277,6 +280,7 @@ export const createBooking = async (
         manageToken,
         holdExpiresAt,
         accountId,
+        playerId,
         status,
         now,
         now,

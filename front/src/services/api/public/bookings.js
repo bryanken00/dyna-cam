@@ -19,13 +19,7 @@ export const getAvailabilityApi = async ({ bookingToken, date, durationMinutes }
   return response.data;
 };
 
-// Book a slot. body: { courtKey, date, startTime, durationMinutes, playerName, phone?, email, payMethod }
-// 201 { bookingCode, manageToken, manageUrl, checkoutUrl } — checkoutUrl (Phase F) when
-// payMethod is "Online": the Xendit checkout to send the player to
-export const createPublicBookingApi = async ({ bookingToken, body }) => {
-  const response = await axiosInstance.post(`/api/v1/public/book/${bookingToken}/bookings`, body);
-  return response.data;
-};
+// Booking a slot needs a signed-in player (PLAN-006): createPlayerBookingApi in ./player.js
 
 // One booking → { booking }
 export const getMyBookingApi = async (manageToken) => {

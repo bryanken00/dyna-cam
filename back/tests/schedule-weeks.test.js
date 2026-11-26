@@ -19,6 +19,12 @@ describe("weekly schedule confirmation (CR-043)", () => {
 
   const call = (method, url, body, token = admin.token) => ctx.api(method, url, { token, body });
   const pub = (method, url, body) => ctx.api(method, url, { body });
+  // PLAN-006: booking online needs a player signed in with Google — the body's
+  // email / playerName say which player books (their account gives both)
+  const bookAsPlayer = async (url, { email = "bea@example.com", playerName = "Bea Santos", ...body }) => {
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", url, { player: player.token, body });
+  };
 
   const today = () => moment().tz("Asia/Manila").format(DATE);
   const thisSunday = () => moment.tz(today(), DATE, "Asia/Manila").isoWeekday(7).format(DATE);
@@ -66,7 +72,7 @@ describe("weekly schedule confirmation (CR-043)", () => {
   };
 
   const bookOnline = (venue, date) =>
-    pub("POST", `/public/book/${venue.token}/bookings`, {
+    bookAsPlayer(`/public/book/${venue.token}/bookings`, {
       courtKey: venue.courtKey,
       date,
       startTime: "10:00",

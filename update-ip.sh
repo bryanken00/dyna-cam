@@ -9,7 +9,7 @@
 # run-mac.sh do before starting: every http(s)://<private IPv4> and
 # http(s)://localhost (or 127.0.0.1) in a value becomes http(s)://<ip>. Kept as
 # they are:
-#   • GOOGLE_REDIRECT_URI — Google accepts localhost there, never a private IP
+#   • GOOGLE_REDIRECT_URI, GOOGLE_LOGIN_REDIRECT_URI — Google accepts localhost there, never a private IP
 #   • ALLOWED_ORIGINS' localhost entries — the IP ones are added beside them
 #   • plain host names (DB_HOST=localhost, RATE_LIMIT_REDIS_HOST)
 #   • public addresses, 0.0.0.0, comments; line endings
@@ -71,7 +71,7 @@ const PRIVATE = /^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\
 const URL_IP = /(https?:\/\/)(\d{1,3}(?:\.\d{1,3}){3})(?=[:/,"'\s]|$)/g;
 const URL_LOCAL = /(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/,"'\s]|$)/g;
 const IS_LOCAL = /^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/;
-const KEEP_LOCAL = new Set(["GOOGLE_REDIRECT_URI"]);
+const KEEP_LOCAL = new Set(["GOOGLE_REDIRECT_URI", "GOOGLE_LOGIN_REDIRECT_URI"]);
 let any = false;
 for (const file of files) {
   if (!fs.existsSync(file)) {

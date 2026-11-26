@@ -43,6 +43,12 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
 
   const call = (method, url, body) => ctx.api(method, url, { token: admin.token, body });
   const pub = (method, url, body) => ctx.api(method, url, { body });
+  // PLAN-006: booking online needs a player signed in with Google — the body's
+  // email / playerName say which player books (their account gives both)
+  const bookAsPlayer = async (url, { email = "bea@example.com", playerName = "Bea Santos", ...body }) => {
+    const player = await ctx.signInPlayer({ email, name: playerName });
+    return ctx.api("POST", url, { player: player.token, body });
+  };
 
   /** "YYYY-MM-DD" this many days from today (Manila). */
   const day = (daysAhead) => moment().tz("Asia/Manila").add(daysAhead, "days").format("YYYY-MM-DD");
@@ -91,7 +97,7 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
     const token = link.data.bookingUrl.split("/book/")[1];
     const courts = (await pub("GET", `/public/book/${token}`)).data.courts;
     const court = courts.find((c) => c.name === `Court ${courtNo}`);
-    const res = await pub("POST", `/public/book/${token}/bookings`, {
+    const res = await bookAsPlayer(`/public/book/${token}/bookings`, {
       courtKey: court.key,
       date,
       startTime,
@@ -236,7 +242,7 @@ describe("player cancel and move (PLAN-003 Phase H)", () => {
       (c) => c.name === `Court ${courtNo}`
     );
     assert.ok(courtId);
-    const res = await pub("POST", `/public/book/${token}/bookings`, {
+    const res = await bookAsPlayer(`/public/book/${token}/bookings`, {
       courtKey: court.key,
       date: day(3),
       startTime: "11:00",

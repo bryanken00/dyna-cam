@@ -19,7 +19,7 @@ let privateKey = null;
 let publicKey = null;
 
 // Lazy load keys to avoid startup errors if paths not configured
-const getPrivateKey = () => {
+export const getPrivateKey = () => {
   if (!privateKey) {
     if (!privateKeyPath) {
       throw new APIError(
@@ -33,7 +33,7 @@ const getPrivateKey = () => {
   return privateKey;
 };
 
-const getPublicKey = () => {
+export const getPublicKey = () => {
   if (!publicKey) {
     if (!publicKeyPath) {
       throw new APIError(

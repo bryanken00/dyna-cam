@@ -5,6 +5,8 @@ import { decodeHTML } from "../../../utils/decode-html";
 import { formatPhoneDisplay } from "../../../utils/phoneFormat";
 import { getImageUrl } from "../../../utils/upload";
 import { useGetPublicVenues } from "../../../services/requests/public/bookings";
+import { useProfileRedirect } from "../../../services/requests/public/player";
+import { usePlayerSignedIn } from "../../../store/playerStore";
 
 /** "06:00" → "6 AM", "17:30" → "5:30 PM", "24:00" → "midnight". */
 const clock = (hhmm) => {
@@ -20,9 +22,13 @@ const todayText = (hours) =>
 /**
  * `/book` (CR-030): every venue taking online bookings, filtered by what the
  * player types (name or address). Each card opens the venue's booking page.
+ * PLAN-006: a signed-out player is asked to sign in with Google first.
  */
 export const useVenuesPageHooks = () => {
   const [search, setSearch] = useState("");
+  const signedIn = usePlayerSignedIn();
+  // A first sign-in completes the profile (name, phone) before booking
+  const profileRedirect = useProfileRedirect("/book");
   const { data, isLoading, error, refetch, isFetching } = useGetPublicVenues();
 
   const venues = useMemo(
@@ -51,6 +57,10 @@ export const useVenuesPageHooks = () => {
   }, [venues, search]);
 
   return {
+    signedIn,
+    profileRedirect,
+    // Off on this server: nobody can book online (the desk still can)
+    signInAvailable: data?.data?.signInAvailable !== false,
     venues: shown,
     total: venues.length,
     search,

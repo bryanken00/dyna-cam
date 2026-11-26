@@ -36,7 +36,9 @@ game jobs go only to a box reporting `drive-direct`. No 5-minute pieces, no
 joining, no ffmpeg on the server. PLAN-003 (court booking) adds the player's booking pages under
 `/api/v1/public/book/:bookingToken/*` and `/api/v1/public/bookings/:manageToken/*`
 (`controllers/v1/public/booking.controller.js`; the venue's booking link / the booking's own link is
-the credential) and a fifth no-login family, `/api/v1/webhooks/xendit` (`x-callback-token`; the
+the credential — PLAN-006: creating a booking there also needs a player signed in with Google,
+`Authorization: Player <token>`; the sign-in is `/api/v1/auth/google/*` and the player's own
+routes `/api/v1/player/*`, see `utils/players.js`, `utils/playerTokens.js`, `utils/googleSignIn.js`) and a fifth no-login family, `/api/v1/webhooks/xendit` (`x-callback-token`; the
 invoice is read back from Xendit before anything changes — `lib/payments/xendit.js`,
 `utils/bookingPayments.js`). Booking writes live in `utils/bookings.js` and lock the court row
 before `utils/courtTimeline.js` `findConflict()`. Queries see the whole database (soft deletes aside); the seeded
