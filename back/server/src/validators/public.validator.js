@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalPhone } from "./_helpers.js";
+import { emptyToUndefined, optionalPhone } from "./_helpers.js";
 import { bookingDate, bookingLength, startTime } from "./bookings.validator.js";
 
 /** Validators for the no-login player routes (controllers/v1/public/). */
@@ -102,17 +102,27 @@ export const manageTokenParamsSchema = z.object({ manageToken: token });
 const courtKey = z.string().regex(/^[a-f0-9]{16}$/, "Pick a court");
 
 // GET /book/:bookingToken/availability?date=&durationMinutes=
+// CR-047: the booking page asks for one-hour slots (durationMinutes defaults to 60)
 export const availabilityQuerySchema = z.object({
   date: bookingDate(),
-  durationMinutes: bookingLength(360),
+  durationMinutes: emptyToUndefined(bookingLength(1440).optional()).default(60),
 });
 
+// CR-047: one picked hour — the booking page sends every hour tapped, on any court
+const pickedSlot = z.object({ courtKey, startTime: startTime() });
+
 // POST /book/:bookingToken/bookings
-export const publicBookingSchema = z.object({
-  courtKey,
+// CR-047: { date, slots: [{ courtKey, startTime }] } — neighbouring hours on a court are
+// joined into one booking, and several make an order paid in one checkout. The single
+// shape { courtKey, startTime, durationMinutes } still works.
+export const publicBookingSchema = z
+  .object({
+  courtKey: courtKey.optional(),
   date: bookingDate(),
-  startTime: startTime(),
-  durationMinutes: bookingLength(360),
+  startTime: startTime().optional(),
+  // CR-047: no longest booking — up to the venue's opening hours (checked when booking)
+  durationMinutes: bookingLength(1440).optional(),
+  slots: z.array(pickedSlot).min(1, "Pick at least one hour").max(96).optional(),
   // PLAN-006: the name and email are the signed-in player's (an old page's
   // playerName / email are dropped here, unknown keys being stripped)
   phone: optionalPhone(),
@@ -122,7 +132,11 @@ export const publicBookingSchema = z.object({
     .enum(["Online"], { message: "Booking online is paid online — pay at the counter is no longer offered" })
     .optional()
     .default("Online"),
-});
+  })
+  .refine((b) => b.slots || (b.courtKey && b.startTime && b.durationMinutes), {
+    message: "Pick a court and a time",
+    path: ["slots"],
+  });
 
 // GET /bookings/:manageToken/move-options?date= — PLAN-003 Phase H
 export const moveOptionsQuerySchema = z.object({ date: bookingDate() });

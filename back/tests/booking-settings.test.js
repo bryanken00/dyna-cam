@@ -94,7 +94,8 @@ describe("booking settings and closures (PLAN-003 Phase A)", () => {
       const { settings, courts } = res.data;
       assert.equal(settings.bookingEnabled, false);
       assert.equal(settings.bookingUrl, null);
-      assert.equal(settings.maxBookingMinutes, 180);
+      // CR-047: no longest booking — a booking runs up to the venue's opening hours
+      assert.equal(settings.maxBookingMinutes, undefined);
       assert.equal(settings.deskHoldMinutes, 30);
       assert.deepEqual(settings.hours, []);
       assert.deepEqual(settings.rates, []);
@@ -117,7 +118,8 @@ describe("booking settings and closures (PLAN-003 Phase A)", () => {
       assert.equal(saved.status, 200, JSON.stringify(saved.body));
 
       let { settings } = (await getSettings()).data;
-      assert.equal(settings.maxBookingMinutes, 120);
+      // An old client's Longest booking is ignored
+      assert.equal(settings.maxBookingMinutes, undefined);
       assert.deepEqual(settings.hours, [
         { dayOfWeek: 1, opensAt: "06:00", closesAt: "22:00" },
         { dayOfWeek: 6, opensAt: "07:00", closesAt: "24:00" },
@@ -151,7 +153,7 @@ describe("booking settings and closures (PLAN-003 Phase A)", () => {
       assert.equal(Number(deleted), 2);
     });
 
-    it("refuses bad hours, overlapping rates, odd lengths and foreign courts", async () => {
+    it("refuses bad hours, overlapping rates and foreign courts", async () => {
       const notOnTheHour = await putSettings({
         hours: [{ dayOfWeek: 2, opensAt: "06:30", closesAt: "22:00" }],
       });
@@ -186,9 +188,6 @@ describe("booking settings and closures (PLAN-003 Phase A)", () => {
         ],
       });
       assert.equal(override.status, 200, JSON.stringify(override.body));
-
-      const halfHours = await putSettings({ maxBookingMinutes: 90 });
-      assert.equal(halfHours.status, 400);
 
       const elsewhere = await newCourt(await newVenue("Other Courts"));
       const foreign = await putSettings({

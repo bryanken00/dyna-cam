@@ -206,9 +206,9 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     assert.equal((await availability(home.token, at(-26).slice(0, 10))).status, 400);
     assert.equal((await bookOnline(home.token, key, 24 * 16)).status, 400);
     assert.equal((await availability(home.token, at(24 * 16).slice(0, 10))).status, 400);
-    assert.equal((await bookOnline(home.token, key, 70, { durationMinutes: 240 })).status, 400);
-    // Starts within the pay-at-desk deadline
-    assert.equal((await bookOnline(home.token, key, 0)).status, 400);
+    // CR-047: an hour that started more than 30 minutes ago (the running hour is
+    // bookable only in its first half — booking-orders.test.js)
+    assert.equal((await bookOnline(home.token, key, -1)).status, 400);
     assert.equal((await bookOnline(home.token, "0123456789abcdef", 70)).status, 400);
     // PLAN-006: nobody signed in → 401, and nothing is booked
     const anonymous = await pub("POST", `/public/book/${home.token}/bookings`, {
@@ -241,6 +241,24 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     });
     assert.equal(evening.status, 409);
     assert.match(evening.body.message, /opening hours/);
+    // CR-047: no longest booking — any length inside the opening hours, nothing past closing
+    const pastClosing = await bookOnline(venue.token, early, 0, {
+      date,
+      startTime: "06:00",
+      durationMinutes: 240,
+      playerName: "Long Player",
+      email: "long@example.com",
+    });
+    assert.equal(pastClosing.status, 409);
+    assert.match(pastClosing.body.message, /opening hours/);
+    const allMorning = await bookOnline(venue.token, early, 0, {
+      date,
+      startTime: "06:00",
+      durationMinutes: 180,
+      playerName: "Long Player",
+      email: "long@example.com",
+    });
+    assert.equal(allMorning.status, 201, JSON.stringify(allMorning.body));
   });
 
   it("frees the slot when a hold runs out, and the page says so", async () => {

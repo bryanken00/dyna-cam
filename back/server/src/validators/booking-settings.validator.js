@@ -86,10 +86,9 @@ const overlappingRates = (rates) => {
 // PUT /:venueId
 export const updateBookingSettingsSchema = z
   .object({
-    maxBookingMinutes: wholeNumber("The longest booking", 60, 360).refine(
-      (value) => value % 60 === 0,
-      "The longest booking must be whole hours"
-    ),
+    // CR-047: no longest booking any more (a game runs as long as the venue is open) —
+    // an older page may still send it; it's ignored
+    maxBookingMinutes: z.unknown().optional(),
     bookingDaysAhead: wholeNumber("Days ahead", 1, 90),
     deskHoldMinutes: wholeNumber("The pay-at-desk deadline", 0, 1440),
     onlineHoldMinutes: wholeNumber("The online payment hold", 5, 60),

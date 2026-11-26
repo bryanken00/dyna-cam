@@ -37,14 +37,21 @@ describe("booking maintenance job (PLAN-003 Phase E)", () => {
   // CR-046: no cash — "Paid" is a pay link (Hold) paid online through the test checkout
   const book = async (courtId, hoursFromNow, payment = "Paid") => {
     const s = at(hoursFromNow);
-    const res = await call("POST", "/admin/bookings", {
+    const payload = {
       courtId,
       date: s.slice(0, 10),
       startTime: s.slice(11, 16),
       durationMinutes: 60,
       playerName: "Dina Lim",
       payment: payment === "Paid" ? "Hold" : payment,
-    });
+    };
+    let res = await call("POST", "/admin/bookings", payload);
+    // The last minutes of the running hour are too late for a pay link: book it Free then
+    if (payment === "Paid" && res.status === 400 && /too late to pay online/.test(res.body.message)) {
+      res = await call("POST", "/admin/bookings", { ...payload, payment: "Free" });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.data.bookingId;
+    }
     assert.equal(res.status, 201, JSON.stringify(res.body));
     if (payment === "Paid") await ctx.payBooking(res.data.bookingId);
     return res.data.bookingId;

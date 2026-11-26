@@ -76,7 +76,6 @@ const BookingRulesSection = ({
           <Heading>Rules</Heading>
           <DescriptionList
             items={[
-              { label: "Longest booking", value: formatMinutes(settings.maxBookingMinutes) },
               {
                 label: "Book up to",
                 value: `${settings.bookingDaysAhead} days ahead, in confirmed weeks`,

@@ -8,7 +8,7 @@ import {
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
-import { hashToken } from "../../../utils/crypto/tokens.js";
+import { hashToken, randomPayCode } from "../../../utils/crypto/tokens.js";
 import { bookingManageUrl, sessionShareUrl } from "../../../utils/clips.js";
 import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
@@ -26,10 +26,16 @@ import {
 import { isOnlinePaymentOn, isPaymentSandbox } from "../../../lib/payments/xendit.js";
 import { requirePlayer } from "../../../middlewares/playerAuth.middleware.js";
 import { playerSignInConfigured } from "../../../utils/googleSignIn.js";
-import { describeSlot, sendBookingEmail, sendCreatedEmail } from "../../../utils/bookingEmails.js";
+import {
+  describeSlot,
+  sendBookingEmail,
+  sendCreatedEmail,
+  sendOrderConfirmedEmail,
+} from "../../../utils/bookingEmails.js";
 import {
   MIN_CHECKOUT_SECONDS,
   openCheckout,
+  openOrderCheckout,
   resumeCheckout,
   runPaymentFollowUps,
   settleInvoice,
@@ -87,7 +93,7 @@ const moveCourtKey = (manageToken, courtId) =>
 /** The venue an online booking link belongs to (Active, online booking on), or null. */
 const findVenue = async (db, bookingToken) => {
   const rows = await db.query(
-    `SELECT venueId, name, address, phone, logoUrl, maxBookingMinutes, bookingDaysAhead,
+    `SELECT venueId, name, address, phone, logoUrl, bookingDaysAhead,
             deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes,
             scheduleConfirmedUntil
      FROM venues
@@ -119,14 +125,14 @@ const pastWindowMessage = (venue, date) =>
     ? NOT_OPEN_MESSAGE
     : `You can book up to ${venue.bookingDaysAhead} days ahead`;
 
-/** Why a date or length can't be booked, or null. */
-const dateProblem = (venue, date, durationMinutes) => {
+/**
+ * Why a date can't be booked, or null. CR-047: no longest booking — a game can
+ * run as long as the venue is open (findConflict refuses hours it's closed).
+ */
+const dateProblem = (venue, date) => {
   const { today, lastDate } = bookableDates(venue);
   if (date < today) return "That date has passed";
   if (date > lastDate) return pastWindowMessage(venue, date);
-  if (durationMinutes > venue.maxBookingMinutes) {
-    return `Bookings here are at most ${venue.maxBookingMinutes / 60} hours`;
-  }
   return null;
 };
 
@@ -207,7 +213,6 @@ router.get(
       today,
       lastDate,
       rules: {
-        maxBookingMinutes: venue.maxBookingMinutes,
         deskHoldMinutes: venue.deskHoldMinutes,
         onlineHoldMinutes: venue.onlineHoldMinutes,
         cancelCutoffHours: venue.cancelCutoffHours,
@@ -238,7 +243,7 @@ router.get(
       return res.sendError("This booking link isn't valid", 404);
     }
     const { date, durationMinutes } = req.query;
-    const problem = dateProblem(venue, date, durationMinutes);
+    const problem = dateProblem(venue, date);
     if (problem) {
       return res.sendError(problem, 400);
     }
@@ -250,6 +255,8 @@ router.get(
       courts,
       date,
       durationMinutes,
+      // CR-047: the hour that's running is bookable in its first half
+      allowRunning: true,
     });
 
     return res.sendSuccess("Availability", {
@@ -296,7 +303,7 @@ router.post(
         ERROR_CODES.PROFILE_INCOMPLETE
       );
     }
-    const { date, startTime, durationMinutes } = req.body;
+    const { date } = req.body;
     const { playerId, name: playerName, email } = req.player;
     const phone = req.body.phone || req.player.phone;
     // CR-046: pay first to reserve — no pay at the counter
@@ -306,68 +313,190 @@ router.post(
         409
       );
     }
-    const problem = dateProblem(venue, date, durationMinutes);
-    if (problem) {
-      return res.sendError(problem, 400);
-    }
 
+    // CR-047: the hours picked → one booking per run of neighbouring hours on a court
+    const runs = req.body.slots
+      ? joinPickedHours(req.body.slots)
+      : [{ courtKey: req.body.courtKey, startTime: req.body.startTime, durationMinutes: req.body.durationMinutes }];
     const courts = await activeCourts(req.db, venue.venueId);
-    const court = courts.find((c) => courtKey(bookingToken, c.courtId) === req.body.courtKey);
-    if (!court) {
-      return res.sendError(
-        "That court isn't taking bookings — reload the page and pick again",
-        400
-      );
+    const planned = [];
+    for (const run of runs) {
+      const court = courts.find((c) => courtKey(bookingToken, c.courtId) === run.courtKey);
+      if (!court) {
+        return res.sendError("That court isn't taking bookings — reload the page and pick again", 400);
+      }
+      const problem = dateProblem(venue, date);
+      if (problem) {
+        return res.sendError(runs.length > 1 ? `${court.name} at ${hourLabel(run.startTime)}: ${problem}` : problem, 400);
+      }
+      planned.push({ ...run, court });
     }
+    // Courts in a fixed order (then by time), so two orders can't deadlock
+    planned.sort((a, b) =>
+      a.court.courtId === b.court.courtId
+        ? a.startTime.localeCompare(b.startTime)
+        : a.court.courtId.localeCompare(b.court.courtId)
+    );
 
     let conn;
-    let result;
+    const made = [];
+    let orderId = null;
+    let refused = null;
     try {
       conn = await req.db.beginTransaction();
-      result = await createBooking(conn, {
-        courtId: court.courtId,
-        startLocal: toStartLocal(date, startTime),
-        durationMinutes,
-        playerName,
-        phone,
-        email,
-        payment: "Online",
-        source: "Online",
-        playerId,
-      });
-      if (result.ok) await req.db.commit(conn);
-      else await req.db.rollback(conn);
+      if (planned.length > 1) orderId = await createOrder(conn, { venueId: venue.venueId, playerId });
+      for (const run of planned) {
+        const result = await createBooking(conn, {
+          courtId: run.court.courtId,
+          startLocal: toStartLocal(date, run.startTime),
+          durationMinutes: run.durationMinutes,
+          playerName,
+          phone,
+          email,
+          payment: "Online",
+          source: "Online",
+          playerId,
+          orderId,
+        });
+        if (!result.ok) {
+          refused = {
+            status: result.status,
+            message:
+              planned.length > 1
+                ? `${run.court.name} at ${hourLabel(run.startTime)}: ${result.message}`
+                : result.message,
+          };
+          break;
+        }
+        made.push(result);
+      }
+      if (refused) {
+        await req.db.rollback(conn);
+      } else {
+        if (orderId) await finishOrder(conn, { orderId, made });
+        await req.db.commit(conn);
+      }
     } catch (err) {
       await req.db.rollback(conn);
       throw err;
     }
+    if (refused) return res.sendError(refused.message, refused.status);
 
-    if (!result.ok) {
-      return res.sendError(result.message, result.status);
-    }
+    // In time order for the player (the first one's page is where they come back to)
+    made.sort((a, b) => a.startAt.localeCompare(b.startAt) || a.courtName.localeCompare(b.courtName));
+    const first = made[0];
     const reply = {
-      bookingCode: result.bookingCode,
-      manageToken: result.manageToken,
-      manageUrl: bookingManageUrl(result.manageToken),
+      bookingCode: first.bookingCode,
+      manageToken: first.manageToken,
+      manageUrl: bookingManageUrl(first.manageToken),
       checkoutUrl: null,
+      bookings: made.map((b) => ({
+        bookingCode: b.bookingCode,
+        manageUrl: bookingManageUrl(b.manageToken),
+        courtName: b.courtName,
+        startAt: b.startAt,
+        endAt: b.endAt,
+        price: Number(b.price),
+      })),
+      total: made.reduce((sum, b) => sum + Number(b.price), 0),
     };
 
-    // Phase F: the slot is held; now open its Xendit checkout (outside the
-    // transaction — it's a call to Xendit). If that fails, the hold is let go.
-    if (result.status === "Pending") {
-      const checkout = await openCheckout(req.db, { bookingId: result.bookingId });
+    // Phase F: the slots are held; now open the Xendit checkout (outside the
+    // transaction — it's a call to Xendit). If that fails, every hold is let go.
+    const pending = made.filter((b) => b.status === "Pending");
+    if (pending.length > 0) {
+      const checkout = orderId
+        ? await openOrderCheckout(req.db, { orderId })
+        : await openCheckout(req.db, { bookingId: first.bookingId });
       if (!checkout.ok) {
-        await releaseHold(req.db, result.bookingId);
+        for (const b of pending) await releaseHold(req.db, b.bookingId);
         return res.sendError(checkout.message, checkout.status);
       }
       reply.checkoutUrl = checkout.checkoutUrl;
       return res.sendSuccess("Booked — pay now to confirm it", reply, 201);
     }
-    // Phase G: free (nothing to pay) → the confirmation
-    await sendCreatedEmail(req.db, result);
+    // Phase G: free (nothing to pay) → the confirmation (CR-047: one email for an order)
+    if (orderId) await sendOrderConfirmedEmail(req.db, made.map((b) => b.bookingId));
+    else await sendCreatedEmail(req.db, first);
     return res.sendSuccess("Booked — you're all set", reply, 201);
   })
 );
+
+/** "18:00" → "6 PM". */
+const hourLabel = (startTime) => moment(`2000-01-01 ${startTime}`, "YYYY-MM-DD HH:mm").format("h A");
+
+/**
+ * CR-047: picked hours → runs: per court, neighbouring hours joined into one
+ * booking (10:00 + 11:00 → 10:00 for 2 h); a gap starts another.
+ * @param {Array<{ courtKey, startTime }>} slots
+ * @returns {Array<{ courtKey, startTime, durationMinutes }>}
+ */
+const joinPickedHours = (slots) => {
+  const byCourt = new Map();
+  for (const slot of slots) {
+    if (!byCourt.has(slot.courtKey)) byCourt.set(slot.courtKey, new Set());
+    byCourt.get(slot.courtKey).add(slot.startTime);
+  }
+  const runs = [];
+  for (const [key, times] of byCourt) {
+    let run = null;
+    for (const time of [...times].sort()) {
+      const minute = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+      if (run && minute === run.endMinute) {
+        run.endMinute += 60;
+      } else {
+        run = { courtKey: key, startTime: time, startMinute: minute, endMinute: minute + 60 };
+        runs.push(run);
+      }
+    }
+  }
+  return runs.map((r) => ({
+    courtKey: r.courtKey,
+    startTime: r.startTime,
+    durationMinutes: r.endMinute - r.startMinute,
+  }));
+};
+
+/** CR-047: a new order (inside the transaction) → its orderId. */
+const createOrder = async (conn, { venueId, playerId }) => {
+  const now = getCurrentTimestampLocal();
+  const [uuidRow] = await conn.execute(`SELECT UUID() AS id`);
+  const orderId = uuidRow[0].id;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await conn.execute(
+        `INSERT INTO booking_orders (orderId, orderCode, venueId, playerId, amount, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, 0, 'Active', ?, ?)`,
+        [orderId, randomPayCode(), venueId, playerId, now, now]
+      );
+      return orderId;
+    } catch (err) {
+      if (err.code !== "ER_DUP_ENTRY" || attempt >= 4) throw err;
+    }
+  }
+};
+
+/**
+ * CR-047: the order's total, and one hold for all its unpaid bookings (the
+ * earliest of theirs) so they're paid — or released — together.
+ */
+const finishOrder = async (conn, { orderId, made }) => {
+  const now = getCurrentTimestampLocal();
+  const amount = made.reduce((sum, b) => sum + Number(b.price), 0);
+  await conn.execute(`UPDATE booking_orders SET amount = ?, dateUpdated = ? WHERE orderId = ?`, [
+    amount,
+    now,
+    orderId,
+  ]);
+  const holds = made.filter((b) => b.status === "Pending" && b.holdExpiresAt).map((b) => b.holdExpiresAt);
+  if (holds.length > 1) {
+    const earliest = holds.reduce((min, h) => (h < min ? h : min));
+    await conn.execute(
+      `UPDATE bookings SET holdExpiresAt = ? WHERE orderId = ? AND status = 'Pending'`,
+      [earliest, orderId]
+    );
+  }
+};
 
 /** A held booking whose checkout couldn't be opened gives its slot back. */
 const releaseHold = async (db, bookingId) => {

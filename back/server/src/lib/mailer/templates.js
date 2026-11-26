@@ -235,6 +235,38 @@ export const bookingConfirmedEmail = (b) => ({
 });
 
 /**
+ * CR-047: several bookings paid in one checkout — one confirmation listing each
+ * (its own game: court, day, time and its booking page, where it starts recording).
+ * @param {{ playerName, venueName, day: string, paidLine: string,
+ *   items: Array<{ courtName, time, manageUrl, checkInFrom }> }} o
+ */
+export const bookingOrderConfirmedEmail = (o) => ({
+  subject: `Booked: ${o.items.length} games at ${o.venueName}, ${o.day}`,
+  html: layout(
+    "You're booked",
+    `${p(`${hi(o.playerName)} your courts are booked for <strong>${escapeHtml(o.day)}</strong>. ${escapeHtml(
+      o.paidLine
+    )}. Each one is its own game:`)}
+     <table role="presentation" style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 0 0 20px; border: 1px solid #e4e4e7; border-radius: 8px;">
+       ${o.items
+         .map(
+           (item, i) => `<tr>
+         <td style="padding: 10px 14px;${i ? " border-top: 1px solid #e4e4e7;" : ""}">${escapeHtml(item.courtName)}<br />
+           <span style="color: #71717a;">${escapeHtml(item.time)}</span></td>
+         <td style="padding: 10px 14px; text-align: right;${i ? " border-top: 1px solid #e4e4e7;" : ""}">
+           <a href="${escapeHtml(item.manageUrl)}" style="color: #2563eb;">Open booking</a></td>
+       </tr>`
+         )
+         .join("")}
+     </table>
+     ${muted(`At the court${
+       o.items[0]?.checkInFrom ? ` (from ${escapeHtml(o.items[0].checkInFrom)} for the first one)` : ""
+     }, open that game's booking and tap <strong>I'm at the court — start recording</strong>. Each game is recorded for its booked time, and you get its video on your phone.`)}
+     ${muted("You can find all of them any time in My games.")}`
+  ),
+});
+
+/**
  * Held from the desk (CR-046: a pay link — no payment at the counter): pay
  * online by the deadline, or the court is released.
  * @param {BookingEmailFacts & { payBy: string }} b - payBy: "4:30 PM, Tue Nov 24"

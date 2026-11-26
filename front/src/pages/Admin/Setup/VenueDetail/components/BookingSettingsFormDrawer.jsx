@@ -45,7 +45,6 @@ import { useUpdateBookingSettings } from "../../../../../services/requests/admin
 
 // "all" stands for "every court" — Radix Select items can't be ""
 const ALL_COURTS = "all";
-const LENGTH_OPTIONS = [60, 120, 180, 240, 300, 360];
 
 const hourOf = (hhmm) => Number(String(hhmm).slice(0, 2));
 
@@ -60,7 +59,6 @@ const wholeNumber = (label, min, max) =>
 // Mirrors booking-settings.validator.js
 const settingsSchema = z
   .object({
-    maxBookingMinutes: z.string(),
     bookingDaysAhead: wholeNumber("Days ahead", 1, 90),
     deskHoldMinutes: wholeNumber("Pay-link deadline", 0, 1440),
     onlineHoldMinutes: wholeNumber("Online payment hold", 5, 60),
@@ -137,7 +135,6 @@ const NEW_RATE = {
 const toFormValues = (settings) => {
   const byDay = new Map((settings?.hours || []).map((h) => [h.dayOfWeek, h]));
   return {
-    maxBookingMinutes: String(settings?.maxBookingMinutes ?? 180),
     bookingDaysAhead: String(settings?.bookingDaysAhead ?? 14),
     deskHoldMinutes: String(settings?.deskHoldMinutes ?? 30),
     onlineHoldMinutes: String(settings?.onlineHoldMinutes ?? 15),
@@ -291,7 +288,6 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
       await updateMutation.mutateAsync({
         venueId: settings.venueId,
         settings: {
-          maxBookingMinutes: Number(values.maxBookingMinutes),
           bookingDaysAhead: Number(values.bookingDaysAhead),
           deskHoldMinutes: Number(values.deskHoldMinutes),
           onlineHoldMinutes: Number(values.onlineHoldMinutes),
@@ -383,31 +379,6 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
               {/* Rules */}
               <SectionLabel>Booking rules</SectionLabel>
               <div className="grid gap-5 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="maxBookingMinutes"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Longest booking</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger className="h-10 w-full max-w-40">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {LENGTH_OPTIONS.map((m) => (
-                            <SelectItem key={m} value={String(m)}>
-                              {m / 60} {m === 60 ? "hour" : "hours"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>Bookings are whole hours, starting on the hour.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                 <NumberField
                   form={form}
                   name="bookingDaysAhead"

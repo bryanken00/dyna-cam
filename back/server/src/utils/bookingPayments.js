@@ -3,7 +3,7 @@ import * as xendit from "../lib/payments/xendit.js";
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { bookingManageUrl } from "./clips.js";
 import { findConflict } from "./courtTimeline.js";
-import { sendBookingEmail } from "./bookingEmails.js";
+import { sendBookingEmail, sendOrderConfirmedEmail } from "./bookingEmails.js";
 
 /**
  * PLAN-003 Phase F — paying a booking online through Xendit, and giving the
@@ -44,8 +44,13 @@ const fail = (status, message, code) => ({ ok: false, status, message, code });
 
 /** Our reference on the Xendit invoice — the code the player already has, never an ID. */
 export const invoiceExternalId = (bookingCode) => `booking-${bookingCode}`;
-const bookingCodeOf = (externalId) =>
-  /^booking-([A-Z0-9]{4,12})$/.exec(externalId || "")?.[1] || null;
+/** CR-047: an order's invoice pays several bookings at once. */
+export const orderExternalId = (orderCode) => `order-${orderCode}`;
+/** → { kind: "booking"|"order", code } or null (not one of ours). */
+const invoiceRef = (externalId) => {
+  const match = /^(booking|order)-([A-Z0-9]{4,12})$/.exec(externalId || "");
+  return match ? { kind: match[1], code: match[2] } : null;
+};
 
 const cents = (amount) => Math.round(Number(amount) * 100);
 
@@ -56,11 +61,13 @@ const clock = (local) => moment.tz(local, FORMAT, TIMEZONE).format("h:mm A");
 
 /**
  * How long an online booking's slot is held for its checkout: the venue's
- * onlineHoldMinutes, but never past the start.
+ * onlineHoldMinutes, but never past the start — or, for the hour that's
+ * already running (CR-047), never past the booking's end.
  */
-export const onlineHoldUntil = ({ startLocal, onlineHoldMinutes, now }) => {
+export const onlineHoldUntil = ({ startLocal, endLocal, onlineHoldMinutes, now }) => {
   const until = moment.tz(now, FORMAT, TIMEZONE).add(onlineHoldMinutes, "minutes").format(FORMAT);
-  return until < startLocal ? until : startLocal;
+  const cap = startLocal > now || !endLocal ? startLocal : endLocal;
+  return until < cap ? until : cap;
 };
 
 /** Close a checkout so it can't be paid. Never throws: a failure is logged. */
@@ -139,6 +146,79 @@ export const openCheckout = async (db, { bookingId }) => {
   return { ok: true, checkoutUrl: invoice.url };
 };
 
+/** CR-047: an order's bookings still waiting for this checkout (Pending, Unpaid, hold not run out). */
+const unpaidOrderBookings = (db, orderId, now) =>
+  db.query(
+    `SELECT b.bookingId, b.bookingCode, b.manageToken, b.startAt, b.endAt, b.price, b.email,
+            b.holdExpiresAt, b.checkoutId, c.name AS courtName, v.name AS venueName
+     FROM bookings b
+     JOIN courts c ON c.courtId = b.courtId
+     JOIN venues v ON v.venueId = b.venueId
+     WHERE b.orderId = ? AND b.status = 'Pending' AND b.paymentStatus = 'Unpaid'
+       AND b.holdExpiresAt > ?
+     ORDER BY b.startAt ASC, c.name ASC`,
+    [orderId, now]
+  );
+
+/**
+ * CR-047: one Xendit checkout for every booking of an order still waiting for
+ * payment — their total, open until the earliest of their holds — remembered
+ * on each of them. Outside a transaction: it calls Xendit.
+ *
+ * @returns {Promise<{ ok: true, checkoutUrl: string } | { ok: false, status, message, code? }>}
+ */
+export const openOrderCheckout = async (db, { orderId }) => {
+  if (!xendit.isOnlinePaymentOn()) {
+    return fail(409, "Online payment isn't available right now — please call the venue");
+  }
+  const now = getCurrentTimestampLocal();
+  const [order] = await db.query(
+    `SELECT orderId, orderCode FROM booking_orders WHERE orderId = ? AND status = 'Active' LIMIT 1`,
+    [orderId]
+  );
+  const items = order ? await unpaidOrderBookings(db, orderId, now) : [];
+  if (items.length === 0) return fail(409, "Nothing here is waiting for payment");
+  const holdUntil = items.reduce((min, b) => (b.holdExpiresAt < min ? b.holdExpiresAt : min), items[0].holdExpiresAt);
+  const seconds = secondsUntil(holdUntil, now);
+  if (seconds < MIN_CHECKOUT_SECONDS) {
+    return fail(409, "The hold on these courts is running out — book them again");
+  }
+  const amount = items.reduce((total, b) => total + Number(b.price), 0);
+  const lines = items.map((b) => `${b.courtName} ${clock(b.startAt)}–${clock(b.endAt)}`);
+
+  let invoice;
+  try {
+    invoice = await xendit.createInvoice({
+      externalId: orderExternalId(order.orderCode),
+      amount,
+      durationSeconds: seconds,
+      returnUrl: `${bookingManageUrl(items[0].manageToken)}?checkout=done`,
+      email: items[0].email,
+      description: `${items[0].venueName} · ${items[0].startAt.slice(0, 10)} · ${lines.join(", ")}`.slice(0, 250),
+    });
+  } catch (err) {
+    logger.error("Xendit: could not open an order checkout", { orderId, error: err.message, code: err.code });
+    return fail(502, "Online payment isn't working right now — try again in a minute");
+  }
+
+  const ids = items.map((b) => b.bookingId);
+  const updated = await db.query(
+    `UPDATE bookings SET checkoutId = ?, checkoutUrl = ?, dateUpdated = ?
+     WHERE bookingId IN (${ids.map(() => "?").join(", ")}) AND status = 'Pending' AND paymentStatus = 'Unpaid'`,
+    [invoice.id, invoice.url, getCurrentTimestampLocal(), ...ids]
+  );
+  if (Number(updated?.affectedRows || 0) !== ids.length) {
+    // Something changed meanwhile (staff, a cancel): this total is wrong — don't let it be paid
+    await expireCheckout(invoice.id);
+    await db.query(
+      `UPDATE bookings SET checkoutId = NULL, checkoutUrl = NULL WHERE checkoutId = ?`,
+      [invoice.id]
+    );
+    return fail(409, "Something changed in this booking — open it again to pay");
+  }
+  return { ok: true, checkoutUrl: invoice.url };
+};
+
 /**
  * The player's "Pay": reopen the open checkout (same invoice, same page), or
  * open a new one if it expired or no longer matches the price — while the hold lasts.
@@ -147,6 +227,13 @@ export const openCheckout = async (db, { bookingId }) => {
  * @returns {Promise<{ ok: true, checkoutUrl?: string, paid?: boolean } | { ok: false, ... }>}
  */
 export const resumeCheckout = async (db, booking) => {
+  // CR-047: a booking made with others is paid with them, in one checkout
+  const order = booking.orderId ? { orderId: booking.orderId } : null;
+  let expected = Number(booking.price);
+  if (order) {
+    const items = await unpaidOrderBookings(db, order.orderId, getCurrentTimestampLocal());
+    expected = items.reduce((total, b) => total + Number(b.price), 0);
+  }
   if (booking.checkoutId) {
     let invoice = null;
     try {
@@ -170,13 +257,13 @@ export const resumeCheckout = async (db, booking) => {
     if (
       invoice?.status === "PENDING" &&
       invoice.url &&
-      cents(invoice.amount) === cents(booking.price)
+      cents(invoice.amount) === cents(expected)
     ) {
       return { ok: true, checkoutUrl: invoice.url };
     }
     if (invoice?.status === "PENDING") await expireCheckout(invoice.id);
   }
-  return openCheckout(db, { bookingId: booking.bookingId });
+  return order ? openOrderCheckout(db, order) : openCheckout(db, { bookingId: booking.bookingId });
 };
 
 /** Lock a booking by its code — any status, Deleted too (a payment for it still needs a home). */
@@ -247,11 +334,13 @@ const decide = async (conn, booking, invoice, now) => {
 export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
   const invoice = known || (await xendit.getInvoice(invoiceId));
   if (!invoice.paid) return { outcome: "NOT_PAID" };
-  const bookingCode = bookingCodeOf(invoice.externalId);
-  if (!bookingCode) {
+  const ref = invoiceRef(invoice.externalId);
+  if (!ref) {
     logger.warn("Xendit: a paid invoice that isn't a booking", { invoiceId: invoice.id });
     return { outcome: "UNKNOWN_BOOKING" };
   }
+  if (ref.kind === "order") return settleOrderInvoice(db, invoice, ref.code);
+  const bookingCode = ref.code;
 
   const now = getCurrentTimestampLocal();
   let conn;
@@ -344,6 +433,155 @@ export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
     refunded: Boolean(sent?.ok),
   });
   return { outcome: sent?.ok ? "REFUNDED" : "REFUND_FAILED", why: decision.why };
+};
+
+/** One online payment row for a booking (inside the caller's transaction). */
+const insertOnlinePayment = async (conn, { booking, amount, invoiceId, keep, why, now }) => {
+  const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
+  const paymentId = uuidRow[0].id;
+  await conn.execute(
+    `INSERT INTO payments
+       (paymentId, bookingId, venueId, amount, method, provider, providerRef, refundError, note,
+        status, paidAt, dateCreated, dateUpdated)
+     VALUES (?, ?, ?, ?, 'ONLINE', 'xendit', ?, ?, ?, 'Paid', ?, ?, ?)`,
+    [
+      paymentId,
+      booking.bookingId,
+      booking.venueId,
+      amount,
+      invoiceId,
+      keep ? null : REFUND_QUEUED,
+      keep ? null : `Paid online but not kept (${why}) — refunded`,
+      now,
+      now,
+      now,
+    ]
+  );
+  return paymentId;
+};
+
+/**
+ * CR-047: a paid order invoice. Its courts are locked (sorted), then its
+ * bookings. The amount must be the sum of the order's unpaid bookings (what the
+ * checkout was opened for); then each booking is decided on its own — kept and
+ * Confirmed with a payment row of its own price, or that share refunded. A
+ * different amount (an old checkout) is refunded whole.
+ */
+const settleOrderInvoice = async (db, invoice, orderCode) => {
+  const now = getCurrentTimestampLocal();
+  let conn;
+  const kept = [];
+  const refunds = [];
+  try {
+    conn = await db.beginTransaction();
+    const [orders] = await conn.execute(
+      `SELECT orderId FROM booking_orders WHERE orderCode = ? LIMIT 1`,
+      [orderCode]
+    );
+    if (orders.length === 0) {
+      await db.rollback(conn);
+      logger.warn("Xendit: a paid invoice for no order", { invoiceId: invoice.id, orderCode });
+      return { outcome: "UNKNOWN_BOOKING" };
+    }
+    const [peek] = await conn.execute(
+      `SELECT DISTINCT courtId FROM bookings WHERE orderId = ? ORDER BY courtId`,
+      [orders[0].orderId]
+    );
+    for (const { courtId } of peek) {
+      await conn.execute(`SELECT courtId FROM courts WHERE courtId = ? LIMIT 1 FOR UPDATE`, [courtId]);
+    }
+    const [bookings] = await conn.execute(
+      `SELECT * FROM bookings WHERE orderId = ? ORDER BY startAt ASC, courtId ASC FOR UPDATE`,
+      [orders[0].orderId]
+    );
+    const [existing] = await conn.execute(
+      `SELECT paymentId FROM payments WHERE providerRef = ? LIMIT 1`,
+      [invoice.id]
+    );
+    if (existing.length > 0 || bookings.length === 0) {
+      await db.rollback(conn);
+      return existing.length > 0 ? { outcome: "ALREADY_RECORDED" } : { outcome: "UNKNOWN_BOOKING" };
+    }
+
+    const unpaid = bookings.filter(
+      (b) => b.paymentStatus === "Unpaid" && ["Pending", "Expired"].includes(b.status)
+    );
+    const expected = unpaid.reduce((total, b) => total + Number(b.price), 0);
+    if (unpaid.length === 0 || cents(invoice.amount) !== cents(expected)) {
+      // Not what this order owes now (an old checkout): the whole payment goes back
+      const home = unpaid[0] || bookings[0];
+      const paymentId = await insertOnlinePayment(conn, {
+        booking: home,
+        amount: invoice.amount,
+        invoiceId: invoice.id,
+        keep: false,
+        why: "AMOUNT_MISMATCH",
+        now,
+      });
+      refunds.push({ paymentId, bookingId: home.bookingId, amount: Number(invoice.amount), why: "AMOUNT_MISMATCH" });
+    } else {
+      for (const booking of unpaid) {
+        const decision = await decide(conn, booking, { amount: booking.price }, now);
+        const paymentId = await insertOnlinePayment(conn, {
+          booking,
+          amount: booking.price,
+          invoiceId: invoice.id,
+          keep: decision.keep,
+          why: decision.why,
+          now,
+        });
+        if (decision.keep) {
+          await conn.execute(
+            `UPDATE bookings
+             SET status = 'Confirmed', paymentStatus = 'Paid', payMethod = 'Online', holdExpiresAt = NULL,
+                 checkoutId = NULL, checkoutUrl = NULL, dateUpdated = ?
+             WHERE bookingId = ?`,
+            [now, booking.bookingId]
+          );
+          kept.push(booking.bookingId);
+        } else {
+          await conn.execute(
+            `UPDATE bookings
+             SET status = IF(status = 'Pending' AND holdExpiresAt IS NOT NULL AND holdExpiresAt <= ?,
+                             'Expired', status),
+                 checkoutId = IF(checkoutId = ?, NULL, checkoutId),
+                 checkoutUrl = IF(checkoutId IS NULL, NULL, checkoutUrl),
+                 dateUpdated = ?
+             WHERE bookingId = ?`,
+            [now, invoice.id, now, booking.bookingId]
+          );
+          refunds.push({
+            paymentId,
+            bookingId: booking.bookingId,
+            amount: Number(booking.price),
+            why: decision.why,
+            reason: decision.reason,
+          });
+        }
+      }
+    }
+    await db.commit(conn);
+  } catch (err) {
+    await db.rollback(conn);
+    if (err.code === "ER_DUP_ENTRY") return { outcome: "ALREADY_RECORDED" };
+    throw err;
+  }
+
+  // One email for everything kept (CR-047), then each refund on its own
+  if (kept.length > 0) await sendOrderConfirmedEmail(db, kept);
+  let allSent = true;
+  for (const r of refunds) {
+    logger.warn("Xendit: refunding an order payment a booking can't keep", r);
+    const [sent] = await sendRefunds(db, { paymentIds: [r.paymentId], reason: r.reason || "OTHERS" });
+    allSent = allSent && Boolean(sent?.ok);
+    await sendBookingEmail(db, r.bookingId, "PaymentRefunded", {
+      why: r.why,
+      amount: r.amount,
+      refunded: Boolean(sent?.ok),
+    });
+  }
+  if (kept.length > 0) return { outcome: "CONFIRMED", kept: kept.length, refunded: refunds.length };
+  return { outcome: allSent ? "REFUNDED" : "REFUND_FAILED", why: refunds[0]?.why };
 };
 
 /** The booking reads Refunded once every one of its payments is back (cancelled bookings only). */

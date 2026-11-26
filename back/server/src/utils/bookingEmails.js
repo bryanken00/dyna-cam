@@ -5,6 +5,7 @@ import {
   bookingConfirmedEmail,
   bookingGameStartedEmail,
   bookingMovedEmail,
+  bookingOrderConfirmedEmail,
   bookingPayLinkEmail,
   bookingPaymentRefundedEmail,
   bookingReminderEmail,
@@ -252,6 +253,61 @@ export const sendBookingEmail = async (db, bookingId, kind, extra = {}) => {
     return { sent: true, to: b.email };
   } catch (err) {
     logger.error("Booking email failed", { bookingId, kind, error: err.message });
+    return { sent: false, reason: "FAILED" };
+  }
+};
+
+/**
+ * CR-047: bookings paid together in one checkout → one confirmation listing
+ * them all. Each booking's confirmationSentAt is claimed first (so it's never
+ * also mailed on its own); one booking alone gets the usual confirmation.
+ * Never throws.
+ *
+ * @param db - req.db (after commit)
+ * @param {string[]} bookingIds - Confirmed bookings of one order
+ */
+export const sendOrderConfirmedEmail = async (db, bookingIds) => {
+  if (bookingIds.length === 1) return sendBookingEmail(db, bookingIds[0], "Confirmed");
+  try {
+    const rows = [];
+    for (const id of bookingIds) {
+      const b = await loadBooking(db, id);
+      if (b && b.status === "Confirmed" && b.email) rows.push(b);
+    }
+    if (rows.length === 0) return { sent: false, reason: "NO_EMAIL" };
+    const configured = sendgridConfigured();
+    let mine = rows;
+    if (configured) {
+      const now = getCurrentTimestampLocal();
+      mine = [];
+      for (const b of rows) {
+        const claimed = await db.query(
+          `UPDATE bookings SET confirmationSentAt = ? WHERE bookingId = ? AND confirmationSentAt IS NULL`,
+          [now, b.bookingId]
+        );
+        if (Number(claimed?.affectedRows || 0) > 0) mine.push(b);
+      }
+      if (mine.length === 0) return { sent: false, reason: "ALREADY_SENT" };
+    }
+    mine.sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : a.courtName.localeCompare(b.courtName)));
+    const total = mine.reduce((sum, b) => sum + Number(b.price), 0);
+    const mail = bookingOrderConfirmedEmail({
+      playerName: mine[0].playerName,
+      venueName: mine[0].venueName,
+      day: local(mine[0].startAt).format("ddd, MMM D, YYYY"),
+      paidLine: `Paid ${peso(total)} online`,
+      items: mine.map((b) => ({
+        courtName: b.courtName,
+        time: `${clock(b.startAt)} – ${clock(b.endAt)}`,
+        manageUrl: bookingManageUrl(b.manageToken),
+        checkInFrom: checkInFrom(b),
+      })),
+    });
+    const { sent } = await sendMail({ to: mine[0].email, subject: mail.subject, html: mail.html });
+    if (!configured) return { sent: false, reason: "NOT_SET_UP" };
+    return sent ? { sent: true, to: mine[0].email } : { sent: false, reason: "FAILED" };
+  } catch (err) {
+    logger.error("Order confirmation email failed", { error: err.message });
     return { sent: false, reason: "FAILED" };
   }
 };

@@ -104,8 +104,10 @@ export const getPlayerGamesApi = async ({ page = 1, limit = 10 } = {}) => {
   return response.data;
 };
 
-// Book a slot as the signed-in player. body: { courtKey, date, startTime, durationMinutes, phone?, payMethod }
-// 201 { bookingCode, manageToken, manageUrl, checkoutUrl } — checkoutUrl when payMethod is "Online"
+// Book as the signed-in player. body: { date, slots: [{ courtKey, startTime }], phone?, payMethod }
+// (CR-047: neighbouring hours on a court join into one booking; several are paid in one checkout)
+// 201 { bookingCode, manageToken, manageUrl, checkoutUrl, bookings: [...], total } — the first
+// booking's links; checkoutUrl pays everything
 export const createPlayerBookingApi = async ({ bookingToken, body }) => {
   const response = await playerAxios.post(`/api/v1/public/book/${bookingToken}/bookings`, body);
   return response.data;

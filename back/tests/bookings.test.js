@@ -43,21 +43,21 @@ describe("bookings at the desk (PLAN-003 Phase B)", () => {
   // CR-046: no cash — a pay link (Hold), paid online here unless the test picks how
   // it's paid; a refused booking comes back as it is
   const book = async (courtId, hoursFromNow, body = {}, who = admin) => {
-    const res = await call(
-      "POST",
-      "/admin/bookings",
-      {
-        courtId,
-        ...slot(hoursFromNow),
-        durationMinutes: 60,
-        playerName: "Ana Reyes",
-        phone: "09123456789",
-        email: "ana@example.com",
-        payment: "Hold",
-        ...body,
-      },
-      who
-    );
+    const payload = {
+      courtId,
+      ...slot(hoursFromNow),
+      durationMinutes: 60,
+      playerName: "Ana Reyes",
+      phone: "09123456789",
+      email: "ana@example.com",
+      payment: "Hold",
+      ...body,
+    };
+    const res = await call("POST", "/admin/bookings", payload, who);
+    // The last minutes of the running hour are too late for a pay link: book it Free then
+    if (!body.payment && res.status === 400 && /too late to pay online/.test(res.body?.message || "")) {
+      return call("POST", "/admin/bookings", { ...payload, payment: "Free" }, who);
+    }
     if (res.status === 201 && !body.payment) await ctx.payBooking(res.data.bookingId);
     return res;
   };

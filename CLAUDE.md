@@ -188,7 +188,11 @@ reports `drive-direct`. The app keeps its token
   set — and then nobody books online (the desk still can). A booking must be `Paid` or
   `Free` to check in. CR-046: **no payment at the counter** — players always pay online, staff
   bookings are a pay link (`payment: "Hold"`, the player pays online by the venue's pay-by time) or
-  Free; there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
+  Free; CR-047: players tap hours on any courts — neighbouring hours on a court join into one
+  booking, several bookings are an order (`booking_orders`, `bookings.orderId`) paid by one Xendit
+  invoice `order-<orderCode>` with one payment row per booking (each cancels / refunds alone), and the
+  running hour is bookable in its first 30 minutes (`runningHourBookable`); no longest booking —
+  only opening hours limit a player's booking (`venues.maxBookingMinutes` is unused); there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
   payment, no Online settlement report; migration 042 made old unpaid games and clips Free).
   **Online payment** goes through Dyna Cam's one Xendit account
   (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):

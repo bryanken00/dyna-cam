@@ -370,12 +370,22 @@ router.get(
           )
         : Promise.resolve([]),
       req.db.query(
-        `SELECT b.manageToken, v.checkInEarlyMinutes FROM bookings b
+        `SELECT b.manageToken, b.orderId, v.checkInEarlyMinutes FROM bookings b
          JOIN venues v ON v.venueId = b.venueId
          WHERE b.bookingId = ?`,
         [booking.bookingId]
       ),
     ]);
+    // CR-047: the other bookings paid together with this one
+    const paidTogether = tokens[0].orderId
+      ? await req.db.query(
+          `SELECT b.bookingId, b.bookingCode, b.startAt, b.endAt, b.status, c.name AS courtName
+           FROM bookings b JOIN courts c ON c.courtId = b.courtId
+           WHERE b.orderId = ? AND b.bookingId != ? AND b.status != 'Deleted'
+           ORDER BY b.startAt ASC, c.name ASC`,
+          [tokens[0].orderId, booking.bookingId]
+        )
+      : [];
 
     return res.sendSuccess("Booking retrieved successfully", {
       booking: {
@@ -389,6 +399,7 @@ router.get(
           .format(FORMAT),
         payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
         game: games[0] || null,
+        paidTogether,
       },
     });
   })

@@ -20,7 +20,7 @@ import { confirmTarget, scheduleStatus, sundayOf } from "../../../utils/schedule
  */
 const router = express.Router();
 
-const RULE_COLUMNS = `v.maxBookingMinutes, v.bookingDaysAhead, v.deskHoldMinutes,
+const RULE_COLUMNS = `v.bookingDaysAhead, v.deskHoldMinutes,
   v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes, v.scheduleConfirmedUntil`;
 
 /** The level order for the Dashboard: the most urgent first. */
@@ -141,7 +141,6 @@ router.get(
         bookingUrl: venue.bookingToken ? bookingPageUrl(venue.bookingToken) : null,
         // CR-038: the TV court board's link (null: off)
         displayUrl: venue.displayToken ? courtBoardUrl(venue.displayToken) : null,
-        maxBookingMinutes: venue.maxBookingMinutes,
         bookingDaysAhead: venue.bookingDaysAhead,
         deskHoldMinutes: venue.deskHoldMinutes,
         onlineHoldMinutes: venue.onlineHoldMinutes,
@@ -209,12 +208,11 @@ router.put(
 
       await conn.execute(
         `UPDATE venues
-         SET maxBookingMinutes = ?, bookingDaysAhead = ?, deskHoldMinutes = ?,
+         SET bookingDaysAhead = ?, deskHoldMinutes = ?,
              onlineHoldMinutes = ?, cancelCutoffHours = ?, checkInEarlyMinutes = ?,
              dateUpdated = ?
          WHERE venueId = ?`,
         [
-          rules.maxBookingMinutes,
           rules.bookingDaysAhead,
           rules.deskHoldMinutes,
           rules.onlineHoldMinutes,

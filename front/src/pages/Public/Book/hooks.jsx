@@ -22,8 +22,24 @@ const detailsSchema = z.object({
 });
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_PARAM = /^\d{2}:\d{2}$/;
-const COURT_PARAM = /^[a-f0-9]{16}$/;
+// CR-047: a pick in the URL — "<courtKey>@HH:mm"
+const PICK_PARAM = /^[a-f0-9]{16}@\d{2}:\d{2}$/;
+const pickId = (courtKey, startTime) => `${courtKey}@${startTime}`;
+
+// Picks are kept per date while the page is open: another date starts empty, and
+// coming back to a date brings its picks back. A reload starts over (with a warning
+// first). Booking still takes one date at a time.
+
+// Set just before leaving for the checkout or Google's sign-in, so the reload warning stays quiet
+let leavingOnPurpose = false;
+
+/** byDate with one date's picks replaced (removed when empty) */
+const withDatePicks = (byDate, day, picks) => {
+  const next = { ...byDate };
+  if (picks.size > 0) next[day] = [...picks];
+  else delete next[day];
+  return next;
+};
 
 /** A failed booking → the sentence under the button. */
 const bookErrorMessage = (error) => {
@@ -36,15 +52,53 @@ const bookErrorMessage = (error) => {
 };
 
 /**
- * `/book/:bookingToken` (PLAN-003 Phase C): pick a date, a length, a court and
- * a start time, add who's playing, and book. Phase F: pay now online (the
- * player is sent to Xendit's checkout; CR-046: always — no pay at the desk). PLAN-006: booking needs
- * a Google sign-in — the picks ride along in the URL (?date&len&court&time),
- * so the player comes back from Google to the same slot.
+ * Picks → what gets booked (CR-047): per court, neighbouring hours joined into
+ * one booking (one game); a gap starts another. → [{ courtKey, courtName,
+ * startTime, hours, start, end, price }]
+ */
+const joinPicks = (picks, availability, date) => {
+  if (!availability || !date) return [];
+  const runs = [];
+  for (const court of availability.courts) {
+    let run = null;
+    for (const s of court.slots) {
+      if (!picks.has(pickId(court.key, s.startTime)) || !s.available) {
+        run = null;
+        continue;
+      }
+      if (run) {
+        run.hours += 1;
+        run.price += s.price;
+        run.end = run.end.add(60, "minute");
+      } else {
+        const start = dayjs(`${date} ${s.startTime}`);
+        run = {
+          courtKey: court.key,
+          courtName: decodeHTML(court.name),
+          startTime: s.startTime,
+          hours: 1,
+          price: s.price,
+          start,
+          end: start.add(60, "minute"),
+        };
+        runs.push(run);
+      }
+    }
+  }
+  return runs;
+};
+
+/**
+ * `/book/:bookingToken` (PLAN-003 Phase C): pick a date, then tap the hours you
+ * want on any courts (CR-047 — no length: neighbouring hours on a court join
+ * into one game, and several courts are paid in one checkout), and book. The
+ * hour that's running is bookable in its first half. Paid online (CR-046).
+ * PLAN-006: booking needs a Google sign-in — the picks ride along in the URL
+ * (?date&picks), so the player comes back from Google to the same picks.
  */
 export const useBookPageHooks = () => {
   const { bookingToken } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const { data, isLoading, error, refetch, isFetching } = useGetBookingPage(bookingToken);
@@ -60,20 +114,44 @@ export const useBookPageHooks = () => {
     const value = searchParams.get("date");
     return DATE_PARAM.test(value || "") ? value : null;
   });
-  const [durationMinutes, setDurationMinutes] = useState(() => {
-    const value = Number(searchParams.get("len"));
-    return Number.isInteger(value) && value > 0 && value % 60 === 0 ? value : 60;
+  // CR-047: every hour tapped, as "<courtKey>@HH:mm", per date. Only the URL's picks (back
+  // from signing in) come in, for the URL's date — then leave the URL, so a reload clears them
+  const [picksByDate, setPicksByDate] = useState(() => {
+    const urlDate = searchParams.get("date");
+    const urlPicks = (searchParams.get("picks") || "").split(",").filter((p) => PICK_PARAM.test(p));
+    return DATE_PARAM.test(urlDate || "") && urlPicks.length > 0 ? { [urlDate]: urlPicks } : {};
   });
-  // { courtKey, startTime } — cleared whenever the date or length changes
-  const [slot, setSlot] = useState(() => {
-    const courtKey = searchParams.get("court");
-    const startTime = searchParams.get("time");
-    return COURT_PARAM.test(courtKey || "") && TIME_PARAM.test(startTime || "")
-      ? { courtKey, startTime }
-      : null;
-  });
+  const hadUrlPicks = searchParams.has("picks");
+  useEffect(() => {
+    if (!hadUrlPicks) return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("picks");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [hadUrlPicks, setSearchParams]);
+
+  // Reloading or closing the tab with hours picked asks first (the picks would be lost).
+  // Leaving for the checkout or Google's sign-in doesn't: the picks are booked or travel along.
+  const hasPicks = Object.keys(picksByDate).length > 0;
+  useEffect(() => {
+    if (!hasPicks) return undefined;
+    leavingOnPurpose = false;
+    const warn = (event) => {
+      if (leavingOnPurpose) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasPicks]);
+  const handleLeaveToSignIn = useCallback(() => {
+    leavingOnPurpose = true;
+  }, []);
   const [bookError, setBookError] = useState("");
-  // "Online" | "Desk" — null until the player picks (Online first when it's on)
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   // A date from the URL counts only if it can still be booked
@@ -84,7 +162,10 @@ export const useBookPageHooks = () => {
   const payOnline = !!pageData?.payOnline;
   // CR-033: online payment is the built-in test checkout, not Xendit
   const paymentSandbox = !!pageData?.paymentSandbox;
-  // CR-046: pay first to reserve — always online (no pay at the desk)
+
+  // The picks shown: the chosen date's only
+  const picks = useMemo(() => new Set((date && picksByDate[date]) || []), [picksByDate, date]);
+
 
   // Every date from today to the last bookable one, and whether the venue opens then
   const dates = useMemo(() => {
@@ -100,18 +181,13 @@ export const useBookPageHooks = () => {
     return list;
   }, [pageData]);
 
-  const lengths = useMemo(() => {
-    const max = pageData?.rules?.maxBookingMinutes || 60;
-    return Array.from({ length: max / 60 }, (_, i) => (i + 1) * 60);
-  }, [pageData]);
-
   const {
     data: availabilityData,
     isLoading: availabilityLoading,
     isFetching: availabilityFetching,
     error: availabilityError,
     refetch: refetchAvailability,
-  } = useGetAvailability({ bookingToken, date, durationMinutes });
+  } = useGetAvailability({ bookingToken, date, durationMinutes: 60 });
   const availability = availabilityData?.data || null;
 
   const bookMutation = useCreatePlayerBooking();
@@ -122,60 +198,67 @@ export const useBookPageHooks = () => {
     mode: "onTouched",
   });
 
-  // The phone from the player's last booking, unless they've typed one already
+  // The phone from the player's profile, unless they've typed one already
   const lastPhone = player?.phone || "";
   useEffect(() => {
     if (lastPhone && !form.getFieldState("phone").isDirty) form.setValue("phone", lastPhone);
   }, [lastPhone, form]);
 
   // ─── Handlers ──────────────────────────────────────────────────────
+  // Another date shows its own picks (none yet → empty); the old date's are kept
   const handlePickDate = useCallback((value) => {
     setPickedDate(value);
-    setSlot(null);
     setBookError("");
   }, []);
 
-  const handlePickLength = useCallback((minutes) => {
-    setDurationMinutes(minutes);
-    setSlot(null);
-    setBookError("");
-  }, []);
+  // CR-047: tap an hour to add it, tap again to take it off
+  const handleTogglePick = useCallback(
+    (courtKey, startTime) => {
+      if (!date) return;
+      setPicksByDate((current) => {
+        const next = new Set(current[date] || []);
+        const id = pickId(courtKey, startTime);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return withDatePicks(current, date, next);
+      });
+      setBookError("");
+    },
+    [date],
+  );
 
-  const handlePickSlot = useCallback((courtKey, startTime) => {
-    setSlot({ courtKey, startTime });
+  const handleClearPicks = useCallback(() => {
+    if (!date) return;
+    setPicksByDate((current) => withDatePicks(current, date, new Set()));
     setBookError("");
-  }, []);
+  }, [date]);
 
-  // What the picked slot is: court name, times, price
+  const isPicked = useCallback((courtKey, startTime) => picks.has(pickId(courtKey, startTime)), [picks]);
+
+  // What will be booked: one game per run of neighbouring hours on a court
+  const runs = useMemo(() => joinPicks(picks, availability, date), [picks, availability, date]);
   const picked = useMemo(() => {
-    if (!slot || !availability) return null;
-    const court = availability.courts.find((c) => c.key === slot.courtKey);
-    const s = court?.slots.find((x) => x.startTime === slot.startTime);
-    if (!court || !s?.available) return null;
-    const start = dayjs(`${date} ${slot.startTime}`);
+    if (runs.length === 0) return null;
     return {
-      courtName: decodeHTML(court.name),
-      start,
-      end: start.add(durationMinutes, "minute"),
-      price: s.price,
+      runs,
+      total: runs.reduce((sum, r) => sum + r.price, 0),
     };
-  }, [slot, availability, date, durationMinutes]);
+  }, [runs]);
 
   const handleBook = useCallback(
     (values) => {
-      if (!slot) return;
+      if (!picked) return;
       setBookError("");
+      const slots = [];
+      for (const run of picked.runs) {
+        for (let i = 0; i < run.hours; i += 1) {
+          slots.push({ courtKey: run.courtKey, startTime: run.start.add(i * 60, "minute").format("HH:mm") });
+        }
+      }
       bookMutation.mutate(
         {
           bookingToken,
-          body: {
-            courtKey: slot.courtKey,
-            date,
-            startTime: slot.startTime,
-            durationMinutes,
-            phone: values.phone.trim() || null,
-            payMethod: "Online",
-          },
+          body: { date, slots, phone: values.phone.trim() || null, payMethod: "Online" },
         },
         {
           onSuccess: (response) => {
@@ -184,43 +267,41 @@ export const useBookPageHooks = () => {
               setBookError("Something went wrong. Please try again.");
               return;
             }
-            // Phase F: off to Xendit's checkout; it sends the player back to the
-            // booking's page, which waits for the payment to land
+            // Booked: this date's picks are done
+            setPicksByDate((current) => withDatePicks(current, date, new Set()));
+            // Phase F: off to Xendit's checkout (one for everything picked); it sends
+            // the player back to the first booking's page, which waits for the payment
             const checkoutUrl = response?.data?.checkoutUrl;
             if (checkoutUrl) {
+              leavingOnPurpose = true;
               setIsRedirecting(true);
               window.location.assign(checkoutUrl);
               return;
             }
-            // replace: Back shouldn't land on a form that would book again
-            navigate(`/booking/${token}`, { replace: true });
+            // Nothing to pay: replace, so Back doesn't land on a form that would book again
+            navigate(response?.data?.bookings?.length > 1 ? "/me/games" : `/booking/${token}`, {
+              replace: true,
+            });
           },
           onError: (err) => {
             setBookError(bookErrorMessage(err));
             // Taken meanwhile, or the page is out of date: show the real state
-            if ([400, 409].includes(err?.response?.status)) {
-              setSlot(null);
-              refetchAvailability();
-            }
+            if ([400, 409].includes(err?.response?.status)) refetchAvailability();
             if (err?.response?.status === 404) refetch();
           },
         },
       );
     },
-    [slot, bookMutation, bookingToken, date, durationMinutes, navigate, refetchAvailability, refetch],
+    [picked, bookMutation, bookingToken, date, navigate, refetchAvailability, refetch],
   );
 
   // Where Google brings a signed-out player back to: this page with their picks
   const signInReturnPath = useMemo(() => {
     const query = new URLSearchParams();
     if (date) query.set("date", date);
-    query.set("len", String(durationMinutes));
-    if (slot) {
-      query.set("court", slot.courtKey);
-      query.set("time", slot.startTime);
-    }
+    if (picks.size > 0) query.set("picks", [...picks].join(","));
     return `/book/${bookingToken}?${query}`;
-  }, [bookingToken, date, durationMinutes, slot]);
+  }, [bookingToken, date, picks]);
   const profileRedirect = useProfileRedirect(signInReturnPath);
 
   return {
@@ -232,6 +313,7 @@ export const useBookPageHooks = () => {
     playerLoading: signedIn && playerLoading,
     signInAvailable,
     signInReturnPath,
+    handleLeaveToSignIn,
     venueName: decodeHTML(pageData?.venue?.name),
     isLoading,
     isFetching,
@@ -240,17 +322,15 @@ export const useBookPageHooks = () => {
     refetch,
     dates,
     date,
-    lengths,
-    durationMinutes,
     availability,
     availabilityLoading,
     availabilityFetching,
     availabilityError,
-    slot,
+    isPicked,
     picked,
     handlePickDate,
-    handlePickLength,
-    handlePickSlot,
+    handleTogglePick,
+    handleClearPicks,
     form,
     handleBook: form.handleSubmit(handleBook),
     payOnline,

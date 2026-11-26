@@ -31,12 +31,12 @@ const GoogleMark = () => (
  * sends the browser to Google and back to `returnPath` (default: this page).
  * Unchanged Google mark + "Sign in with Google", as Google's branding asks.
  */
-const GoogleSignInButton = ({ returnPath, label = "Sign in with Google", size = "lg", className }) => {
+const GoogleSignInButton = ({ returnPath, label = "Sign in with Google", size = "lg", className, onClick }) => {
   const location = useLocation();
   const back = returnPath || `${location.pathname}${location.search}`;
   return (
     <Button asChild variant="outline" size={size} className={className}>
-      <a href={playerSignInUrl(back)}>
+      <a href={playerSignInUrl(back)} onClick={onClick}>
         <GoogleMark />
         {label}
       </a>

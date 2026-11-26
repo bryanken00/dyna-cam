@@ -133,7 +133,6 @@ const VENUES = [
     clipPrice: 150,
     onlineBooking: true,
     rules: {
-      maxBookingMinutes: 180,
       bookingDaysAhead: 14,
       deskHoldMinutes: 30,
       onlineHoldMinutes: 15,
@@ -162,7 +161,6 @@ const VENUES = [
     clipPrice: 120,
     onlineBooking: true,
     rules: {
-      maxBookingMinutes: 120,
       bookingDaysAhead: 10,
       deskHoldMinutes: 60,
       onlineHoldMinutes: 15,
@@ -189,7 +187,6 @@ const VENUES = [
     clipPrice: 100,
     onlineBooking: false, // booking link off: desk bookings only
     rules: {
-      maxBookingMinutes: 180,
       bookingDaysAhead: 14,
       deskHoldMinutes: 30,
       onlineHoldMinutes: 15,

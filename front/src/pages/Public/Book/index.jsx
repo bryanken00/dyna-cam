@@ -26,13 +26,12 @@ import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import SectionLabel from "../../../components/SectionLabel";
 import Spinner from "../../../components/Spinner";
-import PickChip from "../../../components/PickChip";
 import BookingDateStrip from "../../../components/BookingDateStrip";
 import CourtSlotPicker from "../../../components/CourtSlotPicker";
 import GoogleSignInButton from "../../../components/player/GoogleSignInButton";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
-import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
+import { formatPeso } from "../../../utils/dynaCam";
 import {
   PHONE_MAX_LENGTH,
   PHONE_PLACEHOLDER,
@@ -70,6 +69,7 @@ const BookPage = () => {
     playerLoading,
     signInAvailable,
     signInReturnPath,
+    handleLeaveToSignIn,
     venueName,
     isLoading,
     isFetching,
@@ -78,16 +78,14 @@ const BookPage = () => {
     refetch,
     dates,
     date,
-    lengths,
-    durationMinutes,
     availability,
     availabilityLoading,
     availabilityError,
-    slot,
+    isPicked,
     picked,
     handlePickDate,
-    handlePickLength,
-    handlePickSlot,
+    handleTogglePick,
+    handleClearPicks,
     form,
     handleBook,
     payOnline,
@@ -198,7 +196,7 @@ const BookPage = () => {
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-6">
-            {/* Left: date, length, court and start time */}
+            {/* Left: date, then courts and hours (CR-047: tap as many as you like) */}
             <div className="p-5 space-y-6 min-w-0" style={cardStyle}>
               {/* Date */}
               <div>
@@ -206,34 +204,21 @@ const BookPage = () => {
                 <BookingDateStrip dates={dates} date={date} today={page.today} onPick={handlePickDate} />
               </div>
 
-              {/* Length */}
-              <div>
-                <SectionLabel>How long</SectionLabel>
-                <div className="flex gap-2 flex-wrap">
-                  {lengths.map((m) => (
-                    <PickChip
-                      key={m}
-                      selected={m === durationMinutes}
-                      onClick={() => handlePickLength(m)}
-                      className="px-4 h-10"
-                    >
-                      <span style={{ fontSize: 14, fontWeight: 500 }}>{formatMinutes(m)}</span>
-                    </PickChip>
-                  ))}
-                </div>
-              </div>
-
               {/* Court + time */}
               <div>
-                <SectionLabel>Court and start time</SectionLabel>
+                <SectionLabel>Courts and hours</SectionLabel>
+                <p className="m-0 mb-3" style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+                  Tap every hour you want, on any court, up to closing. Hours next to each other on a court
+                  are one game; you pay for everything at once.
+                </p>
                 <CourtSlotPicker
                   availability={availability}
                   loading={availabilityLoading}
                   error={availabilityError}
-                  durationMinutes={durationMinutes}
-                  slot={slot}
-                  onPick={handlePickSlot}
-                  emptyHint={`Nothing free for ${formatMinutes(durationMinutes)} that day — try a shorter time or another date.`}
+                  durationMinutes={60}
+                  isPicked={isPicked}
+                  onPick={handleTogglePick}
+                  emptyHint="Nothing free that day — try another date."
                   columnsClassName="grid-cols-3 sm:grid-cols-4 xl:grid-cols-6"
                 />
               </div>
@@ -245,25 +230,55 @@ const BookPage = () => {
               {picked ? (
                 <div className="p-5 lg:flex-1" style={cardStyle}>
                   <div className="lg:sticky lg:top-6">
+                    {/* CR-047: one game per run of neighbouring hours, all paid together */}
                     <div
-                      className="p-3.5 mb-5 flex items-center justify-between gap-3"
+                      className="mb-5"
                       style={{
                         background: "var(--color-surface-sunken)",
                         border: "1px solid var(--color-line)",
                         borderRadius: 12,
                       }}
                     >
-                      <div className="min-w-0">
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
-                          {picked.courtName} · {picked.start.format("ddd, MMM D")}
-                        </div>
-                        <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
-                          {picked.start.format("h:mm A")} – {picked.end.format("h:mm A")}
-                        </div>
+                      <div
+                        className="px-3.5 pt-3 flex items-center justify-between"
+                        style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}
+                      >
+                        <span>{picked.runs[0].start.format("ddd, MMM D")}</span>
+                        <button type="button" onClick={handleClearPicks} className="hover:underline">
+                          Clear
+                        </button>
                       </div>
-                      <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-dark)" }}>
-                        {formatPeso(picked.price)}
-                      </span>
+                      <ul className="m-0 p-0 list-none">
+                        {picked.runs.map((run) => (
+                          <li
+                            key={`${run.courtKey}@${run.startTime}`}
+                            className="px-3.5 py-2.5 flex items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
+                                {run.courtName}
+                              </div>
+                              <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                                {run.start.format("h:mm A")} – {run.end.format("h:mm A")}
+                              </div>
+                            </div>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
+                              {formatPeso(run.price)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div
+                        className="px-3.5 py-3 flex items-center justify-between"
+                        style={{ borderTop: "1px solid var(--color-line)" }}
+                      >
+                        <span style={{ fontSize: 13.5, color: "var(--color-text-secondary)" }}>
+                          {picked.runs.length === 1 ? "1 game" : `${picked.runs.length} games`}
+                        </span>
+                        <span style={{ fontSize: 20, fontWeight: 600, color: "var(--color-text-dark)" }}>
+                          {formatPeso(picked.total)}
+                        </span>
+                      </div>
                     </div>
 
                     {!signedIn ? (
@@ -276,7 +291,11 @@ const BookPage = () => {
                             your account — find them any time in My games.
                           </span>
                         </div>
-                        <GoogleSignInButton returnPath={signInReturnPath} className="w-full h-12" />
+                        <GoogleSignInButton
+                          returnPath={signInReturnPath}
+                          onClick={handleLeaveToSignIn}
+                          className="w-full h-12"
+                        />
                       </div>
                     ) : (
                     <Form {...form}>
@@ -342,8 +361,8 @@ const BookPage = () => {
                           />
                           <span>
                             {paymentSandbox
-                              ? `Pay ${formatPeso(picked.price)} on a test checkout — no real money moves.`
-                              : `Pay ${formatPeso(picked.price)} with GCash, Maya or a card on Xendit's secure page.`}{" "}
+                              ? `Pay ${formatPeso(picked.total)} on a test checkout — no real money moves.`
+                              : `Pay ${formatPeso(picked.total)} with GCash, Maya or a card on Xendit's secure page.`}{" "}
                             The court is yours once it&apos;s paid — we hold it for {page.rules.onlineHoldMinutes} minutes
                             while you pay. Cancel up to {page.rules.cancelCutoffHours} hours before for a full refund.
                           </span>
@@ -356,7 +375,9 @@ const BookPage = () => {
                           disabled={isBooking || playerLoading || !player}
                         >
                           {isBooking ? <Loader2 className="animate-spin" /> : <CalendarCheck />}
-                          {`Book ${picked.courtName}, pay ${formatPeso(picked.price)} now`}
+                          {picked.runs.length === 1
+                            ? `Book ${picked.runs[0].courtName}, pay ${formatPeso(picked.total)} now`
+                            : `Book ${picked.runs.length} games, pay ${formatPeso(picked.total)} now`}
                         </Button>
                       </form>
                     </Form>
@@ -370,10 +391,10 @@ const BookPage = () => {
                 >
                   <CalendarClock className="size-6" style={mutedIcon} />
                   <p className="m-0" style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-dark)" }}>
-                    Pick a start time
+                    Pick your hours
                   </p>
                   <p className="m-0" style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-                    Choose a date, how long, and a court and start time. Your booking and your details go here.
+                    Choose a date, then tap the hours you want on any courts. What you&apos;re booking and the total show here.
                   </p>
                 </div>
               )}

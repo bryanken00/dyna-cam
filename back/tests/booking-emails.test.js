@@ -82,7 +82,7 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     playerNo += 1;
     const email = body.email === undefined ? `player${playerNo}@example.test` : body.email;
     const courtId = body.courtId || (await newCourt());
-    const res = await call("POST", "/admin/bookings", {
+    const payload = {
       courtId,
       ...slot(hoursFromNow),
       durationMinutes: 60,
@@ -91,9 +91,16 @@ describe("booking emails (PLAN-003 Phase G)", () => {
       payment: "Hold",
       ...body,
       email,
-    });
+    };
+    let res = await call("POST", "/admin/bookings", payload);
+    let paid = !!body.payment;
+    // The last minutes of the running hour are too late for a pay link: book it Free then
+    if (!paid && res.status === 400 && /too late to pay online/.test(res.body.message)) {
+      res = await call("POST", "/admin/bookings", { ...payload, payment: "Free" });
+      paid = true;
+    }
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    if (!body.payment) {
+    if (!paid) {
       await ctx.payBooking(res.data.bookingId);
       // Paid straight away: drop its pay-link email, so a test counts what follows
       sendgrid.state.messages = sendgrid.state.messages.filter(
@@ -250,7 +257,7 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     const mails = mailsTo(b.email);
     assert.equal(mails.length, 2);
     assert.match(mails[1].subject, /^Reminder:/);
-    assert.match(mails[1].text, /starts in (1 hour|\d+ minutes)/);
+    assert.match(mails[1].text, /starts in \d+ (hour|minute)/);
     assert.ok((await bookingRow(b.bookingId)).reminderSentAt);
 
     // Cancelled → no reminder

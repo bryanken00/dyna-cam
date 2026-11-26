@@ -23,7 +23,18 @@ const FORMAT = "YYYY-MM-DD HH:mm:ss";
 /** Statuses that can still change: paid, moved, cancelled. */
 export const OPEN_BOOKING = ["Pending", "Confirmed"];
 
-/** Desk bookings can be up to this long (online ones: the venue's maxBookingMinutes). */
+/**
+ * CR-047: the hour that's already running can be booked online while it's free,
+ * until this many minutes into it (i.e. 30 minutes before a one-hour slot ends).
+ * It ends on the hour and costs the full hour.
+ */
+export const RUNNING_HOUR_BOOKABLE_MINUTES = 30;
+
+/** Is `startLocal` past, but its first RUNNING_HOUR_BOOKABLE_MINUTES not over yet? */
+export const runningHourBookable = (startLocal, now) =>
+  startLocal <= now && addMinutesTo(startLocal, RUNNING_HOUR_BOOKABLE_MINUTES) > now;
+
+/** Desk bookings can be up to this long (CR-047: a player's, as long as the venue is open). */
 export const DESK_MAX_BOOKING_MINUTES = 360;
 
 /** "2026-11-24" + "17:00" → "2026-11-24 17:00:00". */
@@ -88,7 +99,7 @@ export const expireHolds = async (db, { venueId, now = getCurrentTimestampLocal(
 /** Lock a court (Active, at an Active venue) and read its venue's booking rules. */
 const lockCourt = async (conn, courtId) => {
   const [rows] = await conn.execute(
-    `SELECT c.courtId, c.venueId, c.name AS courtName, v.maxBookingMinutes, v.bookingDaysAhead,
+    `SELECT c.courtId, c.venueId, c.name AS courtName, v.bookingDaysAhead,
             v.deskHoldMinutes, v.onlineHoldMinutes, v.scheduleConfirmedUntil
      FROM courts c JOIN venues v ON v.venueId = c.venueId
      WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
@@ -111,10 +122,10 @@ const windowProblem = (court, startLocal) => {
 };
 
 /** The rules only a player's own booking keeps (staff may book past them). */
-const onlineRules = (court, { startLocal, durationMinutes, now }) => {
-  if (startLocal <= now) return fail(400, "That time has already started — pick a later one");
-  if (durationMinutes > court.maxBookingMinutes) {
-    return fail(400, `Bookings here are at most ${court.maxBookingMinutes / 60} hours`);
+const onlineRules = (court, { startLocal, now }) => {
+  // CR-047: the running hour is bookable during its first half
+  if (startLocal <= now && !runningHourBookable(startLocal, now)) {
+    return fail(400, "That hour is more than half over — pick a later one");
   }
   return windowProblem(court, startLocal);
 };
@@ -172,7 +183,12 @@ const paymentTerms = ({ kind, court, startLocal, endLocal, now }) => {
     return { ok: true, status: "Pending", paymentStatus: "Unpaid", holdExpiresAt };
   }
   if (kind === "Online") {
-    const holdExpiresAt = onlineHoldUntil({ startLocal, onlineHoldMinutes: court.onlineHoldMinutes, now });
+    const holdExpiresAt = onlineHoldUntil({
+      startLocal,
+      endLocal,
+      onlineHoldMinutes: court.onlineHoldMinutes,
+      now,
+    });
     if (minutesBetween(now, holdExpiresAt) * 60 < MIN_CHECKOUT_SECONDS) {
       return fail(400, "That's too soon to pay online — pick a later time");
     }
@@ -200,6 +216,7 @@ const paymentTerms = ({ kind, court, startLocal, endLocal, now }) => {
  * @param {string|null} [b.accountId] - the staff account (desk)
  * @param {string|null} [b.note] - on the cash payment
  * @param {string|null} [b.playerId] - PLAN-006: the signed-in player booking online
+ * @param {string|null} [b.orderId] - CR-047: the order it's paid in with others
  * @returns {Promise<{ ok: true, bookingId, bookingCode, manageToken, status, price }
  *   | { ok: false, status: number, message: string, code?: string }>}
  */
@@ -219,6 +236,8 @@ export const createBooking = async (
     note = null,
     // PLAN-006: the signed-in player booking online
     playerId = null,
+    // CR-047: booked and paid together with others
+    orderId = null,
   }
 ) => {
   const now = getCurrentTimestampLocal();
@@ -262,8 +281,8 @@ export const createBooking = async (
       `INSERT INTO bookings
          (bookingId, venueId, courtId, startAt, endAt, playerName, phone, email, price,
           paymentStatus, payMethod, source, bookingCode, manageToken, holdExpiresAt,
-          createdByAccountId, playerId, status, dateCreated, dateUpdated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          createdByAccountId, playerId, orderId, status, dateCreated, dateUpdated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         bookingId,
         court.venueId,
@@ -282,6 +301,7 @@ export const createBooking = async (
         holdExpiresAt,
         accountId,
         playerId,
+        orderId,
         status,
         now,
         now,
@@ -298,7 +318,18 @@ export const createBooking = async (
     });
   }
 
-  return { ok: true, bookingId, bookingCode, manageToken, status, price };
+  return {
+    ok: true,
+    bookingId,
+    bookingCode,
+    manageToken,
+    status,
+    price,
+    holdExpiresAt,
+    courtName: court.courtName,
+    startAt: startLocal,
+    endAt: endLocal,
+  };
 };
 
 /** Lock a booking (not Deleted) by ID. */

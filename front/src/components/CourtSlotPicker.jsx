@@ -8,9 +8,11 @@ import { formatHour, formatMinutes, formatPeso } from "../utils/dynaCam";
  * player's booking pages (book a court; Phase H: move a booking, where the
  * booking's own time is marked "Yours").
  *
- * Props: `{ availability, loading, error, durationMinutes, slot, onPick,
+ * Props: `{ availability, loading, error, durationMinutes, slot, onPick, isPicked?,
  *   unavailableLabel?, emptyHint?, columnsClassName? }` — availability: `{ hours, courts: [{ key, name,
- *   slots: [{ startTime, available, price, current? }] }] }`; slot: `{ courtKey, startTime }`.
+ *   slots: [{ startTime, available, price, current?, now? }] }] }`; slot: `{ courtKey, startTime }`.
+ * CR-047: `isPicked(courtKey, startTime)` makes it a multi-pick (the booking
+ * page: tap any hours on any courts); `now` marks the hour that's running.
  */
 const CourtSlotPicker = ({
   availability,
@@ -19,6 +21,7 @@ const CourtSlotPicker = ({
   durationMinutes,
   slot,
   onPick,
+  isPicked,
   unavailableLabel = "Taken",
   emptyHint,
   columnsClassName = "grid-cols-3",
@@ -79,8 +82,10 @@ const CourtSlotPicker = ({
                   key={s.startTime}
                   selected={
                     s.current ||
-                    (slot?.courtKey === court.key &&
-                      slot?.startTime === s.startTime)
+                    (isPicked
+                      ? isPicked(court.key, s.startTime)
+                      : slot?.courtKey === court.key &&
+                        slot?.startTime === s.startTime)
                   }
                   disabled={!s.available}
                   onClick={() => onPick(court.key, s.startTime)}
@@ -109,7 +114,7 @@ const CourtSlotPicker = ({
                     {s.current
                       ? "Yours"
                       : s.available
-                        ? formatPeso(s.price)
+                        ? `${s.now ? "Now · " : ""}${formatPeso(s.price)}`
                         : unavailableLabel}
                   </span>
                 </PickChip>

@@ -268,6 +268,21 @@ const BookingDetailSheet = ({ open, bookingId, courts = [], onClose }) => {
                   ]}
                 />
 
+                {/* CR-047: booked and paid in one checkout with these */}
+                {booking.paidTogether?.length > 0 && (
+                  <div className="mt-6">
+                    <SectionLabel>Paid together with</SectionLabel>
+                    <DescriptionList
+                      items={booking.paidTogether.map((other) => ({
+                        label: decodeHTML(other.courtName),
+                        value: `${formatTimeRange(other.startAt, other.endAt)} · ${
+                          BOOKING_STATUS_LABEL[other.status] || other.status
+                        }`,
+                      }))}
+                    />
+                  </div>
+                )}
+
                 <div className="mt-6">
                   <SectionLabel>Player</SectionLabel>
                   <DescriptionList

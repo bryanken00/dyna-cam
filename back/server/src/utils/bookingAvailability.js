@@ -2,6 +2,7 @@ import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { selectRows } from "./dbRows.js";
 import { BOOKING_SLOT_MINUTES, loadRates, minutesToTime, quoteFromRates } from "./bookingPrice.js";
 import { LIVE_BOOKING, loadVenueHours } from "./courtTimeline.js";
+import { runningHourBookable } from "./bookings.js";
 
 /**
  * PLAN-003 Phase C: which hours of a day a player can book, per court, for
@@ -24,6 +25,8 @@ const overlaps = (item, startLocal, endLocal) => item.startAt < endLocal && item
  * @param {Array<{ courtId: string, name: string }>} q.courts - the venue's Active courts
  * @param {string} q.date - "YYYY-MM-DD"
  * @param {number} q.durationMinutes - whole hours
+ * @param {boolean} [q.allowRunning] - CR-047: show the hour that's already running
+ *   while it's bookable (its first half) — the public booking page
  * @param {Object} [q.moving] - Phase H: a player moving their booking — its own
  *   time doesn't count as taken, only slots priced at most `maxPrice` are offered,
  *   and its current slot is marked `current`
@@ -35,7 +38,10 @@ const overlaps = (item, startLocal, endLocal) => item.startAt < endLocal && item
  *   courts: Array<{ courtId, name, slots: Array<{ startTime, available, price, current? }> }> }>}
  *   price is null when the slot isn't available
  */
-export const dayAvailability = async (db, { venueId, courts, date, durationMinutes, moving = null }) => {
+export const dayAvailability = async (
+  db,
+  { venueId, courts, date, durationMinutes, moving = null, allowRunning = false }
+) => {
   const now = getCurrentTimestampLocal();
   const dayStart = moment.tz(`${date} 00:00:00`, FORMAT, TIMEZONE);
   const hours = await loadVenueHours(db, venueId);
@@ -90,7 +96,9 @@ export const dayAvailability = async (db, { venueId, courts, date, durationMinut
         const start = dayStart.clone().add(minute, "minutes");
         const startLocal = start.format(FORMAT);
         const endLocal = start.clone().add(durationMinutes, "minutes").format(FORMAT);
-        const free = startLocal > now && !inTheWay.some((item) => overlaps(item, startLocal, endLocal));
+        const running = allowRunning && runningHourBookable(startLocal, now);
+        const free =
+          (startLocal > now || running) && !inTheWay.some((item) => overlaps(item, startLocal, endLocal));
         const price = free
           ? quoteFromRates(rates, { courtId: court.courtId, startLocal, durationMinutes })
           : null;
@@ -102,6 +110,8 @@ export const dayAvailability = async (db, { venueId, courts, date, durationMinut
           available,
           price: available ? price.price : null,
           ...(current ? { current: true } : {}),
+          // CR-047: the hour that's running now (bookable in its first half)
+          ...(running ? { now: true } : {}),
         });
       }
       return { courtId: court.courtId, name: court.name, slots };
