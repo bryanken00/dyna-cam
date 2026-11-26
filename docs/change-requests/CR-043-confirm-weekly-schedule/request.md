@@ -1,6 +1,6 @@
 # CR-043 · Confirm each week's schedule before it opens for booking
 
-> **Status:** In progress · **Requested:** 2026-11-25 · **Requested by:** bryanken00 · **Size:** M
+> **Status:** Rejected · **Taken back by:** [CR-048](../CR-048-remove-weekly-confirmation/request.md) · **Requested:** 2026-11-25 · **Requested by:** bryanken00 · **Size:** M
 > **Checklist:** [checklist.md](checklist.md) · **Plan:** — · **Related:** [PLAN-003](../../plans/PLAN-003-court-booking/plan.md) (court booking: rules, hours, rates)
 
 ## Requested change
@@ -101,6 +101,7 @@ change (a tournament, new prices) is never missed, and wants a clear reminder to
 | Decision | By | Date | Notes |
 | --- | --- | --- | --- |
 | Approved | bryanken00 | 2026-11-25 | asked directly; both choices above picked by the requester |
+| Rejected | bryanken00 | 2026-11-26 | Taken back before any release by [CR-048](../CR-048-remove-weekly-confirmation/request.md): "the user can book anytime anyday". Migration 040's column stays, unused. |
 
 ## Revisions
 

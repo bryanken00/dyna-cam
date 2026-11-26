@@ -2,7 +2,6 @@ import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SetupSection from "../../CourtSetup/components/SetupSection";
 import DescriptionList from "../../../../../components/DescriptionList";
-import ScheduleWeekNotice from "../../../../../components/ScheduleWeekNotice";
 import { decodeHTML } from "../../../../../utils/decode-html";
 import {
   WEEKDAY_NAMES,
@@ -30,26 +29,16 @@ const Heading = ({ children }) => (
 
 /**
  * PLAN-003: a summary of the venue's booking rules, opening hours and hourly
- * rates; Edit opens BookingSettingsFormDrawer. CR-043: with online booking on,
- * how far the weekly schedule is confirmed, Confirm next week, and Undo while
- * nobody has booked next week.
+ * rates; Edit opens BookingSettingsFormDrawer.
  */
-const BookingRulesSection = ({
-  settings,
-  canWrite,
-  onEdit,
-  isConfirmingWeek = false,
-  onConfirmWeek,
-  isUnconfirmingWeek = false,
-  onUnconfirmWeek,
-}) => {
+const BookingRulesSection = ({ settings, canWrite, onEdit }) => {
   const byDay = new Map(settings.hours.map((h) => [h.dayOfWeek, h]));
 
   return (
     <SetupSection
       id="booking-rules"
       title="Booking rules, hours and prices"
-      description="Bookings are whole hours inside opening hours. Each hour costs the rate that covers it. Players book online one confirmed week at a time."
+      description="Bookings are whole hours inside opening hours. Each hour costs the rate that covers it."
       aside={
         canWrite && (
           <Button type="button" variant="outline" size="sm" onClick={onEdit}>
@@ -59,27 +48,11 @@ const BookingRulesSection = ({
         )
       }
     >
-      {settings.bookingEnabled && settings.schedule && (
-        <div className="mb-6">
-          <ScheduleWeekNotice
-            schedule={settings.schedule}
-            canConfirm={canWrite}
-            isConfirming={isConfirmingWeek}
-            onConfirm={onConfirmWeek}
-            isUndoing={isUnconfirmingWeek}
-            onUndo={onUnconfirmWeek}
-          />
-        </div>
-      )}
       <div className="grid gap-6 lg:grid-cols-3">
         <div>
           <Heading>Rules</Heading>
           <DescriptionList
             items={[
-              {
-                label: "Book up to",
-                value: `${settings.bookingDaysAhead} days ahead, in confirmed weeks`,
-              },
               {
                 label: "Pay links due",
                 value: `${formatMinutes(settings.deskHoldMinutes)} before the start`,

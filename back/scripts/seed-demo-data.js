@@ -124,6 +124,9 @@ const WEEKEND = [0, 6];
 
 const CAMERA = (n) => `rtsp://admin:demo1234@192.168.10.${n}:554/Streaming/Channels/101`;
 
+// Demo bookings run this many days ahead (players can book any day — CR-048)
+const DEMO_DAYS_AHEAD = 14;
+
 const VENUES = [
   {
     key: "bgc",
@@ -133,7 +136,6 @@ const VENUES = [
     clipPrice: 150,
     onlineBooking: true,
     rules: {
-      bookingDaysAhead: 14,
       deskHoldMinutes: 30,
       onlineHoldMinutes: 15,
       cancelCutoffHours: 24,
@@ -161,7 +163,6 @@ const VENUES = [
     clipPrice: 120,
     onlineBooking: true,
     rules: {
-      bookingDaysAhead: 10,
       deskHoldMinutes: 60,
       onlineHoldMinutes: 15,
       cancelCutoffHours: 12,
@@ -187,7 +188,6 @@ const VENUES = [
     clipPrice: 100,
     onlineBooking: false, // booking link off: desk bookings only
     rules: {
-      bookingDaysAhead: 14,
       deskHoldMinutes: 30,
       onlineHoldMinutes: 15,
       cancelCutoffHours: 24,
@@ -502,11 +502,7 @@ const priceFor = (venue, courtKey, start, hours) => {
 
 async function seedVenues(conn) {
   const created = NOW.clone().subtract(45, "days");
-  // CR-043: the first venue's next week isn't confirmed yet (the Dashboard shows its
-  // notice); the others are confirmed through the end of next week.
-  const thisSunday = NOW.clone().isoWeekday(7).format("YYYY-MM-DD");
-  const nextSunday = NOW.clone().isoWeekday(7).add(7, "days").format("YYYY-MM-DD");
-  for (const [index, venue] of VENUES.entries()) {
+  for (const venue of VENUES) {
     venue.venueId = await uuid(conn);
     await insert(conn, "venues", {
       venueId: venue.venueId,
@@ -516,7 +512,6 @@ async function seedVenues(conn) {
       clipRetentionDays: 7,
       clipPrice: venue.clipPrice,
       bookingToken: venue.onlineBooking ? randomToken() : null,
-      scheduleConfirmedUntil: index === 0 ? thisSunday : nextSunday,
       ...venue.rules,
       status: "Active",
       dateCreated: fmt(created),
@@ -787,7 +782,7 @@ async function seedBookings(conn, staff) {
 
   for (const venue of VENUES) {
     const perDay = venue.onlineBooking ? [1, 3] : [0, 1];
-    for (let day = -10; day <= venue.rules.bookingDaysAhead - 1; day += 1) {
+    for (let day = -10; day <= DEMO_DAYS_AHEAD - 1; day += 1) {
       const count = randInt(...perDay);
       for (let i = 0; i < count; i += 1) {
         const court = pick(venue.activeCourts);

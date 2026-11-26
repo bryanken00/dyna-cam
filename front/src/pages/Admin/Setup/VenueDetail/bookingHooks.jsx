@@ -9,11 +9,9 @@ import { copyText } from "../../../../utils/clipboard";
 import { bookingSignPath, formatTimeRange } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import {
-  useConfirmScheduleWeek,
   useGetBookingSettings,
   useIssueBookingLink,
   useTurnOffBookingLink,
-  useUnconfirmScheduleWeek,
 } from "../../../../services/requests/admin/bookingSettings";
 import {
   useDeleteClosure,
@@ -66,8 +64,6 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
   );
 
   const issueLinkMutation = useIssueBookingLink();
-  const confirmWeekMutation = useConfirmScheduleWeek();
-  const unconfirmWeekMutation = useUnconfirmScheduleWeek();
   const turnOffLinkMutation = useTurnOffBookingLink();
   const deleteClosureMutation = useDeleteClosure();
 
@@ -114,26 +110,6 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
   const handlePrintSign = useCallback(() => {
     window.open(bookingSignPath(venueId), "_blank", "noopener");
   }, [venueId]);
-
-  // ─── CR-043: confirm next week's schedule ──────────────────────────
-  const handleConfirmWeek = useCallback(() => {
-    confirmWeekMutation.mutate(venueId);
-  }, [confirmWeekMutation, venueId]);
-
-  // Only while nobody has booked next week (the API checks again)
-  const handleUnconfirmWeek = useCallback(async () => {
-    const schedule = settings?.schedule;
-    if (!schedule) return;
-    const week = `${dayjs(schedule.nextWeekStart).format("MMM D")} – ${dayjs(schedule.nextWeekEnd).format("MMM D")}`;
-    const ok = await confirm({
-      title: "Undo next week's confirmation",
-      description: `Players can't book ${week} online until you confirm it again. Nobody has booked it yet.`,
-      confirmText: "Undo confirmation",
-      cancelText: "Keep it",
-      danger: true,
-    });
-    if (ok) unconfirmWeekMutation.mutate(venueId);
-  }, [settings, unconfirmWeekMutation, venueId]);
 
   // ─── Settings drawer ───────────────────────────────────────────────
   const handleEditSettings = useCallback(() => setSettingsDrawerOpen(true), []);
@@ -271,10 +247,6 @@ export const useVenueBookingHooks = (venueId, { isDeleted = false } = {}) => {
     settingsDrawerEntity,
     handleEditSettings,
     handleSettingsDrawerClose,
-    isConfirmingWeek: confirmWeekMutation.isPending,
-    handleConfirmWeek,
-    isUnconfirmingWeek: unconfirmWeekMutation.isPending,
-    handleUnconfirmWeek,
     // closures — apiData = { success, message, data: { closures, pagination } }
     closures,
     closuresPagination: {

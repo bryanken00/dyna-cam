@@ -94,12 +94,8 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     );
     assert.ok(courts.every((c) => /^[a-f0-9]{16}$/.test(c.key)));
     assert.equal(today, at(0).slice(0, 10));
-    // CR-043: today + 14 days, capped by the confirmed week — a new booking link
-    // confirms through next week's Sunday, which always comes first
-    assert.equal(
-      lastDate,
-      moment.tz(today, "YYYY-MM-DD", "Asia/Manila").isoWeekday(7).add(7, "days").format("YYYY-MM-DD")
-    );
+    // CR-048: no last date — players book any day from today on
+    assert.equal(lastDate, undefined);
     assert.equal(rules.deskHoldMinutes, 30);
     assert.deepEqual(openDays, EVERY_DAY);
     // No business IDs anywhere
@@ -199,13 +195,14 @@ describe("public booking pages (PLAN-003 Phase C)", () => {
     assert.equal(paid.data.booking.payBy, null);
   });
 
-  it("refuses the past, beyond the booking window, too long, too soon, and closed hours", async () => {
+  it("refuses the past, a started hour and closed hours — any later day is open", async () => {
     const { courts } = (await page(home.token)).data;
     const key = courts[0].key;
     assert.equal((await bookOnline(home.token, key, -26)).status, 400);
     assert.equal((await availability(home.token, at(-26).slice(0, 10))).status, 400);
-    assert.equal((await bookOnline(home.token, key, 24 * 16)).status, 400);
-    assert.equal((await availability(home.token, at(24 * 16).slice(0, 10))).status, 400);
+    // CR-048: no booking window — 120 days ahead is open
+    assert.equal((await availability(home.token, at(24 * 120).slice(0, 10))).status, 200);
+    assert.equal((await bookOnline(home.token, key, 24 * 120)).status, 201);
     // CR-047: an hour that started more than 30 minutes ago (the running hour is
     // bookable only in its first half — booking-orders.test.js)
     assert.equal((await bookOnline(home.token, key, -1)).status, 400);

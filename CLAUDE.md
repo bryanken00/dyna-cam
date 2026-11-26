@@ -166,10 +166,9 @@ reports `drive-direct`. The app keeps its token
   (`bookings.manageToken`, `/booking/:manageToken`, API `/public/bookings/:manageToken/*`: pay,
   check in, and until the venue's cut-off cancel / move once); CR-038: a venue's **TV court board**
   link (`venues.displayToken`, `/board/:displayToken`, API `/public/board/:displayToken`: today's
-  courts with no names, codes, reasons or IDs; NULL = off); CR-043: players book online only up to
-  `venues.scheduleConfirmedUntil` (a Sunday — staff confirm next week each week via
-  `POST /admin/booking-settings/:venueId/confirm-week`, `utils/scheduleWeeks.js`; the desk isn't
-  limited, the Dashboard reminds); all three links come from `randomToken()`, and
+  courts with no names, codes, reasons or IDs; NULL = off); players book online any open day
+  from today on, with no last date (CR-048 took back CR-043's weekly confirmation and the days-ahead
+  limit — `venues.scheduleConfirmedUntil` and `venues.bookingDaysAhead` are unused); all three links come from `randomToken()`, and
   their replies name courts by a hashed key, never a business ID. CR-030: players get in through
   `/book` (every Active venue with a booking link and an Active court, from `GET /public/venues`)
   (CR-045: Find my booking is gone — `/booking` goes to My games; the booking code is staff-only,

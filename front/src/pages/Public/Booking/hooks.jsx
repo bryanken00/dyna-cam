@@ -111,18 +111,6 @@ export const useBookingPageHooks = () => {
   } = useGetMoveOptions({ manageToken, date: moveDate }, { enabled: moveOpen });
   const moveOptions = moveData?.data || null;
 
-  const moveDates = useMemo(() => {
-    if (!moveOptions) return [];
-    const open = new Set(moveOptions.openDays);
-    const list = [];
-    let d = dayjs(moveOptions.today);
-    const last = dayjs(moveOptions.lastDate);
-    while (!d.isAfter(last, "day")) {
-      list.push({ date: d.format("YYYY-MM-DD"), open: open.has(d.day()), day: d });
-      d = d.add(1, "day");
-    }
-    return list;
-  }, [moveOptions]);
 
   // The picked new time: court and times (the booking keeps its own price)
   const movePicked = useMemo(() => {
@@ -218,7 +206,6 @@ export const useBookingPageHooks = () => {
     moveOptions,
     moveLoading,
     moveError,
-    moveDates,
     moveDate,
     moveSlot,
     movePicked,

@@ -1,86 +1,25 @@
 import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { randomToken } from "../../../utils/crypto/tokens.js";
 import { bookingPageUrl, courtBoardUrl } from "../../../utils/clips.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { toRate } from "../../../utils/bookingPrice.js";
-import { hoursList, LIVE_BOOKING, loadVenueHours } from "../../../utils/courtTimeline.js";
+import { hoursList, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { updateBookingSettingsSchema } from "../../../validators/booking-settings.validator.js";
-import { confirmTarget, scheduleStatus, sundayOf } from "../../../utils/scheduleWeeks.js";
 
 /**
  * PLAN-003 Phase A — a venue's court-booking setup: the online booking link,
- * the rules (longest booking, days ahead, holds, cut-off, early check-in), the
- * weekly opening hours and the hourly rates. CR-043: those open for online
- * booking one week at a time — staff confirm next week (`/confirm-week`), and
- * `/schedule-reminders` feeds the Dashboard notice.
+ * the rules (holds, cut-off, early check-in), the weekly opening
+ * hours and the hourly rates. Players book online any open day from today on
+ * (CR-048: no weekly confirmation, no days-ahead limit).
  * Permission: bookings.
  */
 const router = express.Router();
 
-const RULE_COLUMNS = `v.bookingDaysAhead, v.deskHoldMinutes,
-  v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes, v.scheduleConfirmedUntil`;
-
-/** The level order for the Dashboard: the most urgent first. */
-const LEVEL_ORDER = { closed: 0, soon: 1, due: 2, ok: 3 };
-
-/**
- * GET /schedule-reminders
- * CR-043: every Active venue with online booking on whose next week isn't
- * confirmed yet, the most urgent first — the Dashboard's notice.
- */
-router.get(
-  "/schedule-reminders",
-  checkPermission("bookings", null, "read"),
-  catchAsync(async (req, res) => {
-    const venues = await req.db.query(
-      `SELECT venueId, name, scheduleConfirmedUntil
-       FROM venues
-       WHERE status = 'Active' AND bookingToken IS NOT NULL
-       ORDER BY name ASC`
-    );
-    const now = getCurrentTimestampLocal();
-    const reminders = venues
-      .map((v) => ({
-        venueId: v.venueId,
-        venueName: v.name,
-        ...scheduleStatus(v.scheduleConfirmedUntil, now),
-      }))
-      .filter((r) => r.level !== "ok")
-      .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
-
-    return res.sendSuccess("Schedule reminders retrieved successfully", { reminders });
-  })
-);
-
-/**
- * CR-043: live bookings (any source) starting in next week at a venue. `run` is
- * `req.db.query` (rows) or a transaction's `conn.execute` (wrapped to rows).
- */
-const countNextWeekBookings = async (run, venueId, schedule, now) => {
-  const afterEnd = moment(schedule.nextWeekEnd, "YYYY-MM-DD").add(1, "day").format("YYYY-MM-DD");
-  const rows = await run(
-    `SELECT COUNT(*) AS n FROM bookings b
-     WHERE b.venueId = ? AND ${LIVE_BOOKING} AND b.startAt >= ? AND b.startAt < ?`,
-    [venueId, now, `${schedule.nextWeekStart} 00:00:00`, `${afterEnd} 00:00:00`]
-  );
-  return Number(rows[0]?.n || 0);
-};
-
-/** Where the venue's schedule stands, plus how many bookings next week already has. */
-const scheduleWithBookings = async (db, venue) => {
-  const now = getCurrentTimestampLocal();
-  const schedule = scheduleStatus(venue.scheduleConfirmedUntil, now);
-  const nextWeekBookings = await countNextWeekBookings(
-    (sql, params) => db.query(sql, params),
-    venue.venueId,
-    schedule,
-    now
-  );
-  return { ...schedule, nextWeekBookings };
-};
+const RULE_COLUMNS = `v.deskHoldMinutes,
+  v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes`;
 
 /** "17:00" → "17:00:00" for a TIME column. */
 const toTime = (hhmm) => `${hhmm}:00`;
@@ -111,7 +50,7 @@ router.get(
       return res.sendError("Venue not found", 404);
     }
 
-    const [hours, rates, courts, schedule] = await Promise.all([
+    const [hours, rates, courts] = await Promise.all([
       loadVenueHours(req.db, venue.venueId),
       req.db.query(
         `SELECT r.rateId, r.name, r.courtId, c.name AS courtName, r.daysOfWeek, r.startTime,
@@ -128,7 +67,6 @@ router.get(
          ORDER BY name ASC`,
         [venue.venueId]
       ),
-      scheduleWithBookings(req.db, venue),
     ]);
 
     return res.sendSuccess("Booking settings retrieved successfully", {
@@ -141,14 +79,10 @@ router.get(
         bookingUrl: venue.bookingToken ? bookingPageUrl(venue.bookingToken) : null,
         // CR-038: the TV court board's link (null: off)
         displayUrl: venue.displayToken ? courtBoardUrl(venue.displayToken) : null,
-        bookingDaysAhead: venue.bookingDaysAhead,
         deskHoldMinutes: venue.deskHoldMinutes,
         onlineHoldMinutes: venue.onlineHoldMinutes,
         cancelCutoffHours: venue.cancelCutoffHours,
         checkInEarlyMinutes: venue.checkInEarlyMinutes,
-        // CR-043: how far the weekly schedule is confirmed, what's due, and
-        // whether next week has bookings (then its confirmation can't be undone)
-        schedule,
         hours: hoursList(hours),
         rates: rates.map(toRate),
       },
@@ -208,12 +142,10 @@ router.put(
 
       await conn.execute(
         `UPDATE venues
-         SET bookingDaysAhead = ?, deskHoldMinutes = ?,
-             onlineHoldMinutes = ?, cancelCutoffHours = ?, checkInEarlyMinutes = ?,
+         SET deskHoldMinutes = ?, onlineHoldMinutes = ?, cancelCutoffHours = ?, checkInEarlyMinutes = ?,
              dateUpdated = ?
          WHERE venueId = ?`,
         [
-          rules.bookingDaysAhead,
           rules.deskHoldMinutes,
           rules.onlineHoldMinutes,
           rules.cancelCutoffHours,
@@ -304,103 +236,8 @@ router.put(
 );
 
 /**
- * POST /:venueId/confirm-week
- * CR-043: confirm the weekly schedule through the end of next week, so players
- * can book it online. If this week wasn't confirmed either, it opens too. Next
- * week already confirmed → 200, nothing changes.
- */
-router.post(
-  "/:venueId/confirm-week",
-  checkPermission("bookings", null, "write"),
-  catchAsync(async (req, res) => {
-    const through = confirmTarget(getTodayDateLocal());
-    const result = await req.db.query(
-      `UPDATE venues SET scheduleConfirmedUntil = ?, dateUpdated = ?
-       WHERE venueId = ? AND status != 'Deleted'
-         AND (scheduleConfirmedUntil IS NULL OR scheduleConfirmedUntil < ?)`,
-      [through, getCurrentTimestampLocal(), req.params.venueId, through]
-    );
-
-    const venue = await findVenue(req.db, req.params.venueId);
-    if (!venue) {
-      return res.sendError("Venue not found", 404);
-    }
-    return res.sendSuccess(
-      result.affectedRows > 0
-        ? "Next week's schedule is confirmed — players can book it now"
-        : "Next week is already confirmed",
-      { schedule: await scheduleWithBookings(req.db, venue) }
-    );
-  })
-);
-
-/**
- * POST /:venueId/unconfirm-week
- * CR-043: take next week's confirmation back while nobody has booked it (no live
- * booking, online or desk), so players can't book it online until it's confirmed
- * again. The venue row is locked first: an online booking locks it too (through
- * its court), so the two can't pass each other.
- */
-router.post(
-  "/:venueId/unconfirm-week",
-  checkPermission("bookings", null, "write"),
-  catchAsync(async (req, res) => {
-    const now = getCurrentTimestampLocal();
-
-    let conn;
-    try {
-      conn = await req.db.beginTransaction();
-
-      const [venues] = await conn.execute(
-        `SELECT venueId, scheduleConfirmedUntil FROM venues
-         WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [req.params.venueId]
-      );
-      if (venues.length === 0) {
-        await req.db.rollback(conn);
-        return res.sendError("Venue not found", 404);
-      }
-      const schedule = scheduleStatus(venues[0].scheduleConfirmedUntil, now);
-      if (!schedule.confirmedUntil || schedule.confirmedUntil < schedule.nextWeekEnd) {
-        await req.db.rollback(conn);
-        return res.sendError("Next week isn't confirmed, so there's nothing to undo", 409);
-      }
-      const booked = await countNextWeekBookings(
-        async (sql, params) => (await conn.execute(sql, params))[0],
-        req.params.venueId,
-        schedule,
-        now
-      );
-      if (booked > 0) {
-        await req.db.rollback(conn);
-        return res.sendError(
-          `Next week already has ${booked} booking${booked === 1 ? "" : "s"}, so its confirmation stays`,
-          409
-        );
-      }
-
-      await conn.execute(
-        `UPDATE venues SET scheduleConfirmedUntil = ?, dateUpdated = ? WHERE venueId = ?`,
-        [sundayOf(now.slice(0, 10)), now, req.params.venueId]
-      );
-      await req.db.commit(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    const venue = await findVenue(req.db, req.params.venueId);
-    return res.sendSuccess("Next week's confirmation is undone — players can't book it online", {
-      schedule: await scheduleWithBookings(req.db, venue),
-    });
-  })
-);
-
-/**
  * POST /:venueId/link
  * Turn online booking on with a new link. A link shared before stops working.
- * CR-043: a venue that never confirmed its schedule counts as confirmed through
- * the end of next week, so the new link works at once.
  */
 router.post(
   "/:venueId/link",
@@ -408,16 +245,8 @@ router.post(
   catchAsync(async (req, res) => {
     const bookingToken = randomToken();
     const result = await req.db.query(
-      `UPDATE venues
-       SET bookingToken = ?, scheduleConfirmedUntil = COALESCE(scheduleConfirmedUntil, ?),
-           dateUpdated = ?
-       WHERE venueId = ? AND status != 'Deleted'`,
-      [
-        bookingToken,
-        confirmTarget(getTodayDateLocal()),
-        getCurrentTimestampLocal(),
-        req.params.venueId,
-      ]
+      `UPDATE venues SET bookingToken = ?, dateUpdated = ? WHERE venueId = ? AND status != 'Deleted'`,
+      [bookingToken, getCurrentTimestampLocal(), req.params.venueId]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);

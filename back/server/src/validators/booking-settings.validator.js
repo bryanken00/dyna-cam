@@ -89,7 +89,8 @@ export const updateBookingSettingsSchema = z
     // CR-047: no longest booking any more (a game runs as long as the venue is open) —
     // an older page may still send it; it's ignored
     maxBookingMinutes: z.unknown().optional(),
-    bookingDaysAhead: wholeNumber("Days ahead", 1, 90),
+    // CR-048: no booking window any more (players book any day from today on) — ignored
+    bookingDaysAhead: z.unknown().optional(),
     deskHoldMinutes: wholeNumber("The pay-at-desk deadline", 0, 1440),
     onlineHoldMinutes: wholeNumber("The online payment hold", 5, 60),
     cancelCutoffHours: wholeNumber("The cancel cut-off", 0, 168),

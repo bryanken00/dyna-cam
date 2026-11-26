@@ -14,7 +14,6 @@ import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { loadVenueHours } from "../../../utils/courtTimeline.js";
-import { isPastConfirmed, NOT_OPEN_MESSAGE, playerLastDate } from "../../../utils/scheduleWeeks.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import {
   cancelBooking,
@@ -93,9 +92,8 @@ const moveCourtKey = (manageToken, courtId) =>
 /** The venue an online booking link belongs to (Active, online booking on), or null. */
 const findVenue = async (db, bookingToken) => {
   const rows = await db.query(
-    `SELECT venueId, name, address, phone, logoUrl, bookingDaysAhead,
-            deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes,
-            scheduleConfirmedUntil
+    `SELECT venueId, name, address, phone, logoUrl,
+            deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes
      FROM venues
      WHERE bookingToken = ? AND status = 'Active'
      LIMIT 1`,
@@ -110,29 +108,14 @@ const activeCourts = (db, venueId) =>
     [venueId]
   );
 
-/**
- * The first and last date a player may book: today … bookingDaysAhead, capped by
- * the week staff last confirmed (CR-043). lastDate < today: nothing is open.
- */
-const bookableDates = (venue) => {
-  const today = getTodayDateLocal();
-  return { today, lastDate: playerLastDate(venue, today) };
-};
-
-/** Why a date after lastDate can't be picked. */
-const pastWindowMessage = (venue, date) =>
-  isPastConfirmed(venue, date)
-    ? NOT_OPEN_MESSAGE
-    : `You can book up to ${venue.bookingDaysAhead} days ahead`;
 
 /**
  * Why a date can't be booked, or null. CR-047: no longest booking — a game can
  * run as long as the venue is open (findConflict refuses hours it's closed).
  */
-const dateProblem = (venue, date) => {
-  const { today, lastDate } = bookableDates(venue);
-  if (date < today) return "That date has passed";
-  if (date > lastDate) return pastWindowMessage(venue, date);
+const dateProblem = (date) => {
+  // CR-048: no booking window — any day from today on
+  if (date < getTodayDateLocal()) return "That date has passed";
   return null;
 };
 
@@ -201,7 +184,7 @@ router.get(
       activeCourts(req.db, venue.venueId),
       loadVenueHours(req.db, venue.venueId),
     ]);
-    const { today, lastDate } = bookableDates(venue);
+    const today = getTodayDateLocal();
 
     return res.sendSuccess("Booking page", {
       venue: venueView(venue),
@@ -211,7 +194,6 @@ router.get(
       })),
       openDays: [...hours.keys()].sort((a, b) => a - b),
       today,
-      lastDate,
       rules: {
         deskHoldMinutes: venue.deskHoldMinutes,
         onlineHoldMinutes: venue.onlineHoldMinutes,
@@ -243,7 +225,7 @@ router.get(
       return res.sendError("This booking link isn't valid", 404);
     }
     const { date, durationMinutes } = req.query;
-    const problem = dateProblem(venue, date);
+    const problem = dateProblem(date);
     if (problem) {
       return res.sendError(problem, 400);
     }
@@ -325,7 +307,7 @@ router.post(
       if (!court) {
         return res.sendError("That court isn't taking bookings — reload the page and pick again", 400);
       }
-      const problem = dateProblem(venue, date);
+      const problem = dateProblem(date);
       if (problem) {
         return res.sendError(runs.length > 1 ? `${court.name} at ${hourLabel(run.startTime)}: ${problem}` : problem, 400);
       }
@@ -545,7 +527,7 @@ const BOOKING_PAGE_SELECT = `SELECT b.bookingId, b.bookingCode, b.startAt, b.end
               b.email, b.price, b.paymentStatus, b.payMethod, b.holdExpiresAt, b.checkoutId,
               b.status, b.cancelledAt, b.cancelledBy, b.rescheduledCount, b.venueId, b.courtId,
               c.name AS courtName, v.name, v.address, v.phone, v.logoUrl, v.cancelCutoffHours,
-              v.checkInEarlyMinutes, v.bookingDaysAhead, v.scheduleConfirmedUntil,
+              v.checkInEarlyMinutes,
               s.shareToken AS gameShareToken,
               EXISTS (SELECT 1 FROM payments p
                       WHERE p.bookingId = b.bookingId AND p.status = 'Paid' AND p.method = 'CASH')
@@ -776,13 +758,10 @@ router.get(
     if (refusal) {
       return res.sendError(refusal, 409);
     }
-    const { today, lastDate } = bookableDates(b);
+    const today = getTodayDateLocal();
     const { date } = req.query;
-    if (date < today || date > lastDate) {
-      return res.sendError(
-        date < today ? "That date has passed" : pastWindowMessage(b, date),
-        400
-      );
+    if (date < today) {
+      return res.sendError("That date has passed", 400);
     }
 
     const durationMinutes = moment
@@ -808,7 +787,6 @@ router.get(
     return res.sendSuccess("Move options", {
       date,
       today,
-      lastDate,
       openDays: [...hours.keys()].sort((x, y) => x - y),
       durationMinutes,
       maxPrice: Number(b.price),

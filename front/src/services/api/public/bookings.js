@@ -4,7 +4,7 @@
 import axiosInstance from "../axios";
 
 // The venue, its courts (by key), the dates and rules →
-// { venue, courts: [{ key, name }], openDays, today, lastDate, rules, payOnline }
+// { venue, courts: [{ key, name }], openDays, today, rules, payOnline } — CR-048: no last date
 export const getBookingPageApi = async (bookingToken) => {
   const response = await axiosInstance.get(`/api/v1/public/book/${bookingToken}`);
   return response.data;
@@ -48,7 +48,7 @@ export const cancelMyBookingApi = async (manageToken) => {
 };
 
 // Phase H: times this booking can move to on a date →
-// { date, today, lastDate, openDays, durationMinutes, maxPrice, hours,
+// { date, today, openDays, durationMinutes, maxPrice, hours,
 //   courts: [{ key, name, slots: [{ startTime, available, price, current? }] }] }
 export const getMoveOptionsApi = async ({ manageToken, date }) => {
   const response = await axiosInstance.get(`/api/v1/public/bookings/${manageToken}/move-options`, {

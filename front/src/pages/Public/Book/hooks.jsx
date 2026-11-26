@@ -154,8 +154,8 @@ export const useBookPageHooks = () => {
   const [bookError, setBookError] = useState("");
   const [isRedirecting, setIsRedirecting] = useState(false);
 
-  // A date from the URL counts only if it can still be booked
-  const datePicked = pickedDate && pageData && pickedDate >= pageData.today && pickedDate <= pageData.lastDate;
+  // A date from the URL counts only if it hasn't passed (CR-048: no last date)
+  const datePicked = pickedDate && pageData && pickedDate >= pageData.today;
   const date = datePicked ? pickedDate : pageData?.today || null;
   // PLAN-006: off on this server → no online booking (the page shows the venue's phone)
   const signInAvailable = pageData?.signInAvailable !== false;
@@ -167,19 +167,6 @@ export const useBookPageHooks = () => {
   const picks = useMemo(() => new Set((date && picksByDate[date]) || []), [picksByDate, date]);
 
 
-  // Every date from today to the last bookable one, and whether the venue opens then
-  const dates = useMemo(() => {
-    if (!pageData) return [];
-    const open = new Set(pageData.openDays);
-    const list = [];
-    let d = dayjs(pageData.today);
-    const last = dayjs(pageData.lastDate);
-    while (!d.isAfter(last, "day")) {
-      list.push({ date: d.format("YYYY-MM-DD"), open: open.has(d.day()), day: d });
-      d = d.add(1, "day");
-    }
-    return list;
-  }, [pageData]);
 
   const {
     data: availabilityData,
@@ -320,7 +307,7 @@ export const useBookPageHooks = () => {
     notFound: error?.response?.status === 404,
     loadError: error?.response?.status !== 404 ? error : null,
     refetch,
-    dates,
+    openDays: pageData?.openDays || [],
     date,
     availability,
     availabilityLoading,

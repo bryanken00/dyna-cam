@@ -22,7 +22,7 @@ import PublicLayout from "../../../components/layout/PublicLayout";
 import ResultState from "../../../components/ResultState";
 import Spinner from "../../../components/Spinner";
 import SectionLabel from "../../../components/SectionLabel";
-import BookingDateStrip from "../../../components/BookingDateStrip";
+import BookingDatePicker from "../../../components/BookingDatePicker";
 import CourtSlotPicker from "../../../components/CourtSlotPicker";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
@@ -88,7 +88,6 @@ const BookingPage = () => {
     moveOptions,
     moveLoading,
     moveError,
-    moveDates,
     moveDate,
     moveSlot,
     movePicked,
@@ -335,8 +334,13 @@ const BookingPage = () => {
                     Pick a new time for your {formatMinutes(booking.durationMinutes)}. You can move once, to a time that
                     costs {formatPeso(booking.price)} or less — your price stays the same.
                   </p>
-                  {moveDates.length > 0 && (
-                    <BookingDateStrip dates={moveDates} date={moveDate} today={moveOptions?.today} onPick={handlePickMoveDate} />
+                  {moveOptions && (
+                    <BookingDatePicker
+                      date={moveDate}
+                      today={moveOptions.today}
+                      openDays={moveOptions.openDays}
+                      onPick={handlePickMoveDate}
+                    />
                   )}
                   <CourtSlotPicker
                     availability={moveOptions}

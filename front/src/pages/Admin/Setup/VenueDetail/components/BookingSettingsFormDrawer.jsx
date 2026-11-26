@@ -59,7 +59,6 @@ const wholeNumber = (label, min, max) =>
 // Mirrors booking-settings.validator.js
 const settingsSchema = z
   .object({
-    bookingDaysAhead: wholeNumber("Days ahead", 1, 90),
     deskHoldMinutes: wholeNumber("Pay-link deadline", 0, 1440),
     onlineHoldMinutes: wholeNumber("Online payment hold", 5, 60),
     cancelCutoffHours: wholeNumber("Cancel cut-off", 0, 168),
@@ -135,7 +134,6 @@ const NEW_RATE = {
 const toFormValues = (settings) => {
   const byDay = new Map((settings?.hours || []).map((h) => [h.dayOfWeek, h]));
   return {
-    bookingDaysAhead: String(settings?.bookingDaysAhead ?? 14),
     deskHoldMinutes: String(settings?.deskHoldMinutes ?? 30),
     onlineHoldMinutes: String(settings?.onlineHoldMinutes ?? 15),
     cancelCutoffHours: String(settings?.cancelCutoffHours ?? 24),
@@ -288,7 +286,6 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
       await updateMutation.mutateAsync({
         venueId: settings.venueId,
         settings: {
-          bookingDaysAhead: Number(values.bookingDaysAhead),
           deskHoldMinutes: Number(values.deskHoldMinutes),
           onlineHoldMinutes: Number(values.onlineHoldMinutes),
           cancelCutoffHours: Number(values.cancelCutoffHours),
@@ -379,12 +376,6 @@ const BookingSettingsFormDrawer = ({ open, onClose, onSuccess, entity = null }) 
               {/* Rules */}
               <SectionLabel>Booking rules</SectionLabel>
               <div className="grid gap-5 sm:grid-cols-2">
-                <NumberField
-                  form={form}
-                  name="bookingDaysAhead"
-                  label="Book up to"
-                  suffix="days ahead"
-                />
                 <NumberField
                   form={form}
                   name="deskHoldMinutes"

@@ -4,7 +4,6 @@ import { selectRows } from "./dbRows.js";
 import { BOOKING_SLOT_MINUTES, quote } from "./bookingPrice.js";
 import { findConflict } from "./courtTimeline.js";
 import { MIN_CHECKOUT_SECONDS, onlineHoldUntil, REFUND_QUEUED } from "./bookingPayments.js";
-import { isPastConfirmed, NOT_OPEN_MESSAGE, playerLastDate } from "./scheduleWeeks.js";
 
 /**
  * PLAN-003: court bookings — the writes the desk (Admin) and, from Phase C,
@@ -99,8 +98,8 @@ export const expireHolds = async (db, { venueId, now = getCurrentTimestampLocal(
 /** Lock a court (Active, at an Active venue) and read its venue's booking rules. */
 const lockCourt = async (conn, courtId) => {
   const [rows] = await conn.execute(
-    `SELECT c.courtId, c.venueId, c.name AS courtName, v.bookingDaysAhead,
-            v.deskHoldMinutes, v.onlineHoldMinutes, v.scheduleConfirmedUntil
+    `SELECT c.courtId, c.venueId, c.name AS courtName,
+            v.deskHoldMinutes, v.onlineHoldMinutes
      FROM courts c JOIN venues v ON v.venueId = c.venueId
      WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
      LIMIT 1 FOR UPDATE`,
@@ -109,25 +108,14 @@ const lockCourt = async (conn, courtId) => {
   return rows[0] || null;
 };
 
-/**
- * A player's date must be inside the venue's booking window: no further than
- * bookingDaysAhead, and (CR-043) inside a week staff have confirmed.
- */
-const windowProblem = (court, startLocal) => {
-  const date = startLocal.slice(0, 10);
-  const today = moment().tz(TIMEZONE).format("YYYY-MM-DD");
-  if (date <= playerLastDate(court, today)) return null;
-  if (isPastConfirmed(court, date)) return fail(400, NOT_OPEN_MESSAGE);
-  return fail(400, `Book at most ${court.bookingDaysAhead} days ahead`);
-};
-
 /** The rules only a player's own booking keeps (staff may book past them). */
-const onlineRules = (court, { startLocal, now }) => {
+const onlineRules = ({ startLocal, now }) => {
   // CR-047: the running hour is bookable during its first half
   if (startLocal <= now && !runningHourBookable(startLocal, now)) {
     return fail(400, "That hour is more than half over — pick a later one");
   }
-  return windowProblem(court, startLocal);
+  // CR-048: no booking window — any day from today on
+  return null;
 };
 
 /** A player never sees another booking's code or a game's details. */
@@ -248,7 +236,7 @@ export const createBooking = async (
   if (endLocal <= now) return fail(400, "That time has already passed");
   const online = source === "Online";
   if (online) {
-    const refused = onlineRules(court, { startLocal, durationMinutes, now });
+    const refused = onlineRules({ startLocal, now });
     if (refused) return refused;
   }
 
@@ -471,15 +459,15 @@ const movedHold = ({ booking, court, startLocal, now, asPlayer }) => {
   return { ok: true, holdExpiresAt };
 };
 
-/** A player's move: before the cut-off, only once, to a later time within bookingDaysAhead. */
-const playerMoveRules = async (conn, { booking, court, startLocal, now }) => {
+/** A player's move: before the cut-off, only once, to a later time (any day — CR-048). */
+const playerMoveRules = async (conn, { booking, startLocal, now }) => {
   const refused = await playerCutoffProblem(conn, booking, now, "move");
   if (refused) return refused;
   if (booking.rescheduledCount > 0) {
     return fail(409, "You've already moved this booking once — call the venue to change it again");
   }
   if (startLocal <= now) return fail(400, "That time has already started — pick a later one");
-  return windowProblem(court, startLocal);
+  return null;
 };
 
 /** The booking keeps its price; a player's new time may cost the same or less (no partial refunds). */
@@ -616,7 +604,7 @@ export const moveBooking = async (
   }
   // Phase H: a player moves their own booking once, before the cut-off
   if (asPlayer) {
-    const refused = await playerMoveRules(conn, { booking, court, startLocal, now });
+    const refused = await playerMoveRules(conn, { booking, startLocal, now });
     if (refused) return refused;
   }
 
