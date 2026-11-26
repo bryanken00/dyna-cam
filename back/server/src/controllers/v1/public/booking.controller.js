@@ -22,7 +22,8 @@ import {
   moveBooking,
   toStartLocal,
 } from "../../../utils/bookings.js";
-import { isOnlinePaymentOn, isPaymentSandbox } from "../../../lib/payments/xendit.js";
+import { isPaymentSandbox } from "../../../lib/payments/xendit.js";
+import { venuePaysOnline } from "../../../utils/companyPayments.js";
 import { requirePlayer } from "../../../middlewares/playerAuth.middleware.js";
 import { playerSignInConfigured } from "../../../utils/googleSignIn.js";
 import {
@@ -89,13 +90,17 @@ const courtKey = (bookingToken, courtId) => hashToken(`${bookingToken}:${courtId
 const moveCourtKey = (manageToken, courtId) =>
   hashToken(`move:${manageToken}:${courtId}`).slice(0, 16);
 
-/** The venue an online booking link belongs to (Active, online booking on), or null. */
+/**
+ * The venue an online booking link belongs to (Active, online booking on), or null.
+ * PLAN-008: a suspended company's venues take no online bookings — their link is a 404.
+ */
 const findVenue = async (db, bookingToken) => {
   const rows = await db.query(
-    `SELECT venueId, name, address, phone, logoUrl,
-            deskHoldMinutes, onlineHoldMinutes, cancelCutoffHours, checkInEarlyMinutes
-     FROM venues
-     WHERE bookingToken = ? AND status = 'Active'
+    `SELECT v.venueId, v.name, v.address, v.phone, v.logoUrl,
+            v.deskHoldMinutes, v.onlineHoldMinutes, v.cancelCutoffHours, v.checkInEarlyMinutes
+     FROM venues v
+     INNER JOIN companies co ON co.companyId = v.companyId AND co.status = 'Active'
+     WHERE v.bookingToken = ? AND v.status = 'Active'
      LIMIT 1`,
     [bookingToken]
   );
@@ -141,11 +146,13 @@ router.get(
   catchAsync(async (req, res) => {
     const today = moment().tz(TIMEZONE).day();
     const rows = await req.db.query(
-      `SELECT v.name, v.address, v.phone, v.logoUrl, v.bookingToken,
+      `SELECT v.venueId, v.name, v.address, v.phone, v.logoUrl, v.bookingToken,
               h.opensAt, h.closesAt,
               (SELECT COUNT(*) FROM courts c
                WHERE c.venueId = v.venueId AND c.status = 'Active') AS courtCount
        FROM venues v
+       -- PLAN-008: every Active company's venues (a suspended company's drop out)
+       INNER JOIN companies co ON co.companyId = v.companyId AND co.status = 'Active'
        LEFT JOIN venue_hours h
          ON h.venueId = v.venueId AND h.status = 'Active' AND h.dayOfWeek = ?
        WHERE v.status = 'Active' AND v.bookingToken IS NOT NULL
@@ -153,8 +160,13 @@ router.get(
        ORDER BY v.name ASC`,
       [today]
     );
+    // PLAN-008: only venues whose company takes online payment (its own Xendit) — booking is pay-first
+    const paying = [];
+    for (const v of rows) {
+      if (await venuePaysOnline(req.db, v.venueId)) paying.push(v);
+    }
     return res.sendSuccess("Venues", {
-      venues: rows.map((v) => ({
+      venues: paying.map((v) => ({
         ...venueView(v),
         bookingToken: v.bookingToken,
         courtCount: Number(v.courtCount),
@@ -201,8 +213,8 @@ router.get(
         cancelCutoffHours: venue.cancelCutoffHours,
         checkInEarlyMinutes: venue.checkInEarlyMinutes,
       },
-      // Phase F: Xendit is set up on the server
-      payOnline: isOnlinePaymentOn(),
+      // Phase F / PLAN-008: the venue's company's Xendit is connected
+      payOnline: await venuePaysOnline(req.db, venue.venueId),
       // CR-033: online payment is the built-in test checkout, not Xendit
       paymentSandbox: isPaymentSandbox(),
       // PLAN-006: booking here needs a Google sign-in; off on this server → no online booking
@@ -289,8 +301,8 @@ router.post(
     const { date } = req.body;
     const { playerId, name: playerName, email } = req.player;
     const phone = req.body.phone || req.player.phone;
-    // CR-046: pay first to reserve — no pay at the counter
-    if (!isOnlinePaymentOn()) {
+    // CR-046: pay first to reserve — no pay at the counter (PLAN-008: the company's own Xendit)
+    if (!(await venuePaysOnline(req.db, venue.venueId))) {
       return res.sendError(
         "Online payment isn't available right now, so the court can't be booked online — please call the venue",
         409
@@ -542,9 +554,9 @@ const BOOKING_PAGE_SELECT = `SELECT b.bookingId, b.bookingCode, b.startAt, b.end
        WHERE b.manageToken = ? AND b.status != 'Deleted'
        LIMIT 1`;
 
-/** Can the player pay this booking online now? */
-const canPayOnline = (b, now) =>
-  isOnlinePaymentOn() &&
+/** Can the player pay this booking online now? (`payOnline`: its company's Xendit is connected) */
+const canPayOnline = (b, now, payOnline) =>
+  payOnline &&
   b.status === "Pending" &&
   b.paymentStatus === "Unpaid" &&
   Boolean(b.holdExpiresAt) &&
@@ -591,7 +603,7 @@ router.get(
     if (
       rows[0].status === "Pending" &&
       rows[0].checkoutId &&
-      isOnlinePaymentOn() &&
+      (await venuePaysOnline(req.db, rows[0].venueId)) &&
       (await syncCheckout(req.db, rows[0].checkoutId))
     ) {
       rows = await req.db.query(BOOKING_PAGE_SELECT, [req.params.manageToken]);
@@ -636,7 +648,7 @@ router.get(
         paymentSandbox: isPaymentSandbox(),
         actions: {
           checkIn: b.status === "Confirmed" && now >= checkInFrom && now < b.endAt,
-          payOnline: canPayOnline(b, now),
+          payOnline: canPayOnline(b, now, await venuePaysOnline(req.db, b.venueId)),
           cancel: changes.cancel,
           move: changes.move,
         },
@@ -875,12 +887,9 @@ router.post(
   payLimiter,
   validateParams(manageTokenParamsSchema),
   catchAsync(async (req, res) => {
-    if (!isOnlinePaymentOn()) {
-      return res.sendError("Online payment isn't available here — pay at the desk", 409);
-    }
     await expireHolds(req.db);
     const rows = await req.db.query(
-      `SELECT bookingId, price, status, paymentStatus, checkoutId FROM bookings
+      `SELECT bookingId, venueId, orderId, price, status, paymentStatus, checkoutId FROM bookings
        WHERE manageToken = ? AND status != 'Deleted' LIMIT 1`,
       [req.params.manageToken]
     );
@@ -888,6 +897,10 @@ router.post(
       return res.sendError("This booking link isn't valid", 404);
     }
     const booking = rows[0];
+    // PLAN-008: paid into the venue's company's own Xendit
+    if (!(await venuePaysOnline(req.db, booking.venueId))) {
+      return res.sendError("Online payment isn't available here — please call the venue", 409);
+    }
     if (booking.paymentStatus === "Paid" || booking.paymentStatus === "Free") {
       return res.sendError("This booking is already paid", 409);
     }

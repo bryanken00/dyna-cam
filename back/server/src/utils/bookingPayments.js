@@ -1,5 +1,6 @@
 import { logger } from "../../config/logger.js";
 import * as xendit from "../lib/payments/xendit.js";
+import { paymentAccountForVenue } from "./companyPayments.js";
 import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { bookingManageUrl } from "./clips.js";
 import { findConflict } from "./courtTimeline.js";
@@ -70,11 +71,25 @@ export const onlineHoldUntil = ({ startLocal, endLocal, onlineHoldMinutes, now }
   return until < cap ? until : cap;
 };
 
-/** Close a checkout so it can't be paid. Never throws: a failure is logged. */
-export const expireCheckout = async (checkoutId) => {
-  if (!checkoutId || !xendit.isOnlinePaymentOn()) return false;
+/**
+ * PLAN-008: the Xendit account a checkout (invoice) was opened with — its booking's
+ * (or payment's) venue's company. A checkout we don't know has no account.
+ */
+export const accountForCheckout = async (db, checkoutId) => {
+  const rows = await db.query(
+    `SELECT venueId FROM bookings WHERE checkoutId = ?
+     UNION SELECT venueId FROM payments WHERE providerRef = ?
+     LIMIT 1`,
+    [checkoutId, checkoutId]
+  );
+  return rows[0] ? paymentAccountForVenue(db, rows[0].venueId) : null;
+};
+
+/** Close a checkout so it can't be paid (with its company's account). Never throws: a failure is logged. */
+export const expireCheckout = async (checkoutId, account) => {
+  if (!checkoutId || !xendit.isOnlinePaymentOn(account)) return false;
   try {
-    const result = await xendit.expireInvoice(checkoutId);
+    const result = await xendit.expireInvoice(checkoutId, account);
     return result.expired;
   } catch (err) {
     logger.warn("Xendit: could not expire a checkout", { checkoutId, error: err.message });
@@ -89,12 +104,9 @@ export const expireCheckout = async (checkoutId) => {
  * @returns {Promise<{ ok: true, checkoutUrl: string } | { ok: false, status, message, code? }>}
  */
 export const openCheckout = async (db, { bookingId }) => {
-  if (!xendit.isOnlinePaymentOn()) {
-    return fail(409, "Online payment isn't available here — pay at the desk");
-  }
   const now = getCurrentTimestampLocal();
   const rows = await db.query(
-    `SELECT b.bookingId, b.bookingCode, b.manageToken, b.startAt, b.endAt, b.price, b.email,
+    `SELECT b.bookingId, b.venueId, b.bookingCode, b.manageToken, b.startAt, b.endAt, b.price, b.email,
             b.holdExpiresAt, b.status, b.paymentStatus, c.name AS courtName, v.name AS venueName
      FROM bookings b
      JOIN courts c ON c.courtId = b.courtId
@@ -106,6 +118,11 @@ export const openCheckout = async (db, { bookingId }) => {
   if (!b || b.status !== "Pending" || b.paymentStatus !== "Unpaid") {
     return fail(409, "This booking isn't waiting for payment");
   }
+  // PLAN-008: paid into the venue's company's own Xendit account
+  const account = await paymentAccountForVenue(db, b.venueId);
+  if (!xendit.isOnlinePaymentOn(account)) {
+    return fail(409, "Online payment isn't available here — please call the venue");
+  }
   const seconds = b.holdExpiresAt ? secondsUntil(b.holdExpiresAt, now) : 0;
   if (seconds < MIN_CHECKOUT_SECONDS) {
     return fail(409, "The hold on this slot is running out — book it again");
@@ -113,14 +130,17 @@ export const openCheckout = async (db, { bookingId }) => {
 
   let invoice;
   try {
-    invoice = await xendit.createInvoice({
-      externalId: invoiceExternalId(b.bookingCode),
-      amount: Number(b.price),
-      durationSeconds: seconds,
-      returnUrl: `${bookingManageUrl(b.manageToken)}?checkout=done`,
-      email: b.email,
-      description: `${b.venueName} · ${b.courtName} · ${b.startAt.slice(0, 10)} ${clock(b.startAt)}–${clock(b.endAt)} · Booking ${b.bookingCode}`,
-    });
+    invoice = await xendit.createInvoice(
+      {
+        externalId: invoiceExternalId(b.bookingCode),
+        amount: Number(b.price),
+        durationSeconds: seconds,
+        returnUrl: `${bookingManageUrl(b.manageToken)}?checkout=done`,
+        email: b.email,
+        description: `${b.venueName} · ${b.courtName} · ${b.startAt.slice(0, 10)} ${clock(b.startAt)}–${clock(b.endAt)} · Booking ${b.bookingCode}`,
+      },
+      account
+    );
   } catch (err) {
     logger.error("Xendit: could not open a checkout", {
       bookingId,
@@ -140,7 +160,7 @@ export const openCheckout = async (db, { bookingId }) => {
     [invoice.id, invoice.url, getCurrentTimestampLocal(), bookingId]
   );
   if (Number(updated?.affectedRows || 0) === 0) {
-    await expireCheckout(invoice.id);
+    await expireCheckout(invoice.id, account);
     return fail(409, "This booking isn't waiting for payment");
   }
   return { ok: true, checkoutUrl: invoice.url };
@@ -168,14 +188,16 @@ const unpaidOrderBookings = (db, orderId, now) =>
  * @returns {Promise<{ ok: true, checkoutUrl: string } | { ok: false, status, message, code? }>}
  */
 export const openOrderCheckout = async (db, { orderId }) => {
-  if (!xendit.isOnlinePaymentOn()) {
-    return fail(409, "Online payment isn't available right now — please call the venue");
-  }
   const now = getCurrentTimestampLocal();
   const [order] = await db.query(
-    `SELECT orderId, orderCode FROM booking_orders WHERE orderId = ? AND status = 'Active' LIMIT 1`,
+    `SELECT orderId, orderCode, venueId FROM booking_orders WHERE orderId = ? AND status = 'Active' LIMIT 1`,
     [orderId]
   );
+  // PLAN-008: paid into the venue's company's own Xendit account
+  const account = order ? await paymentAccountForVenue(db, order.venueId) : null;
+  if (!xendit.isOnlinePaymentOn(account)) {
+    return fail(409, "Online payment isn't available right now — please call the venue");
+  }
   const items = order ? await unpaidOrderBookings(db, orderId, now) : [];
   if (items.length === 0) return fail(409, "Nothing here is waiting for payment");
   const holdUntil = items.reduce((min, b) => (b.holdExpiresAt < min ? b.holdExpiresAt : min), items[0].holdExpiresAt);
@@ -188,14 +210,17 @@ export const openOrderCheckout = async (db, { orderId }) => {
 
   let invoice;
   try {
-    invoice = await xendit.createInvoice({
-      externalId: orderExternalId(order.orderCode),
-      amount,
-      durationSeconds: seconds,
-      returnUrl: `${bookingManageUrl(items[0].manageToken)}?checkout=done`,
-      email: items[0].email,
-      description: `${items[0].venueName} · ${items[0].startAt.slice(0, 10)} · ${lines.join(", ")}`.slice(0, 250),
-    });
+    invoice = await xendit.createInvoice(
+      {
+        externalId: orderExternalId(order.orderCode),
+        amount,
+        durationSeconds: seconds,
+        returnUrl: `${bookingManageUrl(items[0].manageToken)}?checkout=done`,
+        email: items[0].email,
+        description: `${items[0].venueName} · ${items[0].startAt.slice(0, 10)} · ${lines.join(", ")}`.slice(0, 250),
+      },
+      account
+    );
   } catch (err) {
     logger.error("Xendit: could not open an order checkout", { orderId, error: err.message, code: err.code });
     return fail(502, "Online payment isn't working right now — try again in a minute");
@@ -209,7 +234,7 @@ export const openOrderCheckout = async (db, { orderId }) => {
   );
   if (Number(updated?.affectedRows || 0) !== ids.length) {
     // Something changed meanwhile (staff, a cancel): this total is wrong — don't let it be paid
-    await expireCheckout(invoice.id);
+    await expireCheckout(invoice.id, account);
     await db.query(
       `UPDATE bookings SET checkoutId = NULL, checkoutUrl = NULL WHERE checkoutId = ?`,
       [invoice.id]
@@ -236,8 +261,11 @@ export const resumeCheckout = async (db, booking) => {
   }
   if (booking.checkoutId) {
     let invoice = null;
+    const account = booking.venueId
+      ? await paymentAccountForVenue(db, booking.venueId)
+      : await accountForCheckout(db, booking.checkoutId);
     try {
-      invoice = await xendit.getInvoice(booking.checkoutId);
+      invoice = await xendit.getInvoice(booking.checkoutId, account);
     } catch (err) {
       logger.warn("Xendit: could not read a checkout", {
         checkoutId: booking.checkoutId,
@@ -248,7 +276,7 @@ export const resumeCheckout = async (db, booking) => {
       }
     }
     if (invoice?.paid) {
-      const settled = await settleInvoice(db, invoice.id, { invoice });
+      const settled = await settleInvoice(db, invoice.id, { invoice, account });
       if (settled.outcome === "CONFIRMED" || settled.outcome === "ALREADY_RECORDED") {
         return { ok: true, paid: true };
       }
@@ -261,7 +289,7 @@ export const resumeCheckout = async (db, booking) => {
     ) {
       return { ok: true, checkoutUrl: invoice.url };
     }
-    if (invoice?.status === "PENDING") await expireCheckout(invoice.id);
+    if (invoice?.status === "PENDING") await expireCheckout(invoice.id, account);
   }
   return order ? openOrderCheckout(db, order) : openCheckout(db, { bookingId: booking.bookingId });
 };
@@ -326,20 +354,31 @@ const decide = async (conn, booking, invoice, now) => {
  *
  * @param db - req.db
  * @param {string} invoiceId
- * @param {{ invoice?: object }} [options] - an invoice already read from Xendit
+ * @param {{ invoice?: object, account?: object, companyId?: string }} [options] - an invoice
+ *   already read from Xendit; the account to read it with (default: its booking's venue's
+ *   company's — PLAN-008); `companyId` (a company's own webhook): the booking must be a venue
+ *   of that company, or nothing changes (WRONG_COMPANY)
  * @returns {Promise<{ outcome: "NOT_PAID"|"UNKNOWN_BOOKING"|"ALREADY_RECORDED"|"CONFIRMED"
  *   |"REFUNDED"|"REFUND_FAILED", why?: string }>}
  * @throws {xendit.XenditError} when Xendit can't be asked (the webhook answers 503, Xendit retries)
  */
-export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
-  const invoice = known || (await xendit.getInvoice(invoiceId));
+export const settleInvoice = async (db, invoiceId, { invoice: known, account, companyId = null } = {}) => {
+  let invoice = known;
+  if (!invoice) {
+    const readWith = account || (await accountForCheckout(db, invoiceId));
+    if (!readWith) {
+      logger.warn("Xendit: an invoice we never opened", { invoiceId });
+      return { outcome: "UNKNOWN_BOOKING" };
+    }
+    invoice = await xendit.getInvoice(invoiceId, readWith);
+  }
   if (!invoice.paid) return { outcome: "NOT_PAID" };
   const ref = invoiceRef(invoice.externalId);
   if (!ref) {
     logger.warn("Xendit: a paid invoice that isn't a booking", { invoiceId: invoice.id });
     return { outcome: "UNKNOWN_BOOKING" };
   }
-  if (ref.kind === "order") return settleOrderInvoice(db, invoice, ref.code);
+  if (ref.kind === "order") return settleOrderInvoice(db, invoice, ref.code, companyId);
   const bookingCode = ref.code;
 
   const now = getCurrentTimestampLocal();
@@ -354,6 +393,16 @@ export const settleInvoice = async (db, invoiceId, { invoice: known } = {}) => {
       await db.rollback(conn);
       logger.warn("Xendit: a paid invoice for no booking", { invoiceId: invoice.id, bookingCode });
       return { outcome: "UNKNOWN_BOOKING" };
+    }
+    // PLAN-008: a company's webhook settles only its own venues' bookings (another
+    // company's Xendit can't pay — or confirm — this booking)
+    if (companyId && !(await bookingInCompany(conn, booking.venueId, companyId))) {
+      await db.rollback(conn);
+      logger.warn("Xendit: a company's invoice names another company's booking", {
+        invoiceId: invoice.id,
+        bookingCode,
+      });
+      return { outcome: "WRONG_COMPANY" };
     }
     const [existing] = await conn.execute(
       `SELECT paymentId FROM payments WHERE providerRef = ? LIMIT 1`,
@@ -467,7 +516,16 @@ const insertOnlinePayment = async (conn, { booking, amount, invoiceId, keep, why
  * Confirmed with a payment row of its own price, or that share refunded. A
  * different amount (an old checkout) is refunded whole.
  */
-const settleOrderInvoice = async (db, invoice, orderCode) => {
+/** PLAN-008: is this venue the company's? (inside the settling transaction) */
+const bookingInCompany = async (conn, venueId, companyId) => {
+  const [rows] = await conn.execute(`SELECT 1 FROM venues WHERE venueId = ? AND companyId = ? LIMIT 1`, [
+    venueId,
+    companyId,
+  ]);
+  return rows.length > 0;
+};
+
+const settleOrderInvoice = async (db, invoice, orderCode, companyId = null) => {
   const now = getCurrentTimestampLocal();
   let conn;
   const kept = [];
@@ -475,13 +533,21 @@ const settleOrderInvoice = async (db, invoice, orderCode) => {
   try {
     conn = await db.beginTransaction();
     const [orders] = await conn.execute(
-      `SELECT orderId FROM booking_orders WHERE orderCode = ? LIMIT 1`,
+      `SELECT orderId, venueId FROM booking_orders WHERE orderCode = ? LIMIT 1`,
       [orderCode]
     );
     if (orders.length === 0) {
       await db.rollback(conn);
       logger.warn("Xendit: a paid invoice for no order", { invoiceId: invoice.id, orderCode });
       return { outcome: "UNKNOWN_BOOKING" };
+    }
+    if (companyId && !(await bookingInCompany(conn, orders[0].venueId, companyId))) {
+      await db.rollback(conn);
+      logger.warn("Xendit: a company's invoice names another company's order", {
+        invoiceId: invoice.id,
+        orderCode,
+      });
+      return { outcome: "WRONG_COMPANY" };
     }
     const [peek] = await conn.execute(
       `SELECT DISTINCT courtId FROM bookings WHERE orderId = ? ORDER BY courtId`,
@@ -627,22 +693,27 @@ export const sendRefunds = async (
       continue;
     }
     const [payment] = await db.query(
-      `SELECT paymentId, bookingId, amount, providerRef FROM payments WHERE paymentId = ?`,
+      `SELECT paymentId, bookingId, venueId, amount, providerRef FROM payments WHERE paymentId = ?`,
       [paymentId]
     );
+    // PLAN-008: refunded from the company's own Xendit account it was paid into
+    const account = await paymentAccountForVenue(db, payment.venueId);
 
     let error = null;
     let refundId = null;
-    if (!xendit.isOnlinePaymentOn()) {
-      error = "Online payment is switched off on the server";
+    if (!xendit.isOnlinePaymentOn(account)) {
+      error = "Online payment isn't connected for this company";
     } else {
       try {
-        const sent = await xendit.refund({
-          invoiceId: payment.providerRef,
-          amount: Number(payment.amount),
-          referenceId: payment.paymentId,
-          reason,
-        });
+        const sent = await xendit.refund(
+          {
+            invoiceId: payment.providerRef,
+            amount: Number(payment.amount),
+            referenceId: payment.paymentId,
+            reason,
+          },
+          account
+        );
         if (sent.status === "FAILED") error = `Xendit refused it (${sent.failureCode || "FAILED"})`;
         else refundId = sent.id;
       } catch (err) {
@@ -681,13 +752,17 @@ export const sendRefunds = async (
  * @returns {Promise<{ outcome: "UNKNOWN_REFUND"|"NO_CHANGE"|"REFUND_FAILED" }>}
  * @throws {xendit.XenditError} when Xendit can't be asked
  */
-export const handleRefundEvent = async (db, refundId) => {
+export const handleRefundEvent = async (db, refundId, { companyId = null } = {}) => {
   const rows = await db.query(
-    `SELECT paymentId, bookingId, status FROM payments WHERE providerRefundRef = ? LIMIT 1`,
+    `SELECT p.paymentId, p.bookingId, p.status, p.venueId, v.companyId
+     FROM payments p JOIN venues v ON v.venueId = p.venueId
+     WHERE p.providerRefundRef = ? LIMIT 1`,
     [refundId]
   );
   if (rows.length === 0) return { outcome: "UNKNOWN_REFUND" };
-  const found = await xendit.getRefund(refundId);
+  // PLAN-008: a company's webhook speaks only for its own payments
+  if (companyId && rows[0].companyId !== companyId) return { outcome: "UNKNOWN_REFUND" };
+  const found = await xendit.getRefund(refundId, await paymentAccountForVenue(db, rows[0].venueId));
   if (found.status !== "FAILED" || rows[0].status !== "Refunded") return { outcome: "NO_CHANGE" };
 
   const now = getCurrentTimestampLocal();
@@ -719,16 +794,22 @@ export const handleRefundEvent = async (db, refundId) => {
  * Never throws.
  *
  * @param db - req.db
- * @param {{ closeCheckoutId?: string|null, refundPaymentIds?: string[] }} followUp
+ * @param {{ closeCheckoutId?: string|null, venueId?: string, refundPaymentIds?: string[] }} followUp
+ *   (venueId: whose company's Xendit account opened the checkout — PLAN-008)
  * @param {{ accountId?: string|null, reason?: string }} [options]
  * @returns {Promise<{ refunded: number, failed: number, refunds: Array }>} refunded / failed in pesos
  */
 export const runPaymentFollowUps = async (
   db,
-  { closeCheckoutId = null, refundPaymentIds = [] } = {},
+  { closeCheckoutId = null, venueId = null, refundPaymentIds = [] } = {},
   { accountId = null, reason = "CANCELLATION" } = {}
 ) => {
-  if (closeCheckoutId) await expireCheckout(closeCheckoutId);
+  if (closeCheckoutId) {
+    const account = venueId
+      ? await paymentAccountForVenue(db, venueId)
+      : await accountForCheckout(db, closeCheckoutId);
+    await expireCheckout(closeCheckoutId, account);
+  }
   const refunds = refundPaymentIds.length
     ? await sendRefunds(db, { paymentIds: refundPaymentIds, reason, accountId })
     : [];

@@ -16,6 +16,7 @@ All protected endpoints receive the authenticated user's data via `req.user`, se
 | `email`              | `string`  | Email address (from credentials)              |
 | `type`               | `string`  | `'ADMIN'` or `'USER'` (`credentials.type`)    |
 | `roleId`             | `string`  | Assigned role ID                              |
+| `companyId`          | `string`  | PLAN-008: the company the user works for — scope every Admin query to it |
 | `status`             | `string`  | Account status (always `'Active'` here)       |
 | `mustChangePassword` | `boolean` | A forced password change is pending           |
 
@@ -46,9 +47,45 @@ const [me] = await req.db.query(
 const { accountId } = req.body; // anyone can send anyone's ID
 ```
 
-### 2. The Owner is never reachable from the Admin portal
+### 2. Every Admin query is scoped to the caller's company (PLAN-008)
 
-Every Admin query sees the whole database, filtered only by soft delete. The one exception is the **Owner** — the role created by `scripts/_seed-owner.js`
+The platform is multi-company: DGSports onboards **companies** in the back office, and a staff
+account belongs to one (`req.user.companyId`). An Admin query **never** sees another company's
+rows. Use `utils/companyScope.js`:
+
+- Tables with their own `companyId` (`venues`, `users`, `roles`, `settings`, `audit_trail`):
+  `AND x.companyId = ?` with `callerCompany(req)`.
+- Everything under a venue (courts, devices, games, bookings, payments, clips, rates, hours,
+  closures, …): `AND ${inCompanyVenues("x")}` (one `?` = the companyId), or a join on
+  `venues.companyId`.
+- A by-ID request for another company's record returns **404**, exactly like a missing or Deleted
+  one, and the row stays unchanged — put the company condition in the `UPDATE … WHERE` too.
+- An ID the client sends (`venueId`, `courtId`, `roleId`, …) is checked with `venueInCompany` /
+  `courtInCompany` / `roleInCompany` before it's used.
+- New rows in the company tables get `companyId: req.user.companyId`.
+- Background jobs and the device / app / public / player routes work across companies (their own
+  credential scopes them). A job that notifies staff picks only the venue's company's staff.
+- A suspended company's staff can't sign in and their tokens stop working (`passport.jwt.config.js`).
+
+```js
+// ✅ CORRECT — another company's court is "not found"
+const rows = await req.db.query(
+  `SELECT c.courtId, c.name FROM courts c
+   WHERE c.courtId = ? AND c.status != 'Deleted' AND ${inCompanyVenues("c")}`,
+  [courtId, callerCompany(req)],
+);
+
+// ❌ WRONG — any company's court by ID
+await req.db.query(`SELECT * FROM courts WHERE courtId = ?`, [courtId]);
+```
+
+Every Admin module has a cross-company test (`tests/company-scope-*.test.js`).
+
+### 2b. The Owner is never reachable from the Admin portal
+
+Within the company, the one exception is the **Owner** — each company has its own Owner role
+(created when the company is onboarded in the back office, `utils/companies.js`; setup creates
+none)
 and every account that holds it. From the Admin portal they are never listed, returned, edited,
 deleted, or assignable:
 
@@ -87,7 +124,7 @@ the helper that writes the row.
 In `routes/v1/admin/index.js` and `routes/route.js` (the shared `/upload` group), `requireAuth`
 is `[passport JWT check, requirePasswordChanged]`. The second part returns 403
 `PASSWORD_CHANGE_REQUIRED` while `credentials.mustChangePassword` is set (a password the account
-holder did not choose, e.g. the seeded Owner). Changing or resetting the password clears the flag.
+holder did not choose, e.g. a newly onboarded company's Owner). Changing or resetting the password clears the flag.
 
 ```js
 // ✅ CORRECT — JWT + forced-password-change guard
@@ -188,6 +225,7 @@ router.post(
 **Do:**
 
 - Use `req.user.accountId` for audit/ownership
+- Scope every Admin query to `req.user.companyId` (`utils/companyScope.js`); another company's record is a 404
 - Hide the Owner role and Owner accounts (`roleName != 'Owner'`) in every roles/users query
 - Return 404 for an Owner or Deleted record, the same as a missing one
 - Treat `req.user` as the single source of truth for the authenticated context

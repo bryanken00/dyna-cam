@@ -5,6 +5,7 @@ import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
 import { canAccessUpload } from "../../../utils/file/uploads.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import {
   createVenueSchema,
   listVenuesQuerySchema,
@@ -13,7 +14,8 @@ import {
 
 /**
  * Venues — pickleball venues that host Dyna Cam courts (PLAN-001).
- * Permission: venues / list.
+ * Permission: venues / list. PLAN-008: only the caller's company's venues — another
+ * company's venue is a 404; names are unique within a company.
  */
 const router = express.Router();
 
@@ -56,15 +58,15 @@ router.get(
       sortOrder = "DESC",
     } = req.query;
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause;
+    const params = [callerCompany(req)];
+    let whereClause = "WHERE v.companyId = ?";
 
     // No status filter → hide soft-deleted. Explicit ?status=Deleted → show them.
     if (status) {
-      whereClause = "WHERE v.status = ?";
+      whereClause += " AND v.status = ?";
       params.push(status);
     } else {
-      whereClause = "WHERE v.status != 'Deleted'";
+      whereClause += " AND v.status != 'Deleted'";
     }
 
     if (search) {
@@ -113,9 +115,9 @@ router.get(
     const rows = await req.db.query(
       `SELECT ${VENUE_COLUMNS}, ${COUNT_COLUMNS}
        FROM venues v
-       WHERE v.venueId = ? AND v.status != 'Deleted'
+       WHERE v.venueId = ? AND v.companyId = ? AND v.status != 'Deleted'
        LIMIT 1`,
-      [req.params.venueId]
+      [req.params.venueId, callerCompany(req)]
     );
 
     if (rows.length === 0) {
@@ -145,8 +147,9 @@ router.post(
       conn = await req.db.beginTransaction();
 
       const [existing] = await conn.execute(
-        `SELECT venueId FROM venues WHERE name = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [name]
+        `SELECT venueId FROM venues
+         WHERE name = ? AND companyId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
+        [name, callerCompany(req)]
       );
       if (existing.length > 0) {
         await req.db.rollback(conn);
@@ -158,11 +161,12 @@ router.post(
 
       await conn.execute(
         `INSERT INTO venues
-           (venueId, name, address, phone, logoUrl, clipRetentionDays, clipPrice, status,
+           (venueId, companyId, name, address, phone, logoUrl, clipRetentionDays, clipPrice, status,
             dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           venueId,
+          req.user.companyId,
           name,
           address || null,
           phone || null,
@@ -201,8 +205,9 @@ router.put(
       conn = await req.db.beginTransaction();
 
       const [target] = await conn.execute(
-        `SELECT venueId FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [venueId]
+        `SELECT venueId FROM venues
+         WHERE venueId = ? AND companyId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
+        [venueId, callerCompany(req)]
       );
       if (target.length === 0) {
         await req.db.rollback(conn);
@@ -211,9 +216,9 @@ router.put(
 
       const [clash] = await conn.execute(
         `SELECT venueId FROM venues
-         WHERE name = ? AND venueId != ? AND status != 'Deleted'
+         WHERE name = ? AND venueId != ? AND companyId = ? AND status != 'Deleted'
          LIMIT 1 FOR UPDATE`,
-        [name, venueId]
+        [name, venueId, callerCompany(req)]
       );
       if (clash.length > 0) {
         await req.db.rollback(conn);
@@ -224,7 +229,7 @@ router.put(
         `UPDATE venues
          SET name = ?, address = ?, phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?,
              status = ?, dateUpdated = ?
-         WHERE venueId = ?`,
+         WHERE venueId = ? AND companyId = ?`,
         [
           name,
           address || null,
@@ -235,6 +240,7 @@ router.put(
           status || "Active",
           now,
           venueId,
+          callerCompany(req),
         ]
       );
 
@@ -266,8 +272,8 @@ router.delete(
 
       const [result] = await conn.execute(
         `UPDATE venues SET status = 'Deleted', dateUpdated = ?
-         WHERE venueId = ? AND status != 'Deleted'`,
-        [now, venueId]
+         WHERE venueId = ? AND companyId = ? AND status != 'Deleted'`,
+        [now, venueId, callerCompany(req)]
       );
       if (result.affectedRows === 0) {
         await req.db.rollback(conn);

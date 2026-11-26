@@ -3,11 +3,13 @@ import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { clipShareUrl } from "../../../utils/clips.js";
 import { listClipsQuerySchema } from "../../../validators/clips.validator.js";
+import { callerCompany, inCompanyVenues } from "../../../utils/companyScope.js";
 
 /**
  * Clips — the replays saved from court cameras (PLAN-001).
  * Permission: clips. View only since PLAN-002 Phase E: clips are saved by
  * players (court QR / button) and sessions, never from the Admin portal.
+ * PLAN-008: only clips at the caller's company's venues (another's is a 404).
  */
 const router = express.Router();
 
@@ -57,14 +59,14 @@ router.get(
       sortOrder = "DESC",
     } = req.query;
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause;
+    const params = [callerCompany(req)];
+    let whereClause = `WHERE ${inCompanyVenues("cl")}`;
 
     if (status) {
-      whereClause = "WHERE cl.status = ?";
+      whereClause += " AND cl.status = ?";
       params.push(status);
     } else {
-      whereClause = "WHERE cl.status != 'Deleted'";
+      whereClause += " AND cl.status != 'Deleted'";
     }
     // CR-003: a game's parts that went into its whole video live on in Sessions
     whereClause += " AND cl.joinedAt IS NULL";
@@ -132,13 +134,18 @@ router.get(
   checkPermission("clips", null, "read"),
   catchAsync(async (req, res) => {
     const [venues, courts] = await Promise.all([
-      req.db.query(`SELECT venueId, name FROM venues WHERE status != 'Deleted' ORDER BY name ASC`),
+      req.db.query(
+        `SELECT venueId, name FROM venues WHERE status != 'Deleted' AND companyId = ? ORDER BY name ASC`,
+        [callerCompany(req)]
+      ),
       req.db.query(
         `SELECT c.courtId, c.name, c.venueId, v.name AS venueName,
                 (c.status = 'Active' AND v.status = 'Active') AS active
-         FROM courts c JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+         FROM courts c
+         JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
          WHERE c.status != 'Deleted'
-         ORDER BY v.name ASC, c.name ASC`
+         ORDER BY v.name ASC, c.name ASC`,
+        [callerCompany(req)]
       ),
     ]);
     return res.sendSuccess("Clip filter options", {
@@ -158,9 +165,9 @@ router.get(
   catchAsync(async (req, res) => {
     const rows = await req.db.query(
       `${CLIP_SELECT}
-       WHERE cl.clipId = ? AND cl.status != 'Deleted'
+       WHERE cl.clipId = ? AND cl.status != 'Deleted' AND v.companyId = ?
        LIMIT 1`,
-      [req.params.clipId]
+      [req.params.clipId, callerCompany(req)]
     );
 
     if (rows.length === 0) {

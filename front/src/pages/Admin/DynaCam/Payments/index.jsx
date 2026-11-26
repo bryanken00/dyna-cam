@@ -25,6 +25,8 @@ import DatePicker from "../../../../components/DatePicker";
 import DataTable from "../../../../components/DataTable";
 import FilterField from "../../../../components/FilterField";
 import { formatPeso } from "../../../../utils/dynaCam";
+import OnlinePaymentCard from "./components/OnlinePaymentCard";
+import OnlinePaymentFormDrawer from "./components/OnlinePaymentFormDrawer";
 
 const ALL = "all";
 
@@ -44,6 +46,14 @@ const PaymentsPage = () => {
     handleTableChange,
     handleFilterChange,
     handleClearFilters,
+    canWrite,
+    onlinePayment,
+    paymentDrawerOpen,
+    handleConnectPayment,
+    handlePaymentDrawerClose,
+    handleCopyWebhook,
+    handleDisconnectPayment,
+    isDisconnectingPayment,
   } = usePaymentHooks();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -74,6 +84,22 @@ const PaymentsPage = () => {
       <PageHeader
         title="Payments"
         subtitle="Court bookings paid online, and cash taken before payments went online-only (CR-046)."
+      />
+
+      {/* PLAN-008: the company's own Xendit account */}
+      <OnlinePaymentCard
+        payment={onlinePayment}
+        canWrite={canWrite}
+        onConnect={handleConnectPayment}
+        onDisconnect={handleDisconnectPayment}
+        onCopyWebhook={handleCopyWebhook}
+        isDisconnecting={isDisconnectingPayment}
+      />
+      <OnlinePaymentFormDrawer
+        open={paymentDrawerOpen}
+        onClose={handlePaymentDrawerClose}
+        onSuccess={handlePaymentDrawerClose}
+        entity={onlinePayment}
       />
 
       {/* 2. STAT CARDS */}

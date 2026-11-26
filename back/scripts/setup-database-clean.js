@@ -2,7 +2,8 @@
  * Database Setup (Clean) Script (ESM)
  *
  * DROPS all existing tables, re-applies every migration from scratch, then
- * seeds default permissions + the Owner role and account.
+ * seeds default permissions + the first back-office super admin (PLAN-008: no company
+ * or Owner — those are onboarded in the back office).
  * ⚠️  WARNING: This will destroy all existing data!
  *
  * Usage: node scripts/setup-database-clean.js
@@ -13,7 +14,8 @@ import mysql from "mysql2/promise";
 import argon2 from "argon2";
 import moment from "moment-timezone";
 import { runMigrations } from "./migrate.js";
-import { checkOwnerSeedEnv, seedOwner } from "./_seed-owner.js";
+import { checkSuperAdminSeedEnv, seedSuperAdmin } from "./_seed-superadmin.js";
+import { topUpOwnerRoles } from "./_owner-permissions.js";
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
@@ -44,8 +46,8 @@ async function main() {
   let connection;
 
   try {
-    // Fail on a bad OWNER_PASSWORD before anything is dropped
-    checkOwnerSeedEnv();
+    // Fail on a bad SUPERADMIN_PASSWORD before anything is dropped
+    checkSuperAdminSeedEnv();
 
     console.log("⚠️  WARNING: This will DROP all tables and recreate them!");
     console.log("   All existing data will be lost.\n");
@@ -98,9 +100,12 @@ async function main() {
     }
     console.log(`   ✅ ${permissions.length} permissions seeded`);
 
-    // Seed the Owner role + first Owner account — see _seed-owner.js
-    console.log("\n👤 Creating Owner account...");
-    await seedOwner(connection, { timestamp, hashPassword });
+    // PLAN-008: setup creates only the first back-office super admin (SUPERADMIN_EMAIL);
+    // companies and their Owners are onboarded in the back office
+    console.log("\n👤 Creating the back-office super admin...");
+    await seedSuperAdmin(connection, { timestamp, hashPassword });
+    // Existing companies' Owner roles get any permission added since (no account is created)
+    await topUpOwnerRoles(connection, timestamp);
 
     console.log("\n🎉 Clean database setup complete!");
   } catch (error) {

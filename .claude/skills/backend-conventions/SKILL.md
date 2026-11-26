@@ -1,6 +1,6 @@
 ---
 name: backend-conventions
-description: The non-negotiable conventions for this repo's Node + Express + MySQL API (back/) — the authenticated req.user context and the Owner-protection rule, req.db query vs conn.execute return shapes and the transaction template, table/business-ID/UUID/timestamp schema rules and migrations (schema.sql is frozen; every change is a new, immutable migration), Zod validators and the _helpers.js optional-field wrappers, permission gating via checkPermission, and the upload path + signed-link convention. Load BEFORE writing or editing anything under back/server or back/database — any controller, route, validator, middleware, migration, schema change, or upload handler. Also load when reviewing backend code or answering how the API is structured.
+description: The non-negotiable conventions for this repo's Node + Express + MySQL API (back/) — the authenticated req.user context, the company scope (PLAN-008: every Admin query filtered by req.user.companyId) and the Owner-protection rule, req.db query vs conn.execute return shapes and the transaction template, table/business-ID/UUID/timestamp schema rules and migrations (schema.sql is frozen; every change is a new, immutable migration), Zod validators and the _helpers.js optional-field wrappers, permission gating via checkPermission, and the upload path + signed-link convention. Load BEFORE writing or editing anything under back/server or back/database — any controller, route, validator, middleware, migration, schema change, or upload handler. Also load when reviewing backend code or answering how the API is structured.
 ---
 
 # Backend conventions (`back/`)
@@ -43,6 +43,10 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
 - **Check-then-insert needs one transaction with `FOR UPDATE`**, or two concurrent requests both
   pass the check before either inserts.
 - **Never trust a client-sent `accountId` for "who is calling".** The caller is `req.user`.
+- **Every Admin query is scoped to `req.user.companyId`** (PLAN-008, `utils/companyScope.js`):
+  company tables filter `companyId = ?`, venue children use `inCompanyVenues()`; another
+  company's record is a 404 and an ID the client sends is checked before it's used. Each module
+  gets a cross-company test.
 - **The Owner is invisible to the Admin portal.** Any query that lists, returns, edits, deletes or
   assigns a role or user joins `roles` and adds `roleName != 'Owner'`; an Owner (or Deleted)
   record's ID returns 404 like a missing one.

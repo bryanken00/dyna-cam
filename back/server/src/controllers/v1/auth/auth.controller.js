@@ -221,9 +221,11 @@ router.post(
 
     // 5. Get the user's profile
     const userRows = await req.db.query(
-      `SELECT u.accountId, u.firstName, u.lastName, u.roleId, u.status, r.roleName
+      `SELECT u.accountId, u.firstName, u.lastName, u.roleId, u.status, r.roleName,
+              u.companyId, co.name AS companyName, co.status AS companyStatus
        FROM users u
        LEFT JOIN roles r ON r.roleId = u.roleId
+       INNER JOIN companies co ON co.companyId = u.companyId
        WHERE u.accountId = ? AND u.status = 'Active'
        LIMIT 1`,
       [credential.accountId]
@@ -231,7 +233,16 @@ router.post(
     if (userRows.length === 0) {
       throw new APIError("Account not found or deactivated", 401, ERROR_CODES.INVALID_CREDENTIALS);
     }
-    const user = { ...userRows[0], email: credential.email, type: credential.type };
+    // PLAN-008: a suspended company's staff can't sign in
+    if (userRows[0].companyStatus !== "Active") {
+      throw new APIError(
+        "Your company's account is suspended. Please contact DGSports.",
+        403,
+        ERROR_CODES.COMPANY_SUSPENDED
+      );
+    }
+    const { companyStatus: _companyStatus, ...profile } = userRows[0];
+    const user = { ...profile, email: credential.email, type: credential.type };
 
     // The client sends the user straight to the change-password form when
     // this is true; until then the API refuses everything but the auth routes
@@ -340,6 +351,7 @@ router.post(
         `SELECT c.accountId, c.email, c.type, c.status
          FROM credentials c
          INNER JOIN users u ON u.accountId = c.accountId
+         INNER JOIN companies co ON co.companyId = u.companyId AND co.status = 'Active'
          WHERE c.accountId = ? AND c.status = 'Active' AND u.status = 'Active'
          LIMIT 1`,
         [decoded.accountId]
@@ -621,7 +633,13 @@ router.get(
   "/me",
   requireAuth,
   catchAsync(async (req, res) => {
-    return res.sendSuccess("User profile", { user: req.user });
+    // PLAN-008: the company the account works for (companyId is on req.user)
+    const companies = await req.db.query(`SELECT name FROM companies WHERE companyId = ? LIMIT 1`, [
+      req.user.companyId,
+    ]);
+    return res.sendSuccess("User profile", {
+      user: { ...req.user, companyName: companies[0]?.name ?? null },
+    });
   })
 );
 

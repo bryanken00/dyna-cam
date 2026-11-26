@@ -389,7 +389,8 @@ export const recordBookingPayment = async (conn, { bookingId, accountId, note })
     ok: true,
     paymentId,
     amount: Number(booking.price),
-    followUp: { closeCheckoutId: booking.checkoutId || null },
+    // PLAN-008: venueId → the company's Xendit account that opened the checkout
+    followUp: { closeCheckoutId: booking.checkoutId || null, venueId: booking.venueId },
   };
 };
 
@@ -584,7 +585,12 @@ export const cancelBooking = async (
     ok: true,
     refunded,
     refundingOnline,
-    followUp: { bookingId: booking.bookingId, closeCheckoutId: booking.checkoutId || null, refundPaymentIds },
+    followUp: {
+      bookingId: booking.bookingId,
+      venueId: booking.venueId,
+      closeCheckoutId: booking.checkoutId || null,
+      refundPaymentIds,
+    },
   };
 };
 
@@ -670,7 +676,7 @@ export const moveBooking = async (
     price,
     // Where it was — Phase G's Moved email says so
     from: { courtId: booking.courtId, startAt: booking.startAt, endAt: booking.endAt },
-    followUp: { closeCheckoutId },
+    followUp: { closeCheckoutId, venueId: booking.venueId },
   };
 };
 

@@ -7,19 +7,19 @@
  * and online payments. No video: no clips, saves, game video rows or files.
  *
  * ⚠️  It EMPTIES THE DATABASE first: every table is truncated except
- * `_migrations` and `permissions`, and the Owner role, its permissions and
- * the Owner account (login and sessions) are kept, so the Owner can still sign
- * in. Everything else — staff, venues, games, clips, bookings, payments, audit
- * trail — is gone, then the demo is loaded. Re-run it any time for a fresh
+ * `_migrations`, `permissions` and the back office's super admins (PLAN-008).
+ * Every company, Owner, staff account, venue, game, clip, booking, payment and
+ * audit row is gone, then the demo is loaded: two companies (Smash Point Group,
+ * slug "default", and Dink House Inc.), each with its own Owner. Re-run it any time for a fresh
  * demo. Video files on disk are not deleted. Refuses NODE_ENV=production.
  *
  * Usage:
  *   npm run db:data
  *
  * Env (optional):
- *   DEMO_PASSWORD   password for every demo staff login (default: random, printed once)
+ *   DEMO_PASSWORD   password for every demo login — Owners and staff (default: random, printed once)
  *
- * Run `npm run db:setup` first (schema, permissions, Owner).
+ * Run `npm run db:setup` first (schema, permissions, the first super admin).
  */
 
 import "dotenv/config";
@@ -306,11 +306,25 @@ async function uuid(conn) {
 // ---------------------------------------------------------------------------
 
 /** Kept whole: which migrations ran, and the permission set from `db:setup`. */
-const KEEP_TABLES = new Set(["_migrations", "permissions"]);
+// PLAN-008: the back office's super admins stay too (DGSports' own accounts, not demo data)
+const KEEP_TABLES = new Set(["_migrations", "permissions", "platform_admins", "platform_admin_refresh_tokens"]);
 
-/** Emptied except for the Owner's rows, so the Owner can still sign in. */
-const OWNER_ROLE_TABLES = ["roles", "role_permissions"];
-const OWNER_ACCOUNT_TABLES = ["users", "credentials", "user_permissions", "refresh_tokens"];
+/**
+ * PLAN-008: the two demo companies, each with its own Owner (setup makes no company or
+ * Owner — the back office onboards them; the demo does it here). The first has slug
+ * "default", so it may use the .env Xendit keys in development (utils/companyPayments.js);
+ * it owns the staff below and every venue but Dink House Cebu.
+ */
+const FIRST_COMPANY = {
+  name: "Smash Point Group",
+  slug: "default",
+  owner: { firstName: "Carmela", lastName: "Ortiz" },
+};
+const SECOND_COMPANY = {
+  name: "Dink House Inc.",
+  slug: "dink-house",
+  owner: { firstName: "Paolo", lastName: "Mendoza" },
+};
 
 /**
  * Empty every table but the ones above. TRUNCATE commits on its own, so this
@@ -321,15 +335,6 @@ const OWNER_ACCOUNT_TABLES = ["users", "credentials", "user_permissions", "refre
  *   many of them pointed at video files (the files stay on disk)
  */
 async function truncateDatabase(conn) {
-  const [ownerRoles] = await conn.query(`SELECT roleId FROM roles WHERE roleName = 'Owner'`);
-  if (ownerRoles.length === 0) {
-    throw new Error("There is no Owner role — run `npm run db:setup` first");
-  }
-  const roleIds = ownerRoles.map((r) => r.roleId);
-  const [owners] = await conn.query(`SELECT accountId FROM users WHERE roleId IN (?)`, [roleIds]);
-  // NOT IN () is invalid SQL: an impossible ID stands in for "no Owner account"
-  const accountIds = owners.length ? owners.map((r) => r.accountId) : [""];
-
   const [tables] = await conn.query(
     `SELECT table_name AS name FROM information_schema.tables
      WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
@@ -346,21 +351,9 @@ async function truncateDatabase(conn) {
   try {
     for (const { name } of tables) {
       if (KEEP_TABLES.has(name)) continue;
-      if (OWNER_ROLE_TABLES.includes(name)) {
-        const [result] = await conn.query(`DELETE FROM \`${name}\` WHERE roleId NOT IN (?)`, [
-          roleIds,
-        ]);
-        rows += result.affectedRows;
-      } else if (OWNER_ACCOUNT_TABLES.includes(name)) {
-        const [result] = await conn.query(`DELETE FROM \`${name}\` WHERE accountId NOT IN (?)`, [
-          accountIds,
-        ]);
-        rows += result.affectedRows;
-      } else {
-        const [[{ n }]] = await conn.query(`SELECT COUNT(*) AS n FROM \`${name}\``);
-        rows += Number(n);
-        await conn.query(`TRUNCATE TABLE \`${name}\``);
-      }
+      const [[{ n }]] = await conn.query(`SELECT COUNT(*) AS n FROM \`${name}\``);
+      rows += Number(n);
+      await conn.query(`TRUNCATE TABLE \`${name}\``);
     }
   } finally {
     await conn.query(`SET FOREIGN_KEY_CHECKS = 1`);
@@ -373,6 +366,7 @@ async function truncateDatabase(conn) {
 // ---------------------------------------------------------------------------
 
 const tally = {
+  companies: 0,
   roles: 0,
   staff: 0,
   venues: 0,
@@ -397,7 +391,96 @@ const freshCode = () => {
   }
 };
 
-async function seedRolesAndStaff(conn, password) {
+/** One demo company and its Owner (every permission, the demo password, no forced change). */
+async function seedCompany(conn, password, { name, slug, owner }) {
+  const created = fmt(NOW.clone().subtract(50, "days"));
+  const companyId = await uuid(conn);
+  await insert(conn, "companies", {
+    companyId,
+    name,
+    slug,
+    contactEmail: `hello@${slug}.${EMAIL_DOMAIN}`,
+    status: "Active",
+    dateCreated: created,
+    dateUpdated: created,
+  });
+  const roleId = await uuid(conn);
+  await insert(conn, "roles", {
+    roleId,
+    companyId,
+    roleName: "Owner",
+    description: "Full access owner role. Not visible in Admin portal.",
+    status: "Active",
+    dateCreated: created,
+    dateUpdated: created,
+  });
+  await conn.query(
+    `INSERT INTO role_permissions (roleId, permissionId, accessLevel, dateCreated)
+     SELECT ?, permissionId, 'write', ? FROM permissions WHERE status = 'Active'`,
+    [roleId, created]
+  );
+  const accountId = await uuid(conn);
+  await insert(conn, "users", {
+    accountId,
+    companyId,
+    firstName: owner.firstName,
+    lastName: owner.lastName,
+    roleId,
+    status: "Active",
+    dateCreated: created,
+    dateUpdated: created,
+  });
+  const email = staffEmail(owner);
+  await insert(conn, "credentials", {
+    accountId,
+    email,
+    password: await hashPassword(password),
+    type: "ADMIN",
+    status: "Active",
+    // The person running the demo uses these logins themselves
+    mustChangePassword: 0,
+    dateCreated: created,
+    dateUpdated: created,
+  });
+  tally.companies += 1;
+  return { companyId, ownerEmail: email, ownerAccountId: accountId };
+}
+
+/** PLAN-008: both demo companies → { defaultId, secondId, firstOwner, secondOwner, secondOwnerAccountId } */
+async function seedCompanies(conn, password) {
+  const first = await seedCompany(conn, password, FIRST_COMPANY);
+  const second = await seedCompany(conn, password, SECOND_COMPANY);
+  return {
+    defaultId: first.companyId,
+    firstOwner: first.ownerEmail,
+    secondId: second.companyId,
+    secondOwner: second.ownerEmail,
+    secondOwnerAccountId: second.ownerAccountId,
+  };
+}
+
+/**
+ * The seeders pick desk staff from the default company; at the second company's venue
+ * its own Owner made those rows (no company sees another company's staff).
+ */
+async function attributeSecondCompany(conn, companies) {
+  const venueRows = `(SELECT venueId FROM venues WHERE companyId = ?)`;
+  const columns = [
+    ["court_closures", "createdByAccountId"],
+    ["recording_sessions", "createdByAccountId"],
+    ["bookings", "createdByAccountId"],
+    ["payments", "receivedByAccountId"],
+    ["payments", "refundedByAccountId"],
+  ];
+  for (const [table, column] of columns) {
+    await conn.query(
+      `UPDATE \`${table}\` SET \`${column}\` = ? WHERE \`${column}\` IS NOT NULL AND venueId IN ${venueRows}`,
+      [companies.secondOwnerAccountId, companies.secondId]
+    );
+  }
+}
+
+async function seedRolesAndStaff(conn, password, companyId) {
   const [perms] = await conn.query(
     `SELECT permissionId, module, submodule FROM permissions WHERE status = 'Active'`
   );
@@ -410,6 +493,7 @@ async function seedRolesAndStaff(conn, password) {
     roleIds[role.roleName] = roleId;
     await insert(conn, "roles", {
       roleId,
+      companyId,
       roleName: role.roleName,
       description: role.description,
       status: "Active",
@@ -436,6 +520,7 @@ async function seedRolesAndStaff(conn, password) {
     const status = person.status || "Active";
     await insert(conn, "users", {
       accountId,
+      companyId,
       firstName: person.firstName,
       lastName: person.lastName,
       phone: person.phone,
@@ -500,12 +585,14 @@ const priceFor = (venue, courtKey, start, hours) => {
   return total;
 };
 
-async function seedVenues(conn) {
+async function seedVenues(conn, companies) {
   const created = NOW.clone().subtract(45, "days");
   for (const venue of VENUES) {
     venue.venueId = await uuid(conn);
     await insert(conn, "venues", {
       venueId: venue.venueId,
+      // PLAN-008: Dink House Cebu belongs to the second company
+      companyId: venue.key === "cebu" ? companies.secondId : companies.defaultId,
       name: venue.name,
       address: venue.address,
       phone: venue.phone,
@@ -1005,7 +1092,7 @@ async function insertBooking(conn, { staff, venue, court, slot, price, kind: wan
   }
 }
 
-async function seedAuditTrail(conn, staff) {
+async function seedAuditTrail(conn, staff, companyId) {
   const entries = [
     [staff.manager, "UPDATE", "venues", 13, "/api/v1/admin/venues"],
     [staff.manager, "CREATE", "courts", 12, "/api/v1/admin/courts"],
@@ -1024,6 +1111,7 @@ async function seedAuditTrail(conn, staff) {
     );
     await insert(conn, "audit_trail", {
       auditId: await uuid(conn),
+      companyId,
       accountId: who.accountId,
       action,
       module,
@@ -1067,7 +1155,7 @@ async function main() {
     }
 
     console.log(
-      `\n🧹 Emptying database "${process.env.DB_DATABASE}" (keeping permissions and the Owner)...`
+      `\n🧹 Emptying database "${process.env.DB_DATABASE}" (keeping permissions and the super admins)...`
     );
     const removed = await truncateDatabase(conn);
     console.log(`   ✅ ${removed.rows} row(s) removed`);
@@ -1080,12 +1168,14 @@ async function main() {
     await conn.beginTransaction();
 
     console.log(`\n🌱 Seeding demo data (${nowText}, ${TZ})...`);
-    const staff = await seedRolesAndStaff(conn, password);
-    await seedVenues(conn);
+    const companies = await seedCompanies(conn, password);
+    const staff = await seedRolesAndStaff(conn, password, companies.defaultId);
+    await seedVenues(conn, companies);
     await seedClosures(conn, staff);
     await seedBookings(conn, staff); // before walk-ins: bookings get the good slots
     await seedPastGames(conn, staff);
-    await seedAuditTrail(conn, staff);
+    await seedAuditTrail(conn, staff, companies.defaultId);
+    await attributeSecondCompany(conn, companies);
 
     await conn.commit();
 
@@ -1097,10 +1187,14 @@ async function main() {
     );
 
     console.log("\n   📋 Demo staff logins (Admin portal):");
+    console.log(`      ${`Owner (${FIRST_COMPANY.name})`} ${companies.firstOwner}`);
     for (const person of STAFF) {
       const note = person.status === "Inactive" ? "  (Inactive — can't sign in)" : "";
       console.log(`      ${person.role.padEnd(14)} ${staffEmail(person)}${note}`);
     }
+    console.log(
+      `      Owner (${SECOND_COMPANY.name}) ${companies.secondOwner}   ← a second company: sees only Dink House Cebu`
+    );
     console.log(
       generated
         ? `      Password: ${password}   ← generated now, shown only this once`

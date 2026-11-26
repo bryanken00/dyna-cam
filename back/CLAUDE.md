@@ -41,8 +41,9 @@ the credential — PLAN-006: creating a booking there also needs a player signed
 routes `/api/v1/player/*`, see `utils/players.js`, `utils/playerTokens.js`, `utils/googleSignIn.js`) and a fifth no-login family, `/api/v1/webhooks/xendit` (`x-callback-token`; the
 invoice is read back from Xendit before anything changes — `lib/payments/xendit.js`,
 `utils/bookingPayments.js`). Booking writes live in `utils/bookings.js` and lock the court row
-before `utils/courtTimeline.js` `findConflict()`. Queries see the whole database (soft deletes aside); the seeded
-**Owner** role and its accounts are the only records hidden from the Admin portal.
+before `utils/courtTimeline.js` `findConflict()`. PLAN-008: Admin queries see only the caller's
+company (`req.user.companyId`, `utils/companyScope.js` — another company's record is a 404), and
+within it each company's **Owner** role and its accounts are hidden from the Admin portal.
 
 Reference implementation: `server/src/controllers/v1/admin/roles.controller.js`.
 
@@ -56,8 +57,11 @@ column, index, ENUM value, FK, backfill) is a **new numbered migration** in
 renumber or delete it, even to fix it — write a new migration. The real schema is `schema.sql` +
 every migration in order. Details: `schema-conventions.md` in the `backend-conventions` skill.
 
+`npm run db:setup` creates only the first back-office super admin (`SUPERADMIN_EMAIL`, PLAN-008) —
+no company or Owner; companies and their Owners are onboarded in the back office.
 `npm run db:data` (`scripts/seed-demo-data.js`, PLAN-004) **empties the database** (every table
-except `_migrations` and `permissions`; the Owner role and account are kept) and loads demo data for
+except `_migrations`, `permissions` and the super admins) and loads two demo companies with their
+Owners, staff and demo data for
 development, with no video. It refuses `NODE_ENV=production`. A new table or
 status the Admin pages show is worth a few demo rows there.
 

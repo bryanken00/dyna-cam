@@ -283,9 +283,10 @@ req.userPermission = {
 
 ## Owner Role Convention
 
-The "Owner" role is system-managed. `npm run db:setup` (`scripts/_seed-owner.js`) creates it,
-grants it every Active permission at `write`, and creates the first Owner account from
-`OWNER_EMAIL` / `OWNER_PASSWORD`. It must never be visible from the Admin portal.
+The "Owner" role is system-managed, one per company (PLAN-008). Onboarding a company in the back
+office (`utils/companies.js` `createCompany()`) creates it with every Active permission at
+`write`, plus the company's Owner account. `npm run db:setup` creates no Owner (only the first
+super admin). It must never be visible from the Admin portal.
 
 ### Rules
 
@@ -294,7 +295,7 @@ grants it every Active permission at `write`, and creates the first Owner accoun
 3. **Cannot assign Owner from Admin** — reject (400) if the chosen roleId resolves to Owner
 4. **Cannot modify/delete Owner from Admin** — PUT/DELETE on the Owner role or an Owner account,
    and changes to their permissions or overrides, return 404 like a missing record
-5. **Only one Owner role** — role names are unique among non-deleted roles, so creating another
-   "Owner", or renaming a role to "Owner", returns 409
-6. **A new permission reaches the Owner by re-running setup** — every `npm run db:setup` grants the
-   Owner role any Active permission it does not have yet
+5. **Only one Owner role per company** — role names are unique among the company's non-deleted
+   roles, so creating another "Owner", or renaming a role to "Owner", returns 409
+6. **A new permission reaches every Owner by re-running setup** — every `npm run db:setup` grants
+   each company's Owner role any Active permission it does not have yet (`scripts/_owner-permissions.js`)

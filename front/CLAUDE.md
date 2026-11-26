@@ -24,6 +24,15 @@ via `@fontsource-variable`.
 > All UI primitives are **shadcn/ui** — import them from `@/components/ui/*` (the `@/` alias →
 > `src/`) and use lucide-react for icons. Don't introduce another component or icon library.
 
+## Back office (PLAN-008)
+
+DGSports' own portal is `/backoffice/*` (`routes/pageRoutes/BackofficeRoute.jsx`,
+`components/layout/BackofficeLayout.jsx`, `pages/Backoffice/*`): super admins onboard and manage
+companies. It has its own store (`store/backofficeStore.js`, key `<VITE_STORE_KEY>-backoffice`), its
+own `userTypeAuth.backoffice` axios instance and services (`services/*/backoffice/*`), and no
+permissions — any signed-in super admin. Admin pages never need a company filter: the API scopes
+everything to the staff member's company.
+
 ## Design system — "Modern"
 
 Cool-white surfaces + hairline borders in the **DGSports brand** (CR-036, the DGPlay logo's blue

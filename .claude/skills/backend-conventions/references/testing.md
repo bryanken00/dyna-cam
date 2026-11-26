@@ -19,7 +19,8 @@ Every test file calls `startTestApp()` from `tests/helpers/testApp.js` once. It:
 1. Creates a **throwaway database** named `tpl_test_<pid>_<random>` on the MySQL server from
    `DB_HOST` / `DB_USER` / `DB_PASS` (`back/.env`, or real environment variables).
 2. Runs the real `scripts/setup-database.js` against it — schema, migrations, permissions, the
-   Owner role and the first Owner account.
+   the first back-office super admin (PLAN-008: no company or Owner — the harness then onboards
+   the "Default company" and its Owner).
 3. Starts the **real app** (`server/config/express.js`) on a random port, from a temp working
    directory, so uploads never land in `back/public`.
 4. On `stop()`, drops the database and the temp directory.
@@ -82,8 +83,9 @@ What `startTestApp()` returns:
 | --- | --- |
 | `api(method, url, { body, form, token, player, headers })` | Call the API. `url` is the path below `/api/v1`. Returns `{ status, body, data }` (`data` is the envelope's `data`). `form` sends multipart: `[name, value]` or `[name, Buffer, mimeType, filename]`, in order. |
 | `get(path)` | Fetch a non-API path, e.g. a signed upload link. Returns the raw `Response`. |
-| `owner()` | The seeded Owner's session `{ accountId, email, token, refreshToken, user }`, signed in once and reused. The Owner holds every permission but is hidden from the Admin portal's lists and by-ID endpoints. |
+| `owner()` | The default company's Owner session (PLAN-008: setup makes no Owner, so `startTestApp()` onboards the "Default company", slug `default`, with this Owner via `utils/companies.js`) `{ accountId, email, token, refreshToken, user }`, signed in once and reused. The Owner holds every permission but is hidden from the Admin portal's lists and by-ID endpoints. |
 | `ownerRoleId()` | The Owner role's ID, for asserting it can't be reached or assigned. |
+| `createCompany(name)` | PLAN-008: onboard another company (as the back office does) and sign its Owner in. Returns `{ companyId, slug, name, owner }` — `owner` is a ready session like `owner()`'s. Pass it to `createStaff(label, { access, company })` for staff in that company. |
 | `createStaff(label, { access })` | A role (`"<label> staff"`) and a staff user with it, created through the API as the Owner. `access: "read"` or `"write"` grants the role every permission at that level; omitted, it gets none. The helper also does the user's forced first password change, so the password is `STAFF_PASSWORD` and the session is ready to use. Returns `{ accountId, email, roleId, token, refreshToken, user }`. |
 | `signInPlayer({ email, name, phone, sub, completeProfile })` | PLAN-006: a player signed in with Google (Google's own answer skipped; the same email is the same player), with the first-sign-in profile saved (`name` split into first/last, `phone`) unless `completeProfile: false`. Returns `{ token, refreshToken, email }`; pass `player: token` to `api()` to send `Authorization: Player …`. Booking online needs one with a complete profile. |
 | `markGamePaid(sessionId, amount)` | CR-046: a game paid in cash at the desk before cash was removed, stored directly (a `CASH` payment, the game Paid) — the API can't record one any more. |
@@ -108,6 +110,12 @@ For each endpoint that takes an ID: a **Deleted** record's ID gets **404**, and 
 **unchanged** afterwards (check with `ctx.sql`). Where the endpoint can reach roles or users, the
 Owner role's or an Owner account's ID gets the same 404 — even for a staff user holding every
 permission. Copy the shape of `tests/owner-protection.test.js`.
+
+### 1b. Every Admin module gets a cross-company test (PLAN-008)
+
+With `createCompany()`, check that company B's staff can't list, read, edit, delete or use
+company A's records (404, or absent from lists) and that A's rows are unchanged — and that A
+doesn't see B's. See `tests/company-scope-*.test.js`.
 
 ### 2. Go through the API, not around it
 
@@ -147,7 +155,7 @@ Before reporting a fix done, confirm the new test fails on the old code and pass
   booking is paid online only. A file that fakes Xendit sets `PAYMENT_SANDBOX: ""`.
 - A random `UPLOAD_URL_SECRET`, and `SENDGRID_API_KEY=""` so no email is ever sent (a test that
   needs SendGrid points `SENDGRID_API_URL` at a fake — see `tests/drive-email.test.js`).
-- The first Owner is `owner@template.com` with a fixed test password (`OWNER_EMAIL` /
-  `OWNER_PASSWORD`), and its `mustChangePassword` flag is cleared (pass
+- The default company's Owner is `owner@template.com` with a fixed test password (`OWNER` /
+  `OWNER_PASSWORD` exported by the helper; onboarded after setup, which seeds only the super admin), and its `mustChangePassword` flag is cleared (pass
   `keepFirstPasswordFlag: true` to keep it).
 - Log output is silenced, and nothing is written to `back/logs`.

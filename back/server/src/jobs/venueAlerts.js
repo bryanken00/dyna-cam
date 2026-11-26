@@ -151,9 +151,10 @@ export const alertEmailEnabled = () =>
 /**
  * Staff who get alert emails: Active users with an Active sign-in whose access
  * to `alerts` is read or write — a per-user override first, else their role
- * (the Owner role holds it from migration 019).
+ * (the Owner role holds it from migration 019). PLAN-008: only the venue's
+ * company's staff — another company never hears about it.
  */
-export const alertRecipients = (db) =>
+export const alertRecipients = (db, companyId) =>
   db.query(
     `SELECT DISTINCT c.email
      FROM users u
@@ -161,8 +162,9 @@ export const alertRecipients = (db) =>
      JOIN permissions p ON p.module = 'alerts' AND p.submodule IS NULL AND p.status = 'Active'
      LEFT JOIN user_permissions up ON up.accountId = u.accountId AND up.permissionId = p.permissionId
      LEFT JOIN role_permissions rp ON rp.roleId = u.roleId AND rp.permissionId = p.permissionId
-     WHERE u.status = 'Active'
-       AND COALESCE(up.accessLevel, rp.accessLevel, 'none') IN ('read', 'write')`
+     WHERE u.status = 'Active' AND u.companyId = ?
+       AND COALESCE(up.accessLevel, rp.accessLevel, 'none') IN ('read', 'write')`,
+    [companyId]
   );
 
 const COLOURS = { opened: 0xdc2626, resolved: 0x16a34a };
@@ -193,10 +195,11 @@ export const discordMessage = ({ opened, resolved, dashboardUrl }) => {
 const notify = async (db, { opened, resolved, now, discord, mail, emailEnabled }) => {
   const venueIds = [...new Set([...opened, ...resolved].map((row) => row.venueId))];
   const venues = await db.query(
-    `SELECT venueId, name FROM venues WHERE venueId IN (${venueIds.map(() => "?").join(", ")})`,
+    `SELECT venueId, name, companyId FROM venues WHERE venueId IN (${venueIds.map(() => "?").join(", ")})`,
     venueIds
   );
   const venueName = new Map(venues.map((venue) => [venue.venueId, venue.name]));
+  const venueCompany = new Map(venues.map((venue) => [venue.venueId, venue.companyId]));
   const item = (row, since) => ({
     label: ALERT_LABELS[row.kind] || row.kind,
     venueName: venueName.get(row.venueId) || "A venue",
@@ -218,12 +221,22 @@ const notify = async (db, { opened, resolved, now, discord, mail, emailEnabled }
     logger.warn("Venue alerts not posted to Discord", { reason: posted?.reason });
   }
 
+  // PLAN-008: each company's staff get only their own venues' problems
   if (emailEnabled) {
-    const recipients = await alertRecipients(db);
-    const email = venueAlertsEmail({ ...items, dashboardUrl: dashboardUrl || "" });
-    for (const recipient of recipients) {
-      const sent = await mail({ to: recipient.email, ...email });
-      if (sent?.sent) result.emailed += 1;
+    const companyIds = [...new Set(venues.map((venue) => venue.companyId))];
+    for (const companyId of companyIds) {
+      const mine = (row) => venueCompany.get(row.venueId) === companyId;
+      const companyItems = {
+        opened: opened.filter(mine).map((row) => item(row, sinceText(row.firstSeenAt, "Since"))),
+        resolved: resolved.filter(mine).map((row) => item(row, sinceText(now, "Fixed"))),
+      };
+      if (companyItems.opened.length === 0 && companyItems.resolved.length === 0) continue;
+      const recipients = await alertRecipients(db, companyId);
+      const email = venueAlertsEmail({ ...companyItems, dashboardUrl: dashboardUrl || "" });
+      for (const recipient of recipients) {
+        const sent = await mail({ to: recipient.email, ...email });
+        if (sent?.sent) result.emailed += 1;
+      }
     }
   }
 

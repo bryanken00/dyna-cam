@@ -65,8 +65,8 @@ WHERE NOT EXISTS (
   SELECT 1 FROM permissions WHERE module = '{{module}}' AND submodule IS NULL
 );
 
--- Grant it to the Owner role at write level, so the Owner sees the page right away
--- (re-running `npm run db:setup` would also top it up — see scripts/_seed-owner.js)
+-- Grant it to every company's Owner role at write level, so Owners see the page right away
+-- (re-running `npm run db:setup` would also top them up — see scripts/_owner-permissions.js)
 INSERT INTO role_permissions (roleId, permissionId, accessLevel, dateCreated)
 SELECT r.roleId, p.permissionId, 'write', CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')
 FROM roles r

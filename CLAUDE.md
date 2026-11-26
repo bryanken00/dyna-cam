@@ -13,11 +13,26 @@ game's video and sends it straight to the court's **Google Drive**, and players 
 Drive link. Staff run venues, courts, cameras, games and payments from the web Admin portal and the mobile
 staff app. The roadmap is [PLAN-001](docs/plans/PLAN-001-court-replay-cameras/plan.md).
 
-The platform is single-organisation with one portal, **Admin** (`/admin/*` in the client,
-`/api/v1/admin/*` in the API), where staff manage users, roles, permissions, settings and
-resources. The **Owner** — created by `npm run db:setup` — holds every permission and is never
-listed, editable or assignable in Users or Roles; everyone else gets access through roles and
-per-user overrides.
+The platform is **multi-company SaaS** (PLAN-008). DGSports onboards client **companies** in the
+**back office** (`/backoffice/*` in the client, `/api/v1/backoffice/*` in the API; super admins in
+`platform_admins`, their own token audience; Super admins and Activity pages — every back-office
+action goes to `platform_audit_trail` via `utils/platformAudit.js`, and company actions also into
+that company's `audit_trail` as actor `dgsports`, shown "DGSports"). Each company's staff use the **Admin** portal
+(`/admin/*`, `/api/v1/admin/*`) to manage users, roles, permissions, settings and resources —
+**company-wide and only their own company**: every Admin query is scoped to
+`req.user.companyId` (`utils/companyScope.js`; `companyId` on venues, users, roles, settings and
+audit_trail, everything else through its venue), and another company's record is a 404. Each
+company has an **Owner** (created when the company is onboarded in the back office,
+`utils/companies.js`; `npm run db:setup` creates no company or Owner — only the first super admin) that holds every permission and is never listed, editable or assignable in
+Users or Roles; everyone else gets access through roles and per-user overrides. A suspended
+company's staff can't sign in. Players, recorder boxes and the `/book` directory work across
+companies. Super admins: the first — the **only** account `npm run db:setup`
+creates — comes from `SUPERADMIN_EMAIL` and `SUPERADMIN_PASSWORD` (both required until one exists;
+the installer's own password, so no forced change at first sign-in — super admins added in the back
+office get a temporary one); re-running setup also grants every
+company's Owner role any new permission (`scripts/_owner-permissions.js`). `npm run db:data` keeps
+the super admins and builds two demo companies with their Owners (Smash Point Group, slug
+`default`; Dink House Inc. owns Dink House Cebu).
 
 ## Repository layout
 
@@ -120,7 +135,7 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
     `optionalUploadPath()` and check `canAccessUpload()` before saving a client-sent path.
   - **Frontend:** render through `getImageUrl()` and use the link exactly as given; send it back
     unchanged when saving or deleting.
-- **Temporary passwords:** an account created for someone else (the seeded Owner, a staff user)
+- **Temporary passwords:** an account created for someone else (a super admin added in the back office, a company Owner, a staff user)
   is inserted with `mustChangePassword = 1` and its password checked with `passwordProblem()`.
   Until the user changes it, the API returns 403 `PASSWORD_CHANGE_REQUIRED` outside `/auth/*`,
   and the frontend `<Auth>` guard keeps them on Account Settings. There is no fixed default password anywhere.
@@ -197,10 +212,15 @@ reports `drive-direct`. The app keeps its token
   `"25:00"`… (`nextDay`), `toStartLocal()` turns them into real times, `withinHours()` also checks
   the previous day's late window, and `firstBookableDate()` is last night's date while they run; there's no cash anywhere (no Record payment for bookings or games, no Payments → Take
   payment, no Online settlement report; migration 042 made old unpaid games and clips Free).
-  **Online payment** goes through Dyna Cam's one Xendit account
-  (`lib/payments/xendit.js`; off unless `XENDIT_SECRET_KEY` and `XENDIT_CALLBACK_TOKEN` are set):
-  `/api/v1/webhooks/xendit` is its own route family — the `x-callback-token` header is the
-  credential, and a payment is believed only after reading the invoice back from Xendit, never
+  **Online payment** goes into **each company's own Xendit account** (PLAN-008 phase C): keys saved
+  encrypted, write-only, in Admin → Payments → Online payment (`/admin/company-payments`); every
+  Xendit call (`lib/payments/xendit.js`, which takes the account per call) uses the booking's
+  venue → company account (`utils/companyPayments.js`; the default company falls back to
+  `XENDIT_SECRET_KEY` / `XENDIT_CALLBACK_TOKEN`, others never; a company without Xendit takes no
+  online bookings or pay links and drops out of `/book`). Webhooks: `/api/v1/webhooks/xendit/:webhookKey`
+  per company (`/webhooks/xendit` = the default company) — its own route family; the
+  `x-callback-token` must be that company's, the invoice is read back with its key, and only its
+  venues' bookings settle (else `WRONG_COMPANY`); a payment is believed only after reading the invoice back from Xendit, never
   from the webhook body or the checkout redirect (`utils/bookingPayments.js`). Refunds are queued
   in the cancel's transaction and sent after commit; a refused one shows **Refund failed**.
   Booking emails (`utils/bookingEmails.js`) are sent after the commit of the request that causes

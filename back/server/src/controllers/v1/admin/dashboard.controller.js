@@ -4,8 +4,23 @@ import { dashboardInsightsQuerySchema } from "../../../validators/dashboard.vali
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { getCurrentTimestampLocal, getTodayDateLocal, moment } from "../../../utils/dateUtils.js";
 import { ALERT_LABELS, boxHealth } from "../../../utils/venueHealth.js";
+import { callerCompany, inCompanyVenues } from "../../../utils/companyScope.js";
 
+/**
+ * The Admin Dashboard. PLAN-008: every figure, list and box is the caller's
+ * company's only (its venues, users, roles and audit trail).
+ */
 const router = express.Router();
+
+/** PLAN-008: the recorder boxes of the company's venues only. */
+const companyBoxes = async (db, companyId) => {
+  const [boxes, venues] = await Promise.all([
+    boxHealth(db),
+    db.query(`SELECT venueId FROM venues WHERE companyId = ?`, [companyId]),
+  ]);
+  const mine = new Set(venues.map((v) => v.venueId));
+  return boxes.filter((box) => mine.has(box.venueId));
+};
 
 const TZ = process.env.TIMEZONE || "Asia/Manila";
 const SERIES_DAYS = 14;
@@ -54,47 +69,46 @@ router.get(
     const fromM = nowM.clone().startOf("day").subtract(days - 1, "days");
     const from = fromM.format(FORMAT);
     const prevFrom = fromM.clone().subtract(days, "days").format(FORMAT);
+    const companyId = callerCompany(req);
+    const games = `recording_sessions WHERE ${inCompanyVenues("recording_sessions")} AND`;
 
     const [perDayRows, hourRows, weekdayRows, previous, unpaid, cash] = await Promise.all([
       req.db.query(
         `SELECT DATE_FORMAT(startAt, '%Y-%m-%d') AS day, COUNT(*) AS games,
                 COALESCE(SUM(${RECORDED_SECONDS}), 0) AS seconds
-         FROM recording_sessions
-         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         FROM ${games} ${PLAYED} AND startAt >= ? AND startAt <= ?
          GROUP BY day`,
-        [now, from, now]
+        [now, companyId, from, now]
       ),
       req.db.query(
         `SELECT HOUR(startAt) AS hour, COUNT(*) AS games
-         FROM recording_sessions
-         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         FROM ${games} ${PLAYED} AND startAt >= ? AND startAt <= ?
          GROUP BY hour`,
-        [from, now]
+        [companyId, from, now]
       ),
       req.db.query(
         `SELECT WEEKDAY(startAt) AS weekday, COUNT(*) AS games
-         FROM recording_sessions
-         WHERE ${PLAYED} AND startAt >= ? AND startAt <= ?
+         FROM ${games} ${PLAYED} AND startAt >= ? AND startAt <= ?
          GROUP BY weekday`,
-        [from, now]
+        [companyId, from, now]
       ),
       req.db.query(
-        `SELECT COUNT(*) AS games FROM recording_sessions
-         WHERE ${PLAYED} AND startAt >= ? AND startAt < ?`,
-        [prevFrom, from]
+        `SELECT COUNT(*) AS games FROM ${games} ${PLAYED} AND startAt >= ? AND startAt < ?`,
+        [companyId, prevFrom, from]
       ),
       // Finished games still waiting for their payment at the desk — any date
       req.db.query(
-        `SELECT COUNT(*) AS games, MIN(endAt) AS oldestEndAt FROM recording_sessions
-         WHERE paymentStatus = 'Unpaid' AND status IN ('Processing', 'Ready')`
+        `SELECT COUNT(*) AS games, MIN(endAt) AS oldestEndAt
+         FROM ${games} paymentStatus = 'Unpaid' AND status IN ('Processing', 'Ready')`,
+        [companyId]
       ),
       req.db.query(
         `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS payments,
                 SUM(sessionId IS NOT NULL) AS gamePayments,
                 COALESCE(SUM(CASE WHEN sessionId IS NOT NULL THEN amount END), 0) AS gameTotal
          FROM payments
-         WHERE status = 'Paid' AND paidAt >= ? AND paidAt <= ?`,
-        [from, now]
+         WHERE ${inCompanyVenues("payments")} AND status = 'Paid' AND paidAt >= ? AND paidAt <= ?`,
+        [companyId, from, now]
       ),
     ]);
 
@@ -163,6 +177,7 @@ router.get(
   checkPermission("dashboard", null, "read"),
   catchAsync(async (req, res) => {
     const since = moment().tz(TZ).subtract(SERIES_DAYS - 1, "days").format("YYYY-MM-DD 00:00:00");
+    const companyId = callerCompany(req);
 
     const [
       userCounts,
@@ -179,34 +194,42 @@ router.get(
            SUM(CASE WHEN u.status = 'Active' THEN 1 ELSE 0 END) AS active
          FROM users u
          LEFT JOIN roles r ON r.roleId = u.roleId
-         WHERE u.status != 'Deleted' AND (r.roleName IS NULL OR r.roleName != 'Owner')`
+         WHERE u.companyId = ? AND u.status != 'Deleted'
+           AND (r.roleName IS NULL OR r.roleName != 'Owner')`,
+        [companyId]
       ),
       req.db.query(
         `SELECT COUNT(*) AS total FROM roles
-         WHERE status != 'Deleted' AND roleName != 'Owner'`
+         WHERE companyId = ? AND status != 'Deleted' AND roleName != 'Owner'`,
+        [companyId]
       ),
-      req.db.query(`SELECT COUNT(*) AS total FROM audit_trail WHERE dateCreated >= ?`, [since]),
+      req.db.query(`SELECT COUNT(*) AS total FROM audit_trail WHERE companyId = ? AND dateCreated >= ?`, [
+        companyId,
+        since,
+      ]),
       req.db.query(
         `SELECT DATE(dateCreated) AS day, COUNT(*) AS count
          FROM users
-         WHERE status != 'Deleted' AND dateCreated >= ?
+         WHERE companyId = ? AND status != 'Deleted' AND dateCreated >= ?
          GROUP BY DATE(dateCreated)`,
-        [since]
+        [companyId, since]
       ),
       req.db.query(
         `SELECT DATE(dateCreated) AS day, COUNT(*) AS count
          FROM audit_trail
-         WHERE dateCreated >= ?
+         WHERE companyId = ? AND dateCreated >= ?
          GROUP BY DATE(dateCreated)`,
-        [since]
+        [companyId, since]
       ),
       req.db.query(
         `SELECT a.auditId, a.action, a.module, a.description, a.dateCreated,
                 u.firstName, u.lastName
          FROM audit_trail a
          LEFT JOIN users u ON u.accountId = a.accountId
+         WHERE a.companyId = ?
          ORDER BY a.dateCreated DESC
-         LIMIT 6`
+         LIMIT 6`,
+        [companyId]
       ),
     ]);
 
@@ -251,29 +274,32 @@ const secondsBetween = (from, to) =>
  * on court now (or waiting for its device, or the next one today) and today's
  * replays. No player names — the Sessions page has those.
  */
-const courtBoard = async (db, boxes, { now, dayStart, dayEnd }) => {
+const courtBoard = async (db, boxes, { now, dayStart, dayEnd, companyId }) => {
   const [courts, games, replays] = await Promise.all([
     db.query(
       `SELECT c.courtId, c.name, c.venueId, v.name AS venueName,
               c.cameraRtspUrl IS NOT NULL AS hasCamera1,
               c.camera2RtspUrl IS NOT NULL AS hasCamera2
        FROM courts c
-       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
-       WHERE c.status = 'Active'`
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
+       WHERE c.status = 'Active'`,
+      [companyId]
     ),
     db.query(
       `SELECT courtId, status, startAt, endAt, openEnded
        FROM recording_sessions
-       WHERE status IN ('Recording', 'Waiting')
-          OR (status = 'Scheduled' AND startAt BETWEEN ? AND ?)
+       WHERE ${inCompanyVenues("recording_sessions")}
+         AND (status IN ('Recording', 'Waiting')
+          OR (status = 'Scheduled' AND startAt BETWEEN ? AND ?))
        ORDER BY startAt`,
-      [now, dayEnd]
+      [companyId, now, dayEnd]
     ),
     db.query(
       `SELECT courtId, COUNT(*) AS total FROM clips
-       WHERE sessionId IS NULL AND status != 'Deleted' AND dateCreated BETWEEN ? AND ?
+       WHERE ${inCompanyVenues("clips")}
+         AND sessionId IS NULL AND status != 'Deleted' AND dateCreated BETWEEN ? AND ?
        GROUP BY courtId`,
-      [dayStart, dayEnd]
+      [companyId, dayStart, dayEnd]
     ),
   ]);
 
@@ -351,6 +377,7 @@ router.get(
     const now = getCurrentTimestampLocal();
     const dayStart = `${today} 00:00:00`;
     const dayEnd = `${today} 23:59:59`;
+    const companyId = callerCompany(req);
 
     const [sessions, clips, cash, boxes] = await Promise.all([
       req.db.query(
@@ -358,25 +385,28 @@ router.get(
            SUM(CASE WHEN status = 'Recording' THEN 1 ELSE 0 END) AS recording,
            SUM(CASE WHEN status NOT IN ('Cancelled') AND startAt BETWEEN ? AND ? THEN 1 ELSE 0 END) AS today
          FROM recording_sessions
-         WHERE status = 'Recording' OR startAt BETWEEN ? AND ?`,
-        [dayStart, dayEnd, dayStart, dayEnd]
+         WHERE ${inCompanyVenues("recording_sessions")}
+           AND (status = 'Recording' OR startAt BETWEEN ? AND ?)`,
+        [dayStart, dayEnd, companyId, dayStart, dayEnd]
       ),
       req.db.query(
         `SELECT COUNT(*) AS total,
                 SUM(CASE WHEN status = 'Ready' THEN 1 ELSE 0 END) AS ready
          FROM clips
-         WHERE sessionId IS NULL AND status != 'Deleted' AND dateCreated BETWEEN ? AND ?`,
-        [dayStart, dayEnd]
+         WHERE ${inCompanyVenues("clips")}
+           AND sessionId IS NULL AND status != 'Deleted' AND dateCreated BETWEEN ? AND ?`,
+        [companyId, dayStart, dayEnd]
       ),
       req.db.query(
         `SELECT COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS count
-         FROM payments WHERE status = 'Paid' AND paidAt BETWEEN ? AND ?`,
-        [dayStart, dayEnd]
+         FROM payments
+         WHERE ${inCompanyVenues("payments")} AND status = 'Paid' AND paidAt BETWEEN ? AND ?`,
+        [companyId, dayStart, dayEnd]
       ),
-      boxHealth(req.db),
+      companyBoxes(req.db, companyId),
     ]);
 
-    const courts = await courtBoard(req.db, boxes, { now, dayStart, dayEnd });
+    const courts = await courtBoard(req.db, boxes, { now, dayStart, dayEnd, companyId });
 
     return res.sendSuccess("Venue figures retrieved successfully", {
       venues: {
@@ -404,17 +434,19 @@ router.get(
   "/alerts",
   checkPermission("alerts", null, "read"),
   catchAsync(async (req, res) => {
+    const companyId = callerCompany(req);
     const [rows, boxes] = await Promise.all([
       req.db.query(
         `SELECT a.alertId, a.kind, a.status, a.message, a.firstSeenAt, a.openedAt,
                 a.courtId, a.camera, v.name AS venueName
          FROM venue_alerts a
-         JOIN venues v ON v.venueId = a.venueId
+         JOIN venues v ON v.venueId = a.venueId AND v.companyId = ?
          WHERE a.status IN ('Pending', 'Open')
          ORDER BY a.status = 'Open' DESC, a.firstSeenAt ASC
-         LIMIT 200`
+         LIMIT 200`,
+        [companyId]
       ),
-      boxHealth(req.db),
+      companyBoxes(req.db, companyId),
     ]);
 
     const problems = rows.map((row) => ({ ...row, label: ALERT_LABELS[row.kind] || row.kind }));

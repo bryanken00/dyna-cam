@@ -7,8 +7,12 @@ export const XENDIT_TEST_SECRET = "xnd_development_test_secret";
 export const XENDIT_TEST_CALLBACK_TOKEN = "test-callback-token-0123456789";
 const SECRET = XENDIT_TEST_SECRET;
 
-/** A fake Xendit: invoices, expiry, refunds. */
-export const fakeXendit = () => {
+/**
+ * A fake Xendit: invoices, expiry, refunds. PLAN-008: `secrets` — several accounts
+ * (one per company); like real Xendit, an account sees only its own invoices and
+ * refunds (another account's ID is a 404).
+ */
+export const fakeXendit = ({ secrets = [SECRET] } = {}) => {
   const state = {
     invoices: new Map(), // id → invoice
     refunds: new Map(), // id → refund
@@ -34,10 +38,16 @@ export const fakeXendit = () => {
     const body = await read(req);
     const path = req.url;
     state.calls.push(`${req.method} ${path}`);
-    const auth = `Basic ${Buffer.from(`${SECRET}:`).toString("base64")}`;
-    if (req.headers.authorization !== auth) {
+    const account = secrets.find(
+      (secret) => req.headers.authorization === `Basic ${Buffer.from(`${secret}:`).toString("base64")}`
+    );
+    if (!account) {
       return json(res, 401, { error_code: "INVALID_API_KEY", message: "Invalid API key" });
     }
+    state.lastAccount = account;
+    // Another account's invoice / refund doesn't exist for this one
+    const mine = (item) => (item && item.account === account ? item : undefined);
+    if (req.method === "GET" && path === "/balance") return json(res, 200, { balance: 1000 });
 
     if (req.method === "POST" && path === "/v2/invoices") {
       const id = `inv_${++state.count}`;
@@ -53,20 +63,21 @@ export const fakeXendit = () => {
         failure_redirect_url: body.failure_redirect_url,
         status: "PENDING",
         invoice_url: `https://checkout.test/web/${id}`,
+        account,
       };
       state.invoices.set(id, invoice);
       return json(res, 200, invoice);
     }
     let match = /^\/v2\/invoices\/([^/]+)$/.exec(path);
     if (req.method === "GET" && match) {
-      const invoice = state.invoices.get(match[1]);
+      const invoice = mine(state.invoices.get(match[1]));
       return invoice
         ? json(res, 200, invoice)
         : json(res, 404, { error_code: "INVOICE_NOT_FOUND_ERROR", message: "Not found" });
     }
     match = /^\/invoices\/([^/]+)\/expire!$/.exec(path);
     if (req.method === "POST" && match) {
-      const invoice = state.invoices.get(match[1]);
+      const invoice = mine(state.invoices.get(match[1]));
       if (!invoice || invoice.status !== "PENDING") {
         return json(res, 404, { error_code: "INVOICE_NOT_FOUND_ERROR", message: "Can't expire" });
       }
@@ -80,14 +91,17 @@ export const fakeXendit = () => {
           message: "Refund feature is not available for this payment channel.",
         });
       }
+      if (!mine(state.invoices.get(body.invoice_id))) {
+        return json(res, 404, { error_code: "INVOICE_NOT_FOUND_ERROR", message: "Not found" });
+      }
       const id = `rfd_${++state.count}`;
-      const refund = { id, status: "PENDING", ...body };
+      const refund = { id, status: "PENDING", ...body, account };
       state.refunds.set(id, refund);
       return json(res, 200, refund);
     }
     match = /^\/refunds\/([^/]+)$/.exec(path);
     if (req.method === "GET" && match) {
-      const refund = state.refunds.get(match[1]);
+      const refund = mine(state.refunds.get(match[1]));
       return refund ? json(res, 200, refund) : json(res, 404, { error_code: "DATA_NOT_FOUND" });
     }
     return json(res, 404, { error_code: "NOT_FOUND", message: path });

@@ -8,13 +8,14 @@ import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { toRate } from "../../../utils/bookingPrice.js";
 import { hoursList, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { updateBookingSettingsSchema } from "../../../validators/booking-settings.validator.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 
 /**
  * PLAN-003 Phase A — a venue's court-booking setup: the online booking link,
  * the rules (holds, cut-off, early check-in), the weekly opening
  * hours and the hourly rates. Players book online any open day from today on
  * (CR-048: no weekly confirmation, no days-ahead limit).
- * Permission: bookings.
+ * Permission: bookings. PLAN-008: only the caller's company's venues (another's is a 404).
  */
 const router = express.Router();
 
@@ -24,14 +25,14 @@ const RULE_COLUMNS = `v.deskHoldMinutes,
 /** "17:00" → "17:00:00" for a TIME column. */
 const toTime = (hhmm) => `${hhmm}:00`;
 
-/** The venue (not Deleted) or null. */
-const findVenue = async (db, venueId) => {
+/** The company's venue (not Deleted) or null. */
+const findVenue = async (db, venueId, companyId) => {
   const rows = await db.query(
     `SELECT v.venueId, v.name, v.phone, v.logoUrl, v.bookingToken, v.displayToken, ${RULE_COLUMNS}
      FROM venues v
-     WHERE v.venueId = ? AND v.status != 'Deleted'
+     WHERE v.venueId = ? AND v.companyId = ? AND v.status != 'Deleted'
      LIMIT 1`,
-    [venueId]
+    [venueId, companyId]
   );
   return rows[0] || null;
 };
@@ -45,7 +46,7 @@ router.get(
   "/:venueId",
   checkPermission("bookings", null, "read"),
   catchAsync(async (req, res) => {
-    const venue = await findVenue(req.db, req.params.venueId);
+    const venue = await findVenue(req.db, req.params.venueId, callerCompany(req));
     if (!venue) {
       return res.sendError("Venue not found", 404);
     }
@@ -110,8 +111,9 @@ router.put(
       conn = await req.db.beginTransaction();
 
       const [venues] = await conn.execute(
-        `SELECT venueId FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [venueId]
+        `SELECT venueId FROM venues
+         WHERE venueId = ? AND companyId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
+        [venueId, callerCompany(req)]
       );
       if (venues.length === 0) {
         await req.db.rollback(conn);
@@ -245,8 +247,9 @@ router.post(
   catchAsync(async (req, res) => {
     const bookingToken = randomToken();
     const result = await req.db.query(
-      `UPDATE venues SET bookingToken = ?, dateUpdated = ? WHERE venueId = ? AND status != 'Deleted'`,
-      [bookingToken, getCurrentTimestampLocal(), req.params.venueId]
+      `UPDATE venues SET bookingToken = ?, dateUpdated = ?
+       WHERE venueId = ? AND companyId = ? AND status != 'Deleted'`,
+      [bookingToken, getCurrentTimestampLocal(), req.params.venueId, callerCompany(req)]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);
@@ -267,8 +270,8 @@ router.delete(
   catchAsync(async (req, res) => {
     const result = await req.db.query(
       `UPDATE venues SET bookingToken = NULL, dateUpdated = ?
-       WHERE venueId = ? AND status != 'Deleted'`,
-      [getCurrentTimestampLocal(), req.params.venueId]
+       WHERE venueId = ? AND companyId = ? AND status != 'Deleted'`,
+      [getCurrentTimestampLocal(), req.params.venueId, callerCompany(req)]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);
@@ -289,8 +292,8 @@ router.post(
     const displayToken = randomToken();
     const result = await req.db.query(
       `UPDATE venues SET displayToken = ?, dateUpdated = ?
-       WHERE venueId = ? AND status != 'Deleted'`,
-      [displayToken, getCurrentTimestampLocal(), req.params.venueId]
+       WHERE venueId = ? AND companyId = ? AND status != 'Deleted'`,
+      [displayToken, getCurrentTimestampLocal(), req.params.venueId, callerCompany(req)]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);
@@ -311,8 +314,8 @@ router.delete(
   catchAsync(async (req, res) => {
     const result = await req.db.query(
       `UPDATE venues SET displayToken = NULL, dateUpdated = ?
-       WHERE venueId = ? AND status != 'Deleted'`,
-      [getCurrentTimestampLocal(), req.params.venueId]
+       WHERE venueId = ? AND companyId = ? AND status != 'Deleted'`,
+      [getCurrentTimestampLocal(), req.params.venueId, callerCompany(req)]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Venue not found", 404);

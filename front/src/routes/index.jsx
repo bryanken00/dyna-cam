@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { Suspense, lazy } from "react";
 import { ComponentLoader } from "../components/LoadingFallback";
 import AdminRoute from "./pageRoutes/AdminRoute";
+import BackofficeRoute from "./pageRoutes/BackofficeRoute";
 
 const LandingPage = lazy(() => import("../pages/LandingPage"));
 // Developer page: every shared component in both themes. Not linked from the product.
@@ -143,6 +144,8 @@ const RootRoutes = () => {
           }
         />
         <Route path="/admin/*" element={<AdminRoute />} />
+        {/* PLAN-008 phase B: DGSports' back office — onboard and manage companies */}
+        <Route path="/backoffice/*" element={<BackofficeRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

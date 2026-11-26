@@ -87,14 +87,14 @@ The repository is a **monorepo of four independent apps**:
 | Concept               | What it means                                                                                                                                                                                               |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **One portal**        | `Admin` at `/admin` — users, roles, per-user permissions, settings, audit trail, dashboard. Every account signs in there.                                                                                 |
-| **The Owner**         | Created by `npm run db:setup`: an `Owner` role holding every permission (re-running setup grants it any new one) and the first account. Never listed, editable, or assignable in Users or Roles.          |
+| **The Owner**         | Each company's first account, created when DGSports onboards the company in the back office (PLAN-008): an `Owner` role holding every permission (re-running setup grants it any new one). Never listed, editable, or assignable in Users or Roles. `npm run db:setup` creates no Owner — only the first back-office super admin. |
 | **RBAC**              | Permissions are `module` + optional `submodule` + `accessLevel` (`none < read < write`). Per-user overrides take precedence over role permissions.                                                          |
 | **Business IDs**      | Every row has an internal `id BIGINT` (never exposed) and a `varchar(50)` business ID (`accountId`, `roleId`, `permissionId`, …) used in all APIs, URLs, and foreign keys. Generated with MySQL `SELECT UUID()`. |
 | **Soft deletes**      | Rows are never physically deleted — `status` is set to `'Deleted'` and queries filter `status != 'Deleted'`.                                                                                                |
 | **Response envelope** | Every endpoint replies via `res.sendSuccess(message, data, status?)` → `{ success, message, data }`. The frontend unwraps `apiData.data.<entity>`.                                                          |
 | **Audit trail**       | Middleware auto-logs successful `CREATE/UPDATE/DELETE`s (with sanitized metadata) and uploads, plus sign-in events (sign-in, failed sign-in, lockout, password changes). Viewed and exported in Admin → Audit Trail. |
 | **Private uploads**   | Uploaded files are never public. The database stores the plain path; the API hands out signed, expiring links, and a bare path is refused.                                                                  |
-| **Temporary passwords** | An account created for someone else (the seeded Owner, a staff user) must choose its own password at first login; until then the API allows nothing else.                                                 |
+| **Temporary passwords** | An account created for someone else (a company Owner, a super admin, a staff user) must choose its own password at first login; until then the API allows nothing else.                                                 |
 
 ---
 
@@ -246,7 +246,7 @@ Optional, with safe defaults (all documented in the example file):
 
 | Group            | Keys                                                           | Default                          |
 | ---------------- | -------------------------------------------------------------- | -------------------------------- |
-| First Owner      | `OWNER_EMAIL`, `OWNER_PASSWORD` (read by `db:setup`)           | `owner@template.com`, random password |
+| First super admin | `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` (both required, read by `db:setup`) | — (no forced change at first sign-in) |
 | Sessions         | `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`              | `15m`, `7d`                      |
 | Account lockout  | `LOGIN_MAX_FAILED_ATTEMPTS`, `LOGIN_LOCK_MINUTES`              | 5 wrong passwords, 15 minutes    |
 | Upload links     | `UPLOAD_URL_TTL_SECONDS`                                       | `3600` (a link lives 1–2 hours)  |
@@ -292,18 +292,15 @@ backend, for UI work only. Native folders (`android/`, `ios/`) are generated wit
 
 ### 4. Where to start
 
-`npm run db:setup` seeds the permission set, an **Owner** role that holds every permission, and
-the first Owner account. There is **no fixed default password**: the script generates a random
-one and prints it once (or uses `OWNER_PASSWORD` from `back/.env` if you set it). Sign in to the
-**Admin portal** at `/admin` with:
+`npm run db:setup` seeds the permission set and **only the first back-office super admin**
+(PLAN-008) — no company and no Owner. Set `SUPERADMIN_EMAIL` and `SUPERADMIN_PASSWORD` (8+
+characters, not a well-known weak one) in `back/.env` first; there is **no fixed default
+password**. Sign in to the **back office** at `/backoffice` with them (it's your own password, so
+no forced change), then **onboard a company**: it creates the company and its **Owner** account with a
+temporary password (shown once, and emailed when SendGrid is set up).
 
-- **Email:** `owner@template.com` (or `OWNER_EMAIL`)
-- **Password:** the one printed by `db:setup`
-
-At first login you are taken to Account Settings and must choose a new password before anything
-else works.
-
-The Owner is the **only** account seeded. From there, build your team:
+The Owner signs in to the **Admin portal** at `/admin`, chooses a new password, and builds the
+company's team (only that company's data is ever visible):
 
 1. **Create roles** — Admin → **User Management → Roles**, then set each role's permissions.
    `POST /api/v1/admin/roles` · `POST /api/v1/admin/roles/:roleId/permissions`
@@ -313,7 +310,7 @@ The Owner is the **only** account seeded. From there, build your team:
 
 Like the Owner, every user you create must choose their own password at first login. The Owner
 never appears in the Users or Roles lists and can't be edited or assigned there; re-running
-`npm run db:setup` after adding a permission grants it to the Owner role.
+`npm run db:setup` after adding a permission grants it to every company's Owner role.
 
 ---
 
@@ -327,8 +324,8 @@ never appears in the Users or Roles lists and can't be edited or assigned there;
 | `npm start`                                                  | Start the server (`server/bin/www.js`)                                       |
 | `npm run keys`                                               | Generate the RS256 JWT keypair into `auth-keys/` (`-- --force` to overwrite) |
 | `npm run db:migrate`                                         | Apply the baseline + any pending migrations. Additive, safe                   |
-| `npm run db:setup`                                           | Migrate, **then** seed permissions + Owner. Additive, re-runnable, safe       |
-| `npm run db:setup:clean`                                     | ⚠️ **Drops all tables**, re-migrates from scratch, seeds permissions + Owner  |
+| `npm run db:setup`                                           | Migrate, **then** seed permissions + the first super admin (no company or Owner). Additive, re-runnable, safe |
+| `npm run db:setup:clean`                                     | ⚠️ **Drops all tables**, re-migrates from scratch, seeds permissions + the first super admin |
 | `npm run db:reset`                                           | ⚠️ Nuclear: drops the whole **database** and recreates it empty (no tables)  |
 | `npm run db:check`                                           | Verify DB connectivity / list tables + row counts (read-only, safe)          |
 | `npm test`                                                   | API tests against a throwaway database (never touches `DB_DATABASE`); safe   |
@@ -425,7 +422,7 @@ convention docs linked from each row.
 | Sessions | 15-minute access token; 7-day refresh token, rotated on every use, with reuse detection. Sign-out, a password change, and a password reset revoke sessions. A user who is no longer `Active` is refused on every request and can't refresh. | `utils/jwt.js`, `auth.controller.js` |
 | Sign-in | Rate limit per IP, plus a per-account lockout (5 wrong passwords → 15 minutes). No account enumeration on forgot-password. | `utils/loginLockout.js` |
 | Passwords | Argon2id, hashed exactly as typed. At least 8 characters; well-known weak passwords and ones containing the email name are refused. | `utils/passwordPolicy.js` |
-| Temporary passwords | No fixed default password. The seeded Owner and every account created for someone else must choose a new password at first login; until then every route outside `/auth/*` returns 403. | `requirePasswordChanged.middleware.js` |
+| Temporary passwords | No fixed default password. The first super admin's comes from `back/.env`; every account created for someone else must choose a new password at first login; until then every route outside `/auth/*` returns 403. | `requirePasswordChanged.middleware.js` |
 | Permissions | Checked on the server for every Admin resource route. | [`permission-gating.md`](.claude/skills/backend-conventions/references/permission-gating.md) |
 | Uploads | Cannot be written outside `public/uploads`; content must match the declared type; no SVG; random file names; delete checks ownership; served only through signed, expiring links. | [`file-uploads.md`](.claude/skills/backend-conventions/references/file-uploads.md) |
 | Idempotency cache | Never stores auth responses (they contain tokens); expired rows are purged hourly. | `idempotency.middleware.js` |

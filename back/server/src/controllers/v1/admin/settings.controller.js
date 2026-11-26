@@ -2,6 +2,7 @@ import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import {
   updateSettingsSchema,
   SETTINGS_DEFAULTS,
@@ -17,7 +18,10 @@ router.get(
   "/",
   checkPermission("settings", null, "read"),
   catchAsync(async (req, res) => {
-    const rows = await req.db.query(`SELECT settingKey, settingValue FROM settings`);
+    // PLAN-008: the caller's company's settings (a company without rows gets the defaults)
+    const rows = await req.db.query(`SELECT settingKey, settingValue FROM settings WHERE companyId = ?`, [
+      callerCompany(req),
+    ]);
     const stored = Object.fromEntries(rows.map((r) => [r.settingKey, r.settingValue]));
 
     return res.sendSuccess("Settings retrieved successfully", {
@@ -44,10 +48,10 @@ router.put(
         conn = await req.db.beginTransaction();
         for (const [key, value] of entries) {
           await conn.execute(
-            `INSERT INTO settings (settingKey, settingValue, dateCreated, dateUpdated)
-             VALUES (?, ?, ?, ?)
+            `INSERT INTO settings (companyId, settingKey, settingValue, dateCreated, dateUpdated)
+             VALUES (?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue), dateUpdated = VALUES(dateUpdated)`,
-            [key, value === null || value === undefined ? null : String(value), now, now]
+            [callerCompany(req), key, value === null || value === undefined ? null : String(value), now, now]
           );
         }
         await req.db.commit(conn);
@@ -58,7 +62,9 @@ router.put(
     }
 
     // Return the full merged settings so the client can refresh its state
-    const rows = await req.db.query(`SELECT settingKey, settingValue FROM settings`);
+    const rows = await req.db.query(`SELECT settingKey, settingValue FROM settings WHERE companyId = ?`, [
+      callerCompany(req),
+    ]);
     const stored = Object.fromEntries(rows.map((r) => [r.settingKey, r.settingValue]));
 
     return res.sendSuccess("Settings updated successfully", {

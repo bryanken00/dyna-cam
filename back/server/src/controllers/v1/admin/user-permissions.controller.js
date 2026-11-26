@@ -2,6 +2,7 @@ import express from "express";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import {
   setUserPermissionSchema,
   bulkUserPermissionsSchema,
@@ -9,12 +10,12 @@ import {
 
 const router = express.Router();
 
-// The target account must be a live user; Owner accounts are out of reach from
-// the Admin portal. Params: [accountId]
+// The target account must be a live user of the caller's company (PLAN-008); Owner
+// accounts are out of reach from the Admin portal. Params: [accountId, companyId]
 const MANAGEABLE_USER_SQL = `SELECT u.accountId, u.roleId, r.roleName
    FROM users u
    LEFT JOIN roles r ON r.roleId = u.roleId
-   WHERE u.accountId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'
+   WHERE u.accountId = ? AND u.companyId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'
    LIMIT 1`;
 
 /**
@@ -28,7 +29,7 @@ router.get(
     const { accountId } = req.params;
 
     // Get user's role info
-    const userRows = await req.db.query(MANAGEABLE_USER_SQL, [accountId]);
+    const userRows = await req.db.query(MANAGEABLE_USER_SQL, [accountId, callerCompany(req)]);
 
     if (userRows.length === 0) {
       return res.sendError("User not found", 404);
@@ -95,7 +96,7 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
 
-      const [userRows] = await conn.execute(MANAGEABLE_USER_SQL, [accountId]);
+      const [userRows] = await conn.execute(MANAGEABLE_USER_SQL, [accountId, callerCompany(req)]);
 
       if (userRows.length === 0) {
         await req.db.rollback(conn);
@@ -153,7 +154,7 @@ router.delete(
   catchAsync(async (req, res) => {
     const { accountId, permissionId } = req.params;
 
-    const userRows = await req.db.query(MANAGEABLE_USER_SQL, [accountId]);
+    const userRows = await req.db.query(MANAGEABLE_USER_SQL, [accountId, callerCompany(req)]);
 
     if (userRows.length === 0) {
       return res.sendError("User not found", 404);
@@ -190,7 +191,7 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
 
-      const [userRows] = await conn.execute(MANAGEABLE_USER_SQL, [accountId]);
+      const [userRows] = await conn.execute(MANAGEABLE_USER_SQL, [accountId, callerCompany(req)]);
 
       if (userRows.length === 0) {
         await req.db.rollback(conn);

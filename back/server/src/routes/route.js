@@ -74,5 +74,27 @@ router.use("/v1/oauth/google", googleOAuthRoute);
 import xenditWebhookRoute from "../controllers/v1/webhooks/xendit.controller.js";
 router.use("/v1/webhooks/xendit", xenditWebhookRoute);
 
+// PLAN-008 phase B: the back office — DGSports' super admins onboard and manage
+// companies. Its own sign-in and token audience (utils/platformTokens.js): a staff
+// token never passes here, and a back-office token never passes the staff check.
+import backofficeAuthRoute from "../controllers/v1/backoffice/auth.controller.js";
+import backofficeCompaniesRoute from "../controllers/v1/backoffice/companies.controller.js";
+import {
+  requirePlatformAdmin,
+  requirePlatformPasswordChanged,
+} from "../middlewares/platformAuth.middleware.js";
+router.use("/v1/backoffice/auth", backofficeAuthRoute);
+router.use(
+  "/v1/backoffice/companies",
+  requirePlatformAdmin,
+  requirePlatformPasswordChanged,
+  backofficeCompaniesRoute
+);
+// PLAN-008 phase E: super admins, and the back office's own audit trail
+import backofficeAdminsRoute from "../controllers/v1/backoffice/admins.controller.js";
+import backofficeActivityRoute from "../controllers/v1/backoffice/activity.controller.js";
+router.use("/v1/backoffice/admins", requirePlatformAdmin, requirePlatformPasswordChanged, backofficeAdminsRoute);
+router.use("/v1/backoffice/activity", requirePlatformAdmin, requirePlatformPasswordChanged, backofficeActivityRoute);
+
 // Exporting the router to be used in the main app
 export default router;

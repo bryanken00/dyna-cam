@@ -1,4 +1,5 @@
-// The seeded Owner's first password and the forced password change (review finding F4).
+// The first passwords (review finding F4): setup's super admin (PLAN-008: the only account
+// setup makes) and an onboarded Owner's forced password change.
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -47,20 +48,21 @@ describe("first Owner password", () => {
     const exists = async (name) =>
       (await server.query(`SHOW DATABASES LIKE ?`, [name]))[0].length === 1;
 
-    it("refuses an unusable OWNER_PASSWORD before creating anything", async () => {
+    // PLAN-008: setup creates only the first back-office super admin
+    it("refuses an unusable SUPERADMIN_PASSWORD before creating anything", async () => {
       const name = newTestDatabaseName();
       extra.push(name);
 
       const short = runScript("setup-database.js", {
         DB_DATABASE: name,
-        OWNER_PASSWORD: "short",
+        SUPERADMIN_PASSWORD: "short",
       });
       assert.equal(short.ok, false);
       assert.match(short.output, /at least 8/);
 
       const common = runScript("setup-database.js", {
         DB_DATABASE: name,
-        OWNER_PASSWORD: "password123",
+        SUPERADMIN_PASSWORD: "password123",
       });
       assert.equal(common.ok, false);
       assert.match(common.output, /too common/);
@@ -68,16 +70,44 @@ describe("first Owner password", () => {
       assert.equal(await exists(name), false);
     });
 
-    it("generates and prints a random password when none is configured", () => {
+    it("needs SUPERADMIN_EMAIL on a new database", () => {
+      const name = newTestDatabaseName();
+      extra.push(name);
+      const run = runScript("setup-database.js", { DB_DATABASE: name, SUPERADMIN_EMAIL: "" });
+      assert.equal(run.ok, false);
+      assert.match(run.output, /Set SUPERADMIN_EMAIL/);
+    });
+
+    it("needs SUPERADMIN_PASSWORD on a new database", () => {
+      const name = newTestDatabaseName();
+      extra.push(name);
+      const run = runScript("setup-database.js", { DB_DATABASE: name, SUPERADMIN_PASSWORD: "" });
+      assert.equal(run.ok, false);
+      assert.match(run.output, /Set SUPERADMIN_PASSWORD/);
+    });
+
+    it("creates only the super admin — no company, role or Owner — with no forced password change", async () => {
       const name = newTestDatabaseName();
       extra.push(name);
 
-      const run = runScript("setup-database.js", { DB_DATABASE: name, OWNER_PASSWORD: "" });
+      const run = runScript("setup-database.js", { DB_DATABASE: name });
       assert.equal(run.ok, true, run.output);
-      assert.match(run.output, /Password: [A-Za-z0-9_-]{16}\s+← generated/);
+      assert.match(run.output, /Password: the value of SUPERADMIN_PASSWORD/);
+      const [[counts]] = await server.query(
+        `SELECT
+           (SELECT COUNT(*) FROM \`${name}\`.platform_admins WHERE mustChangePassword = 0) AS admins,
+           (SELECT COUNT(*) FROM \`${name}\`.companies) AS companies,
+           (SELECT COUNT(*) FROM \`${name}\`.roles) AS roles,
+           (SELECT COUNT(*) FROM \`${name}\`.users) AS users,
+           (SELECT COUNT(*) FROM \`${name}\`.credentials) AS credentials`
+      );
+      assert.deepEqual(
+        { admins: Number(counts.admins), companies: Number(counts.companies), roles: Number(counts.roles), users: Number(counts.users), credentials: Number(counts.credentials) },
+        { admins: 1, companies: 0, roles: 0, users: 0, credentials: 0 }
+      );
     });
 
-    it("gives the Owner role every permission", async () => {
+    it("gives an onboarded company's Owner role every permission", async () => {
       const [[counts]] = await ctx.sql.query(
         `SELECT
            (SELECT COUNT(*) FROM permissions WHERE status = 'Active') AS permissions,
@@ -89,7 +119,7 @@ describe("first Owner password", () => {
       assert.equal(counts.granted, counts.permissions);
     });
 
-    it("is re-runnable: a second run adds no second Owner, and grants new permissions", async () => {
+    it("is re-runnable: no second super admin, no Owner made, and Owners get new permissions", async () => {
       await ctx.sql.query(
         `INSERT INTO permissions (permissionId, module, submodule, description, portal, status, dateCreated, dateUpdated)
          VALUES ('test-new-permission', 'reports', NULL, 'Added later', 'ADMIN', 'Active',
@@ -98,16 +128,14 @@ describe("first Owner password", () => {
 
       const again = runScript("setup-database.js", { DB_DATABASE: ctx.database });
       assert.equal(again.ok, true, again.output);
-      assert.match(again.output, /already exists — skipping/);
+      assert.match(again.output, /super admin already exists — skipping/);
+      const [[admins]] = await ctx.sql.query(`SELECT COUNT(*) AS n FROM platform_admins`);
+      assert.equal(Number(admins.n), 1);
       const [[owners]] = await ctx.sql.query(
         `SELECT COUNT(*) AS n FROM users u INNER JOIN roles r ON r.roleId = u.roleId
          WHERE r.roleName = 'Owner'`
       );
-      assert.equal(owners.n, 1);
-      const [[roles]] = await ctx.sql.query(
-        `SELECT COUNT(*) AS n FROM roles WHERE roleName = 'Owner'`
-      );
-      assert.equal(roles.n, 1);
+      assert.equal(Number(owners.n), 1); // the default company's, onboarded by the test harness
       const [[granted]] = await ctx.sql.query(
         `SELECT accessLevel FROM role_permissions WHERE permissionId = 'test-new-permission'`
       );

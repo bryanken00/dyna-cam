@@ -2,6 +2,7 @@ import express from "express";
 import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import {
   createRoleSchema,
   updateRoleSchema,
@@ -29,8 +30,9 @@ router.get(
       sortOrder = "DESC",
     } = req.query;
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause = "WHERE r.status != 'Deleted' AND r.roleName != 'Owner'";
+    // PLAN-008: only the caller's company's roles
+    const params = [callerCompany(req)];
+    let whereClause = "WHERE r.companyId = ? AND r.status != 'Deleted' AND r.roleName != 'Owner'";
 
     if (search) {
       whereClause += ` AND (r.roleName LIKE ? OR r.description LIKE ?)`;
@@ -92,9 +94,9 @@ router.get(
     const roles = await req.db.query(
       `SELECT roleId, roleName, description, status, dateCreated, dateUpdated
        FROM roles
-       WHERE roleId = ? AND status != 'Deleted' AND roleName != 'Owner'
+       WHERE roleId = ? AND companyId = ? AND status != 'Deleted' AND roleName != 'Owner'
        LIMIT 1`,
-      [roleId]
+      [roleId, callerCompany(req)]
     );
 
     if (roles.length === 0) {
@@ -125,12 +127,13 @@ router.post(
       const [uuidRow] = await conn.execute(`SELECT UUID() as id`);
       const roleId = uuidRow[0].id;
 
-      // Check duplicate roleName (this also keeps a second "Owner" from being made)
+      // Check duplicate roleName within the company (PLAN-008: names are unique per
+      // company; this also keeps a second "Owner" from being made)
       const [existing] = await conn.execute(
         `SELECT roleId FROM roles
-         WHERE roleName = ? AND status != 'Deleted'
+         WHERE companyId = ? AND roleName = ? AND status != 'Deleted'
          LIMIT 1 FOR UPDATE`,
-        [roleName]
+        [callerCompany(req), roleName]
       );
 
       if (existing.length > 0) {
@@ -139,9 +142,9 @@ router.post(
       }
 
       await conn.execute(
-        `INSERT INTO roles (roleId, roleName, description, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, 'Active', ?, ?)`,
-        [roleId, roleName, description || null, now, now]
+        `INSERT INTO roles (roleId, companyId, roleName, description, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, 'Active', ?, ?)`,
+        [roleId, callerCompany(req), roleName, description || null, now, now]
       );
 
       await req.db.commit(conn);
@@ -175,9 +178,9 @@ router.put(
       // renamed to "Owner")
       const [existing] = await conn.execute(
         `SELECT roleId FROM roles
-         WHERE roleName = ? AND roleId != ? AND status != 'Deleted'
+         WHERE companyId = ? AND roleName = ? AND roleId != ? AND status != 'Deleted'
          LIMIT 1 FOR UPDATE`,
-        [roleName, roleId]
+        [callerCompany(req), roleName, roleId]
       );
 
       if (existing.length > 0) {
@@ -188,8 +191,8 @@ router.put(
       const [result] = await conn.execute(
         `UPDATE roles
          SET roleName = ?, description = ?, status = ?, dateUpdated = ?
-         WHERE roleId = ? AND status != 'Deleted' AND roleName != 'Owner'`,
-        [roleName, description || null, status || "Active", now, roleId]
+         WHERE roleId = ? AND companyId = ? AND status != 'Deleted' AND roleName != 'Owner'`,
+        [roleName, description || null, status || "Active", now, roleId, callerCompany(req)]
       );
 
       if (result.affectedRows === 0) {
@@ -220,8 +223,8 @@ router.delete(
 
     const result = await req.db.query(
       `UPDATE roles SET status = 'Inactive', dateUpdated = ?
-       WHERE roleId = ? AND status = 'Active' AND roleName != 'Owner'`,
-      [now, roleId]
+       WHERE roleId = ? AND companyId = ? AND status = 'Active' AND roleName != 'Owner'`,
+      [now, roleId, callerCompany(req)]
     );
 
     if (result.affectedRows === 0) {
@@ -242,7 +245,8 @@ router.get(
   catchAsync(async (req, res) => {
     const { roleId } = req.params;
 
-    // Joining roles keeps the Owner role from resolving to any rows.
+    // Joining roles keeps the Owner role (and another company's roles) from resolving
+    // to any rows.
     const permissions = await req.db.query(
       `SELECT
         rp.id,
@@ -256,8 +260,8 @@ router.get(
       FROM role_permissions rp
       INNER JOIN roles r ON r.roleId = rp.roleId
       INNER JOIN permissions p ON p.permissionId = rp.permissionId
-      WHERE rp.roleId = ? AND r.roleName != 'Owner'`,
-      [roleId]
+      WHERE rp.roleId = ? AND r.companyId = ? AND r.roleName != 'Owner'`,
+      [roleId, callerCompany(req)]
     );
 
     return res.sendSuccess("Role permissions retrieved", { permissions });
@@ -286,9 +290,9 @@ router.post(
       // is replaced
       const [roleRows] = await conn.execute(
         `SELECT roleId FROM roles
-         WHERE roleId = ? AND status != 'Deleted' AND roleName != 'Owner'
+         WHERE roleId = ? AND companyId = ? AND status != 'Deleted' AND roleName != 'Owner'
          LIMIT 1 FOR UPDATE`,
-        [roleId]
+        [roleId, callerCompany(req)]
       );
 
       if (roleRows.length === 0) {

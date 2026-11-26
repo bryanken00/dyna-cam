@@ -1,6 +1,6 @@
 # PLAN-008 · Multi-company SaaS: companies, company-wide Admin, and a back office
 
-> **Status:** Draft · **Created:** 2026-11-26 · **Owner:** bryanken00 · **Checklist:** [checklist.md](checklist.md)
+> **Status:** In progress · **Created:** 2026-11-26 · **Owner:** bryanken00 · **Checklist:** [checklist.md](checklist.md)
 > **Related:** [PLAN-001](../PLAN-001-court-replay-cameras/plan.md) (venues, courts, boxes), [PLAN-003](../PLAN-003-court-booking/plan.md) (booking, Xendit), [PLAN-006](../PLAN-006-player-google-sign-in/plan.md) (players)
 
 ## Goal
@@ -127,7 +127,14 @@ a company check on every Admin query** — plus a separate back office to create
   - **Suspend** / **Reactivate**: suspended staff can't sign in, and its venues stop taking online
     bookings while existing bookings and games stay;
   - re-send the Owner's welcome, or reset the Owner's password.
-- **Super admins:** list, add and deactivate (later phase).
+- **Super admins** (phase E): a **Super admins** page in the back office — list, add (temporary
+  password shown once, changed at first sign-in), deactivate / reactivate, reset a password. A
+  super admin can't deactivate themselves, and the last active one can't be deactivated.
+- **Back-office audit trail** (phase E): every back-office action (sign-in, failed sign-in,
+  onboard, edit, suspend, reactivate, Owner password reset, super-admin changes) is recorded in its
+  own `platform_audit_trail` (who, what, which company, IP, when) and shown on an **Activity** page
+  in the back office. Company actions also add a row to that company's audit trail (actor: DGSports)
+  so its Owner sees "DGSports suspended the company".
 
 ### Admin portal (company staff)
 
@@ -143,8 +150,9 @@ a company check on every Admin query** — plus a separate back office to create
   shows all of them.
 - **`/book` directory:** lists every Active venue of every Active company, as today. A suspended
   company's venues drop out (see Open questions for a per-company page).
-- **Emails:** booking and game emails name the venue and the company's display name. They still
-  come from the one SendGrid sender.
+- **Emails:** one universal DGSports sender for every company, as set up today (decided
+  2026-11-26). Booking and game emails name the venue; there's no per-company display name or
+  sender.
 - **Payments:** see *Each company's own Xendit* below. Players' checkout is unchanged; the money
   goes to the venue's company.
 
@@ -183,8 +191,9 @@ Players pay straight into the company's own Xendit account. DGSports doesn't hol
   suspend.
 - **C · Each company's Xendit:** Settings → Online payment, per-company webhook, every Xendit call
   with the venue's company keys.
-- **D · Polish:** company name in the Admin top bar and emails, the back-office company stats,
-  `npm run boxes` showing the company.
+- **D · Polish:** company name in the Admin top bar, the back-office company stats,
+  `npm run boxes` showing the company. (Emails keep the one universal sender.)
+- **E · Back office admin:** the Super admins page and the back-office audit trail (Activity page).
 
 ### Alternatives considered
 
@@ -265,3 +274,20 @@ Still open:
 - 2026-11-26: Created.
 - 2026-11-26: Open questions answered. Payments are each company's own Xendit (a new phase C);
   directory, one email = one company, and no support access as recommended.
+- 2026-11-26: Built on `plan-008-multi-company-saas`. The Xendit columns went into `044_companies.sql`
+  (no `046`). The online-payment settings live on the Payments page
+  (`/admin/company-payments`), as the Settings page has had no permission since CR-021.
+- 2026-11-26: Emails stay on the one universal sender (no per-company display name) — bryanken00.
+  Added phase E: managing super admins and a back-office audit trail.
+- 2026-11-26: Phase E built: `046_platform_audit_trail.sql`, `utils/platformAudit.js`, back office
+  Super admins and Activity pages; company actions are mirrored into the company's audit trail as
+  DGSports.
+- 2026-11-26: `npm run db:setup` creates **only** the first back-office super admin (bryanken00):
+  no company and no Owner; `OWNER_EMAIL` / `OWNER_PASSWORD` and `scripts/_seed-owner.js` are
+  gone; `SUPERADMIN_EMAIL` is required until a super admin exists. Migration 044 makes the
+  "Default company" only on an install that already has data. Re-running setup still grants every
+  company's Owner role new permissions (`scripts/_owner-permissions.js`). `npm run db:data` builds
+  both demo companies and their Owners itself (Smash Point Group, slug `default`; Dink House Inc.).
+- 2026-11-26: `SUPERADMIN_PASSWORD` is required (no generated password) and the seeded super admin
+  has no forced change at first sign-in — the installer chose it (bryanken00). Super admins added
+  in the back office still get a temporary password they must change.

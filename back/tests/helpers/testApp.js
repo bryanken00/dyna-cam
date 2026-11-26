@@ -5,7 +5,9 @@
  *   1. creates a database named `tpl_test_<pid>_<random>` on the MySQL server
  *      from DB_HOST / DB_USER / DB_PASS (back/.env, or real environment variables),
  *   2. runs the real `scripts/setup-database.js` against it (schema, migrations,
- *      permissions, the Owner role and first Owner account),
+ *      permissions and the first back-office super admin — PLAN-008: nothing else),
+ *      then onboards the "Default company" (slug "default") with its Owner the way
+ *      the back office does (utils/companies.js), so tests have a company to work in,
  *   3. starts the real app (server/config/express.js) on a random port, from a
  *      temp working directory so uploads never land in back/public,
  *   4. and on stop() drops the database and the temp directory.
@@ -27,9 +29,11 @@ import mysql from "mysql2/promise";
 export const BACK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_DB_PREFIX = "tpl_test_";
 
-// The seeded Owner (setup-database.js reads OWNER_EMAIL / OWNER_PASSWORD)
+// The default company's Owner, onboarded by startTestApp() (setup makes no Owner — PLAN-008)
 export const OWNER = { email: "owner@template.com", password: "Test-Root-Passw0rd-1" };
 export const OWNER_PASSWORD = OWNER.password;
+// PLAN-008 phase B: the seeded back-office super admin (SUPERADMIN_EMAIL / _PASSWORD)
+export const SUPERADMIN = { email: "superadmin@dgsports.test", password: "Test-Super-Passw0rd-1" };
 // What the Owner types when creating a staff user; the user must replace it at first login
 export const TEMPORARY_PASSWORD = "Temp-First-Passw0rd";
 // What a staff user made by createStaff() chooses at first login
@@ -74,6 +78,29 @@ export const runScript = (script, env = {}) => {
     return { ok: true, output };
   } catch (err) {
     return { ok: false, output: `${err.stdout || ""}${err.stderr || ""}` };
+  }
+};
+
+/**
+ * PLAN-008: setup creates only the super admin, so the tests' "Default company" and its
+ * Owner (OWNER, temporary password — must change it at first sign-in) are onboarded here
+ * exactly as the back office does it. Slug "default": the company that may use the
+ * .env Xendit keys (utils/companyPayments.js).
+ */
+const onboardDefaultCompany = async (sql) => {
+  const { createCompany } = await importFromBack("server/src/utils/companies.js");
+  await sql.beginTransaction();
+  try {
+    const made = await createCompany(sql, {
+      name: "Default company",
+      slug: "default",
+      owner: { firstName: "System", lastName: "Owner", email: OWNER.email, password: OWNER.password },
+    });
+    if (!made.ok) throw new Error(`Default company onboarding failed: ${made.message}`);
+    await sql.commit();
+  } catch (err) {
+    await sql.rollback().catch(() => {});
+    throw err;
   }
 };
 
@@ -136,8 +163,8 @@ export const loadTestEnv = (overrides = {}) => {
       `tpl-sandbox-${process.pid}-${crypto.randomBytes(4).toString("hex")}.json`
     ),
     RATE_LIMIT_PUBLIC_PAY_POINTS: "1000",
-    OWNER_EMAIL: OWNER.email,
-    OWNER_PASSWORD: OWNER.password,
+    SUPERADMIN_EMAIL: SUPERADMIN.email,
+    SUPERADMIN_PASSWORD: SUPERADMIN.password,
     // The app runs from a temp directory, so key paths must be absolute
     jwtAuthPrivatePath: path.resolve(
       BACK,
@@ -173,6 +200,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
 
   const sql = await connectToServer();
   await sql.query(`USE \`${database}\``);
+  await onboardDefaultCompany(sql);
   if (!keepFirstPasswordFlag) {
     await sql.query(`UPDATE credentials SET mustChangePassword = 0`);
   }
@@ -286,7 +314,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
 
   /** The Owner role's ID — never reachable from the Admin portal. */
   const ownerRoleId = async () => {
-    const [[row]] = await sql.query(`SELECT roleId FROM roles WHERE roleName = 'Owner' LIMIT 1`);
+    const [[row]] = await sql.query(`SELECT roleId FROM roles WHERE roleName = 'Owner' ORDER BY id LIMIT 1`);
     return row.roleId;
   };
 
@@ -299,8 +327,9 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
    *   permission at this level; null (default) grants none
    * @returns {{ accountId, email, roleId, token, refreshToken, user }}
    */
-  const createStaff = async (label, { access = null } = {}) => {
-    const { token } = await owner();
+  const createStaff = async (label, { access = null, company = null } = {}) => {
+    // PLAN-008: in another company (from createCompany()) — made by that company's Owner
+    const { token } = company ? company.owner : await owner();
     const { roleId } = expectOk(
       await api("POST", "/admin/roles", { token, body: { roleName: `${label} staff` } }),
       "create role"
@@ -497,13 +526,85 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     fs.rmSync(workDir, { recursive: true, force: true });
   };
 
+  /**
+   * PLAN-008: onboard another company, as the back office does (utils/companies.js), and
+   * sign its Owner in (first password change done).
+   * @returns {{ companyId, slug, name, owner: { accountId, email, token, refreshToken, user } }}
+   */
+  let companyCount = 0;
+  const createCompany = async (name) => {
+    companyCount += 1;
+    const label = name || `Company ${companyCount}`;
+    const { createCompany: create, slugify } = await importFromBack("server/src/utils/companies.js");
+    const email = `owner-${slugify(label)}-${companyCount}@example.test`;
+    let conn;
+    let made;
+    try {
+      conn = await db.beginTransaction();
+      made = await create(conn, {
+        name: label,
+        slug: `${slugify(label)}-${companyCount}`,
+        owner: { firstName: label, lastName: "Owner", email, password: TEMPORARY_PASSWORD },
+      });
+      if (!made.ok) throw new Error(`createCompany(${label}): ${made.message}`);
+      await db.commit(conn);
+    } catch (err) {
+      if (conn) await db.rollback(conn).catch(() => {});
+      throw err;
+    }
+    const first = await login(email, TEMPORARY_PASSWORD);
+    const changed = expectOk(
+      await api("PUT", "/admin/auth/me/password", {
+        token: first.token,
+        body: { currentPassword: TEMPORARY_PASSWORD, newPassword: STAFF_PASSWORD },
+      }),
+      "company Owner's first password change"
+    );
+    return {
+      companyId: made.companyId,
+      slug: made.slug,
+      name: label,
+      owner: {
+        accountId: made.ownerAccountId,
+        email,
+        token: changed.token,
+        refreshToken: changed.refreshToken.token,
+        user: { ...first.user, mustChangePassword: false },
+      },
+    };
+  };
+
+  /**
+   * PLAN-008: the seeded super admin's back-office session (signed in once, then
+   * reused). Its password is SUPERADMIN_PASSWORD — no forced change for this account.
+   * @returns {{ token, refreshToken, admin }}
+   */
+  let superAdminSession;
+  const superAdmin = async () => {
+    if (superAdminSession) return superAdminSession;
+    const signedIn = await api("POST", "/backoffice/auth/login", {
+      body: { email: SUPERADMIN.email, password: SUPERADMIN.password },
+    });
+    if (signedIn.status !== 200) {
+      throw new Error(`super admin login failed: ${signedIn.status} ${JSON.stringify(signedIn.body)}`);
+    }
+    superAdminSession = {
+      token: signedIn.data.token,
+      refreshToken: signedIn.data.refreshToken.token,
+      admin: signedIn.data.admin,
+    };
+    return superAdminSession;
+  };
+
   return {
     api,
     get,
     login,
     owner,
+    superAdmin,
     ownerRoleId,
     createStaff,
+    createCompany,
     pairBox,
     makeUnpaid,
     markGamePaid,

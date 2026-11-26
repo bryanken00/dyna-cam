@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import { toast } from "sonner";
 import { Undo2 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
@@ -11,6 +12,11 @@ import {
   formatPeso,
 } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
+import { copyText } from "../../../../utils/clipboard";
+import {
+  useDisconnectCompanyPayments,
+  useGetCompanyPayments,
+} from "../../../../services/requests/admin/companyPayments";
 import {
   useGetPayments,
   useRefundPayment,
@@ -330,7 +336,40 @@ export const usePaymentHooks = () => {
     [getActionItems, current, pageSize],
   );
 
+  // ─── PLAN-008 phase C: the company's own Xendit ────────────────────
+  const { data: paymentSetupData } = useGetCompanyPayments();
+  const onlinePayment = paymentSetupData?.data?.payment || null;
+  const disconnectMutation = useDisconnectCompanyPayments();
+  const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false);
+
+  const handleConnectPayment = useCallback(() => setPaymentDrawerOpen(true), []);
+  const handlePaymentDrawerClose = useCallback(() => setPaymentDrawerOpen(false), []);
+  const handleCopyWebhook = useCallback(async () => {
+    if (!onlinePayment?.webhookUrl) return;
+    const ok = await copyText(onlinePayment.webhookUrl);
+    if (ok) toast.success("Webhook URL copied — paste it into Xendit → Settings → Webhooks");
+    else toast.error("Couldn't copy the URL");
+  }, [onlinePayment]);
+  const handleDisconnectPayment = useCallback(async () => {
+    const ok = await confirm({
+      title: "Disconnect Xendit",
+      description:
+        "Players can't book online or pay links until you connect Xendit again. Payments already made stay, and refunds of them need Xendit connected.",
+      confirmText: "Disconnect",
+      cancelText: "Cancel",
+      danger: true,
+    });
+    if (ok) disconnectMutation.mutate();
+  }, [disconnectMutation]);
+
   return {
+    onlinePayment,
+    paymentDrawerOpen,
+    handleConnectPayment,
+    handlePaymentDrawerClose,
+    handleCopyWebhook,
+    handleDisconnectPayment,
+    isDisconnectingPayment: disconnectMutation.isPending,
     // apiData = { success, message, data: { payments, totals, pagination } }
     data: apiData?.data?.payments || [],
     totals: apiData?.data?.totals || { today: 0, thisMonth: 0, countToday: 0 },

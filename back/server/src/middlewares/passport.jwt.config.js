@@ -34,10 +34,12 @@ const configurePassport = (db) => {
 
       try {
         const rows = await db.query(
-          `SELECT u.accountId, u.firstName, u.lastName, u.roleId, u.status,
+          `SELECT u.accountId, u.companyId, u.firstName, u.lastName, u.roleId, u.status,
                   c.email, c.type, c.mustChangePassword
            FROM users u
            INNER JOIN credentials c ON c.accountId = u.accountId
+           -- PLAN-008: a suspended (or deleted) company's staff tokens stop working
+           INNER JOIN companies co ON co.companyId = u.companyId AND co.status = 'Active'
            WHERE u.accountId = ? AND u.status != 'Deleted' AND c.status != 'Deleted'
            LIMIT 1`,
           [userId]

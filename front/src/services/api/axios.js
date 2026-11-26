@@ -1,6 +1,7 @@
 import axios from "axios";
 import { toast } from "sonner";
 import { useAdminAuthStore } from "../../store/authStore";
+import { useBackofficeAuthStore } from "../../store/backofficeStore";
 import { useCsrfStore } from "../../store/csrfStore";
 
 export const axiosInstance = axios.create({
@@ -12,10 +13,13 @@ export const axiosInstance = axios.create({
 
 export const userTypeAuth = {
   admin: "admin",
+  // PLAN-008: the back office — its own tokens at /api/v1/backoffice/auth/*
+  backoffice: "backoffice",
 };
 
 export const tokens = {
   [userTypeAuth.admin]: useAdminAuthStore,
+  [userTypeAuth.backoffice]: useBackofficeAuthStore,
 };
 
 export const getUserToken = (userType = userTypeAuth.admin) => {
@@ -120,6 +124,7 @@ axiosInstance.interceptors.response.use(
 // other under rotation).
 const refreshPromises = {
   [userTypeAuth.admin]: null,
+  [userTypeAuth.backoffice]: null,
 };
 
 const performTokenRefresh = async (user) => {

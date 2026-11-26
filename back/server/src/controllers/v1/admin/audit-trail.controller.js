@@ -3,8 +3,13 @@ import { catchAsync, validateQuery } from "../../../utils/catchAsync.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { listAuditQuerySchema } from "../../../validators/audit-trail.validator.js";
 import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 
 const router = express.Router();
+
+// PLAN-008 phase E: what DGSports did to the company in the back office is recorded
+// with the actor "dgsports" (utils/platformAudit.js) — no users row, so show its name
+const ACTOR_FIRST_NAME = "COALESCE(u.firstName, IF(a.accountId = 'dgsports', 'DGSports', NULL)) AS firstName";
 
 // Spreadsheet apps evaluate a cell starting with =, +, -, @, TAB or CR as a
 // formula. RFC4180 quoting does NOT prevent this — Excel strips the quotes and
@@ -30,8 +35,9 @@ const csvCell = (value) => {
 const buildAuditFilter = (req) => {
   const { search = "", module, accountId, startDate, endDate } = req.query;
 
-  const conditions = [];
-  const params = [];
+  // PLAN-008: only the caller's company's entries
+  const conditions = ["a.companyId = ?"];
+  const params = [callerCompany(req)];
 
   if (search) {
     conditions.push("(a.action LIKE ? OR a.description LIKE ?)");
@@ -54,7 +60,7 @@ const buildAuditFilter = (req) => {
     params.push(`${endDate} 23:59:59`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const whereClause = `WHERE ${conditions.join(" AND ")}`;
   return { whereClause, params };
 };
 
@@ -89,7 +95,7 @@ router.get(
         a.metadata,
         a.ipAddress,
         a.dateCreated,
-        u.firstName,
+        ${ACTOR_FIRST_NAME},
         u.lastName
       FROM audit_trail a
       LEFT JOIN users u ON u.accountId = a.accountId
@@ -133,7 +139,7 @@ router.get(
     const logs = await req.db.query(
       `SELECT
         a.dateCreated, a.action, a.module, a.description,
-        a.accountId, u.firstName, u.lastName, a.ipAddress, a.metadata
+        a.accountId, ${ACTOR_FIRST_NAME}, u.lastName, a.ipAddress, a.metadata
       FROM audit_trail a
       LEFT JOIN users u ON u.accountId = a.accountId
       ${whereClause}
@@ -192,12 +198,12 @@ router.get(
       `SELECT
         a.auditId, a.accountId, a.action, a.module, a.description, a.metadata,
         a.ipAddress, a.userAgent, a.dateCreated,
-        u.firstName, u.lastName
+        ${ACTOR_FIRST_NAME}, u.lastName
       FROM audit_trail a
       LEFT JOIN users u ON u.accountId = a.accountId
-      WHERE a.auditId = ?
+      WHERE a.auditId = ? AND a.companyId = ?
       LIMIT 1`,
-      [auditId]
+      [auditId, callerCompany(req)]
     );
 
     if (rows.length === 0) {

@@ -9,6 +9,8 @@ import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
 import { isOnlinePaymentOn } from "../../../lib/payments/xendit.js";
+import { paymentAccountForCompany } from "../../../utils/companyPayments.js";
+import { callerCompany, courtInCompany, inCompanyVenues } from "../../../utils/companyScope.js";
 import {
   describeSlot,
   sendBookingEmail,
@@ -40,8 +42,26 @@ import {
  *
  * The writes live in utils/bookings.js (shared with the player's booking page
  * from Phase C); each runs in a transaction that locks the court row first.
+ *
+ * PLAN-008: everything is the caller's company's — a booking of another company's
+ * venue is 404 (router.param below), and a court sent in a body must be the company's.
  */
 const router = express.Router();
+
+/** PLAN-008: a :bookingId of another company's venue answers 404, like a missing one. */
+router.param("bookingId", async (req, res, next, bookingId) => {
+  try {
+    const rows = await req.db.query(
+      `SELECT 1 FROM bookings b JOIN venues v ON v.venueId = b.venueId
+       WHERE b.bookingId = ? AND v.companyId = ? LIMIT 1`,
+      [bookingId, callerCompany(req)]
+    );
+    if (rows.length === 0) return res.sendError("Booking not found", 404);
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
 
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
@@ -102,15 +122,19 @@ router.get(
   "/options",
   checkPermission("bookings", null, "read"),
   catchAsync(async (req, res) => {
+    const companyId = callerCompany(req);
     const [venues, courts] = await Promise.all([
       req.db.query(
-        `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
+        `SELECT venueId, name, status FROM venues
+         WHERE status != 'Deleted' AND companyId = ? ORDER BY name ASC`,
+        [companyId]
       ),
       req.db.query(
         `SELECT c.courtId, c.venueId, c.name, c.status
          FROM courts c JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
-         WHERE c.status != 'Deleted'
-         ORDER BY c.name ASC`
+         WHERE c.status != 'Deleted' AND v.companyId = ?
+         ORDER BY c.name ASC`,
+        [companyId]
       ),
     ]);
     return res.sendSuccess("Booking options", { venues, courts });
@@ -130,11 +154,15 @@ router.get(
       req.query;
     await expireHolds(req.db, { venueId });
     const offset = (page - 1) * pageSize;
+    const companyId = callerCompany(req);
     const params = [];
 
     // No status filter → hide soft-deleted. Explicit ?status=Deleted → show them.
     let whereClause = status ? "WHERE b.status = ?" : "WHERE b.status != 'Deleted'";
     if (status) params.push(status);
+    // PLAN-008: only the caller's company's venues
+    whereClause += " AND v.companyId = ?";
+    params.push(companyId);
     if (venueId) {
       whereClause += " AND b.venueId = ?";
       params.push(venueId);
@@ -162,8 +190,9 @@ router.get(
     const today = getTodayDateLocal();
     const now = getCurrentTimestampLocal();
     const weekAgo = moment().tz(TIMEZONE).subtract(7, "days").format(FORMAT);
-    const scope = venueId ? " AND venueId = ?" : "";
-    const scopeParams = venueId ? [venueId] : [];
+    // PLAN-008: the numbers are the company's (and the venue's, when one is picked)
+    const scope = (table) => `${venueId ? " AND venueId = ?" : ""} AND ${inCompanyVenues(table)}`;
+    const scopeParams = venueId ? [venueId, companyId] : [companyId];
 
     const [countRows, bookings, stats, revenue] = await Promise.all([
       req.db.query(`SELECT COUNT(*) AS total FROM ${BOOKING_FROM} ${whereClause}`, params),
@@ -181,7 +210,7 @@ router.get(
            SUM(status = 'Pending' AND holdExpiresAt > ?) AS unpaid,
            SUM(status = 'NoShow' AND startAt >= ?) AS noShowsThisWeek
          FROM bookings
-         WHERE 1 = 1${scope}`,
+         WHERE 1 = 1${scope("bookings")}`,
         [
           `${today} 00:00:00`,
           moment.tz(today, "YYYY-MM-DD", TIMEZONE).add(1, "day").format(FORMAT),
@@ -193,7 +222,7 @@ router.get(
       req.db.query(
         `SELECT COALESCE(SUM(amount), 0) AS revenueToday
          FROM payments
-         WHERE bookingId IS NOT NULL AND status = 'Paid' AND paidAt >= ?${scope}`,
+         WHERE bookingId IS NOT NULL AND status = 'Paid' AND paidAt >= ?${scope("payments")}`,
         [`${today} 00:00:00`, ...scopeParams]
       ),
     ]);
@@ -229,8 +258,9 @@ router.get(
   catchAsync(async (req, res) => {
     const { venueId, date } = req.query;
     const venues = await req.db.query(
-      `SELECT venueId, name FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1`,
-      [venueId]
+      `SELECT venueId, name FROM venues
+       WHERE venueId = ? AND status != 'Deleted' AND companyId = ? LIMIT 1`,
+      [venueId, callerCompany(req)]
     );
     if (venues.length === 0) {
       return res.sendError("Venue not found", 404);
@@ -303,8 +333,8 @@ router.get(
     const courts = await req.db.query(
       `SELECT c.courtId, c.venueId FROM courts c
        JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
-       WHERE c.courtId = ? AND c.status != 'Deleted' LIMIT 1`,
-      [courtId]
+       WHERE c.courtId = ? AND c.status != 'Deleted' AND v.companyId = ? LIMIT 1`,
+      [courtId, callerCompany(req)]
     );
     if (courts.length === 0) {
       return res.sendError("Court not found", 404);
@@ -421,9 +451,14 @@ router.post(
   validateBody(createBookingSchema),
   catchAsync(async (req, res) => {
     const { courtId, date, startTime, durationMinutes, playerName, phone, email, payment } = req.body;
-    if (payment === "Hold" && !isOnlinePaymentOn()) {
+    // PLAN-008: only a court of the caller's company
+    if (!(await courtInCompany(req.db, courtId, callerCompany(req)))) {
+      return res.sendError("Court not found or not active", 404);
+    }
+    // PLAN-008: the company's own Xendit pays the link
+    if (payment === "Hold" && !isOnlinePaymentOn(await paymentAccountForCompany(req.db, callerCompany(req)))) {
       return res.sendError(
-        "Online payment isn't set up, so the player can't pay a link — make it Free, or set up online payment",
+        "Online payment isn't connected, so the player can't pay a link — make it Free, or connect Xendit (Payments → Online payment)",
         409
       );
     }
@@ -470,6 +505,10 @@ router.put(
   validateBody(moveBookingSchema),
   catchAsync(async (req, res) => {
     const { courtId, date, startTime, reprice, ignoreHours } = req.body;
+    // PLAN-008: the booking is the company's (router.param); the new court must be too
+    if (courtId && !(await courtInCompany(req.db, courtId, callerCompany(req)))) {
+      return res.sendError("Court not found or not active", 404);
+    }
     const result = await inTransaction(req, (conn) =>
       moveBooking(conn, {
         bookingId: req.params.bookingId,

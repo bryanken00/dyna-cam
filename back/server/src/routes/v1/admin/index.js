@@ -17,6 +17,7 @@ import paymentsController from "../../../controllers/v1/admin/payments.controlle
 import bookingSettingsController from "../../../controllers/v1/admin/booking-settings.controller.js";
 import closuresController from "../../../controllers/v1/admin/closures.controller.js";
 import bookingsController from "../../../controllers/v1/admin/bookings.controller.js";
+import companyPaymentsController from "../../../controllers/v1/admin/company-payments.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -61,6 +62,8 @@ router.use(
 );
 router.use("/closures", requireAuth, auditTrail("closures"), closuresController);
 router.use("/bookings", requireAuth, auditTrail("bookings"), bookingsController);
+// PLAN-008 phase C: the company's own Xendit account (write-only keys)
+router.use("/company-payments", requireAuth, auditTrail("company-payments"), companyPaymentsController);
 
 
 export default router;

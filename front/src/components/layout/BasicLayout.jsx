@@ -1,4 +1,4 @@
-import { PanelLeftClose, PanelLeftOpen, User } from "lucide-react";
+import { Building2, PanelLeftClose, PanelLeftOpen, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -123,6 +123,18 @@ const BasicLayout = ({ navigations, store }) => {
 
           {/* Right — theme toggle + user */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* PLAN-008: the company this staff account works for */}
+            {userData?.companyName && width > 900 && (
+              <span
+                className="inline-flex items-center gap-1.5 max-w-50 px-2.5 py-1 rounded-lg text-xs font-medium"
+                style={{ border: "1px solid var(--color-line)", color: "var(--color-text-secondary)" }}
+                title={userData.companyName}
+              >
+                <Building2 className="size-3.5 shrink-0" />
+                <span className="truncate">{userData.companyName}</span>
+              </span>
+            )}
+
             <ThemeToggle />
 
             {/* divider */}
@@ -171,6 +183,11 @@ const BasicLayout = ({ navigations, store }) => {
                   >
                     {userData?.email}
                   </div>
+                  {userData?.companyName && (
+                    <div className="text-xs mt-0.5" style={{ color: "var(--color-text-secondary)" }}>
+                      {userData.companyName}
+                    </div>
+                  )}
                   {userData?.roleName && (
                     <div
                       className="text-xs mt-0.5 font-medium"

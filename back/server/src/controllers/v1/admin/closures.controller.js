@@ -4,6 +4,7 @@ import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { LIVE_BOOKING } from "../../../utils/courtTimeline.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import { cancelBooking } from "../../../utils/bookings.js";
 import { runPaymentFollowUps } from "../../../utils/bookingPayments.js";
 import { sendBookingEmail } from "../../../utils/bookingEmails.js";
@@ -27,8 +28,9 @@ const router = express.Router();
 const CLOSURE_COLUMNS = `cl.closureId, cl.venueId, cl.courtId, c.name AS courtName, cl.startAt,
   cl.endAt, cl.reason, cl.status, cl.dateCreated, cl.dateUpdated`;
 
+// PLAN-008: one `?` — the caller's companyId (another company's closure is a 404)
 const CLOSURE_FROM = `court_closures cl
-  JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted'
+  JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted' AND v.companyId = ?
   LEFT JOIN courts c ON c.courtId = cl.courtId`;
 
 /**
@@ -184,13 +186,16 @@ router.get(
     const order = when === "upcoming" ? "ASC" : "DESC";
 
     const [countRows, closures] = await Promise.all([
-      req.db.query(`SELECT COUNT(*) AS total FROM ${CLOSURE_FROM} ${whereClause}`, params),
+      req.db.query(`SELECT COUNT(*) AS total FROM ${CLOSURE_FROM} ${whereClause}`, [
+        callerCompany(req),
+        ...params,
+      ]),
       req.db.query(
         `SELECT ${CLOSURE_COLUMNS} FROM ${CLOSURE_FROM}
          ${whereClause}
          ORDER BY cl.startAt ${order}
          LIMIT ? OFFSET ?`,
-        [...params, Number(pageSize), Number(offset)]
+        [callerCompany(req), ...params, Number(pageSize), Number(offset)]
       ),
     ]);
     const total = countRows[0]?.total || 0;
@@ -218,7 +223,7 @@ router.get(
       `SELECT ${CLOSURE_COLUMNS} FROM ${CLOSURE_FROM}
        WHERE cl.closureId = ? AND cl.status != 'Deleted'
        LIMIT 1`,
-      [req.params.closureId]
+      [callerCompany(req), req.params.closureId]
     );
     if (rows.length === 0) {
       return res.sendError("Closure not found", 404);
@@ -245,8 +250,8 @@ router.post(
       conn = await req.db.beginTransaction();
 
       const [venues] = await conn.execute(
-        `SELECT venueId FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1`,
-        [venueId]
+        `SELECT venueId FROM venues WHERE venueId = ? AND companyId = ? AND status != 'Deleted' LIMIT 1`,
+        [venueId, callerCompany(req)]
       );
       if (venues.length === 0) {
         await req.db.rollback(conn);
@@ -311,7 +316,7 @@ router.put(
         `SELECT cl.closureId, cl.venueId FROM ${CLOSURE_FROM}
          WHERE cl.closureId = ? AND cl.status != 'Deleted'
          LIMIT 1 FOR UPDATE`,
-        [closureId]
+        [callerCompany(req), closureId]
       );
       if (rows.length === 0) {
         await req.db.rollback(conn);
@@ -360,10 +365,10 @@ router.delete(
   catchAsync(async (req, res) => {
     const result = await req.db.query(
       `UPDATE court_closures cl
-       JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted'
+       JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted' AND v.companyId = ?
        SET cl.status = 'Deleted', cl.dateUpdated = ?
        WHERE cl.closureId = ? AND cl.status != 'Deleted'`,
-      [getCurrentTimestampLocal(), req.params.closureId]
+      [callerCompany(req), getCurrentTimestampLocal(), req.params.closureId]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Closure not found", 404);

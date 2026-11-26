@@ -26,6 +26,7 @@ import {
 } from "../../../utils/courtDrive.js";
 import { consentUrl, driveConfigured, signDriveState } from "../../../utils/googleDrive.js";
 import APIError, { ERROR_CODES } from "../../../utils/APIError.js";
+import { callerCompany, courtInCompany } from "../../../utils/companyScope.js";
 import {
   createCourtSchema,
   listCourtsQuerySchema,
@@ -34,7 +35,8 @@ import {
 
 /**
  * Courts — one camera each, inside a venue (PLAN-001).
- * Permission: venues / courts.
+ * Permission: venues / courts. PLAN-008: only courts at the caller's company's
+ * venues — another company's court (or venue) is a 404.
  *
  * The camera URL is write-only here: it carries the camera's credentials, so
  * responses only say whether one is set and show it with the credentials
@@ -53,7 +55,7 @@ const COURT_SELECT = `
            WHERE d.venueId = c.venueId AND d.status = 'Active' AND d.lastSeenAt >= ?
          ) AS recorderOnline
   FROM courts c
-  JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'`;
+  JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?`;
 
 /** Seconds since a stored Manila timestamp, by the server's clock (null if none). */
 const secondsSince = (localTimestamp) =>
@@ -220,16 +222,17 @@ router.get(
     const [countRows, courts] = await Promise.all([
       req.db.query(
         `SELECT COUNT(*) as total
-         FROM courts c JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+         FROM courts c
+         JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
          ${whereClause}`,
-        params
+        [callerCompany(req), ...params]
       ),
       req.db.query(
         `${COURT_SELECT}
          ${whereClause}
          ORDER BY v.name ASC, c.${safeSortBy} ${safeSortOrder}
          LIMIT ? OFFSET ?`,
-        [onlineSince, ...params, Number(pageSize), Number(offset)]
+        [onlineSince, callerCompany(req), ...params, Number(pageSize), Number(offset)]
       ),
     ]);
 
@@ -258,7 +261,9 @@ router.get(
   checkPermission("venues", "courts", "read"),
   catchAsync(async (req, res) => {
     const venues = await req.db.query(
-      `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
+      `SELECT venueId, name, status FROM venues
+       WHERE status != 'Deleted' AND companyId = ? ORDER BY name ASC`,
+      [callerCompany(req)]
     );
     return res.sendSuccess("Venue options", { venues });
   })
@@ -275,7 +280,7 @@ router.get(
       `${COURT_SELECT}
        WHERE c.courtId = ? AND c.status != 'Deleted'
        LIMIT 1`,
-      [secondsAgoLocal(DEVICE_ONLINE_SECONDS), req.params.courtId]
+      [secondsAgoLocal(DEVICE_ONLINE_SECONDS), callerCompany(req), req.params.courtId]
     );
 
     if (rows.length === 0) {
@@ -325,8 +330,9 @@ router.post(
       conn = await req.db.beginTransaction();
 
       const [venue] = await conn.execute(
-        `SELECT venueId FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
-        [venueId]
+        `SELECT venueId FROM venues
+         WHERE venueId = ? AND companyId = ? AND status != 'Deleted' LIMIT 1 FOR UPDATE`,
+        [venueId, callerCompany(req)]
       );
       if (venue.length === 0) {
         await req.db.rollback(conn);
@@ -417,10 +423,10 @@ router.put(
         `SELECT c.courtId, c.venueId, c.cameraRtspUrl, c.camera2RtspUrl, c.streamRtmpUrl,
                 c.streamLayout
          FROM courts c
-         JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+         JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
          WHERE c.courtId = ? AND c.status != 'Deleted'
          LIMIT 1 FOR UPDATE`,
-        [courtId]
+        [callerCompany(req), courtId]
       );
       if (target.length === 0) {
         await req.db.rollback(conn);
@@ -510,11 +516,11 @@ router.post(
       .format("YYYY-MM-DD HH:mm:ss");
     const result = await req.db.query(
       `UPDATE courts c
-       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
        SET c.previewWantedUntil = ?
        WHERE c.courtId = ? AND c.status != 'Deleted'`,
       // Live status, not an edit: dateUpdated and the audit trail are left alone
-      [until, req.params.courtId]
+      [callerCompany(req), until, req.params.courtId]
     );
     if (result.affectedRows === 0) {
       return res.sendError("Court not found", 404);
@@ -536,10 +542,10 @@ router.post(
     const qrToken = randomToken();
     const result = await req.db.query(
       `UPDATE courts c
-       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
        SET c.qrToken = ?, c.dateUpdated = ?
        WHERE c.courtId = ? AND c.status != 'Deleted'`,
-      [qrToken, getCurrentTimestampLocal(), courtId]
+      [callerCompany(req), qrToken, getCurrentTimestampLocal(), courtId]
     );
 
     if (result.affectedRows === 0) {
@@ -573,10 +579,10 @@ router.post(
     }
     const rows = await req.db.query(
       `SELECT c.courtId, c.venueId FROM courts c
-       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted'
+       JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
        WHERE c.courtId = ? AND c.status != 'Deleted'
        LIMIT 1`,
-      [req.params.courtId]
+      [callerCompany(req), req.params.courtId]
     );
     if (rows.length === 0) {
       return res.sendError("Court not found", 404);
@@ -601,6 +607,9 @@ router.delete(
   "/:courtId/google-drive",
   checkPermission("venues", "courts", "write"),
   catchAsync(async (req, res) => {
+    if (!(await courtInCompany(req.db, req.params.courtId, callerCompany(req)))) {
+      return res.sendError("Court not found", 404);
+    }
     const found = await disconnectCourtDrive(req.db, req.params.courtId);
     if (!found) {
       return res.sendError("Court not found", 404);
@@ -618,9 +627,11 @@ router.delete(
   checkPermission("venues", "courts", "write"),
   catchAsync(async (req, res) => {
     const result = await req.db.query(
-      `UPDATE courts SET status = 'Deleted', dateUpdated = ?
-       WHERE courtId = ? AND status != 'Deleted'`,
-      [getCurrentTimestampLocal(), req.params.courtId]
+      `UPDATE courts c
+       JOIN venues v ON v.venueId = c.venueId AND v.companyId = ?
+       SET c.status = 'Deleted', c.dateUpdated = ?
+       WHERE c.courtId = ? AND c.status != 'Deleted'`,
+      [callerCompany(req), getCurrentTimestampLocal(), req.params.courtId]
     );
 
     if (result.affectedRows === 0) {

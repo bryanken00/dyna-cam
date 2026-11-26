@@ -40,10 +40,12 @@ const ago = (at) => {
 
 async function list(db) {
   const [rows] = await db.query(
-    `SELECT d.deviceId, d.name, d.status, d.lastSeenAt, d.agentVersion, v.name AS venue
+    `SELECT d.deviceId, d.name, d.status, d.lastSeenAt, d.agentVersion, v.name AS venue,
+            co.name AS company
      FROM devices d JOIN venues v ON v.venueId = d.venueId
+     JOIN companies co ON co.companyId = v.companyId
      WHERE d.status != 'Deleted'
-     ORDER BY v.name, d.name`
+     ORDER BY co.name, v.name, d.name`
   );
   if (rows.length === 0) {
     console.log("No recorder boxes yet. A box enrols itself on first start (edge/README.md).");
@@ -56,6 +58,8 @@ async function list(db) {
         row.lastSeenAt &&
         moment().diff(moment.tz(row.lastSeenAt, TIMEZONE), "seconds") <= ONLINE_SECONDS;
       return {
+        // PLAN-008: a platform tool — every company's boxes
+        company: row.company,
         venue: row.venue,
         name: row.name,
         status: row.status === "Active" ? (online ? "online" : "offline") : row.status,

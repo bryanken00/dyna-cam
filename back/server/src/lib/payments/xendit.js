@@ -3,9 +3,8 @@ import crypto from "node:crypto";
 import * as sandbox from "./sandbox.js";
 
 /**
- * PLAN-003 Phase F — Xendit, Dyna Cam's one payment account (every venue's
- * online bookings are paid into it; settling with venues happens outside the
- * system). Each booking is paid through a Xendit **Invoice**: a hosted checkout
+ * PLAN-003 Phase F — Xendit. PLAN-008 phase C: each company has its own Xendit
+ * account (players pay straight into it); every call takes the account to use. Each booking is paid through a Xendit **Invoice**: a hosted checkout
  * page offering the account's enabled methods (GCash, Maya, cards…).
  *
  * Online payment is ON only when both XENDIT_SECRET_KEY and
@@ -55,17 +54,26 @@ export const isPaymentSandbox = () =>
   String(process.env.PAYMENT_SANDBOX || "").trim().toLowerCase() === "true" &&
   process.env.NODE_ENV !== "production";
 
-/** Is online payment configured (Xendit keys, or the sandbox)? */
-export const isOnlinePaymentOn = () =>
-  isPaymentSandbox() ||
-  (Boolean(process.env.XENDIT_SECRET_KEY) && Boolean(process.env.XENDIT_CALLBACK_TOKEN));
+/**
+ * PLAN-008 phase C: a Xendit account — `{ secretKey, callbackToken }`. Each company
+ * has its own (utils/companyPayments.js); `envAccount()` is the one in back/.env
+ * (the default company's, until it saves its own). Every call below takes the
+ * account to use; leaving it out means the .env one.
+ */
+export const envAccount = () => ({
+  secretKey: process.env.XENDIT_SECRET_KEY || "",
+  callbackToken: process.env.XENDIT_CALLBACK_TOKEN || "",
+});
 
-const authHeader = () =>
-  `Basic ${Buffer.from(`${process.env.XENDIT_SECRET_KEY || ""}:`).toString("base64")}`;
+/** Is online payment configured for this account (its keys, or the sandbox)? */
+export const isOnlinePaymentOn = (account = envAccount()) =>
+  isPaymentSandbox() || (Boolean(account?.secretKey) && Boolean(account?.callbackToken));
+
+const authHeader = (account) => `Basic ${Buffer.from(`${account?.secretKey || ""}:`).toString("base64")}`;
 
 /** One call to Xendit → the parsed JSON body, or a XenditError. */
-const request = async (method, path, body) => {
-  if (!isOnlinePaymentOn()) {
+const request = async (method, path, body, account = envAccount()) => {
+  if (!isOnlinePaymentOn(account)) {
     throw new XenditError("Online payment is not set up", { code: "NOT_CONFIGURED" });
   }
   if (isPaymentSandbox()) {
@@ -77,7 +85,7 @@ const request = async (method, path, body) => {
     res = await fetch(`${API_URL()}${path}`, {
       method,
       headers: {
-        Authorization: authHeader(),
+        Authorization: authHeader(account),
         Accept: "application/json",
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
@@ -140,30 +148,31 @@ const toInvoice = (raw) => {
  * @param {string} invoice.description
  * @returns {Promise<{ id, externalId, status, paid, amount, url, expiresAt }>}
  */
-export const createInvoice = async ({
-  externalId,
-  amount,
-  durationSeconds,
-  returnUrl,
-  email = null,
-  description,
-}) =>
+export const createInvoice = async (
+  { externalId, amount, durationSeconds, returnUrl, email = null, description },
+  account = envAccount()
+) =>
   toInvoice(
-    await request("POST", "/v2/invoices", {
-      external_id: externalId,
-      amount,
-      currency: "PHP",
-      description: description.slice(0, 255),
-      invoice_duration: Math.max(60, Math.floor(durationSeconds)),
-      success_redirect_url: returnUrl,
-      failure_redirect_url: returnUrl,
-      ...(email ? { payer_email: email } : {}),
-    })
+    await request(
+      "POST",
+      "/v2/invoices",
+      {
+        external_id: externalId,
+        amount,
+        currency: "PHP",
+        description: description.slice(0, 255),
+        invoice_duration: Math.max(60, Math.floor(durationSeconds)),
+        success_redirect_url: returnUrl,
+        failure_redirect_url: returnUrl,
+        ...(email ? { payer_email: email } : {}),
+      },
+      account
+    )
   );
 
 /** The invoice as Xendit has it — the only source a payment is believed from. */
-export const getInvoice = async (invoiceId) =>
-  toInvoice(await request("GET", `/v2/invoices/${encodeURIComponent(invoiceId)}`));
+export const getInvoice = async (invoiceId, account = envAccount()) =>
+  toInvoice(await request("GET", `/v2/invoices/${encodeURIComponent(invoiceId)}`, undefined, account));
 
 /**
  * Close an unpaid checkout so it can't be paid any more (the booking was
@@ -172,9 +181,9 @@ export const getInvoice = async (invoiceId) =>
  *
  * @returns {Promise<{ expired: boolean, status?: string }>}
  */
-export const expireInvoice = async (invoiceId) => {
+export const expireInvoice = async (invoiceId, account = envAccount()) => {
   try {
-    const raw = await request("POST", `/invoices/${encodeURIComponent(invoiceId)}/expire!`);
+    const raw = await request("POST", `/invoices/${encodeURIComponent(invoiceId)}/expire!`, undefined, account);
     return { expired: true, status: toInvoice(raw).status };
   } catch (err) {
     if (err instanceof XenditError && !err.transient && err.status >= 400 && err.status < 500) {
@@ -194,13 +203,18 @@ export const expireInvoice = async (invoiceId) => {
  * @param {string} [refund.reason] - one of REFUND_REASONS
  * @returns {Promise<{ id: string, status: string }>} status PENDING, SUCCEEDED or FAILED
  */
-export const refund = async ({ invoiceId, amount, referenceId, reason = "CANCELLATION" }) => {
-  const raw = await request("POST", "/refunds", {
-    invoice_id: invoiceId,
-    reference_id: referenceId,
-    amount,
-    reason: REFUND_REASONS.includes(reason) ? reason : "OTHERS",
-  });
+export const refund = async ({ invoiceId, amount, referenceId, reason = "CANCELLATION" }, account = envAccount()) => {
+  const raw = await request(
+    "POST",
+    "/refunds",
+    {
+      invoice_id: invoiceId,
+      reference_id: referenceId,
+      amount,
+      reason: REFUND_REASONS.includes(reason) ? reason : "OTHERS",
+    },
+    account
+  );
   return {
     id: raw.id || raw.refund_id,
     status: String(raw.status || "PENDING").toUpperCase(),
@@ -209,8 +223,8 @@ export const refund = async ({ invoiceId, amount, referenceId, reason = "CANCELL
 };
 
 /** A refund as Xendit has it (for its refund.succeeded / refund.failed events). */
-export const getRefund = async (refundId) => {
-  const raw = await request("GET", `/refunds/${encodeURIComponent(refundId)}`);
+export const getRefund = async (refundId, account = envAccount()) => {
+  const raw = await request("GET", `/refunds/${encodeURIComponent(refundId)}`, undefined, account);
   return {
     id: raw.id || raw.refund_id,
     status: String(raw.status || "").toUpperCase(),
@@ -219,11 +233,29 @@ export const getRefund = async (refundId) => {
 };
 
 /**
+ * PLAN-008: prove a company's secret key works — its account's cash balance
+ * (GET /balance). The sandbox answers for any key.
+ * @returns {Promise<{ balance: number }>}
+ */
+export const getBalance = async (account) => {
+  if (isPaymentSandbox()) return { balance: 0 };
+  const raw = await request("GET", "/balance", undefined, account);
+  return { balance: Number(raw.balance || 0) };
+};
+
+/** "xnd_development_…" → "test", "xnd_production_…" → "live" (null: not a Xendit secret key). */
+export const keyMode = (secretKey) => {
+  if (/^xnd_development_/.test(secretKey || "")) return "test";
+  if (/^xnd_production_/.test(secretKey || "")) return "live";
+  return null;
+};
+
+/**
  * Is this the x-callback-token header Xendit signs every webhook with?
  * Compared in constant time (as SHA-256 digests, so lengths never leak).
  */
-export const checkCallbackToken = (header) => {
-  const expected = process.env.XENDIT_CALLBACK_TOKEN || "";
+export const checkCallbackToken = (header, account = envAccount()) => {
+  const expected = account?.callbackToken || "";
   if (!expected || typeof header !== "string" || header.length === 0) return false;
   const a = crypto.createHash("sha256").update(header).digest();
   const b = crypto.createHash("sha256").update(expected).digest();

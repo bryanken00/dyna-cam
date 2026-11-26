@@ -364,3 +364,41 @@ export const bookingPaymentRefundedEmail = (b) => ({
      ${manageLink(b, "Open your booking")}`
   ),
 });
+
+/**
+ * PLAN-008 phase B: a new company's Owner, onboarded from the back office — where to
+ * sign in and the temporary password (they must choose their own at first sign-in).
+ * Sent only when SendGrid is set up; the back office shows the password once either way.
+ *
+ * @param {{ ownerName: string, companyName: string, loginUrl: string, email: string, password: string }} p
+ */
+export const companyWelcomeEmail = ({ ownerName, companyName, loginUrl, email, password }) => ({
+  subject: `${companyName} is set up on ${APP_NAME}`,
+  html: layout(
+    `Welcome to ${escapeHtml(APP_NAME)}`,
+    `
+    <p style="font-size: 14px; line-height: 1.6; margin: 0 0 16px;">
+      Hi ${escapeHtml(ownerName)}, <strong>${escapeHtml(companyName)}</strong> is set up on ${escapeHtml(APP_NAME)},
+      and you're its Owner. Sign in to add your venues, courts and staff.
+    </p>
+    <p style="font-size: 14px; line-height: 1.6; margin: 0 0 20px;">
+      Email: <strong>${escapeHtml(email)}</strong><br />
+      Temporary password: <strong style="font-family: monospace;">${escapeHtml(password)}</strong><br />
+      You'll choose your own password when you first sign in.
+    </p>
+    <p style="margin: 0 0 20px;">${button(loginUrl, "Sign in")}</p>
+    <p style="font-size: 13px; color: #71717a; word-break: break-all; margin: 0;">${escapeHtml(loginUrl)}</p>
+  `
+  ),
+  text: [
+    `Hi ${ownerName},`,
+    "",
+    `${companyName} is set up on ${APP_NAME}, and you're its Owner.`,
+    "",
+    `Sign in: ${loginUrl}`,
+    `Email: ${email}`,
+    `Temporary password: ${password}`,
+    "",
+    "You'll choose your own password when you first sign in.",
+  ].join("\n"),
+});

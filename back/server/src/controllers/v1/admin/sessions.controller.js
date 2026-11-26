@@ -40,6 +40,7 @@ import {
   sendGameDriveEmail,
 } from "../../../utils/gameEmails.js";
 import { resendFromBox } from "../../../utils/boxVideos.js";
+import { callerCompany, courtInCompany } from "../../../utils/companyScope.js";
 
 /**
  * Recording sessions — a court booked for a whole time window (PLAN-001
@@ -47,8 +48,26 @@ import { resendFromBox } from "../../../utils/boxVideos.js";
  * See utils/sessions.js for how a game becomes one video per camera (CR-006). Phones/tablets
  * are paired to one session here (PLAN-002 Phase E, /:sessionId/pairing-codes)
  * and see it live through /api/v1/app (utils/sessionDevices.js).
+ *
+ * PLAN-008: only the caller's company's games — a :sessionId of another company's
+ * venue is 404 (router.param below), and a court sent in a body must be the company's.
  */
 const router = express.Router();
+
+/** PLAN-008: a :sessionId of another company's venue answers 404, like a missing one. */
+router.param("sessionId", async (req, res, next, sessionId) => {
+  try {
+    const rows = await req.db.query(
+      `SELECT 1 FROM recording_sessions s JOIN venues v ON v.venueId = s.venueId
+       WHERE s.sessionId = ? AND v.companyId = ? LIMIT 1`,
+      [sessionId, callerCompany(req)]
+    );
+    if (rows.length === 0) return res.sendError("Session not found", 404);
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
 
 const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
@@ -220,8 +239,9 @@ router.get(
       sortOrder,
     } = req.query;
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause = "WHERE 1 = 1";
+    // PLAN-008: only the caller's company's venues
+    const params = [callerCompany(req)];
+    let whereClause = "WHERE v.companyId = ?";
     if (status) {
       whereClause += " AND s.status = ?";
       params.push(status);
@@ -367,9 +387,9 @@ const createOpenGame = async (req, res) => {
     const [courts] = await conn.execute(
       `SELECT c.courtId, c.venueId, c.cameraRtspUrl IS NOT NULL AS hasCamera
        FROM courts c JOIN venues v ON v.venueId = c.venueId
-       WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active'
+       WHERE c.courtId = ? AND c.status = 'Active' AND v.status = 'Active' AND v.companyId = ?
        LIMIT 1 FOR UPDATE`,
-      [courtId]
+      [courtId, callerCompany(req)]
     );
     if (courts.length === 0) {
       await req.db.rollback(conn);
@@ -470,6 +490,10 @@ router.post(
     const { courtId, startNow, startAt, durationMinutes, playerName, phone, email, maxCaptures } =
       req.body;
     if (!startNow && !startAt) return createOpenGame(req, res);
+    // PLAN-008: only a court of the caller's company
+    if (!(await courtInCompany(req.db, courtId, callerCompany(req)))) {
+      return res.sendError("Court not found or not active", 404);
+    }
     const start = startNow ? moment().tz(TIMEZONE) : moment.tz(startAt, FORMAT, TIMEZONE);
     if (!start.isValid()) {
       return res.sendError("Invalid start date and time", 400);

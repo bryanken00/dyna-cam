@@ -40,6 +40,9 @@ const SENSITIVE_FIELDS = [
   "token",
   "refreshToken",
   "secret",
+  // PLAN-008: a company's Xendit keys (Admin → Online payment)
+  "secretKey",
+  "callbackToken",
 ];
 
 /**
@@ -57,7 +60,7 @@ const SENSITIVE_FIELDS = [
  * @returns {Promise<boolean>} true when the row was written
  */
 export async function recordAudit(req, { action, module, description, metadata, actor }) {
-  const { accountId } = actor || req.user || {};
+  const { accountId, companyId } = actor || req.user || {};
 
   try {
     if (!accountId) {
@@ -67,10 +70,14 @@ export async function recordAudit(req, { action, module, description, metadata, 
     const [{ auditId }] = await req.db.query(`SELECT UUID() as auditId`);
 
     await req.db.query(
-      `INSERT INTO audit_trail (auditId, accountId, action, module, description, metadata, ipAddress, userAgent, dateCreated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // PLAN-008: the entry belongs to the actor's company (looked up when only the
+      // account is known, e.g. a sign-in); NULL for an account that isn't staff
+      `INSERT INTO audit_trail (auditId, companyId, accountId, action, module, description, metadata, ipAddress, userAgent, dateCreated)
+       VALUES (?, COALESCE(?, (SELECT u.companyId FROM users u WHERE u.accountId = ? LIMIT 1)), ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         auditId,
+        companyId || null,
+        accountId,
         accountId,
         action,
         module,

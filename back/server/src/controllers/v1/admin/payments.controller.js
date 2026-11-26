@@ -4,6 +4,7 @@ import { getCurrentTimestampLocal, getTodayDateLocal } from "../../../utils/date
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
 import { listPaymentsQuerySchema, refundPaymentSchema } from "../../../validators/payments.validator.js";
 import { REFUND_SENDING } from "../../../utils/bookingPayments.js";
+import { callerCompany, inCompanyVenues } from "../../../utils/companyScope.js";
 
 /**
  * Payments — every payment recorded (permission: payments): online booking
@@ -16,6 +17,9 @@ import { REFUND_SENDING } from "../../../utils/bookingPayments.js";
  *
  * CR-046 (no payment at the counter) removed Take payment (GET /lookup,
  * POST /) and the online settlement report (GET /settlement).
+ *
+ * PLAN-008: only the caller's company's venues' payments; another company's
+ * :paymentId answers 404.
  */
 const router = express.Router();
 
@@ -30,8 +34,10 @@ router.get(
   catchAsync(async (req, res) => {
     const { page = 1, pageSize = 20, venueId, status, dateFrom, dateTo } = req.query;
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause = "WHERE 1 = 1";
+    const companyId = callerCompany(req);
+    // PLAN-008: only the caller's company's venues
+    const params = [companyId];
+    let whereClause = `WHERE ${inCompanyVenues("p")}`;
     if (venueId) {
       whereClause += " AND p.venueId = ?";
       params.push(venueId);
@@ -50,8 +56,8 @@ router.get(
     }
 
     const today = getTodayDateLocal();
-    const venueScope = venueId ? " AND venueId = ?" : "";
-    const venueParams = venueId ? [venueId] : [];
+    const venueScope = `${venueId ? " AND venueId = ?" : ""} AND ${inCompanyVenues("payments")}`;
+    const venueParams = venueId ? [venueId, companyId] : [companyId];
 
     const [countRows, payments, totals] = await Promise.all([
       req.db.query(`SELECT COUNT(*) AS total FROM payments p ${whereClause}`, params),
@@ -122,7 +128,9 @@ router.get(
   checkPermission("payments", null, "read"),
   catchAsync(async (req, res) => {
     const venues = await req.db.query(
-      `SELECT venueId, name, status FROM venues WHERE status != 'Deleted' ORDER BY name ASC`
+      `SELECT venueId, name, status FROM venues
+       WHERE status != 'Deleted' AND companyId = ? ORDER BY name ASC`,
+      [callerCompany(req)]
     );
     return res.sendSuccess("Payment filter options", { venues });
   })
@@ -142,9 +150,9 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
       const [rows] = await conn.execute(
-        `SELECT paymentId, clipId, sessionId, bookingId, status, refundError FROM payments
-         WHERE paymentId = ? LIMIT 1 FOR UPDATE`,
-        [req.params.paymentId]
+        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId, p.status, p.refundError FROM payments p
+         WHERE p.paymentId = ? AND ${inCompanyVenues("p")} LIMIT 1 FOR UPDATE`,
+        [req.params.paymentId, callerCompany(req)]
       );
       if (rows.length === 0) {
         await req.db.rollback(conn);

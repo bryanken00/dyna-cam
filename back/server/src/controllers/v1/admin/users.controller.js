@@ -5,6 +5,7 @@ import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { hashPassword } from "../../../utils/hashing/argonHash.js";
 import { passwordProblem } from "../../../utils/passwordPolicy.js";
 import { checkPermission } from "../../../middlewares/checkPermission.middleware.js";
+import { callerCompany } from "../../../utils/companyScope.js";
 import {
   createUserSchema,
   updateUserSchema,
@@ -13,10 +14,10 @@ import {
 
 const router = express.Router();
 
-// A role the Admin portal may assign: any live role except Owner.
-// Params: [roleId]
+// A role the Admin portal may assign: any live role of the caller's company
+// except Owner (PLAN-008). Params: [roleId, companyId]
 const ASSIGNABLE_ROLE_SQL = `SELECT roleId FROM roles
-   WHERE roleId = ? AND status != 'Deleted' AND roleName != 'Owner'
+   WHERE roleId = ? AND companyId = ? AND status != 'Deleted' AND roleName != 'Owner'
    LIMIT 1`;
 
 /**
@@ -38,8 +39,9 @@ router.get(
     } = req.query;
 
     const offset = (page - 1) * pageSize;
-    const params = [];
-    let whereClause = "WHERE u.status != 'Deleted' AND r.roleName != 'Owner'";
+    // PLAN-008: only the caller's company
+    const params = [callerCompany(req)];
+    let whereClause = "WHERE u.companyId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'";
 
     if (search) {
       whereClause += ` AND (u.firstName LIKE ? OR u.lastName LIKE ? OR c.email LIKE ?)`;
@@ -129,9 +131,9 @@ router.get(
       FROM users u
       LEFT JOIN credentials c ON c.accountId = u.accountId
       LEFT JOIN roles r ON r.roleId = u.roleId
-      WHERE u.accountId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'
+      WHERE u.accountId = ? AND u.companyId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'
       LIMIT 1`,
-      [userId]
+      [userId, callerCompany(req)]
     );
 
     if (users.length === 0) {
@@ -183,7 +185,7 @@ router.post(
       }
 
       // The role must exist and must not be Owner
-      const [roleRows] = await conn.execute(ASSIGNABLE_ROLE_SQL, [roleId]);
+      const [roleRows] = await conn.execute(ASSIGNABLE_ROLE_SQL, [roleId, callerCompany(req)]);
 
       if (roleRows.length === 0) {
         await req.db.rollback(conn);
@@ -196,9 +198,9 @@ router.post(
 
       // Create user
       await conn.execute(
-        `INSERT INTO users (accountId, firstName, lastName, phone, roleId, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, 'Active', ?, ?)`,
-        [accountId, firstName, lastName, phone || null, roleId, now, now]
+        `INSERT INTO users (accountId, companyId, firstName, lastName, phone, roleId, status, dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+        [accountId, callerCompany(req), firstName, lastName, phone || null, roleId, now, now]
       );
 
       // Create credential (Argon2 embeds the salt in the encoded hash).
@@ -236,7 +238,7 @@ router.put(
     const now = getCurrentTimestampLocal();
 
     // The new role must exist and must not be Owner
-    const roleRows = await req.db.query(ASSIGNABLE_ROLE_SQL, [roleId]);
+    const roleRows = await req.db.query(ASSIGNABLE_ROLE_SQL, [roleId, callerCompany(req)]);
 
     if (roleRows.length === 0) {
       return res.sendError("Selected role was not found", 400);
@@ -247,8 +249,8 @@ router.put(
       `UPDATE users u
        INNER JOIN roles r ON r.roleId = u.roleId
        SET u.firstName = ?, u.lastName = ?, u.phone = ?, u.roleId = ?, u.status = ?, u.dateUpdated = ?
-       WHERE u.accountId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'`,
-      [firstName, lastName, phone || null, roleId, status || "Active", now, userId]
+       WHERE u.accountId = ? AND u.companyId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'`,
+      [firstName, lastName, phone || null, roleId, status || "Active", now, userId, callerCompany(req)]
     );
 
     if (result.affectedRows === 0) {
@@ -279,8 +281,8 @@ router.delete(
         `UPDATE users u
          INNER JOIN roles r ON r.roleId = u.roleId
          SET u.status = 'Deleted', u.dateUpdated = ?
-         WHERE u.accountId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'`,
-        [now, userId]
+         WHERE u.accountId = ? AND u.companyId = ? AND u.status != 'Deleted' AND r.roleName != 'Owner'`,
+        [now, userId, callerCompany(req)]
       );
 
       if (userResult.affectedRows === 0) {

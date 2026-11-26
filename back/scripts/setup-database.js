@@ -2,7 +2,8 @@
  * Database Setup Script (ESM)
  *
  * Applies all pending migrations (database/migrations/) then seeds default
- * permissions + the Owner role and account. Additive and re-runnable — existing
+ * permissions + the first back-office super admin (PLAN-008: nothing else — companies
+ * and their Owners are onboarded in the back office). Additive and re-runnable — existing
  * tables and data are left untouched; seeds are skipped when already present.
  *
  * Usage: node scripts/setup-database.js
@@ -13,7 +14,8 @@ import mysql from "mysql2/promise";
 import argon2 from "argon2";
 import moment from "moment-timezone";
 import { runMigrations } from "./migrate.js";
-import { checkOwnerSeedEnv, seedOwner } from "./_seed-owner.js";
+import { checkSuperAdminSeedEnv, seedSuperAdmin } from "./_seed-superadmin.js";
+import { topUpOwnerRoles } from "./_owner-permissions.js";
 
 const DB_CONFIG = {
   host: process.env.DB_HOST,
@@ -44,7 +46,7 @@ async function main() {
   let connection;
 
   try {
-    checkOwnerSeedEnv();
+    checkSuperAdminSeedEnv();
 
     console.log("🔌 Connecting to MySQL...");
     connection = await mysql.createConnection(DB_CONFIG);
@@ -103,9 +105,12 @@ async function main() {
         : "   ⏭️  Permissions already seeded — skipping"
     );
 
-    // Seed the Owner role + account (account skipped when one exists) — see _seed-owner.js
-    console.log("\n👤 Creating Owner account...");
-    await seedOwner(connection, { timestamp, hashPassword });
+    // PLAN-008: setup creates only the first back-office super admin (SUPERADMIN_EMAIL);
+    // companies and their Owners are onboarded in the back office
+    console.log("\n👤 Creating the back-office super admin...");
+    await seedSuperAdmin(connection, { timestamp, hashPassword });
+    // Existing companies' Owner roles get any permission added since (no account is created)
+    await topUpOwnerRoles(connection, timestamp);
 
     console.log("\n🎉 Database setup complete!");
   } catch (error) {
