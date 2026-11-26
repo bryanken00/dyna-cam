@@ -1,6 +1,6 @@
 // CR-030 — a way in for players: the public list of venues taking online
-// bookings, "Find my booking" by code + phone or email, and the venue's booking
-// link on a court's QR page.
+// bookings and the venue's booking link on a court's QR page. ("Find my
+// booking" by code + phone or email was removed by CR-045.)
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
@@ -10,7 +10,6 @@ import { startTestApp } from "./helpers/testApp.js";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 const ALL_DAY = EVERY_DAY.map((dayOfWeek) => ({ dayOfWeek, opensAt: "00:00", closesAt: "24:00" }));
-const NO_MATCH = /No booking matches/;
 
 describe("player booking entry points (CR-030)", () => {
   let ctx;
@@ -164,64 +163,11 @@ describe("player booking entry points (CR-030)", () => {
   });
 
   describe("POST /public/bookings/find", () => {
-    it("finds a booking by its code and email (any case) or phone (any format)", async () => {
+    it("CR-045: is gone — players find their bookings in My games", async () => {
       const made = await book(home.token);
-      const spaced = `${made.bookingCode.slice(0, 3)} ${made.bookingCode.slice(3)}`.toLowerCase();
-
-      for (const [code, contact] of [
-        [made.bookingCode, "bea@example.com"],
-        [spaced, "BEA@EXAMPLE.COM"],
-        [made.bookingCode, "0917 123 4567"],
-        [made.bookingCode, "09171234567"],
-        [made.bookingCode, "+63 917 123 4567"],
-      ]) {
-        const res = await find(code, contact);
-        assert.equal(res.status, 200, `${code} / ${contact}: ${JSON.stringify(res.body)}`);
-        assert.equal(res.data.manageToken, made.manageToken);
-        assert.ok(res.data.manageUrl.endsWith(`/booking/${made.manageToken}`), res.data.manageUrl);
-      }
-    });
-
-    it("answers every miss with the same 404", async () => {
-      const made = await book(home.token, {
-        phone: "0918 765 4321",
-        email: "carlo@example.com",
-        hoursAhead: 32,
-      });
-      const other = made.bookingCode === "ZZZZZZ" ? "YYYYYY" : "ZZZZZZ";
-      for (const [code, contact] of [
-        [made.bookingCode, "someone@example.com"],
-        [made.bookingCode, "0917 000 0000"],
-        [other, "carlo@example.com"],
-      ]) {
-        const res = await find(code, contact);
-        assert.equal(res.status, 404, `${code} / ${contact}`);
-        assert.match(res.body.message, NO_MATCH);
-      }
-    });
-
-    it("refuses a contact that is neither a phone number nor an email", async () => {
-      const res = await find("ABC123", "hello");
-      assert.equal(res.status, 400);
-    });
-
-    it("doesn't find a deleted booking, and leaves it as it was", async () => {
-      const made = await book(home.token, {
-        phone: "0919 222 3333",
-        email: "dee@example.com",
-        hoursAhead: 34,
-      });
-      const { db } = ctx;
-      await db.query(`UPDATE bookings SET status = 'Deleted' WHERE bookingCode = ?`, [
-        made.bookingCode,
-      ]);
-      const res = await find(made.bookingCode, "dee@example.com");
+      const res = await find(made.bookingCode, "bea@example.com");
       assert.equal(res.status, 404);
-      assert.match(res.body.message, NO_MATCH);
-      const [row] = await db.query(`SELECT status FROM bookings WHERE bookingCode = ?`, [
-        made.bookingCode,
-      ]);
-      assert.equal(row.status, "Deleted");
+      assert.equal(res.data, undefined, "no booking link handed out");
     });
   });
 

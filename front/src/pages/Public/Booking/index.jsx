@@ -4,12 +4,10 @@ import {
   CalendarClock,
   CircleAlert,
   Clock,
-  Copy,
   CreditCard,
   Link2,
   Loader2,
   Play,
-  QrCode,
   RotateCcw,
   Store,
   UserX,
@@ -29,7 +27,7 @@ import BookingDateStrip from "../../../components/BookingDateStrip";
 import CourtSlotPicker from "../../../components/CourtSlotPicker";
 import { getImageUrl } from "../../../utils/upload";
 import { decodeHTML } from "../../../utils/decode-html";
-import { formatMinutes, formatPayCode, formatPeso } from "../../../utils/dynaCam";
+import { formatMinutes, formatPeso } from "../../../utils/dynaCam";
 import { formatPhoneDisplay } from "../../../utils/phoneFormat";
 
 const cardStyle = {
@@ -59,9 +57,10 @@ const Row = ({ label, children }) => (
 );
 
 /**
- * `/booking/:manageToken` (PLAN-003 Phase C) — the player's booking: its code
- * (typed at the court QR to check in, read out at the desk), where and when,
- * the price and payment, and what happens next.
+ * `/booking/:manageToken` (PLAN-003 Phase C) — the player's booking: where and
+ * when, the price and payment, and what happens next. CR-045: no booking code
+ * and no court QR — on the day, "I'm at the court — start recording" here
+ * starts the camera.
  */
 const BookingPage = () => {
   const {
@@ -73,7 +72,6 @@ const BookingPage = () => {
     notFound,
     loadError,
     refetch,
-    handleCopyCode,
     handleCopyLink,
     handleCheckIn,
     isCheckingIn,
@@ -115,10 +113,10 @@ const BookingPage = () => {
         <ResultState
           status="404"
           title="This booking link isn't valid"
-          description="Check the link you were sent, or find your booking with its code."
+          description="Check the link you were sent, or see your bookings in My games."
           action={
             <Button asChild>
-              <Link to="/booking">Find my booking</Link>
+              <Link to="/me/games">My games</Link>
             </Button>
           }
         />
@@ -270,7 +268,7 @@ const BookingPage = () => {
                 </p>
               )}
               <p className="m-0 mt-3 text-center" style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-                Or scan the QR sign on {courtName} and enter your code.
+                Tap it when you&apos;re on {courtName} — the camera records your booked time.
               </p>
             </div>
           )}
@@ -283,41 +281,22 @@ const BookingPage = () => {
             </Button>
           )}
 
-          {/* Code */}
-          {live && (
-            <div className="p-5 text-center" style={cardStyle}>
-              <div style={{ fontSize: 12.5, color: "var(--color-text-secondary)" }}>Your booking code</div>
-              <button
-                type="button"
-                onClick={handleCopyCode}
-                className="mt-1 inline-flex items-center gap-2 cursor-pointer"
-                aria-label="Copy booking code"
-              >
-                <span
-                  className="font-mono"
-                  style={{ fontSize: 30, fontWeight: 600, letterSpacing: "0.12em", color: "var(--color-text-dark)" }}
-                >
-                  {formatPayCode(booking.bookingCode)}
-                </span>
-                <Copy className="w-4.5 h-4.5" style={{ color: "var(--color-text-muted)" }} />
-              </button>
-              <div
-                className="mt-3 flex items-start gap-2.5 p-3 text-left"
-                style={{
-                  background: "var(--color-surface-sunken)",
-                  border: "1px solid var(--color-line)",
-                  borderRadius: 12,
-                  fontSize: 13,
-                  color: "var(--color-text-dark)",
-                }}
-              >
-                <QrCode className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-secondary)" }} />
-                <span>
-                  {booking.status === "Pending" ? "Once it's paid, scan" : "When you arrive, scan"} the QR sign on{" "}
-                  {courtName} from {dayjs(booking.checkInFrom).format("h:mm A")} and enter this code — your game
-                  records for your booked time.
-                </span>
-              </div>
+          {/* CR-045: no court QR and no booking code — the camera starts from this page */}
+          {live && !booking.actions.checkIn && !booking.gameShareToken && (
+            <div
+              className="p-4 flex items-start gap-2.5"
+              style={{ ...cardStyle, fontSize: 13.5, color: "var(--color-text-dark)" }}
+            >
+              <Play className="size-4.5 shrink-0 mt-0.5" style={{ color: "var(--color-text-secondary)" }} />
+              <span>
+                {booking.status === "Pending" ? "Once it's paid, come" : "Come"} back to this page at the court
+                {" "}from {dayjs(booking.checkInFrom).format("h:mm A")}
+                {dayjs(booking.checkInFrom).isSame(dayjs(), "day")
+                  ? " today"
+                  : ` on ${dayjs(booking.checkInFrom).format("ddd, MMM D")}`}{" "}
+                and tap <strong>I&apos;m at the court — start recording</strong>. The camera on {courtName} records
+                your booked time. It&apos;s also in My games and the link in your email.
+              </span>
             </div>
           )}
         </div>

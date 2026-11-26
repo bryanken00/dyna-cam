@@ -218,7 +218,6 @@ export const venuePath = (venueId) => `${VENUES_PATH}/${venueId}`;
 export const courtSetupPath = (venueId, courtId) =>
   `${venuePath(venueId)}/courts/${courtId}`;
 /** The printable A5 sign — full page, opened in its own tab. */
-export const courtSignPath = (courtId) => `/admin/setup/courts/${courtId}/print`;
 /** PLAN-003: the printable A5 "Book a court" sign for a venue's booking link. */
 export const bookingSignPath = (venueId) => `${venuePath(venueId)}/booking-sign`;
 

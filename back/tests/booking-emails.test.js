@@ -138,12 +138,15 @@ describe("booking emails (PLAN-003 Phase G)", () => {
     await new Promise((resolve) => sendgrid?.server.close(resolve));
   });
 
-  it("a paid desk booking sends the confirmation once, with the code and the player's link", async () => {
+  it("a paid desk booking sends the confirmation once, with the player's link and how to start recording", async () => {
     const b = await book(30);
     const [mail, ...more] = mailsTo(b.email);
     assert.equal(more.length, 0);
     assert.match(mail.subject, /^Booked: Court \d+ at Email Courts/);
-    assert.ok(mail.html.includes(b.bookingCode));
+    // CR-045: no booking code, no court QR — the booking's page starts the camera
+    assert.ok(!mail.html.includes(b.bookingCode));
+    assert.doesNotMatch(mail.text, /booking code|QR sign/i);
+    assert.match(mail.text, /I'm at the court — start recording/);
     const row = await bookingRow(b.bookingId);
     assert.ok(mail.html.includes(`http://web.test/booking/${row.manageToken}`));
     assert.match(mail.text, /Paid ₱500 at the desk/);

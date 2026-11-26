@@ -37,7 +37,6 @@ import {
 import {
   availabilityQuerySchema,
   bookingTokenParamsSchema,
-  findBookingSchema,
   manageTokenParamsSchema,
   moveOptionsQuerySchema,
   playerMoveSchema,
@@ -52,7 +51,7 @@ import {
  * availability never says who booked what.
  *
  *   GET  /venues                                 CR-030: every venue taking online bookings
- *   POST /bookings/find                          CR-030: a booking's own link from its code + phone/email
+ *   (CR-045 removed CR-030's POST /bookings/find: players find bookings in My games, PLAN-006)
  *   GET  /book/:bookingToken                     the venue, its courts and booking rules
  *   GET  /book/:bookingToken/availability        free hours per court for a date and length
  *   POST /book/:bookingToken/bookings            book a slot: pay at the desk, or online (Phase F);
@@ -178,47 +177,6 @@ router.get(
   })
 );
 
-// Per IP: a player looks a booking up once or twice; a few tries a minute
-// covers typos, and stops anyone guessing codes
-const findBookingLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_PUBLIC_FIND_POINTS || "5", 10),
-  duration: 60,
-  keyGenerator: (req) => `public-booking-find:${req.ip}`,
-  message: "Too many tries — wait a minute and try again.",
-});
-
-/**
- * POST /bookings/find { bookingCode, contact }
- * CR-030: "Find my booking" — the booking's own link, for its code plus the
- * phone or email it was booked with. Every miss (no such code, wrong phone or
- * email, a deleted booking) gets the same 404, so it says nothing about codes.
- */
-router.post(
-  "/bookings/find",
-  findBookingLimiter,
-  validateBody(findBookingSchema),
-  catchAsync(async (req, res) => {
-    const { bookingCode, contact } = req.body;
-    const [booking] = await req.db.query(
-      `SELECT b.manageToken FROM bookings b
-       JOIN venues v ON v.venueId = b.venueId AND v.status != 'Deleted'
-       WHERE b.bookingCode = ? AND b.status != 'Deleted'
-         AND ${contact.email ? "LOWER(b.email) = ?" : "b.phone = ?"}
-       LIMIT 1`,
-      [bookingCode, contact.email || contact.phone]
-    );
-    if (!booking) {
-      return res.sendError(
-        "No booking matches that code and phone number or email — check them, or ask the venue",
-        404
-      );
-    }
-    return res.sendSuccess("Booking found", {
-      manageToken: booking.manageToken,
-      manageUrl: bookingManageUrl(booking.manageToken),
-    });
-  })
-);
 
 /**
  * GET /book/:bookingToken
@@ -897,9 +855,12 @@ router.post(
     }
     if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, rows[0].bookingId, "GameStarted");
     return res.sendSuccess(
-      result.status === "Scheduled"
-        ? "Checked in — recording starts at your booked time"
-        : "Checked in — the camera is recording",
+      // CR-045: this page is now the only way in, so it also says when a game resumed (CR-041)
+      result.resumed
+        ? "Recording resumed — the camera is recording"
+        : result.status === "Scheduled"
+          ? "Checked in — recording starts at your booked time"
+          : "Checked in — the camera is recording",
       { shareToken: result.shareToken, shareUrl: result.shareUrl },
       result.alreadyCheckedIn ? 200 : 201
     );

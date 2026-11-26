@@ -9,7 +9,6 @@ import {
   getMoveOptionsApi,
   moveMyBookingApi,
   getPublicVenuesApi,
-  findMyBookingApi,
 } from "../../api/public/bookings";
 
 // A 404 means the link isn't valid (turned off, replaced) — don't retry it
@@ -127,7 +126,3 @@ export const useGetPublicVenues = () => {
   });
 };
 
-// Mutation: CR-030 — Find my booking (code + phone or email). The page shows errors itself.
-export const useFindMyBooking = () => {
-  return useMutation({ mutationFn: findMyBookingApi });
-};

@@ -133,75 +133,25 @@ describe("booking check-in (PLAN-003 Phase D)", () => {
     assert.equal(session.data.session.startedBy, `Booking ${b.bookingCode}`);
   });
 
-  it("checks in at the court QR with the booking code", async () => {
+  it("CR-045: nothing starts from the court QR any more; its page still opens for old signs", async () => {
     const { courtId, qrToken } = await newCourt();
     const b = await book(courtId, 0);
 
     const court = await pub("GET", `/public/courts/${qrToken}`);
     assert.equal(court.status, 200, JSON.stringify(court.body));
-    assert.deepEqual(court.data.court.booking, { from: at(0), until: at(1) });
-    assert.equal(court.data.court.busy, false);
     // The page never shows who or which code
     assert.ok(!JSON.stringify(court.body).includes(b.bookingCode));
     assert.ok(!JSON.stringify(court.body).includes("Carlo"));
 
-    const wrong = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: "ZZZZZZ" });
-    assert.equal(wrong.status, 404);
+    // The code check-in is gone: 404, and the booking is untouched
+    const res = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: b.bookingCode });
+    assert.equal(res.status, 404);
     assert.equal((await bookingRow(b.bookingId)).status, "Confirmed");
 
-    // Typed loosely: lower case, a space in the middle
-    const typed = `${b.bookingCode.slice(0, 3).toLowerCase()} ${b.bookingCode.slice(3).toLowerCase()}`;
-    const res = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: typed });
-    assert.equal(res.status, 201, JSON.stringify(res.body));
+    // The booking's own page still checks it in
+    const own = await pub("POST", `/public/bookings/${b.manageToken}/check-in`);
+    assert.equal(own.status, 201, JSON.stringify(own.body));
     assert.equal((await bookingRow(b.bookingId)).status, "CheckedIn");
-
-    const busy = await pub("GET", `/public/courts/${qrToken}`);
-    assert.equal(busy.data.court.busy, true);
-    assert.equal(busy.data.court.booking, null);
-
-    // Another court's QR doesn't take this code
-    const other = await newCourt();
-    const b2 = await book(other.courtId, 0);
-    const crossed = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: b2.bookingCode });
-    assert.equal(crossed.status, 409);
-    assert.match(crossed.body.message, /This code is for Court \d+ — scan the QR sign on Court \d+/);
-    assert.equal((await bookingRow(b2.bookingId)).status, "Confirmed");
-  });
-
-  it("a real code that can't check in here now says why, not 'wrong code' (BUG-007)", async () => {
-    const { courtId, qrToken } = await newCourt();
-    const checkIn = (bookingCode) => pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode });
-
-    // Too early today: the window opens 10 minutes before the start
-    const soon = await book(courtId, 2);
-    const early = await checkIn(soon.bookingCode);
-    assert.equal(early.status, 409, JSON.stringify(early.body));
-    assert.match(early.body.message, /^(Too early — your booking is|Your booking is on) .+ Check in from \d{1,2}:\d{2} [AP]M/);
-    assert.equal((await bookingRow(soon.bookingId)).status, "Confirmed");
-
-    // Another day names the day
-    const later = await book(courtId, 50);
-    const dayAhead = await checkIn(later.bookingCode);
-    assert.equal(dayAhead.status, 409);
-    assert.match(dayAhead.body.message, /^Your booking is on \w{3}, \w{3} \d{1,2}, .+ that day\.$/);
-
-    // Cancelled
-    const gone = await book(courtId, 6);
-    await call("POST", `/admin/bookings/${gone.bookingId}/cancel`, { reason: "Test" });
-    const cancelled = await checkIn(gone.bookingCode);
-    assert.equal(cancelled.status, 409);
-    assert.equal(cancelled.body.message, "This booking was cancelled.");
-
-    // A code that matches nothing at this venue: the one wrong-code message
-    const wrong = await checkIn("ZZZZZZ");
-    assert.equal(wrong.status, 404);
-    assert.match(wrong.body.message, /doesn't match a booking on this court/);
-
-    // Another venue's real code says nothing about it
-    const away = await setupVenue("Elsewhere Courts");
-    const awayCourt = await newCourt(away);
-    const awayBooking = await book(awayCourt.courtId, 3);
-    assert.equal((await checkIn(awayBooking.bookingCode)).status, 404);
   });
 
   it("starts an early check-in at the booked time", async () => {

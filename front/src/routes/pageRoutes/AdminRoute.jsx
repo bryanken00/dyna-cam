@@ -1,14 +1,13 @@
 import { Building2, Home, User, Video } from "lucide-react";
 import { FileText } from "lucide-react";
 import { Suspense, lazy } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router";
+import { Navigate, Route, Routes } from "react-router";
 import BasicLayout from "../../components/layout/BasicLayout";
 import { ComponentLoader } from "../../components/LoadingFallback";
 import NotFound from "../../components/NotFound";
 import { useAdminAuthStore } from "../../store/authStore";
 import { Auth, UnAuth } from "../ValidateAuth";
 import { ProtectedRoute } from "../../components/ProtectedRoute";
-import { courtSignPath } from "../../utils/dynaCam";
 
 const Login = lazy(() => import("../../pages/Admin/Login"));
 const ForgotPassword = lazy(() => import("../../pages/Auth/ForgotPassword"));
@@ -23,7 +22,6 @@ const AccountSettings = lazy(() => import("../../pages/Admin/AccountSettings"));
 const Venues = lazy(() => import("../../pages/Admin/Setup/Venues"));
 const VenueDetail = lazy(() => import("../../pages/Admin/Setup/VenueDetail"));
 const CourtSetup = lazy(() => import("../../pages/Admin/Setup/CourtSetup"));
-const CourtSign = lazy(() => import("../../pages/Admin/Setup/CourtSign"));
 // PLAN-003: printable "Book a court" sign for a venue's online booking link
 const BookingSign = lazy(() => import("../../pages/Admin/Setup/BookingSign"));
 // DGSports (PLAN-001; CR-036 renamed from Dyna Cam): day-to-day work
@@ -36,12 +34,6 @@ const VENUE_PAGE_ACCESS = [
   { module: "venues", submodule: "list", accessLevel: "read" },
   { module: "venues", submodule: "courts", accessLevel: "read" },
 ];
-
-/** Old print-sign links (PLAN-001) → the Setup route, keeping the court. */
-const LegacyCourtSignRedirect = () => {
-  const { courtId } = useParams();
-  return <Navigate to={courtSignPath(courtId)} replace />;
-};
 
 const AdminRoute = () => {
   const navigations = [
@@ -277,22 +269,6 @@ const AdminRoute = () => {
       </Route>
 
       <Route element={<Auth store={useAdminAuthStore} redirect="/admin" />}>
-        {/* Printable A5 court sign — full page, outside the sidebar layout.
-            Opened in a new tab from a venue's courts or the court page. */}
-        <Route
-          path="setup/courts/:courtId/print"
-          element={
-            <Suspense fallback={<ComponentLoader />}>
-              <ProtectedRoute
-                module="venues"
-                submodule="courts"
-                accessLevel="read"
-              >
-                <CourtSign />
-              </ProtectedRoute>
-            </Suspense>
-          }
-        />
         {/* PLAN-003: printable A5 "Book a court" sign — full page, new tab */}
         <Route
           path="setup/venues/:venueId/booking-sign"
@@ -305,10 +281,6 @@ const AdminRoute = () => {
           }
         />
         {/* PLAN-001 routes → their Setup homes (bookmarks, printed links) */}
-        <Route
-          path="dyna-cam/courts/:courtId/print"
-          element={<LegacyCourtSignRedirect />}
-        />
         <Route
           path="dyna-cam/venues"
           element={<Navigate to="/admin/setup/venues" replace />}

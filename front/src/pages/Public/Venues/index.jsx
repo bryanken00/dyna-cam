@@ -7,7 +7,7 @@ import {
   LayoutGrid,
   LogIn,
   MapPin,
-  QrCode,
+  Play,
   RotateCcw,
   Store,
   Ticket,
@@ -31,10 +31,10 @@ const cardStyle = {
 const metaStyle = { fontSize: 13, color: "var(--color-text-secondary)" };
 const metaIcon = "h-3.5 w-3.5 shrink-0";
 
-/** "Already booked?" — the way back to a booking without its link. */
+/** "Already booked?" — CR-045: a player's bookings are in My games (no Find my booking). */
 const FindBookingCard = () => (
   <Link
-    to="/booking"
+    to="/me/games"
     className="p-4 flex items-center gap-3"
     style={{ ...cardStyle, textDecoration: "none" }}
   >
@@ -49,7 +49,7 @@ const FindBookingCard = () => (
         Already booked?
       </span>
       <span className="block" style={metaStyle}>
-        Find your booking with its code to pay, check in, move or cancel.
+        Your bookings are in My games — pay, start recording, move or cancel there.
       </span>
     </span>
     <ChevronRight className="h-4 w-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
@@ -61,7 +61,7 @@ const HOW_IT_WORKS = [
   { icon: LogIn, text: "Sign in with Google — your bookings and game videos stay with your account." },
   { icon: CalendarCheck, text: "Pick a venue, then a day, a court and a time." },
   { icon: CreditCard, text: "Pay online, or at the front desk before your hold runs out." },
-  { icon: QrCode, text: "At the court, scan the QR sign and enter your booking code — your game records." },
+  { icon: Play, text: "At the court, open your booking and tap “I'm at the court — start recording”." },
 ];
 
 const HowItWorksCard = () => (

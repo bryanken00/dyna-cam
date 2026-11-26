@@ -131,15 +131,7 @@ const CameraLiveCheck = ({
               style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
             >
               <CircleCheck className="w-4 h-4" style={{ color: "var(--color-success)" }} />
-              The camera works. Next: print the{" "}
-              <a href="#court-qr" className="hover:underline" style={{ color: "var(--color-link)" }}>
-                QR sign
-              </a>
-              , and optionally set a{" "}
-              <a href="#court-button" className="hover:underline" style={{ color: "var(--color-link)" }}>
-                button
-              </a>
-              .
+              The camera works. Next: connect the court&apos;s Google Drive below.
             </p>
           )}
         </div>

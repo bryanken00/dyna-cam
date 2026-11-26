@@ -97,7 +97,7 @@ export const useVenueHooks = () => {
           courts,
           "court",
           "courts",
-        )} will be removed too — their QR signs stop working — and its ${plural(
+        )} will be removed too, and its ${plural(
           devices,
           "recorder box is",
           "recorder boxes are",

@@ -4,7 +4,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useCourtSetupHooks } from "./hooks";
 import CameraSection from "./components/CameraSection";
 import GoogleDriveSection from "./components/GoogleDriveSection";
-import QrSignSection from "./components/QrSignSection";
 import StreamSection from "./components/StreamSection";
 import PageHeader from "../../../../components/PageHeader";
 import RefreshButton from "../../../../components/RefreshButton";
@@ -15,8 +14,9 @@ import { VENUES_PATH, venuePath } from "../../../../utils/dynaCam";
 
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — set up one court: its
- * camera and optional camera 2 (guided, with the live check), QR sign (where
- * players check in with a booking code, CR-034), live stream and Google Drive.
+ * camera and optional camera 2 (guided, with the live check), live stream and
+ * Google Drive. (CR-045 removed the court QR sign: players start recording from
+ * their booking.)
  * Each section saves on its own with the court's full PUT.
  */
 const CourtSetupPage = () => {
@@ -97,7 +97,7 @@ const CourtSetupPage = () => {
 
       <PageHeader
         title={courtName}
-        subtitle={`${venueName} · set up the cameras, QR sign, live stream and Google Drive`}
+        subtitle={`${venueName} · set up the cameras, live stream and Google Drive`}
         actions={
           <div className="flex items-center gap-3">
             <StatusDot tone={court.status === "Active" ? "success" : "muted"}>
@@ -127,7 +127,6 @@ const CourtSetupPage = () => {
         justSaved={!!justSaved.camera2}
         onSaved={handleCameraSaved}
       />
-      <QrSignSection key={`qr-${court.courtId}`} court={court} canWrite={canWrite} />
       <StreamSection key={`stream-${court.courtId}`} court={court} canWrite={canWrite} />
       <GoogleDriveSection key={`drive-${court.courtId}`} court={court} canWrite={canWrite} />
     </div>

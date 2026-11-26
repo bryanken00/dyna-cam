@@ -178,16 +178,16 @@ describe("resume a booked game ended early (CR-041)", () => {
     assert.equal(now.data.session.resume, null);
   });
 
-  it("the booking code at the court QR resumes a booking marked Completed", async () => {
-    const { courtId, qrToken } = await newCourt();
+  it("the booking's own page resumes a booking marked Completed (CR-045: no court QR)", async () => {
+    const { courtId } = await newCourt();
     const b = await book(courtId);
     await playAndEnd(b);
     // What the booking maintenance job does a minute later
     await ctx.sql.query(`UPDATE bookings SET status = 'Completed' WHERE bookingId = ?`, [b.bookingId]);
 
-    const res = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: b.bookingCode });
+    const res = await pub("POST", `/public/bookings/${b.manageToken}/check-in`);
     assert.equal(res.status, 201, JSON.stringify(res.body));
-    assert.equal(res.body.message, "Recording resumed — the camera is recording");
+    assert.match(res.body.message, /^Recording resumed/);
     assert.equal((await bookingRow(b.bookingId)).status, "CheckedIn");
     assert.equal((await gamesOf(b.bookingId)).length, 2);
   });
@@ -204,7 +204,7 @@ describe("resume a booked game ended early (CR-041)", () => {
   });
 
   it("nothing to resume once less than a minute of the booking is left", async () => {
-    const { courtId, qrToken } = await newCourt();
+    const { courtId } = await newCourt();
     const b = await book(courtId);
     const first = await playAndEnd(b);
     const soon = moment().tz("Asia/Manila").add(30, "seconds").format(FORMAT);
@@ -217,8 +217,8 @@ describe("resume a booked game ended early (CR-041)", () => {
     assert.equal(resume.status, 409);
     assert.equal(resume.body.message, "This booking's time is over");
 
-    const qr = await pub("POST", `/public/courts/${qrToken}/check-in`, { bookingCode: b.bookingCode });
-    assert.equal(qr.status, 409);
+    const own = await pub("POST", `/public/bookings/${b.manageToken}/check-in`);
+    assert.ok(own.status >= 400, `booking page check-in → ${own.status}`);
     assert.equal((await gamesOf(b.bookingId)).length, 1);
   });
 

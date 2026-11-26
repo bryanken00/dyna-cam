@@ -21,7 +21,7 @@ const hasSwitched = (camera) => camera?.live?.cameraVersion === camera?.version;
 
 /**
  * `/admin/setup/venues/:venueId/courts/:courtId` — one court's setup:
- * Camera and Camera 2 (guided, each with its live check), QR sign, Button,
+ * Camera and Camera 2 (guided, each with its live check), Button,
  * Live stream.
  */
 export const useCourtSetupHooks = () => {

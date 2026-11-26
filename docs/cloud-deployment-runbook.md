@@ -389,7 +389,7 @@ in this order:
 - [ ] Booking settings: opening hours and rates; online booking link turned on
 - [ ] Sign in with Google on the venue's booking page; the account menu shows your photo
 - [ ] A test booking paid online (Xendit test mode first): the booking turns Paid; Payments shows it, and it's in My games
-- [ ] At the court, scan the QR and enter the code: the game starts and the game page shows it recording
+- [ ] At the court, open the booking (My games or the confirmation email) and tap **I'm at the court — start recording**: the game starts and the game page shows it recording
 - [ ] Live view plays on a phone on the venue Wi-Fi (`https://<box>.live.dgsports.ph:8090`)
 - [ ] Each court's Google Drive connected (Admin → Setup → the court → Google Drive)
 - [ ] End the game: the game page shows "sending to Google Drive", then **Open in Google Drive**; the link plays on a phone with no Google sign-in

@@ -5,7 +5,8 @@ names (`DynaCam/`, `dynaCam.js`, `dyna-cam-api`) keep the old name, and the mobi
 recorder box are still branded Dyna Cam until their own rebuild.
 
 A court-camera service for pickleball venues, built on this repo's admin platform. Players book a
-court, then scan its QR and enter their booking code to start recording their game (CR-034), then watch it live, save their best rallies, and get the
+court (signed in with Google, PLAN-006), then start recording from their booking's page — "I'm at the
+court — start recording" (CR-045: no court QR, no booking code for players) — then watch it live, save their best rallies, and get the
 whole game on their phone (CR-027; the old 60-second clips and court buttons are gone — clips saved
 before only expire). Videos never live in the cloud (CR-040): the venue's recorder box keeps each
 game's video and sends it straight to the court's **Google Drive**, and players get it only as a
@@ -137,10 +138,11 @@ Every request to build, change, or fix something under `front/`, `back/`, `app/`
   the player's page (the court QR / clip share token is the credential, and a short-lived code
   from the session device's QR lets a player add their own Facebook/YouTube stream — its key is
   stored encrypted and never returned; CR-025: while a game records, its page also gets the box's signed
-  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-034:
-  the court QR's `/public/courts/:qrToken` only checks a booking in by its code
-  (`POST …/check-in`) — CR-027's walk-in `POST …/games` is gone, so the QR never starts a game
-  without a booking (`startedByPlayer = 1` marks the walk-in games made before); CR-028: the game page also has
+  live link and can Save the last … via `POST /public/sessions/:shareToken/captures`; CR-045:
+  nothing starts from a court QR any more — `/public/courts/:qrToken` only shows an old sign's
+  notice (CR-034's code check-in and CR-027's walk-in games are gone; `startedByPlayer = 1` marks the
+  walk-in games made before), and a booking checks in from its own page
+  (`POST /public/bookings/:manageToken/check-in`) or by staff; CR-028: the game page also has
   the device's End game, delete a save and own-stream controls under `/public/sessions/:shareToken/…` —
   anyone holding the link can use them). CR-015: an unpaid game's videos open only once staff record its
   payment (CR-039: games no longer start unpaid — booking check-ins are free, Sessions has no New game
@@ -170,8 +172,8 @@ reports `drive-direct`. The app keeps its token
   limited, the Dashboard reminds); all three links come from `randomToken()`, and
   their replies name courts by a hashed key, never a business ID. CR-030: players get in through
   `/book` (every Active venue with a booking link and an Active court, from `GET /public/venues`)
-  and `/booking` (Find my booking: `POST /public/bookings/find`, booking code + the booking's phone
-  or email → its link; one 404 for every miss, rate-limited). PLAN-006: **booking online needs a
+  (CR-045: Find my booking is gone — `/booking` goes to My games; the booking code is staff-only,
+  in Admin and on Xendit invoices). PLAN-006: **booking online needs a
   player signed in with Google** — `/api/v1/auth/google/start|callback` (no login; the encrypted
   `state` carries the return path and the ID-token nonce; the callback hands the browser a
   single-use 60-second code, never a token, at `/signed-in`) and `/api/v1/player/*`

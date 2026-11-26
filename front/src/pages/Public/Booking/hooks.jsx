@@ -170,13 +170,6 @@ export const useBookingPageHooks = () => {
     );
   }, [moveSlot, moveMutation, manageToken, moveDate, refetch]);
 
-  const handleCopyCode = useCallback(async () => {
-    if (!booking) return;
-    const ok = await copyText(booking.bookingCode);
-    if (ok) toast.success("Booking code copied");
-    else toast.error("Couldn't copy the code");
-  }, [booking]);
-
   const handleCopyLink = useCallback(async () => {
     const ok = await copyText(window.location.href);
     if (ok) toast.success("Link copied — keep it to come back to your booking");
@@ -206,7 +199,6 @@ export const useBookingPageHooks = () => {
     notFound: error?.response?.status === 404 || error?.response?.status === 400,
     loadError: error && ![400, 404].includes(error.response?.status) ? error : null,
     refetch,
-    handleCopyCode,
     handleCopyLink,
     handleCheckIn,
     isCheckingIn: checkInMutation.isPending,

@@ -7,7 +7,7 @@ import {
   CloudUpload,
   HandCoins,
   MonitorPlay,
-  QrCode,
+  Play,
   Radio,
   RadioTower,
   ShieldCheck,
@@ -23,19 +23,20 @@ import { APP_NAME } from "@/components/brand/appName";
 import HeroCourt, { ReplayBar } from "@/components/brand/HeroCourt";
 
 /**
- * A player's game, in the order it happens: book, check in at the court's QR with the booking
- * code (CR-034), play (CR-041: Resume after ending early), then the Drive link (CR-040).
+ * A player's game, in the order it happens: book, start recording from the booking's page
+ * (CR-045: no court QR, no booking code), play (CR-041: Resume after ending early), then the
+ * Drive link (CR-040).
  */
 const STEPS = [
   {
     icon: CalendarCheck,
     title: "Book your court",
-    body: "Pick a venue, a court and a time, and sign in with Google to book. Pay online with GCash, Maya or a card, or at the desk. You get a booking code.",
+    body: "Pick a venue, a court and a time, and sign in with Google to book. Pay online with GCash, Maya or a card, or at the desk. Your booking is in My games and your email.",
   },
   {
-    icon: QrCode,
-    title: "Check in at the court",
-    body: "When you arrive, scan the QR sign by your court and enter your booking code. The cameras roll for your booked time. Nothing to install.",
+    icon: Play,
+    title: "Start recording at the court",
+    body: "When you arrive, open your booking and tap “I'm at the court — start recording”. The cameras roll for your booked time. Nothing to install.",
   },
   {
     icon: Smartphone,
@@ -76,9 +77,9 @@ const VENUE_FEATURES = [
     body: "Players book from your booking link and pay with GCash, Maya or a card, or at the desk. They can cancel or move before your cut-off.",
   },
   {
-    icon: QrCode,
-    title: "Check-in at the court",
-    body: "Players scan the court's QR sign and enter their booking code, and recording starts by itself. No front-desk work.",
+    icon: Play,
+    title: "Check-in from the booking",
+    body: "Players start recording from their booking on their phone — no QR sign, no code, no front-desk work.",
   },
   {
     icon: Camera,
@@ -231,8 +232,8 @@ const NavLink = ({ href, children }) => (
 
 /**
  * Public home page (CR-011, after the "Improve UI and UX" design): a navy hero
- * with the brand court on a tilted card, how a game is recorded (book → check in
- * at the court with the booking code → play, watch, save → Google Drive), what
+ * with the brand court on a tilted card, how a game is recorded (book → start
+ * recording from the booking → play, watch, save → Google Drive), what
  * players can do during it, a navy call-out for venues, what venues get, and the
  * privacy note. CR-030: Book a court in the top bar and the hero opens /book.
  * CR-042: the words follow today's flow (CR-034 check-in, CR-040 Drive only).
@@ -291,7 +292,7 @@ const LandingPage = () => {
                 className="m-0 mt-6 max-w-md"
                 style={{ ...bodyStyle, fontSize: 16.5, color: "rgb(255 255 255 / 0.74)" }}
               >
-                Book a court, scan its code and enter your booking code — the whole game records.
+                Book a court, then start recording from your booking on your phone — the whole game records.
                 Watch it live, save your best rallies, and get every minute from Google Drive on
                 your phone. Nothing to install.
               </p>

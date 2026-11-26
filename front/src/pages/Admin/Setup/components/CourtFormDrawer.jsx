@@ -48,7 +48,7 @@ const iconPrefix =
 const mutedIcon = { color: "var(--color-text-muted)" };
 
 /**
- * Add a court to a venue, or rename / (de)activate one. The camera, QR sign,
+ * Add a court to a venue, or rename / (de)activate one. The camera,
  * button and live stream are set up on the court's own page.
  *
  * `entity` is an existing court (edit), or `{ venueId, venueName }` — the

@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
-import { toast } from "sonner";
-import { Copy, Pencil, Printer, Settings2, Trash2 } from "lucide-react";
+import { Pencil, Settings2, Trash2 } from "lucide-react";
 import RowActions from "../../../../components/RowActions";
 import StatusDot from "../../../../components/StatusDot";
 import CameraStatusChip from "../components/CameraStatusChip";
@@ -9,8 +8,7 @@ import LiveChip from "../components/LiveChip";
 import { useDebounce } from "../../../../hooks/useDebounce";
 import { usePermissions } from "../../../../hooks/usePermissions";
 import { decodeHTML } from "../../../../utils/decode-html";
-import { copyText } from "../../../../utils/clipboard";
-import { courtSetupPath, courtSignPath } from "../../../../utils/dynaCam";
+import { courtSetupPath } from "../../../../utils/dynaCam";
 import { confirm } from "../../../../store/confirmStore";
 import { useGetVenueById } from "../../../../services/requests/admin/venues";
 import {
@@ -131,15 +129,6 @@ export const useVenueDetailHooks = () => {
     [navigate, venueId],
   );
 
-  const handlePrint = useCallback((record) => {
-    window.open(courtSignPath(record.courtId), "_blank", "noopener");
-  }, []);
-
-  const handleCopyLink = useCallback(async (record) => {
-    const ok = await copyText(record.qrUrl);
-    if (ok) toast.success("Player link copied");
-    else toast.error("Couldn't copy the link");
-  }, []);
 
   const handleDeleteRequest = useCallback(
     async (record) => {
@@ -147,7 +136,7 @@ export const useVenueDetailHooks = () => {
         title: "Delete court",
         description: `Delete "${decodeHTML(
           record.name,
-        )}"? Its QR sign stops working. Clips already saved stay until they expire. This can't be undone.`,
+        )}"? Clips already saved stay until they expire. This can't be undone.`,
         confirmText: "Delete court",
         cancelText: "Cancel",
         danger: true,
@@ -157,7 +146,7 @@ export const useVenueDetailHooks = () => {
     [deleteCourtMutation],
   );
 
-  // ⋮ menu: Set up camera, Print QR, Copy link, divider, Edit, Delete
+  // ⋮ menu: Set up camera, divider, Edit, Delete (CR-045: no court QR sign or player link)
   const getActionItems = useCallback(
     (record) => {
       if (record.status === "Deleted") return [];
@@ -167,18 +156,6 @@ export const useVenueDetailHooks = () => {
           label: "Set up camera",
           icon: <Settings2 className="w-4 h-4" />,
           onClick: () => handleSetUp(record),
-        },
-        {
-          key: "print",
-          label: "Print QR sign",
-          icon: <Printer className="w-4 h-4" />,
-          onClick: () => handlePrint(record),
-        },
-        {
-          key: "copy",
-          label: "Copy player link",
-          icon: <Copy className="w-4 h-4" />,
-          onClick: () => handleCopyLink(record),
         },
       ];
       if (canWriteCourts) {
@@ -204,8 +181,6 @@ export const useVenueDetailHooks = () => {
     [
       canWriteCourts,
       handleSetUp,
-      handlePrint,
-      handleCopyLink,
       handleEditCourt,
       handleDeleteRequest,
     ],

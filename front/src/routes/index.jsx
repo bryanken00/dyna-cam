@@ -18,7 +18,6 @@ const PublicBook = lazy(() => import("../pages/Public/Book"));
 const PublicBooking = lazy(() => import("../pages/Public/Booking"));
 // CR-030: the way in for players — every venue taking bookings, and Find my booking
 const PublicVenues = lazy(() => import("../pages/Public/Venues"));
-const PublicFindBooking = lazy(() => import("../pages/Public/FindBooking"));
 const PublicPaymentSandbox = lazy(() => import("../pages/Public/PaymentSandbox")); // CR-033
 const PublicBoard = lazy(() => import("../pages/Public/Board")); // CR-038: a venue's TV court board
 const PublicSignedIn = lazy(() => import("../pages/Public/SignedIn")); // PLAN-006: back from Google
@@ -85,14 +84,8 @@ const RootRoutes = () => {
             </Suspense>
           }
         />
-        <Route
-          path="/booking"
-          element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicFindBooking />
-            </Suspense>
-          }
-        />
+        {/* CR-045: Find my booking is gone — a player's bookings are in My games */}
+        <Route path="/booking" element={<Navigate to="/me/games" replace />} />
         <Route
           path="/book/:bookingToken"
           element={

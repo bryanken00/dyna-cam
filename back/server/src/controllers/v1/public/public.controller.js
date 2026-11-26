@@ -1,6 +1,6 @@
 import express from "express";
 import { catchAsync, validateBody, validateParams } from "../../../utils/catchAsync.js";
-import { getCurrentTimestampLocal, moment } from "../../../utils/dateUtils.js";
+import { getCurrentTimestampLocal } from "../../../utils/dateUtils.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { sessionShareUrl } from "../../../utils/clips.js";
 import { COURT_RECORDING_COLUMNS, onlineSince } from "../../../utils/clipRequests.js";
@@ -10,12 +10,7 @@ import {
   settleSessions,
   uploadPercent,
 } from "../../../utils/sessions.js";
-import {
-  BOOKED_GAME_MAX_CAPTURES,
-  checkInBooking,
-  resumeOffer,
-} from "../../../utils/bookingCheckIn.js";
-import { sendBookingEmail } from "../../../utils/bookingEmails.js";
+import { BOOKED_GAME_MAX_CAPTURES, resumeOffer } from "../../../utils/bookingCheckIn.js";
 import { loadSessionVideos, toLockedVideo, toPublicVideo } from "../../../utils/sessionVideos.js";
 import { gameUnlocked } from "../../../utils/payments.js";
 import {
@@ -36,7 +31,6 @@ import { describeStream } from "../../../utils/sessionStreams.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { captureSchema } from "../../../validators/app.validator.js";
 import {
-  checkInCodeSchema,
   clipTokenParamsSchema,
   courtTokenParamsSchema,
   gameCodeParamsSchema,
@@ -49,8 +43,8 @@ import {
  * reveal only what the player's page shows (no IDs, no camera details) and the
  * writes are rate-limited.
  *
- *   GET  /courts/:qrToken          the court's page — CR-034: check in with a booking code
- *   POST /courts/:qrToken/check-in PLAN-003 Phase D: start the booked game by its code
+ *   GET  /courts/:qrToken          the court's page — CR-045: an old court QR sign; nothing starts
+ *                                  from it any more (a booking's own page starts its game)
  *   (CR-034 removed CR-027's POST /courts/:qrToken/games: no game without a booking)
  *   GET  /clips/:shareToken        a clip saved before CR-027 (polls until Ready)
  *   GET  /sessions/:shareToken     a recorded session's page (its parts; CR-025: live view)
@@ -182,142 +176,6 @@ router.get(
         bookingToken: venue?.bookingToken || null,
       },
     });
-  })
-);
-
-// PLAN-003 Phase D: a booking code is 6 characters from 31, but one court has
-// only its current booking to match — a few tries per IP and per court are
-// plenty for a player and useless for guessing
-const checkInByCodeLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_PUBLIC_CHECKIN_POINTS || "10", 10),
-  duration: 60,
-  keyGenerator: (req) => `court-checkin:${req.ip}`,
-  message: "Too many tries — wait a minute and try again.",
-});
-const checkInByCodeCourtLimiter = dynamicLimiter({
-  points: parseInt(process.env.RATE_LIMIT_COURT_CHECKIN_POINTS || "20", 10),
-  duration: 600,
-  keyGenerator: (req) => `court-checkin-court:${req.params.qrToken}`,
-  message: "Too many tries on this court — ask the front desk to check you in.",
-});
-
-const TIMEZONE = process.env.TIMEZONE || "Asia/Manila";
-const FORMAT = "YYYY-MM-DD HH:mm:ss";
-const WRONG_CODE =
-  "That code doesn't match a booking on this court — check the code on your booking page";
-
-/**
- * BUG-007: a code that isn't this court's booking right now — is it a real
- * booking at this venue that's just not checkable here and now (too early,
- * over, cancelled, another court)? The player holds the code, so telling them
- * about their own booking gives nothing away; a code that matches nothing at
- * this venue still gets the one wrong-code message.
- *
- * @returns {Promise<string|null>} what to tell the player, or null (no such booking here)
- */
-const explainCode = async (db, court, bookingCode, now) => {
-  const [b] = await db.query(
-    `SELECT b.courtId, b.status, b.startAt, b.endAt, c.name AS courtName, v.checkInEarlyMinutes
-     FROM bookings b
-     JOIN courts c ON c.courtId = b.courtId
-     JOIN venues v ON v.venueId = b.venueId
-     WHERE b.venueId = ? AND b.bookingCode = ? AND b.status != 'Deleted'
-     ORDER BY b.startAt DESC
-     LIMIT 1`,
-    [court.venueId, bookingCode]
-  );
-  if (!b) return null;
-
-  const start = moment.tz(b.startAt, FORMAT, TIMEZONE);
-  const end = moment.tz(b.endAt, FORMAT, TIMEZONE);
-  const opens = start.clone().subtract(b.checkInEarlyMinutes, "minutes");
-  const nowM = moment.tz(now, FORMAT, TIMEZONE);
-  const sameDay = start.isSame(nowM, "day");
-  const when = `${sameDay ? "" : `${start.format("ddd, MMM D")}, `}${start.format("h:mm A")} – ${end.format("h:mm A")}`;
-
-  if (b.status === "Cancelled") return "This booking was cancelled.";
-  if (b.status === "Expired") return "This booking wasn't paid in time, so the court was released.";
-  if (b.status === "NoShow" || b.status === "Completed" || b.endAt <= now) {
-    return `This booking (${when}) is over.`;
-  }
-  if (b.courtId !== court.courtId) {
-    return `This code is for ${b.courtName} — scan the QR sign on ${b.courtName}.`;
-  }
-  if (opens.isAfter(nowM)) {
-    return sameDay
-      ? `Too early — your booking is ${when}. Check in from ${opens.format("h:mm A")}.`
-      : `Your booking is on ${when}. Check in from ${opens.format("h:mm A")} that day.`;
-  }
-  return null;
-};
-
-/**
- * POST /courts/:qrToken/check-in
- * PLAN-003 Phase D: the player scanned the court's QR and typed their booking
- * code → the booking's recorded game starts (for its booked time only).
- * Body: { bookingCode }. 201 { shareToken, shareUrl } (200 when already in).
- * A wrong code says nothing about the court's bookings.
- */
-router.post(
-  "/courts/:qrToken/check-in",
-  checkInByCodeLimiter,
-  checkInByCodeCourtLimiter,
-  validateParams(courtTokenParamsSchema),
-  validateBody(checkInCodeSchema),
-  catchAsync(async (req, res) => {
-    const court = await findCourt(req.db, req.params.qrToken);
-    if (!court) {
-      return res.sendError("This court code is not valid", 404);
-    }
-    await advanceSessions(req.db, { venueId: court.venueId });
-    const now = getCurrentTimestampLocal();
-
-    // The code must be this court's booking, in (or about to open) its time.
-    // CR-041: a Completed one (its game ended early) resumes the rest.
-    const [booking] = await req.db.query(
-      `SELECT b.bookingId FROM bookings b
-       JOIN venues v ON v.venueId = b.venueId
-       WHERE b.courtId = ? AND b.bookingCode = ?
-         AND b.status IN ('Confirmed', 'CheckedIn', 'Completed', 'Pending')
-         AND b.startAt <= DATE_ADD(?, INTERVAL v.checkInEarlyMinutes MINUTE) AND b.endAt > ?
-       LIMIT 1`,
-      [court.courtId, req.body.bookingCode, now, now]
-    );
-    if (!booking) {
-      // BUG-007: a real booking that just can't check in here now says why
-      const reason = await explainCode(req.db, court, req.body.bookingCode, now);
-      return reason ? res.sendError(reason, 409) : res.sendError(WRONG_CODE, 404);
-    }
-
-    let conn;
-    let result;
-    try {
-      conn = await req.db.beginTransaction();
-      result = await checkInBooking(conn, {
-        bookingId: booking.bookingId,
-        requireRecorderOnline: true,
-      });
-      if (result.ok) await req.db.commit(conn);
-      else await req.db.rollback(conn);
-    } catch (err) {
-      await req.db.rollback(conn);
-      throw err;
-    }
-
-    if (!result.ok) {
-      return res.sendError(result.message, null, result.status, result.code);
-    }
-    // PLAN-003 Phase G: the game page link, by email
-    if (!result.alreadyCheckedIn) await sendBookingEmail(req.db, booking.bookingId, "GameStarted");
-    return res.sendSuccess(
-      result.resumed
-        ? "Recording resumed — the camera is recording"
-        : result.status === "Scheduled"
-          ? "Checked in — recording starts at your booked time"
-          : "Checked in — the camera is recording",
-      { shareToken: result.shareToken, shareUrl: result.shareUrl },
-      result.alreadyCheckedIn ? 200 : 201
-    );
   })
 );
 

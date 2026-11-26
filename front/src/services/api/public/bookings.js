@@ -71,12 +71,3 @@ export const getPublicVenuesApi = async () => {
   return response.data;
 };
 
-// CR-030: Find my booking — its code plus the phone or email it was booked with →
-// { manageToken, manageUrl }; 404 when nothing matches, 429 after too many tries
-export const findMyBookingApi = async ({ bookingCode, contact }) => {
-  const response = await axiosInstance.post("/api/v1/public/bookings/find", {
-    bookingCode,
-    contact,
-  });
-  return response.data;
-};
