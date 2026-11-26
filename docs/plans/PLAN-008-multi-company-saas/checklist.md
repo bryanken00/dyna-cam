@@ -133,12 +133,44 @@
 - [x] `npm run db:data` builds both demo companies and their Owners (checked on a throwaway database)
 - [x] README, CLAUDE.md files and backend / new-module skill docs updated
 
+## Phase F — Company enroll keys
+
+### API
+
+- [x] Migration `047_company_enroll_keys.sql`: on `companies` — `enrollKeyHash` (UNIQUE, SHA-256 of
+      the key), `enrollKeyCreatedAt`
+- [x] `POST /backoffice/companies/:companyId/enroll-key` (generate or regenerate → the key once, from
+      `randomToken()`; not cached by idempotency) · `DELETE …/enroll-key` (turn off); both in the
+      back-office Activity (never the key itself)
+- [x] Company detail: `enrollKey: { on, createdAt }` and the company's boxes (venue, status, last seen)
+- [x] `/pair/enroll`: find the company by the key's hash, and accept only a `venueId` of that
+      company (Active venue, Active company) — anything else the same refusal as a wrong key; per-IP
+      and global limits stay
+- [x] Remove `RECORDER_ENROLL_KEY` (code, `.env.example`, test env, docs); enrolled boxes unaffected
+- [x] Tests: a company's key enrols into its venue; into another company's venue → refused; after
+      Regenerate the old key is refused and the enrolled box still works; Turn off → refused;
+      suspended company → refused; the key never appears in replies after generation or in the audit
+- [x] `npm run lint` · `npm test` (547 pass; `company-enroll-keys.test.js`, pairing / enrolment-off updated)
+
+### Web
+
+- [x] Back office company page: **Box enroll key** card — Generate / Regenerate / Turn off (confirm),
+      the key shown once with Copy and the box setup steps (`API_URL`, `ENROLL_KEY`, `VENUE_ID`);
+      the company's boxes list
+- [x] `npm run lint` · `npm run build`
+
+### Docs
+
+- [x] CLAUDE.md files, backend skill, README, `setup.sh` (asks for the super admin; no shared key),
+      `edge/README.md` + `edge/.env.example`, `docs/recorder-box-security.md`,
+      `docs/cloud-deployment-runbook.md`, `docs/recorder-box-installation-windows.md`
+
 ## Wrap-up
 
 - [x] `cd back && npm run lint` (0 errors) · `npm test` (528 pass) · `cd front && npm run lint` (0 errors) · `npm run build`
 - [x] Changelog entry added (`ref: PLAN-008`) (covers phase E)
 
-- [x] Migrations 044 / 045 noted as pending for deploy: set `SUPERADMIN_EMAIL` (and optionally `SUPERADMIN_PASSWORD`, `API_PUBLIC_URL`) in `.env`, then `npm run db:setup` (or `db:migrate` + setup for the super admin; migrations 044, 045, 046)
+- [x] Migrations 044 / 045 noted as pending for deploy: set `SUPERADMIN_EMAIL` (and optionally `SUPERADMIN_PASSWORD`, `API_PUBLIC_URL`) in `.env`, then `npm run db:setup` (or `db:migrate` + setup for the super admin; migrations 044–047)
 - [ ] Tried in the browser: onboard company B in the back office → its Owner signs in, adds a venue →
       company A's staff never see it, and B never sees A's
 - [ ] `plan.md` status set to `Done`

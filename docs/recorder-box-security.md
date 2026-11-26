@@ -28,19 +28,20 @@ and the venue network, so follow this page.
 
 ## 1. Enrol keys: on only while installing
 
-One enrol key lets a box join **any** venue whose ID you know, so keep enrolment off unless
-you're installing a box.
+Each company has its own enrol key (PLAN-008), made in the back office. It lets a box join **any
+of that company's venues** whose ID you know (never another company's), so keep it off unless
+you're installing a box for that company.
 
-1. **Before the install:** on the cloud server, set `RECORDER_ENROLL_KEY` in `back/.env`. Use a
-   new one each time (`openssl rand -hex 32`). Then restart the API.
-2. Install the box with that key as `ENROLL_KEY` in its `.env`. Wait for **Enrolled as …** in
-   the log.
+1. **Before the install:** back office → the company → **Box enroll key** → **Generate** (or
+   **Regenerate** for a new one each time) and copy it. It's shown once; the API keeps only its hash.
+2. Install the box with that key as `ENROLL_KEY` and the venue's ID as `VENUE_ID` in its `.env`.
+   Wait for **Enrolled as …** in the log.
 3. **After the install:**
    - Delete the `ENROLL_KEY=` value from the box's `.env`. It isn't needed again.
-   - Clear `RECORDER_ENROLL_KEY` in `back/.env` on the server and restart the API. Enrolment is
-     now off: a box that tries gets "enrolment is off", and boxes already enrolled keep working.
-4. On the server, run `npm run boxes` in `back/` and check the list has only the boxes you
-   expect.
+   - Back office → the company → Box enroll key → **Turn off**. A box that tries is now refused,
+     and boxes already enrolled keep working.
+4. Check the company page's **Recorder boxes** list (or `npm run boxes` in `back/` on the server)
+   has only the boxes you expect.
 
 ## 2. Every box, any system
 
@@ -176,8 +177,8 @@ Do these **in order, the same day**:
 2. **Change every camera password at that venue** (Tapo app → the camera → Advanced → Camera
    Account), then update each court's camera address in Admin → Courts.
 3. **Reset the venue's live-stream keys** on YouTube/Facebook, then update them in Admin.
-4. **Change the enrol key** if that box's `.env` still had it: set a new `RECORDER_ENROLL_KEY` (or
-   leave it cleared, section 1) and restart the API.
+4. **Change the enrol key** if that box's `.env` still had it: back office → its company → Box enroll
+   key → **Regenerate** (or **Turn off**, section 1). No API restart.
 5. **Check the courts' Google Drive folders** for odd shares or files. The box never held the
    Drive sign-in, but its videos were on its disk.
 6. **Install a replacement** with a fresh enrolment (section 1), and harden it (sections 2–5).

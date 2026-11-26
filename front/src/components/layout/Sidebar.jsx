@@ -85,7 +85,7 @@ const flattenLeaves = (navigations) =>
   );
 
 // ── Brand ────────────────────────────────────────────────────────────────────
-const Brand = ({ collapsed }) => {
+const Brand = ({ collapsed, subtitle = "Court replay admin" }) => {
   return (
     <div
       className={clsx(
@@ -104,7 +104,7 @@ const Brand = ({ collapsed }) => {
             className="truncate"
             style={{ fontSize: 11.5, color: "var(--color-text-muted)" }}
           >
-            Court replay admin
+            {subtitle}
           </div>
         </div>
       )}
@@ -440,6 +440,7 @@ const UserFooter = ({
   onNavigate,
   onLogout,
   collapsed,
+  accountRoute = "/admin/account-settings",
 }) => {
   const fullName =
     [userData?.firstName, userData?.lastName].filter(Boolean).join(" ") ||
@@ -528,7 +529,7 @@ const UserFooter = ({
           className="min-w-50"
         >
           <DropdownMenuItem asChild>
-            <Link to="/admin/account-settings" onClick={onNavigate}>
+            <Link to={accountRoute} onClick={onNavigate}>
               <Settings className="w-4 h-4" />
               Account settings
             </Link>
@@ -554,6 +555,8 @@ const SidebarShell = ({
   userData,
   onExpand,
   isMobile,
+  subtitle,
+  accountRoute,
 }) => {
   const inputRef = useRef(null);
   const navigate = useNavigate();
@@ -649,7 +652,7 @@ const SidebarShell = ({
         borderRight: "1px solid var(--color-line)",
       }}
     >
-      <Brand collapsed={collapsed} />
+      <Brand collapsed={collapsed} subtitle={subtitle} />
 
       {locked ? (
         <LockedNotice collapsed={collapsed} />
@@ -731,6 +734,7 @@ const SidebarShell = ({
         onNavigate={onNavigate}
         onLogout={onLogout}
         collapsed={collapsed}
+        accountRoute={accountRoute}
       />
     </div>
   );
@@ -743,6 +747,9 @@ const Sidebar = ({
   navigations,
   handleLogout,
   userData,
+  // PLAN-008: the back office uses the same sidebar (its own subtitle and account page)
+  subtitle,
+  accountRoute,
 }) => {
   const { width } = useWindowSize();
   const location = useLocation();
@@ -772,6 +779,8 @@ const Sidebar = ({
             onLogout={handleLogout}
             userData={userData}
             isMobile
+            subtitle={subtitle}
+            accountRoute={accountRoute}
           />
         </SheetContent>
       </Sheet>
@@ -802,6 +811,8 @@ const Sidebar = ({
         collapsed={collapsed}
         userData={userData}
         onExpand={() => handleCollapse(false)}
+        subtitle={subtitle}
+        accountRoute={accountRoute}
       />
     </div>
   );

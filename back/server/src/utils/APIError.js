@@ -72,7 +72,8 @@ export const ERROR_CODES = {
   CAMERA_OFFLINE: 'CAMERA_OFFLINE',
   // PLAN-003: a closure would land on live bookings — error.conflicts lists them
   BOOKINGS_IN_THE_WAY: 'BOOKINGS_IN_THE_WAY',
-  // PLAN-002 Phase I: the API has no RECORDER_ENROLL_KEY, so boxes can't enrol
+  // PLAN-002 Phase I (unused since PLAN-008 phase F: enroll keys are per company, and a
+  // missing one is refused like a wrong key)
   ENROLLMENT_DISABLED: 'ENROLLMENT_DISABLED',
   // CR-040: Google Drive didn't answer the API for a box's upload — the box tries again
   DRIVE_UNAVAILABLE: 'DRIVE_UNAVAILABLE',

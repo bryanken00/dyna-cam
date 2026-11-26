@@ -87,7 +87,8 @@ Load the relevant doc for the detail; these are the ones worth knowing cold.
   `req.device.venueId` / `req.pairedApp.sessionId` (a paired device sees only its own session)
   and answer anything else with 404.
   `/api/v1/pair/*` trades a session's 6-digit key (`utils/pairing.js`, stored as a keyed HMAC),
-  or a recorder box's `RECORDER_ENROLL_KEY` (`/pair/enroll`, compared in constant time), for a token:
+  or a recorder box's company enroll key (`/pair/enroll`: looked up by its SHA-256 in
+  `companies.enrollKeyHash`, only for that company's Active venues — PLAN-008 phase F), for a token:
   keep its per-IP and global limits, and send every token-bearing reply with
   `noIdempotencyCache(res)`. `/api/v1/public/*` has no auth at all: return only what the
   player's page shows (no business IDs, no camera details), rate-limit writes, and validate the

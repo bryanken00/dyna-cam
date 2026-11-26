@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import express from "express";
 import { openGameEnd } from "../../../utils/sessions.js";
 import { catchAsync, validateBody } from "../../../utils/catchAsync.js";
@@ -17,7 +16,8 @@ import { enrollDeviceSchema, pairAppSchema } from "../../../validators/pairing.v
  * is the credential, once.
  *
  *   POST /app      a session device redeems a session key → its token (shown once)
- *   POST /enroll   a recorder box enrols with RECORDER_ENROLL_KEY → its token (Phase I)
+ *   POST /enroll   a recorder box enrols with its company's enroll key → its token
+ *                  (Phase I; PLAN-008 phase F: the key is per company, from the back office)
  *
  * Guessing: a key is single-use and lives 10 minutes; each IP gets
  * RATE_LIMIT_PAIR_POINTS tries per minute and RATE_LIMIT_PAIR_HOURLY_POINTS per
@@ -146,19 +146,16 @@ router.post(
 );
 
 /**
- * The enrol key from back/.env (PLAN-002 Phase I), as a fixed-length digest
- * for a constant-time compare; null = enrolment off (unset or too short).
- */
-const enrollDigest = () => {
-  const key = String(process.env.RECORDER_ENROLL_KEY || "").trim();
-  if (key.length < 32) return null;
-  return crypto.createHash("sha256").update(key).digest();
-};
-
-/**
  * POST /enroll — a recorder box set up from its .env (PLAN-002 Phase I):
  * { enrollKey, venueId, name?, agentVersion? } → its own token, once.
  * The key never travels again; the box keeps the token in DATA_DIR/device.json.
+ *
+ * PLAN-008 phase F: the key is a company's (back office → company → Generate enroll
+ * key; stored only as its SHA-256). It's found by that hash among Active companies,
+ * and the venue must be an Active venue of THAT company. Any other case — no such
+ * key, a turned-off or regenerated one, a suspended company, another company's venue,
+ * an unknown venue — gets the same refusal, so the reply never tells which part was
+ * wrong. The per-IP limits and the global failure pause stay.
  */
 router.post(
   "/enroll",
@@ -167,30 +164,23 @@ router.post(
   perHour,
   validateBody(enrollDeviceSchema),
   catchAsync(async (req, res) => {
-    const expected = enrollDigest();
-    if (!expected) {
-      return res.sendError(
-        "Recorder box enrolment is off — set RECORDER_ENROLL_KEY in the API's .env",
-        null,
-        403,
-        ERROR_CODES.ENROLLMENT_DISABLED
-      );
-    }
     const { enrollKey, venueId, name, agentVersion } = req.body;
-    const given = crypto.createHash("sha256").update(enrollKey).digest();
-    const keyOk = crypto.timingSafeEqual(given, expected);
 
     const now = getCurrentTimestampLocal();
     let conn;
     let result = null;
     try {
       conn = await req.db.beginTransaction();
-      const [venues] = keyOk
-        ? await conn.execute(
-            `SELECT venueId, name FROM venues WHERE venueId = ? AND status != 'Deleted' LIMIT 1`,
-            [venueId]
-          )
-        : [[]];
+      // One lookup by the key's hash: the venue, only if it's an Active venue of the
+      // Active company that key belongs to
+      const [venues] = await conn.execute(
+        `SELECT v.venueId, v.name
+         FROM companies co
+         INNER JOIN venues v ON v.companyId = co.companyId AND v.venueId = ? AND v.status = 'Active'
+         WHERE co.enrollKeyHash = ? AND co.status = 'Active'
+         LIMIT 1`,
+        [venueId, hashToken(enrollKey)]
+      );
       if (venues.length === 0) {
         await req.db.rollback(conn);
       } else {
@@ -215,7 +205,7 @@ router.post(
 
     if (!result) {
       failures.push(Date.now());
-      logger.warn("Recorder box enrolment refused", { ip: req.ip, keyOk });
+      logger.warn("Recorder box enrolment refused", { ip: req.ip });
       return res.sendError(
         "That enrol key or venue isn't accepted",
         null,

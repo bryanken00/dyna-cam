@@ -29,6 +29,10 @@ export const PLATFORM_ACTIONS = [
   "COMPANY_SUSPEND",
   "COMPANY_REACTIVATE",
   "OWNER_PASSWORD_RESET",
+  // Phase F: the company's recorder-box enroll key (never the key itself)
+  "COMPANY_ENROLL_KEY_GENERATE",
+  "COMPANY_ENROLL_KEY_REGENERATE",
+  "COMPANY_ENROLL_KEY_OFF",
   "ADMIN_CREATE",
   "ADMIN_UPDATE",
   "ADMIN_DEACTIVATE",

@@ -15,6 +15,9 @@ import { formatPhoneDisplay } from "../../../utils/phoneFormat";
 import CompanyFormDrawer from "../Companies/components/CompanyFormDrawer";
 import TemporaryPasswordDialog from "../Companies/components/TemporaryPasswordDialog";
 import CompanyStatus from "../Companies/components/CompanyStatus";
+import CompanyBoxes from "./components/CompanyBoxes";
+import EnrollKeyCard from "./components/EnrollKeyCard";
+import EnrollKeyDialog from "./components/EnrollKeyDialog";
 import { useCompanyDetail } from "./hooks";
 
 const card = {
@@ -42,6 +45,11 @@ const CompanyDetailPage = () => {
     isResetting,
     shownPassword,
     handleClosePassword,
+    handleGenerateKey,
+    handleTurnOffKey,
+    isChangingKey,
+    shownEnrollKey,
+    handleCloseEnrollKey,
   } = useCompanyDetail();
 
   const back = (
@@ -168,6 +176,15 @@ const CompanyDetailPage = () => {
         </div>
       </div>
 
+      {/* PLAN-008 phase F: recorder boxes — the company's enroll key and its boxes */}
+      <EnrollKeyCard
+        enrollKey={company.enrollKey}
+        onGenerate={handleGenerateKey}
+        onTurnOff={handleTurnOffKey}
+        busy={isChangingKey}
+      />
+      <CompanyBoxes boxes={company.boxes} />
+
       <CompanyFormDrawer open={editOpen} entity={company} onClose={handleEditClose} onSuccess={handleEditClose} />
       <TemporaryPasswordDialog
         open={!!shownPassword}
@@ -175,6 +192,7 @@ const CompanyDetailPage = () => {
         email={shownPassword?.email}
         password={shownPassword?.password}
       />
+      <EnrollKeyDialog open={!!shownEnrollKey} onClose={handleCloseEnrollKey} enrollKey={shownEnrollKey?.enrollKey} />
     </div>
   );
 };

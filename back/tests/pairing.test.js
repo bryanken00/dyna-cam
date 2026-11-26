@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 
-import { startTestApp, TEST_ENROLL_KEY } from "./helpers/testApp.js";
+import { startTestApp } from "./helpers/testApp.js";
 
 describe("pairing", () => {
   let ctx;
@@ -186,10 +186,13 @@ describe("pairing", () => {
   describe("a recorder box (Phase I: enrols from .env)", () => {
     const enrol = (body, ip = "203.0.113.50") =>
       ctx.api("POST", "/pair/enroll", { body, headers: { "X-Forwarded-For": ip } });
+    // PLAN-008 phase F: the venue's company's enroll key (made as the back office would)
+    let companyKey;
 
-    it("enrols with the API's key and its venue, once, for its own token", async () => {
+    it("enrols with its company's key and its venue, once, for its own token", async () => {
+      companyKey = await ctx.enrollKeyFor(home.venueId);
       const res = await enrol({
-        enrollKey: TEST_ENROLL_KEY,
+        enrollKey: companyKey,
         venueId: home.venueId,
         name: "Bry's Table",
         agentVersion: "1.2.0",
@@ -216,15 +219,15 @@ describe("pairing", () => {
       await call("DELETE", `/admin/venues/${gone}`);
       const cases = [
         [{ enrollKey: "x".repeat(48), venueId: home.venueId }, "203.0.113.51"],
-        [{ enrollKey: TEST_ENROLL_KEY, venueId: "00000000-0000-0000-0000-000000000000" }, "203.0.113.52"],
-        [{ enrollKey: TEST_ENROLL_KEY, venueId: gone }, "203.0.113.53"],
+        [{ enrollKey: companyKey, venueId: "00000000-0000-0000-0000-000000000000" }, "203.0.113.52"],
+        [{ enrollKey: companyKey, venueId: gone }, "203.0.113.53"],
       ];
       for (const [body, ip] of cases) {
         const res = await enrol(body, ip);
         assert.equal(res.status, 400, JSON.stringify(body));
         assert.match(res.body.message, /isn't accepted/);
       }
-      assert.equal((await enrol({ enrollKey: TEST_ENROLL_KEY }, "203.0.113.54")).status, 400);
+      assert.equal((await enrol({ enrollKey: companyKey }, "203.0.113.54")).status, 400);
     });
   });
 });

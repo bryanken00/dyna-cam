@@ -38,7 +38,7 @@ They connect the box to the cloud. They must be exact.
 | Value | What to write down | Where to get it |
 | --- | --- | --- |
 | **API_URL** | `https://office.dynamicglobalsoft.com:1342` | Always this. Port **1342** (the API), not 1343 (the website). |
-| **ENROLL_KEY** | a 64-character code | `RECORDER_ENROLL_KEY` from the server's `back/.env` — ask whoever runs the server. Treat it like a password. |
+| **ENROLL_KEY** | a 43-character code | The venue's company's **Box enroll key** — DGSports generates it in the back office and gives it to you. It only works for that company's venues. Treat it like a password. |
 | **VENUE_ID** | a code like `567311c4-e7c9-…` | Cloud Admin → Setup → Venues → your venue → **Copy ID** |
 
 ---
@@ -321,8 +321,8 @@ Register-ScheduledTask -TaskName "DGSports certificate renewal" -Action $action 
 | `node`, `npm` or `ffmpeg` *is not recognized* | Close PowerShell and open it again after installing (Part B step 2). |
 | *running scripts is disabled on this system* | Run Part B step 4 (`Set-ExecutionPolicy …`). |
 | `Missing API_URL` or `Missing ENROLL_KEY` | `.env` must be in `C:\dgsports\edge` and filled in (Part D). Notepad may save it as `.env.txt` — choose *Save as type: All files*. |
-| *The API refused this box's ENROLL_KEY / VENUE_ID* | One of them is wrong. Compare with A2 (no quotes, no spaces), save, restart. |
-| *Enrolment is turned off on the API* | The server has no `RECORDER_ENROLL_KEY`. Ask whoever runs the server to set it. |
+| *The API refused this box's ENROLL_KEY / VENUE_ID* | One of them is wrong — or the key was regenerated / turned off, or the venue isn't that company's. Compare with A2 (no quotes, no spaces), ask DGSports for the current key if needed, save, restart. |
+| *Enrolment is turned off on the API* | An older server without an enrol key. Ask DGSports to generate the company's Box enroll key. |
 | *This box was revoked* and it stops | Delete `C:\dgsports\edge\data\revoked.json` and restart — it joins again as a new box. |
 | Court shows *Camera not reachable* | Camera on and on the same network? Check its IP and RTSP account. |
 | *Camera rejected the username/password* | Use the camera's RTSP account (Tapo: *Camera Account*), not the Tapo app login. |

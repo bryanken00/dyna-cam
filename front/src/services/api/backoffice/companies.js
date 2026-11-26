@@ -45,3 +45,19 @@ export const resetOwnerPasswordApi = async (companyId) => {
   );
   return response.data;
 };
+
+// PLAN-008 phase F: make (or remake) the company's box enroll key → { enrollKey, createdAt } — ONCE
+export const generateEnrollKeyApi = async (companyId) => {
+  const response = await createAxiosInstanceWithInterceptor("data", userTypeAuth.backoffice).post(
+    `/api/v1/backoffice/companies/${companyId}/enroll-key`,
+  );
+  return response.data;
+};
+
+// PLAN-008 phase F: turn the enroll key off → { enrollKey: { on: false } }
+export const turnOffEnrollKeyApi = async (companyId) => {
+  const response = await createAxiosInstanceWithInterceptor("data", userTypeAuth.backoffice).delete(
+    `/api/v1/backoffice/companies/${companyId}/enroll-key`,
+  );
+  return response.data;
+};

@@ -6,9 +6,10 @@
  *   npm run boxes:revoke -- <name or id>  block a box: it gets 401 at its next request,
  *                                         stops, and won't enrol again by itself
  *
- * A box enrols itself with RECORDER_ENROLL_KEY (POST /api/v1/pair/enroll). After a
- * box is stolen, revoke it AND change RECORDER_ENROLL_KEY (and the other boxes'
- * ENROLL_KEY — enrolled boxes keep working, they don't need the key again).
+ * A box enrols itself with its company's enroll key (POST /api/v1/pair/enroll;
+ * PLAN-008 phase F — a super admin makes it in the back office, company page). After
+ * a box is stolen, revoke it AND Regenerate that company's enroll key there
+ * (enrolled boxes keep working, they don't need the key again).
  */
 import "dotenv/config";
 import mysql from "mysql2/promise";
@@ -105,8 +106,8 @@ async function revoke(db, target) {
   ]);
   console.log(
     `Revoked ${box.venue} · ${box.name}. It stops at its next request and won't enrol again ` +
-      "until someone deletes data/revoked.json on it. If it was stolen, also change " +
-      "RECORDER_ENROLL_KEY."
+      "until someone deletes data/revoked.json on it. If it was stolen, also Regenerate " +
+      "its company's enroll key in the back office."
   );
 }
 

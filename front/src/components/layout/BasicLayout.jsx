@@ -14,7 +14,8 @@ import { filterNavigationByPermissions } from "../../utils/filterNavigation";
 import Sidebar, { RAIL_WIDTH, SIDEBAR_WIDTH } from "./Sidebar";
 
 // Derive a readable page title from the current pathname + nav tree
-const getPageTitle = (pathname, navigations) => {
+const getPageTitle = (pathname, navigations, defaultTitle = "Dashboard") => {
+  if (pathname.endsWith("/account-settings")) return { group: null, title: "Account settings" };
   for (const nav of navigations) {
     if (nav.children) {
       for (const child of nav.children) {
@@ -29,25 +30,33 @@ const getPageTitle = (pathname, navigations) => {
       return { group: null, title: nav.label };
     }
   }
-  return { group: null, title: "Dashboard" };
+  return { group: null, title: defaultTitle };
 };
 
-const BasicLayout = ({ navigations, store }) => {
+/**
+ * The portal frame shared by the Admin portal and (PLAN-008) the back office: the
+ * sidebar (brand, search, the pages, the account menu), the top bar (page title,
+ * theme, the user) and the page. `navigations` are already the ones to show.
+ * `subtitle` sits under the brand; `accountRoute` is the account menu's Account
+ * settings; `onLogout` signs out.
+ */
+export const PortalLayout = ({
+  navigations,
+  userData,
+  onLogout,
+  subtitle = "Court replay admin",
+  accountRoute = "/admin/account-settings",
+  defaultTitle = "Dashboard",
+}) => {
   // On desktop `collapsed` = mini-rail; on mobile it = drawer-open.
   const [collapsed, setCollapsed] = useState(false);
   const { width } = useWindowSize();
-  const { userData, reset } = store();
-  const { hasPermission, isLoading } = usePermissions();
   const location = useLocation();
 
   const isMobile = width < 992;
+  const filteredNavigations = navigations;
 
-  const filteredNavigations = useMemo(() => {
-    if (isLoading) return [];
-    return filterNavigationByPermissions(navigations, hasPermission);
-  }, [navigations, hasPermission, isLoading]);
-
-  const { group, title } = getPageTitle(location.pathname, filteredNavigations);
+  const { group, title } = getPageTitle(location.pathname, filteredNavigations, defaultTitle);
 
   const handleCollapse = (value) => setCollapsed(value);
 
@@ -64,8 +73,10 @@ const BasicLayout = ({ navigations, store }) => {
         collapsed={collapsed}
         handleCollapse={handleCollapse}
         navigations={filteredNavigations}
-        handleLogout={reset}
+        handleLogout={onLogout}
         userData={userData}
+        subtitle={subtitle}
+        accountRoute={accountRoute}
       />
 
       {/* Main area */}
@@ -212,6 +223,19 @@ const BasicLayout = ({ navigations, store }) => {
       </div>
     </div>
   );
+};
+
+/** The Admin portal's frame: the pages the staff member's permissions allow. */
+const BasicLayout = ({ navigations, store }) => {
+  const { userData, reset } = store();
+  const { hasPermission, isLoading } = usePermissions();
+
+  const filteredNavigations = useMemo(() => {
+    if (isLoading) return [];
+    return filterNavigationByPermissions(navigations, hasPermission);
+  }, [navigations, hasPermission, isLoading]);
+
+  return <PortalLayout navigations={filteredNavigations} userData={userData} onLogout={reset} />;
 };
 
 export default BasicLayout;

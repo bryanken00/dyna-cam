@@ -125,9 +125,6 @@ export const dropTestDatabase = async (connection, name) => {
   await connection.query(`DROP DATABASE IF EXISTS \`${name}\``);
 };
 
-/** The enrol key every test app runs with (a file can override it via `env`). */
-export const TEST_ENROLL_KEY = "test-enroll-key-0123456789abcdef0123456789abcdef";
-
 /** Load back/.env (if present) and apply the settings every test run needs. */
 export const loadTestEnv = (overrides = {}) => {
   dotenv.config({ path: path.join(BACK, ".env"), quiet: true });
@@ -147,8 +144,6 @@ export const loadTestEnv = (overrides = {}) => {
     RATE_LIMIT_PLAYER_SESSION_POINTS: "1000",
     RATE_LIMIT_PLAYER_SIGN_IN_POINTS: "1000",
     UPLOAD_URL_SECRET: crypto.randomBytes(32).toString("hex"),
-    // Recorder boxes enrol with this (PLAN-002 Phase I); ctx.pairBox() uses it
-    RECORDER_ENROLL_KEY: TEST_ENROLL_KEY,
     SENDGRID_API_KEY: "", // never send real email (a test that wants SendGrid fakes it)
     // Never reach Xendit (a test that wants online payment points XENDIT_API_URL at a fake)
     XENDIT_SECRET_KEY: "",
@@ -385,18 +380,44 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
   };
 
   /**
+   * PLAN-008 phase F: the enroll key of a venue's company — the one this harness made
+   * for it, or a new one (as the back office's Generate would: only its SHA-256 is
+   * stored). A venue that doesn't exist gets a key no company has, so enrolment is
+   * refused the way a real wrong key is.
+   */
+  const enrollKeys = new Map(); // companyId → key
+  const sha256 = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
+  const enrollKeyFor = async (venueId) => {
+    const [[row]] = await sql.query(
+      `SELECT c.companyId, c.enrollKeyHash FROM venues v
+       INNER JOIN companies c ON c.companyId = v.companyId WHERE v.venueId = ? LIMIT 1`,
+      [venueId]
+    );
+    if (!row) return crypto.randomBytes(32).toString("base64url");
+    const known = enrollKeys.get(row.companyId);
+    if (known && row.enrollKeyHash === sha256(known)) return known;
+    const key = crypto.randomBytes(32).toString("base64url");
+    await sql.query(
+      `UPDATE companies SET enrollKeyHash = ?, enrollKeyCreatedAt = NOW() WHERE companyId = ?`,
+      [sha256(key), row.companyId]
+    );
+    enrollKeys.set(row.companyId, key);
+    return key;
+  };
+
+  /**
    * Add a recorder box to a venue the only way there is (PLAN-002 Phase I): it
-   * enrols itself with RECORDER_ENROLL_KEY at /pair/enroll. Each call comes from
-   * its own documentation-range IP, so the per-IP limits don't trip in suites
-   * that add several boxes. (`adminToken` is unused, kept so call sites read the
-   * same as before.)
+   * enrols itself at /pair/enroll — PLAN-008 phase F: with its company's enroll key
+   * (enrollKeyFor). Each call comes from its own documentation-range IP, so the per-IP
+   * limits don't trip in suites that add several boxes. (`adminToken` is unused, kept
+   * so call sites read the same as before.)
    * @returns {Promise<{ status: number, data: { token: string, deviceId: string, name: string } }>}
    */
   let boxCount = 0;
   const pairBox = async (_adminToken, venueId, name = "Box") => {
     boxCount += 1;
     const enrolled = await api("POST", "/pair/enroll", {
-      body: { enrollKey: process.env.RECORDER_ENROLL_KEY, venueId, name, agentVersion: "test" },
+      body: { enrollKey: await enrollKeyFor(venueId), venueId, name, agentVersion: "test" },
       headers: { "X-Forwarded-For": `198.51.100.${boxCount % 250}` },
     });
     if (enrolled.status !== 201) return enrolled;
@@ -606,6 +627,7 @@ export async function startTestApp({ env = {}, keepFirstPasswordFlag = false } =
     createStaff,
     createCompany,
     pairBox,
+    enrollKeyFor,
     makeUnpaid,
     markGamePaid,
     signInPlayer,

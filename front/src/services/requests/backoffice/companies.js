@@ -8,6 +8,8 @@ import {
   resetOwnerPasswordApi,
   suspendCompanyApi,
   updateCompanyApi,
+  generateEnrollKeyApi,
+  turnOffEnrollKeyApi,
 } from "../../api/backoffice/companies";
 
 /** PLAN-008 phase B: companies in the back office. Keys: ["backoffice", "companies", …]. */
@@ -64,4 +66,18 @@ export const useResetOwnerPassword = () =>
   useCompanyMutation(resetOwnerPasswordApi, {
     success: "The Owner's password was reset",
     failure: "Failed to reset the Owner's password",
+  });
+
+// Mutation: PLAN-008 phase F — make / remake the box enroll key → data.enrollKey (shown once by the page)
+export const useGenerateEnrollKey = () =>
+  useCompanyMutation(generateEnrollKeyApi, {
+    success: (response) => response?.message || "Enroll key made",
+    failure: "Failed to make the enroll key",
+  });
+
+// Mutation: PLAN-008 phase F — turn the box enroll key off
+export const useTurnOffEnrollKey = () =>
+  useCompanyMutation(turnOffEnrollKeyApi, {
+    success: "Enroll key turned off",
+    failure: "Failed to turn the enroll key off",
   });

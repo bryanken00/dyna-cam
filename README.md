@@ -176,10 +176,11 @@ The repository is a **monorepo of four independent apps**:
 Installs the dependencies of `back/`, `front/` and `edge/`, creates `back/.env`, `front/.env` and
 `edge/.env` from their examples, generates `CSRF_SECRET`, `LOG_SALT` and `UPLOAD_URL_SECRET`, and
 creates the JWT keypair. For running the recorder box on this machine it also points `edge/.env`'s
-`API_URL` at the local API, generates `RECORDER_ENROLL_KEY` in `back/.env` if it is empty and
-copies it into the box's `ENROLL_KEY`, and checks that ffmpeg is installed. Last, it pairs the box:
-it lists the venues in your database so you pick the box's venue (`VENUE_ID`), asks for an
-optional box name (`BOX_NAME`), and checks the two keys match — the box then enrols itself on its
+`API_URL` at the local API and checks that ffmpeg is installed; the box's `ENROLL_KEY` is the
+venue's **company's** enroll key, generated in the back office (`/backoffice` → the company → Box
+enroll key — PLAN-008; there is no shared key in `back/.env`). Last, it pairs the box: it lists the
+venues in your database so you pick the box's venue (`VENUE_ID`), asks for an optional box name
+(`BOX_NAME`), and checks `ENROLL_KEY` is filled in — the box then enrols itself on its
 first start. No venue yet? Add one in Admin → Setup → Venues and re-run `./setup.sh`. It is safe to re-run: an existing `.env`, an already-set
 secret or key, and existing JWT keys are kept. It then asks
 for `DB_USER`, `DB_PASS` and `DB_DATABASE` (press Enter to skip one, or keep its current value),

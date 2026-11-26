@@ -28,7 +28,9 @@ via `@fontsource-variable`.
 
 DGSports' own portal is `/backoffice/*` (`routes/pageRoutes/BackofficeRoute.jsx`,
 `components/layout/BackofficeLayout.jsx`, `pages/Backoffice/*`): super admins onboard and manage
-companies. It has its own store (`store/backofficeStore.js`, key `<VITE_STORE_KEY>-backoffice`), its
+companies. It uses the same frame as the Admin portal — `PortalLayout` in `BasicLayout.jsx` (sidebar,
+top bar), with its own pages, subtitle and account route; `BasicLayout` adds only Admin's
+permission filtering. It has its own store (`store/backofficeStore.js`, key `<VITE_STORE_KEY>-backoffice`), its
 own `userTypeAuth.backoffice` axios instance and services (`services/*/backoffice/*`), and no
 permissions — any signed-in super admin. Admin pages never need a company filter: the API scopes
 everything to the staff member's company.

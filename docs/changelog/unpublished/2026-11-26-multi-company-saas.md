@@ -9,7 +9,9 @@ DGSports now runs many companies on one platform. DGSports onboards each company
 **back office**, which creates the company and its Owner account (with a temporary password and a
 welcome email), and can suspend or reactivate it. Super admins can add and manage each other, and
 every back-office action is recorded on an Activity page — a company's own audit trail also shows
-what DGSports did to it (for example "DGSports suspended the company"). Each company's staff use the Admin portal as
+what DGSports did to it (for example "DGSports suspended the company"). Recorder boxes now enrol
+with their **company's own enroll key**, generated in the back office (shown once; regenerate or
+turn it off any time) — a key only works for that company's venues. Each company's staff use the Admin portal as
 before but see only their own company: its venues, courts, cameras, games, bookings, payments,
 users, roles and audit trail. The top bar shows the company's name. Each company now connects its
 own **Xendit** account (Payments → Online payment), so players pay straight into it; a company
@@ -40,6 +42,11 @@ keeps using the server's Xendit keys until it connects its own.
   `/api/v1/webhooks/xendit/:webhookKey`; every invoice, expiry and refund uses the booking's venue's
   company's keys (`utils/companyPayments.js`); a webhook settles only its own company's bookings.
 - back/: `npm run db:data` keeps super admins and builds two demo companies.
+- back/: `047_company_enroll_keys.sql`; `POST/DELETE /backoffice/companies/:id/enroll-key` (the key
+  once, stored as SHA-256); `/pair/enroll` accepts a company's key only for its Active venues.
+  **`RECORDER_ENROLL_KEY` is removed** — enrolled boxes keep working; new boxes need their company's
+  key. `setup.sh` asks for `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` and no longer wires a key.
 - front/: `/backoffice/*` (login, companies, onboarding, company page, account); Admin top bar shows
   the company; Payments → Online payment card + Connect Xendit drawer.
-- app/, edge/: no change (boxes enrol by venue, so they belong to the venue's company).
+- app/: no change. edge/: no code change — `ENROLL_KEY` is now the company's key (README,
+  `.env.example`).

@@ -20,7 +20,8 @@ the shared `/api/v1/upload/*`, and four Dyna Cam route families that don't use a
 `req.device.venueId`), `/api/v1/app/*` (a phone/tablet paired to one recording session,
 `Authorization: App <token>`, scoped to `req.pairedApp.sessionId`; see
 `utils/sessionDevices.js`), `/api/v1/pair/*` (a session's 6-digit key → an app token; a box's
-`RECORDER_ENROLL_KEY` → a box token at `/pair/enroll`; rate-limited — boxes are listed and
+company's enroll key (PLAN-008 phase F, from the back office; only for that company's venues) →
+a box token at `/pair/enroll`; rate-limited — boxes are listed and
 revoked with `npm run boxes[:revoke]`) and `/api/v1/public/*` (players, no login — the court QR / clip share token is the
 credential; `/public/stream-setup/:code` takes a player's own stream key, see
 `utils/sessionStreams.js`). CR-001 adds `/api/v1/oauth/google/callback` (Google's redirect after

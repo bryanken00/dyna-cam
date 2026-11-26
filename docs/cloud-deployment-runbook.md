@@ -112,13 +112,13 @@ Copy `back/.env.example` to `back/.env`, then set at least these. Generate secre
 | `COOKIE_SECURE` | `true` | HTTPS only. |
 | `ALLOW_CROSS_SITE_CSRF` | `false` | Website and API share `dgsports.ph`, so it's same-site. |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASS` / `DB_DATABASE` | the database above | |
-| `OWNER_EMAIL` | the first admin's email | `db:setup` creates this account. Leave `OWNER_PASSWORD` empty: it prints a random one once. |
+| `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | DGSports' back-office login (8+ char password) | Both required: `db:setup` creates **only** this account (PLAN-008) — no company or Owner. Sign in at `/backoffice`, then onboard companies there (each gets its Owner). |
 | `ISSUER` / `AUDIENCE` | e.g. `dgsports` / `dgsports-users` | JWT claims. |
 | `CSRF_SECRET`, `LOG_SALT`, `UPLOAD_URL_SECRET` | random, 32+ chars | Required; placeholders are refused in production. |
 | `DEVICE_SECRET_KEY` | random, 32+ chars | Encrypts camera passwords and Drive sign-ins. **Never change it later** — stored camera URLs become unreadable. Back it up. |
-| `RECORDER_ENROLL_KEY` | random, 32+ chars | A box enrols with it (§7). Set it only while installing a box, then clear it — see [Recorder box security](recorder-box-security.md#1-enrol-keys-on-only-while-installing). |
+| `API_PUBLIC_URL` | `https://api.dgsports.ph` | Builds each company's Xendit webhook URL (PLAN-008). |
 | `SENDGRID_API_KEY` / `MAIL_FROM` | your key / `DGSports <no-reply@dgsports.ph>` | Verify the sender (or the domain) in SendGrid first. |
-| `XENDIT_SECRET_KEY` / `XENDIT_CALLBACK_TOKEN` | live key / webhook verification token | See §6. |
+| `XENDIT_SECRET_KEY` / `XENDIT_CALLBACK_TOKEN` | usually empty | PLAN-008: each company connects its own Xendit in Admin → Payments → Online payment. These are only an existing install's "Default company" fallback. See §6. |
 | `PAYMENT_SANDBOX` | `false` | |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from Google Cloud | Required: every court's videos go to its Google Drive. |
 | `GOOGLE_REDIRECT_URI` | `https://api.dgsports.ph/api/v1/oauth/google/callback` | Also add it in Google Cloud as an authorised redirect URI. |
@@ -257,15 +257,15 @@ Box setup step by step: [Windows PC](recorder-box-installation-windows.md) or [M
    | Setting | Value |
    | --- | --- |
    | `API_URL` | `https://api.dgsports.ph` (no trailing slash, no `/api`) |
-   | `ENROLL_KEY` | exactly the API's `RECORDER_ENROLL_KEY` |
+   | `ENROLL_KEY` | the company's enroll key: back office → the company → **Box enroll key** → Generate (shown once) |
    | `VENUE_ID` | the venue's ID from step 1 |
    | `BOX_NAME` | e.g. `bigpickle-box-1` |
    | `LIVE_HOST` / `CERT_PATH` | see §8 (live view over HTTPS) |
 
 4. **Start it:** `npm run pm2:start && pm2 save && pm2 startup`. On first start the box enrols
    itself and keeps its own token in `data/device.json`; `ENROLL_KEY` / `VENUE_ID` aren't needed
-   after that — delete `ENROLL_KEY` from its `.env`, clear `RECORDER_ENROLL_KEY` on the server
-   and harden the box: [Recorder box security](recorder-box-security.md).
+   after that — delete `ENROLL_KEY` from its `.env`, **Turn off** the company's key in the back
+   office, and harden the box: [Recorder box security](recorder-box-security.md).
 5. **Check:** on the server, `cd back && npm run boxes` lists the box with its venue and last
    heartbeat; in the Admin, the venue's courts show their cameras recording (Dashboard / venue
    health). A box can be revoked with `npm run boxes:revoke -- <name or id>`.

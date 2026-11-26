@@ -2,7 +2,8 @@
 # First-time setup: install dependencies, create the .env files (back, front,
 # edge), generate the backend secrets and the JWT key pair, wire the recorder
 # box (edge/) to the local API, then ask for DB_USER / DB_PASS / DB_DATABASE
-# and — once all three are set — run `npm run db:setup`. Last, it pairs the
+# and SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD — once all are set — run `npm run db:setup`
+# (PLAN-008: it creates only the back-office super admin). Last, it pairs the
 # recorder box: pick its venue (VENUE_ID) from the database and a box name.
 #
 # Safe to re-run: an existing .env is kept, a secret is generated only while it
@@ -85,9 +86,9 @@ else
 fi
 
 # Points the box at the local API (only while API_URL is still the example
-# value) and gives it the API's enrolment key: RECORDER_ENROLL_KEY in
-# back/.env is generated if empty, and copied into ENROLL_KEY while that is
-# empty. Keys are never printed.
+# value). PLAN-008: the enroll key is the company's, generated in the back office
+# (/backoffice → the company → Box enroll key) — paste it into edge/.env as
+# ENROLL_KEY. Keys are never printed.
 ROOT="$ROOT" node <<'NODE'
 const fs = require("fs");
 const path = require("path");
@@ -117,19 +118,8 @@ if (!apiUrl || apiUrl === "https://api.example.com") {
   console.log("⏭️  edge: API_URL already set — keeping it");
 }
 
-let enrollKey = get(back, "RECORDER_ENROLL_KEY");
-if (!enrollKey) {
-  enrollKey = require("crypto").randomBytes(32).toString("hex");
-  back = set(back, "RECORDER_ENROLL_KEY", enrollKey);
-  fs.writeFileSync(backFile, back);
-  console.log("🔑 back: generated RECORDER_ENROLL_KEY (recorder boxes can enrol)");
-}
-const boxKey = get(edge, "ENROLL_KEY");
-if (!boxKey) {
-  edge = set(edge, "ENROLL_KEY", enrollKey);
-  console.log("🔑 edge: ENROLL_KEY set to the API's RECORDER_ENROLL_KEY");
-} else if (boxKey !== enrollKey) {
-  console.log("⚠️  edge: ENROLL_KEY differs from back's RECORDER_ENROLL_KEY — the box can't enrol until they match");
+if (!get(edge, "ENROLL_KEY")) {
+  console.log("ℹ️  edge: ENROLL_KEY is empty — generate the company's key in the back office (/backoffice → the company → Box enroll key) and paste it");
 } else {
   console.log("⏭️  edge: ENROLL_KEY already set — keeping it");
 }
@@ -203,22 +193,26 @@ if [ -t 0 ]; then
   ask DB_USER "DB_USER" || missing=1
   ask DB_PASS "DB_PASS" secret || missing=1
   ask DB_DATABASE "DB_DATABASE" || missing=1
+  # PLAN-008: db:setup creates only the back-office super admin — it needs both
+  echo "👤 back: the back-office super admin (your /backoffice login; 8+ character password)"
+  ask SUPERADMIN_EMAIL "SUPERADMIN_EMAIL" || missing=1
+  ask SUPERADMIN_PASSWORD "SUPERADMIN_PASSWORD" secret || missing=1
 
   if [ "$missing" -eq 0 ]; then
     echo "🗄️  back: running db:setup..."
     if npm run db:setup; then
       db_ready=1
     else
-      echo "⚠️  back: db:setup failed — check the DB_* values in back/.env, then re-run it"
+      echo "⚠️  back: db:setup failed — check the DB_* and SUPERADMIN_* values in back/.env, then re-run it"
     fi
   else
-    echo "⏭️  back: DB_* not all set — skipping db:setup"
+    echo "⏭️  back: DB_* / SUPERADMIN_* not all set — skipping db:setup"
   fi
 fi
 
 # ── Recorder box pairing (edge/ ↔ back/) ───────────────────────────────────────
 # What the box needs to enrol with the local API on its first start (POST
-# /api/v1/pair/enroll): ENROLL_KEY = back's RECORDER_ENROLL_KEY (wired above),
+# /api/v1/pair/enroll): ENROLL_KEY = the venue's company's key from the back office,
 # API_URL (wired above), VENUE_ID — picked here from the venues in the
 # database — and an optional BOX_NAME. Once enrolled, the box keeps its own
 # token in edge/data/device.json and no longer uses these.
@@ -309,13 +303,10 @@ if [ -t 0 ]; then
   fi
 
   if [ -z "$box_paired" ]; then
-    # The API refuses enrolment with a key under 32 characters, or one that differs
-    back_key="$(env_get RECORDER_ENROLL_KEY)"
+    # PLAN-008: the key is the venue's company's (back office); the API checks it matches
     box_key="$(edge_get ENROLL_KEY)"
-    if [ "${#back_key}" -lt 32 ]; then
-      echo "⚠️  back: RECORDER_ENROLL_KEY is under 32 characters — enrolment stays off"
-    elif [ "$back_key" != "$box_key" ]; then
-      echo "⚠️  edge: ENROLL_KEY doesn't match back's RECORDER_ENROLL_KEY — the box can't enrol"
+    if [ "${#box_key}" -lt 32 ]; then
+      echo "⚠️  edge: ENROLL_KEY is missing — generate the company's key in the back office and paste it"
     elif [ -n "$(edge_get VENUE_ID)" ]; then
       echo "✅ edge: ready to enrol — it pairs itself on its first start against $(edge_get API_URL)"
       box_paired=1
@@ -326,16 +317,17 @@ fi
 echo
 echo "✅ Setup complete. Next:"
 if [ -n "$db_ready" ]; then
-  echo "   1. ./run-mac.sh (macOS) or ./run.sh (Windows)   (sign in with the Owner password printed above)"
+  echo "   1. ./run-mac.sh (macOS) or ./run.sh (Windows), sign in to /backoffice (SUPERADMIN_EMAIL / _PASSWORD) and onboard a company"
 else
   echo "   1. Set DB_HOST / DB_USER / DB_PASS / DB_DATABASE in back/.env"
-  echo "   2. cd back && npm run db:setup   (prints the Owner's one-time password)"
+  echo "   2. Set SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD, then cd back && npm run db:setup   (creates the back-office super admin)"
   echo "   3. ./run-mac.sh (macOS) or ./run.sh (Windows)"
 fi
 if [ -n "$box_paired" ]; then
   echo "   Recorder box: give the venue's courts their cameras in Admin, then add edge:"
   echo "   ./run-mac.sh back front edge"
 else
-  echo "   Recorder box: add a venue and its courts (cameras) in Admin, re-run ./setup.sh to pick"
-  echo "   the venue (or set VENUE_ID in edge/.env), then add edge: ./run-mac.sh back front edge"
+  echo "   Recorder box: add a venue and its courts (cameras) in Admin, generate the company's enroll key"
+  echo "   in the back office (ENROLL_KEY in edge/.env), re-run ./setup.sh to pick the venue (or set"
+  echo "   VENUE_ID), then add edge: ./run-mac.sh back front edge"
 fi

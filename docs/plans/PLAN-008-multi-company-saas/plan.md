@@ -182,6 +182,28 @@ Players pay straight into the company's own Xendit account. DGSports doesn't hol
   until its Owner saves its own keys. New companies never fall back to `.env`.
 - **`PAYMENT_SANDBOX`:** the built-in test checkout stays platform-wide for development and tests.
 
+### Each company's own box enroll key (phase F, decided 2026-11-26)
+
+Today one `RECORDER_ENROLL_KEY` in `back/.env` enrols a recorder box into **any** venue — with
+many companies, anyone holding it plus a venue's ID could put a box in another company's venue.
+Instead each company gets its own key, made in the back office:
+
+1. Back office → onboard the company (its Owner gets a login).
+2. Back office → company page → **Generate enroll key** → copy it (shown once; stored only as a
+   hash, like a password).
+3. The company's Owner adds the venue in Admin and copies its `VENUE_ID` (as today).
+4. The box's `edge/.env`: `API_URL`, `ENROLL_KEY` = the company's key, `VENUE_ID` → start it.
+5. `/pair/enroll` accepts the key only for a venue **of that company** (otherwise refused like a
+   wrong key); the box gets its own device token as today, and `ENROLL_KEY` can then be removed.
+
+- **Regenerate**: the old key stops enrolling new boxes; enrolled boxes keep working. **Turn off**:
+  no new boxes for the company. Both, and Generate, go to the back-office Activity log.
+- The company page shows whether a key is on (and when it was made) and the company's boxes
+  (venue, online / offline).
+- Only super admins see or make keys — companies never handle them (decided).
+- `RECORDER_ENROLL_KEY` is **removed** (decided): only company keys enrol boxes. Boxes already
+  enrolled are unaffected (they use their device token). The box side (`edge/`) doesn't change.
+
 ### Phases
 
 - **A · Companies and scope:** migration 044 (the default company owns everything), `companyId` on
@@ -194,6 +216,8 @@ Players pay straight into the company's own Xendit account. DGSports doesn't hol
 - **D · Polish:** company name in the Admin top bar, the back-office company stats,
   `npm run boxes` showing the company. (Emails keep the one universal sender.)
 - **E · Back office admin:** the Super admins page and the back-office audit trail (Activity page).
+- **F · Company enroll keys:** a box enroll key per company from the back office; the shared
+  `RECORDER_ENROLL_KEY` goes away.
 
 ### Alternatives considered
 
@@ -291,3 +315,9 @@ Still open:
 - 2026-11-26: `SUPERADMIN_PASSWORD` is required (no generated password) and the seeded super admin
   has no forced change at first sign-in — the installer chose it (bryanken00). Super admins added
   in the back office still get a temporary password they must change.
+- 2026-11-26: Added phase F — each company's own recorder-box enroll key, generated in the back
+  office (bryanken00: "generate ENROLL_KEY on the company so it's specific to the company"); the
+  shared `RECORDER_ENROLL_KEY` is removed; only super admins handle keys.
+- 2026-11-26: Phase F built (`047_company_enroll_keys.sql`, back-office Box enroll key card and the
+  company's boxes, `/pair/enroll` per company); `RECORDER_ENROLL_KEY` removed; `setup.sh` asks for
+  the super admin and no longer wires a shared key.
