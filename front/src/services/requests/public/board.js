@@ -9,7 +9,11 @@ export const useGetCourtBoard = (displayToken) => {
     queryKey: ["courtBoard", displayToken],
     queryFn: () => getCourtBoardApi(displayToken),
     enabled: !!displayToken,
-    refetchInterval: 60 * 1000,
+    // PLAN-009 phase D: every 15 s while Open Play runs (the queue moves fast)
+    refetchInterval: (query) => {
+      const board = query.state.data?.data;
+      return board?.openPlay?.length || board?.tournaments?.length ? 15 * 1000 : 60 * 1000;
+    },
     refetchIntervalInBackground: true,
     retry: (count, error) => error?.response?.status !== 404 && count < 3,
   });

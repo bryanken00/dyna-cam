@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { Suspense, lazy } from "react";
 import { ComponentLoader } from "../components/LoadingFallback";
+// PLAN-009: the player pages move to the player app (web-app/) once VITE_PLAYER_APP_URL is set
+import PlayerAppRedirect from "../components/PlayerAppRedirect";
 import AdminRoute from "./pageRoutes/AdminRoute";
 import BackofficeRoute from "./pageRoutes/BackofficeRoute";
 
@@ -80,9 +82,11 @@ const RootRoutes = () => {
         <Route
           path="/book"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicVenues />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicVenues />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         {/* CR-045: Find my booking is gone — a player's bookings are in My games */}
@@ -90,17 +94,21 @@ const RootRoutes = () => {
         <Route
           path="/book/:bookingToken"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicBook />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicBook />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         <Route
           path="/booking/:manageToken"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicBooking />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicBooking />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         <Route
@@ -122,25 +130,31 @@ const RootRoutes = () => {
         <Route
           path="/signed-in"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicSignedIn />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicSignedIn />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         <Route
           path="/me/games"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicMyGames />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicMyGames />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         <Route
           path="/me/profile"
           element={
-            <Suspense fallback={<ComponentLoader />}>
-              <PublicProfile />
-            </Suspense>
+            <PlayerAppRedirect>
+              <Suspense fallback={<ComponentLoader />}>
+                <PublicProfile />
+              </Suspense>
+            </PlayerAppRedirect>
           }
         />
         <Route path="/admin/*" element={<AdminRoute />} />

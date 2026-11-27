@@ -67,6 +67,11 @@ export const conflictMessage = (conflict) => {
       return `A game is on the court then (from ${clock(conflict.from)})`;
     case "CLOSURE":
       return "The court is closed then";
+    // PLAN-009: an Open Play session has the court
+    case "OPEN_PLAY":
+      return `Open Play has the court then (from ${clock(conflict.from)})`;
+    case "TOURNAMENT":
+      return `A tournament has the court then (from ${clock(conflict.from)})`;
     case "CLOSED":
       return "That's outside the venue's opening hours";
     default:

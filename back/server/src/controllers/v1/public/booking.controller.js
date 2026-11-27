@@ -14,6 +14,8 @@ import { checkInBooking } from "../../../utils/bookingCheckIn.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { directionsUrl } from "../../../utils/maps.js";
+import { amenityList, venueKey } from "../../../utils/venueFacts.js";
+import { venueFactsFor } from "../../../utils/playerProfile.js";
 import { firstBookableDate, loadVenueHours } from "../../../utils/courtTimeline.js";
 import { dayAvailability } from "../../../utils/bookingAvailability.js";
 import {
@@ -150,7 +152,7 @@ router.get(
     const today = moment().tz(TIMEZONE).day();
     const rows = await req.db.query(
       `SELECT v.venueId, v.name, v.address, v.latitude, v.longitude, v.phone, v.logoUrl, v.bookingToken,
-              h.opensAt, h.closesAt,
+              v.amenities, h.opensAt, h.closesAt,
               (SELECT COUNT(*) FROM courts c
                WHERE c.venueId = v.venueId AND c.status = 'Active') AS courtCount
        FROM venues v
@@ -168,10 +170,16 @@ router.get(
     for (const v of rows) {
       if (await venuePaysOnline(req.db, v.venueId)) paying.push(v);
     }
+    // PLAN-009 phase B: what each venue's courts are like, and its followers (Discover's filters)
+    const facts = await venueFactsFor(req.db, paying.map((v) => v.venueId));
     return res.sendSuccess("Venues", {
       venues: paying.map((v) => ({
         ...venueView(v),
+        // The venue's public key (follow / Book again) — never its business ID
+        key: venueKey(v.venueId),
         bookingToken: v.bookingToken,
+        amenities: amenityList(v.amenities),
+        ...facts.get(v.venueId),
         courtCount: Number(v.courtCount),
         // CR-050: the venue's public pin (null: none) — the page sorts by distance from the
         // player in the browser ("Near me"); the player's location never reaches the API

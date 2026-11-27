@@ -29,6 +29,15 @@ const Sessions = lazy(() => import("../../pages/Admin/DynaCam/Sessions"));
 const Payments = lazy(() => import("../../pages/Admin/DynaCam/Payments"));
 // PLAN-003: court bookings at the desk
 const Bookings = lazy(() => import("../../pages/Admin/DynaCam/Bookings"));
+// PLAN-009 phase C: Open Play sessions
+const OpenPlay = lazy(() => import("../../pages/Admin/DynaCam/OpenPlay"));
+// PLAN-009 phase D: a session's queue (a tablet at the court)
+const OpenPlayQueue = lazy(() => import("../../pages/Admin/DynaCam/OpenPlayQueue"));
+// PLAN-009 phase E: tournaments, and one tournament's page
+const Tournaments = lazy(() => import("../../pages/Admin/DynaCam/Tournaments"));
+const TournamentDetail = lazy(() => import("../../pages/Admin/DynaCam/TournamentDetail"));
+// PLAN-009 phase F: clubs
+const Clubs = lazy(() => import("../../pages/Admin/DynaCam/Clubs"));
 
 const VENUE_PAGE_ACCESS = [
   { module: "venues", submodule: "list", accessLevel: "read" },
@@ -79,6 +88,9 @@ const AdminRoute = () => {
       permission: {
         anyOf: [
           { module: "bookings", submodule: null, accessLevel: "read" },
+          { module: "open_play", submodule: null, accessLevel: "read" },
+          { module: "tournaments", submodule: null, accessLevel: "read" },
+          { module: "clubs", submodule: null, accessLevel: "read" },
           { module: "clips", submodule: null, accessLevel: "read" },
           { module: "payments", submodule: null, accessLevel: "read" },
         ],
@@ -98,6 +110,51 @@ const AdminRoute = () => {
             </Suspense>
           ),
           permission: { module: "bookings", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/open-play",
+          name: "Open Play",
+          label: "Open Play",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="open_play" accessLevel="read">
+                <OpenPlay />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "open_play", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/tournaments",
+          name: "Tournaments",
+          label: "Tournaments",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="tournaments" accessLevel="read">
+                <Tournaments />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "tournaments", submodule: null, accessLevel: "read" },
+          isFilter: true,
+          isShow: true,
+        },
+        {
+          route: "/clubs",
+          name: "Clubs",
+          label: "Clubs",
+          component: (
+            <Suspense fallback={<ComponentLoader />}>
+              <ProtectedRoute module="clubs" accessLevel="read">
+                <Clubs />
+              </ProtectedRoute>
+            </Suspense>
+          ),
+          permission: { module: "clubs", submodule: null, accessLevel: "read" },
           isFilter: true,
           isShow: true,
         },
@@ -340,6 +397,30 @@ const AdminRoute = () => {
                 />
               );
             })}
+
+          {/* PLAN-009 phase E: one tournament — not a sidebar item */}
+          <Route
+            path="dyna-cam/tournaments/:tournamentId"
+            element={
+              <Suspense fallback={<ComponentLoader />}>
+                <ProtectedRoute module="tournaments" accessLevel="read">
+                  <TournamentDetail />
+                </ProtectedRoute>
+              </Suspense>
+            }
+          />
+
+          {/* PLAN-009 phase D: an Open Play session's queue — not a sidebar item */}
+          <Route
+            path="dyna-cam/open-play/:playSessionId/queue"
+            element={
+              <Suspense fallback={<ComponentLoader />}>
+                <ProtectedRoute module="open_play" accessLevel="read">
+                  <OpenPlayQueue />
+                </ProtectedRoute>
+              </Suspense>
+            }
+          />
 
           {/* Setup detail pages — not sidebar items; "Venues" stays highlighted */}
           <Route

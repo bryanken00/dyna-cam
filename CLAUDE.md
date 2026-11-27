@@ -39,6 +39,7 @@ the super admins and builds 15 demo companies with 28 venues, each company with 
 | Path              | What it is                                                            | Conventions live in                                                          |
 | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `front/`          | React 19 + Vite client (shadcn/ui, Tailwind v4, Zustand, React Query) | [front/CLAUDE.md](front/CLAUDE.md) → `frontend-conventions` skill             |
+| `web-app/`        | React 19 + Vite **player app** (PLAN-009): Discover, booking, Play, Profile — on the same API | [web-app/CLAUDE.md](web-app/CLAUDE.md) → `frontend-conventions` skill |
 | `back/`           | Node + Express API (MySQL via `mysql2`, Passport JWT, Zod) + API tests | [back/CLAUDE.md](back/CLAUDE.md) → `backend-conventions` skill                |
 | `app/`            | Expo SDK 58 / React Native staff app (NativeWind, Zustand, React Query) | [app/CLAUDE.md](app/CLAUDE.md) → `mobile-conventions` skill                 |
 | `edge/`           | Recorder box: Node + ffmpeg, records each court camera and cuts clips | [edge/CLAUDE.md](edge/CLAUDE.md) → `edge-conventions` skill                 |
@@ -53,7 +54,7 @@ in every session. **Load the relevant skill before writing code** — the rules 
 
 | Skill | Use it for |
 | ----- | ---------- |
-| [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md) | Anything under `front/src` — pages, hooks, components, forms, services, stores, routes. 8 topic docs. |
+| [`frontend-conventions`](.claude/skills/frontend-conventions/SKILL.md) | Anything under `front/src` or `web-app/src` — pages, hooks, components, forms, services, stores, routes. 8 topic docs. |
 | [`backend-conventions`](.claude/skills/backend-conventions/SKILL.md) | Anything under `back/server`, `back/database` or `back/tests` — controllers, routes, validators, migrations, uploads, tests. 7 topic docs. |
 | [`mobile-conventions`](.claude/skills/mobile-conventions/SKILL.md) | Anything under `app/` — screens, hooks, components, sheets, services, stores, SQLite, navigation, `app.json`. 7 topic docs; start with `architecture-and-traps.md`. |
 | [`edge-conventions`](.claude/skills/edge-conventions/SKILL.md) | Anything under `edge/` — the recorder box: device API client, ffmpeg recording and clip cutting, segment timing, the job queue, tests and smoke run. |
@@ -67,7 +68,7 @@ in every session. **Load the relevant skill before writing code** — the rules 
 
 ## Work tracking is automatic
 
-Every request to build, change, or fix something under `front/`, `back/`, `app/` or `edge/` gets its tracking doc
+Every request to build, change, or fix something under `front/`, `web-app/`, `back/`, `app/` or `edge/` gets its tracking doc
 **before any code is written**, without the user typing a slash command. Classify it:
 
 | The request is… | Doc | Skill |
@@ -229,6 +230,43 @@ reports `drive-direct`. The app keeps its token
   them and never fail it; once-only ones are claimed on their `…SentAt` column. Staff work is under
   the `bookings` permission (money still needs `payments` write); the job is
   `jobs/bookingMaintenance.js` (every minute).
+- **Player app (PLAN-009):** `web-app/` is the players' own app (port `4022`, on the same API
+  through the `/api/v1` proxy): Discover (`/book`), a venue's booking page, a booking's own page,
+  Play (`/me/games`), Profile — the same paths the main app used. The API sends player links
+  (booking pages, booking links in emails, the Xendit return, the end of a Google sign-in) to
+  `PLAYER_APP_URL` (`utils/clips.js` `playerAppUrl()`, falls back to `APP_URL`); game, clip,
+  stream and TV board pages stay on `APP_URL`, and the player app links to them with
+  `VITE_MAIN_APP_URL`. With `VITE_PLAYER_APP_URL` set, `front/`'s player paths redirect there
+  (`components/PlayerAppRedirect.jsx`).
+- **Open Play (PLAN-009 phase C):** a venue's drop-in sessions (`play_sessions`, weekly
+  `play_series` made 4 weeks ahead by the minute job, spots in `play_signups`). A session's courts
+  are blocked by `court_closures` rows tied to it (`playSessionId`) — so booking, availability,
+  the day grid and the TV board treat that time as taken; the Closures API never lists or changes
+  them, and `findConflict()` reports them as `OPEN_PLAY` (`ignorePlaySessionId` when moving one).
+  Players join at `/api/v1/player/play/*` (free → Confirmed; paid → a `Pending` hold and a Xendit
+  invoice `play-<signupCode>` settled by `settleInvoice()` → `utils/playPayments.js`); anyone
+  reads `/api/v1/public/open-play[/:playToken]` (first names and levels only). Admin:
+  `/api/v1/admin/open-play/*` under the `open_play` permission; refunds also need `payments` write.
+  Walk-ins staff add are free (no cash, CR-046).
+  Phase D, the queue: checked-in players wait in line (`queueEnteredAt`); `utils/openPlayQueue.js`
+  `pickNextGame()` (pure, unit-tested) takes the four who waited longest and splits them fairest;
+  `utils/openPlayGames.js` runs it with the session row locked (`/admin/open-play/sessions/:id/queue*`,
+  `/games/:id/end|void|swap`); the TV board's `openPlay` and `/player/play/signups/:code/queue`
+  show it with first names only.
+- **Tournaments (PLAN-009 phase E):** `tournaments` hold their courts for each day with
+  `court_closures` rows tied to them (`tournamentId`; `findConflict()` → `TOURNAMENT`); divisions
+  (`tournament_divisions`: round robin, knockout, groups then knockout) take teams
+  (`tournament_teams` + `tournament_team_players`; a doubles captain's `inviteToken` lets the partner
+  join; the entry fee is a Xendit invoice `team-<teamCode>` → `utils/tournamentPayments.js`). The
+  draw and scoring are `utils/tournamentBrackets.js` (pure, unit-tested) written by
+  `utils/tournaments.js`; winners move on through `nextMatchId`. Admin `/api/v1/admin/tournaments/*`
+  (`tournaments` permission; refunds also need `payments` write), anyone `/api/v1/public/tournaments*`
+  (no business IDs), players `/api/v1/player/tournaments/*`.
+- **Clubs and coaching (PLAN-009 phase F):** `clubs` belong to a venue (`joinPolicy` Open or
+  Approval; `club_members` Pending / Active / Removed); a session with `play_sessions.clubId` takes
+  that club's Active members only. A clinic is a `play_sessions.kind = 'Clinic'` with a
+  `coachName` — everything else is Open Play. Admin `/api/v1/admin/clubs/*` (`clubs` permission),
+  anyone `/api/v1/public/clubs*`, players `/api/v1/player/clubs/*`.
 - **Backend changes are tested:** `cd back && npm test` (throwaway database, never touches
   `DB_DATABASE`). A new by-ID endpoint gets a test that a `Deleted` record (and, where relevant,
   an Owner-owned one) returns 404 and stays unchanged. There is no CI, so run
@@ -248,8 +286,9 @@ reports `drive-direct`. The app keeps its token
   `docs/changelog/unpublished/` via the `changelog` skill **before reporting done** — one per
   finished checklist / logical change, not per file. Docs/`.claude/`-only changes
   don't get one. **Never bump `version` by hand** — `/publish` picks it from the entries' impact
-  and bumps `front/`, `back/`, `edge/` and `app/` together.
+  and bumps `front/`, `web-app/`, `back/`, `edge/` and `app/` together.
 - **One product version:** the web frontend reads `version` from `front/package.json`, injected
-  by `vite.config.js` as `import.meta.env.APP_VERSION`. The mobile app keeps the same version in
+  by `vite.config.js` as `import.meta.env.APP_VERSION` (the player app the same from
+  `web-app/package.json`). The mobile app keeps the same version in
   `app/package.json`, `app/app.json` (`expo.version`) and `app/src/constants/version.js`. There is
   no version env var — don't add one. EAS owns the app's build numbers.

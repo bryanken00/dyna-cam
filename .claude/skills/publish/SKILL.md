@@ -17,7 +17,7 @@ Arguments: **$ARGUMENTS**
 1. **Entries**: every `*.md` in `docs/changelog/unpublished/` (ignore `.gitkeep`). If there are
    none, stop and say "Nothing to publish: the unpublished queue is empty."
 2. **Current version**: the product has one version, kept in six places:
-   - `version` in `front/package.json`, `back/package.json` and `edge/package.json`
+   - `version` in `front/package.json`, `web-app/package.json` (PLAN-009), `back/package.json` and `edge/package.json`
    - `version` in `app/package.json`
    - `expo.version` in `app/app.json` (what the App Store and Play Store show)
    - `VERSION` in `app/src/constants/version.js` (what the mobile app displays)

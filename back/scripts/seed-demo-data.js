@@ -34,6 +34,9 @@ import { EXTRA_COMPANIES, EXTRA_VENUES } from "./_demo-venues.js";
 import { passwordProblem } from "../server/src/utils/passwordPolicy.js";
 import { encryptSecret } from "../server/src/utils/crypto/secretBox.js";
 import { randomPayCode, randomToken } from "../server/src/utils/crypto/tokens.js";
+import { createPlaySession, insertSignup } from "../server/src/utils/openPlay.js";
+import { seriesWindows } from "../server/src/utils/playSeries.js";
+import { addTeamPlayer, holdCourts, insertTeam, lockTournament } from "../server/src/utils/tournaments.js";
 
 const TZ = process.env.TIMEZONE || "Asia/Manila";
 const FORMAT = "YYYY-MM-DD HH:mm:ss";
@@ -56,6 +59,9 @@ const ROLES = [
       ["venues", "list", "write"],
       ["venues", "courts", "write"],
       ["bookings", null, "write"],
+      ["open_play", null, "write"],
+      ["tournaments", null, "write"],
+      ["clubs", null, "write"],
       ["clips", null, "write"],
       ["payments", null, "write"],
       ["alerts", null, "read"],
@@ -71,6 +77,7 @@ const ROLES = [
       ["venues", "list", "read"],
       ["venues", "courts", "read"],
       ["bookings", null, "write"],
+      ["open_play", null, "write"],
       ["clips", null, "write"],
       ["payments", null, "write"],
     ],
@@ -81,6 +88,9 @@ const ROLES = [
     grants: [
       ["dashboard", null, "read"],
       ["bookings", null, "read"],
+      ["open_play", null, "read"],
+      ["tournaments", null, "read"],
+      ["clubs", null, "read"],
       ["payments", null, "read"],
     ],
   },
@@ -427,6 +437,9 @@ const tally = {
   games: 0,
   bookings: 0,
   payments: 0,
+  openPlay: 0,
+  tournaments: 0,
+  clubs: 0,
   audit: 0,
 };
 
@@ -638,9 +651,18 @@ const priceFor = (venue, courtKey, start, hours) => {
   return total;
 };
 
+// PLAN-009 phase B: what each demo venue and its courts are like (Discover's filters)
+const DEMO_SURFACES = ["Synthetic", "Hard", "Concrete", "Wood"];
+const DEMO_AMENITIES = [
+  "Parking,Restrooms,Lights",
+  "Parking,Showers,Lockers,Restrooms,Aircon",
+  "Restrooms,Food,Lights",
+  "Parking,Restrooms,Food,Pro shop,Lights",
+];
+
 async function seedVenues(conn, companies) {
   const created = NOW.clone().subtract(45, "days");
-  for (const venue of VENUES) {
+  for (const [venueIndex, venue] of VENUES.entries()) {
     venue.venueId = await uuid(conn);
     await insert(conn, "venues", {
       venueId: venue.venueId,
@@ -655,6 +677,7 @@ async function seedVenues(conn, companies) {
       ...venue.location,
       latitude: venue.pin?.latitude ?? null,
       longitude: venue.pin?.longitude ?? null,
+      amenities: DEMO_AMENITIES[venueIndex % DEMO_AMENITIES.length],
       ...venue.rules,
       status: "Active",
       dateCreated: fmt(created),
@@ -663,7 +686,7 @@ async function seedVenues(conn, companies) {
     tally.venues += 1;
 
     let cameraNumber = 60;
-    for (const court of venue.courts) {
+    for (const [courtIndex, court] of venue.courts.entries()) {
       court.courtId = await uuid(conn);
       court.busy = []; // [startText, endText] — games, live bookings, closures
       await insert(conn, "courts", {
@@ -676,6 +699,9 @@ async function seedVenues(conn, companies) {
         streamEnabled: 0,
         streamWatchUrl: court.stream ? "https://www.youtube.com/@smashpointbgc/live" : null,
         streamLayout: court.cameras >= 2 ? "STACKED" : "CAM1",
+        surface: DEMO_SURFACES[venueIndex % DEMO_SURFACES.length],
+        // Every third venue is all indoor; the rest have Court 1 covered and the others outdoor
+        isIndoor: venueIndex % 3 === 0 || courtIndex === 0 ? 1 : 0,
         status: court.status || "Active",
         dateCreated: fmt(created),
         dateUpdated: fmt(created),
@@ -1148,6 +1174,261 @@ async function insertBooking(conn, { staff, venue, court, slot, price, kind: wan
   }
 }
 
+/**
+ * PLAN-009 phase C: Open Play — a weekly evening series at the first venue, and a
+ * few one-off sessions (free and paid) at venues taking online bookings, on
+ * courts the bookings left free. Some have walk-ins so the Admin page and the
+ * player app have names to show.
+ */
+const WALK_INS = ["Mika", "Paolo", "Jasmine", "Rey", "Bea", "Carlo", "Trish", "Jun"];
+const OPEN_PLAY_WINDOWS = [
+  ["06:00", "08:00"],
+  ["19:00", "21:00"],
+  ["16:00", "18:00"],
+];
+
+async function seedOpenPlay(conn, staff) {
+  const now = fmt(NOW);
+  const venues = VENUES.filter((v) => v.onlineBooking).slice(0, 8);
+  const sessions = [];
+
+  // A weekly series: Tue & Thu evenings at the first venue, 4 weeks ahead
+  const home = venues[0];
+  if (home) {
+    const seriesId = await uuid(conn);
+    const series = {
+      seriesId,
+      venueId: home.venueId,
+      kind: "OpenPlay",
+      title: "Weeknight Open Play",
+      description: "Paddles to borrow at the desk. Games to 11, rotate after each game.",
+      daysOfWeek: "2,4",
+      startTime: "19:00:00",
+      endTime: "21:00:00",
+      minLevel: "Low Intermediate",
+      maxLevel: "High Intermediate",
+      capacity: 16,
+      pricePerHead: 150,
+      startsOn: NOW.format("YYYY-MM-DD"),
+      endsOn: null,
+      createdByAccountId: staff.manager?.accountId || null,
+      status: "Active",
+      dateCreated: now,
+      dateUpdated: now,
+    };
+    await insert(conn, "play_series", series);
+    const courtIds = home.activeCourts.slice(0, 2).map((c) => c.courtId);
+    for (const courtId of courtIds) await insert(conn, "play_series_courts", { seriesId, courtId });
+    for (const window of seriesWindows(series, now)) {
+      const made = await createPlaySession(conn, {
+        venueId: home.venueId,
+        seriesId,
+        fields: { ...series, ...window },
+        courtIds,
+        accountId: series.createdByAccountId,
+        now,
+      });
+      if (made.ok) sessions.push({ ...made, capacity: series.capacity });
+    }
+  }
+
+  // One-offs over the next few days, free and paid, each on the first window its courts allow
+  for (const [i, venue] of venues.entries()) {
+    for (const daysAhead of [0, 1, 2, 3, 5]) {
+      if ((i + daysAhead) % 2) continue;
+      const date = NOW.clone().add(daysAhead, "days").format("YYYY-MM-DD");
+      const courtIds = venue.activeCourts.slice(-2).map((c) => c.courtId);
+      const paid = (i + daysAhead) % 3 === 0;
+      for (const [start, end] of OPEN_PLAY_WINDOWS) {
+        const startAt = `${date} ${start}:00`;
+        if (startAt <= now) continue;
+        const made = await createPlaySession(conn, {
+          venueId: venue.venueId,
+          fields: {
+            kind: "OpenPlay",
+            title: start < "12:00" ? "Early Bird Open Play" : "Open Play",
+            description: null,
+            startAt,
+            endAt: `${date} ${end}:00`,
+            minLevel: i % 2 ? null : "Beginner",
+            maxLevel: i % 2 ? null : "Intermediate",
+            capacity: 12,
+            pricePerHead: paid ? 120 : 0,
+          },
+          courtIds,
+          accountId: staff.manager?.accountId || null,
+          now,
+        });
+        if (made.ok) {
+          sessions.push({ ...made, capacity: 12 });
+          break;
+        }
+      }
+    }
+  }
+
+  // A few walk-ins on most sessions (free, staff-added — no cash, CR-046)
+  for (const [i, session] of sessions.entries()) {
+    const count = i % 4 === 3 ? 0 : 2 + (i % 5);
+    for (let n = 0; n < Math.min(count, session.capacity); n += 1) {
+      await insertSignup(conn, {
+        playSessionId: session.playSessionId,
+        walkInName: `${WALK_INS[(i + n) % WALK_INS.length]} ${String.fromCharCode(65 + ((i * 3 + n) % 26))}.`,
+        price: 0,
+        paymentStatus: "Free",
+        status: "Confirmed",
+        createdByAccountId: staff.manager?.accountId || null,
+        now,
+      });
+    }
+  }
+  tally.openPlay += sessions.length;
+}
+
+/**
+ * PLAN-009 phase E: a tournament two weeks out at the first venue taking bookings,
+ * open for registration, with two divisions and some teams staff added.
+ */
+const DEMO_TEAMS = [
+  ["Kitchen Kings", "Rico Abad", "Lea Cruz"],
+  ["Third Shot Drop", "Mon Reyes", "Gail Tan"],
+  ["Dink Dynasty", "Paolo Lim", "Ara Santos"],
+  ["Erne Express", "Jun Dizon", "Kat Ramos"],
+  ["Lob City", "Ben Uy", "Joy Garcia"],
+  ["Net Ninjas", "Carlo Ong", "Mia Flores"],
+];
+
+async function seedTournaments(conn, staff) {
+  const now = fmt(NOW);
+  const venue = VENUES.find((v) => v.onlineBooking);
+  if (!venue) return;
+  const courtIds = venue.activeCourts.slice(-2).map((c) => c.courtId);
+  for (const offset of [13, 16, 19]) {
+    const startDate = NOW.clone().add(offset, "days").format("YYYY-MM-DD");
+    const endDate = NOW.clone().add(offset + 1, "days").format("YYYY-MM-DD");
+    const tournamentId = await uuid(conn);
+    await conn.query("SAVEPOINT demo_tournament");
+    await insert(conn, "tournaments", {
+      tournamentId,
+      venueId: venue.venueId,
+      publicToken: randomToken(),
+      name: "DGSports Club Doubles Open",
+      description: "Two days of doubles. Games to 11, win by 2. Prizes for the top two of each division.",
+      startDate,
+      endDate,
+      dailyStart: "07:00:00",
+      dailyEnd: "12:00:00",
+      registrationClosesAt: `${NOW.clone().add(offset - 2, "days").format("YYYY-MM-DD")} 20:00:00`,
+      createdByAccountId: staff.manager?.accountId || null,
+      status: "Open",
+      dateCreated: now,
+      dateUpdated: now,
+    });
+    const tournament = await lockTournament(conn, { tournamentId });
+    const held = await holdCourts(conn, { tournament, courtIds, accountId: staff.manager?.accountId || null, now });
+    if (!held.ok) {
+      await conn.query("ROLLBACK TO SAVEPOINT demo_tournament");
+      continue;
+    }
+    const divisions = [
+      { name: "Mixed Doubles 3.5", format: "RoundRobinThenKnockout", groupSize: 3, advancePerGroup: 2, entryFee: 500, capacity: 12, teams: DEMO_TEAMS },
+      { name: "Open Doubles", format: "SingleElimination", groupSize: null, advancePerGroup: null, entryFee: 0, capacity: 16, teams: DEMO_TEAMS.slice(0, 3) },
+    ];
+    for (const d of divisions) {
+      const divisionId = await uuid(conn);
+      await insert(conn, "tournament_divisions", {
+        divisionId,
+        tournamentId,
+        name: d.name,
+        teamSize: 2,
+        minLevel: null,
+        maxLevel: null,
+        capacity: d.capacity,
+        entryFee: d.entryFee,
+        format: d.format,
+        groupSize: d.groupSize,
+        advancePerGroup: d.advancePerGroup,
+        pointsToWin: 11,
+        winBy: 2,
+        status: "Active",
+        dateCreated: now,
+        dateUpdated: now,
+      });
+      for (const [teamName, ...players] of d.teams) {
+        const team = await insertTeam(conn, {
+          divisionId,
+          name: `${teamName}${d.format === "SingleElimination" ? " II" : ""}`,
+          teamSize: 2,
+          price: 0,
+          paymentStatus: "Free",
+          createdByAccountId: staff.manager?.accountId || null,
+          now,
+        });
+        for (const [i, playerName] of players.entries()) {
+          await addTeamPlayer(conn, { tournamentTeamId: team.tournamentTeamId, playerName, role: i ? "Partner" : "Captain", now });
+        }
+        await conn.execute(
+          `UPDATE tournament_teams SET status = 'Registered', registeredAt = ? WHERE tournamentTeamId = ?`,
+          [now, team.tournamentTeamId]
+        );
+      }
+    }
+    tally.tournaments += 1;
+    return;
+  }
+}
+
+/**
+ * PLAN-009 phase F: two clubs at the first venue taking bookings (one open, one by
+ * approval), a members-only evening and a coached clinic later in the week.
+ */
+async function seedClubs(conn, staff) {
+  const now = fmt(NOW);
+  const venue = VENUES.find((v) => v.onlineBooking);
+  if (!venue) return;
+  const clubIds = [];
+  for (const [name, joinPolicy, description] of [
+    ["BGC Dink Society", "Open", "Weeknight regulars. All levels welcome — come say hi at Open Play."],
+    ["Smash Point Elite", "Approval", "Competitive 4.0+ group. Ask to join; the club approves new members."],
+  ]) {
+    const clubId = await uuid(conn);
+    await insert(conn, "clubs", {
+      clubId,
+      venueId: venue.venueId,
+      publicToken: randomToken(),
+      name,
+      description,
+      joinPolicy,
+      createdByAccountId: staff.manager?.accountId || null,
+      status: "Active",
+      dateCreated: now,
+      dateUpdated: now,
+    });
+    clubIds.push(clubId);
+    tally.clubs += 1;
+  }
+  const courtIds = venue.activeCourts.slice(0, 1).map((c) => c.courtId);
+  const day = (n) => NOW.clone().add(n, "days").format("YYYY-MM-DD");
+  for (const [d, fields] of [
+    [4, { kind: "OpenPlay", title: "Dink Society Night", clubId: clubIds[0], minLevel: null, maxLevel: null, pricePerHead: 0 }],
+    [6, { kind: "Clinic", title: "Third Shot Drop Clinic", coachName: "Coach Rina Dela Paz", minLevel: "Beginner", maxLevel: "Intermediate", pricePerHead: 350 }],
+  ]) {
+    for (const [start, end] of [["13:00", "15:00"], ["10:00", "12:00"], ["21:00", "23:00"]]) {
+      const made = await createPlaySession(conn, {
+        venueId: venue.venueId,
+        fields: { description: null, capacity: 12, ...fields, startAt: `${day(d)} ${start}:00`, endAt: `${day(d)} ${end}:00` },
+        courtIds,
+        accountId: staff.manager?.accountId || null,
+        now,
+      });
+      if (made.ok) {
+        tally.openPlay += 1;
+        break;
+      }
+    }
+  }
+}
+
 async function seedAuditTrail(conn, staff, companyId) {
   const entries = [
     [staff.manager, "UPDATE", "venues", 13, "/api/v1/admin/venues"],
@@ -1230,6 +1511,9 @@ async function main() {
     await seedClosures(conn, staff);
     await seedBookings(conn, staff); // before walk-ins: bookings get the good slots
     await seedPastGames(conn, staff);
+    await seedOpenPlay(conn, staff);
+    await seedTournaments(conn, staff);
+    await seedClubs(conn, staff);
     await seedAuditTrail(conn, staff, companies.defaultId);
     await attributeOtherCompanies(conn, companies);
 

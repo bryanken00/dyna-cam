@@ -8,6 +8,7 @@ import {
   queryEnumDefault,
   queryInt,
 } from "./_helpers.js";
+import { VENUE_AMENITIES } from "../utils/venueFacts.js";
 
 const retentionDays = z.coerce
   .number()
@@ -42,6 +43,9 @@ const location = {
   latitude: coordinate("Latitude", 90),
   longitude: coordinate("Longitude", 180),
 };
+// PLAN-009 phase B: what the venue has (Discover's filters); the form sends the whole list
+const amenities = z.array(z.enum(VENUE_AMENITIES)).max(VENUE_AMENITIES.length).optional().default([]);
+
 // A pin is both numbers or neither
 const pinComplete = (v) => (v.latitude === undefined) === (v.longitude === undefined);
 const PIN_MESSAGE = { message: "Set both latitude and longitude, or clear the pin", path: ["latitude"] };
@@ -56,6 +60,7 @@ export const createVenueSchema = z.object({
   clipRetentionDays: retentionDays.default(7),
   clipPrice: clipPrice.default(0),
   ...location,
+  amenities,
 }).refine(pinComplete, PIN_MESSAGE);
 
 // PUT /:venueId
@@ -68,6 +73,7 @@ export const updateVenueSchema = z.object({
   clipPrice: clipPrice.default(0),
   status: z.enum(["Active", "Inactive"]).optional(),
   ...location,
+  amenities,
 }).refine(pinComplete, PIN_MESSAGE);
 
 // GET /

@@ -18,6 +18,9 @@ import bookingSettingsController from "../../../controllers/v1/admin/booking-set
 import closuresController from "../../../controllers/v1/admin/closures.controller.js";
 import bookingsController from "../../../controllers/v1/admin/bookings.controller.js";
 import companyPaymentsController from "../../../controllers/v1/admin/company-payments.controller.js";
+import openPlayController from "../../../controllers/v1/admin/open-play.controller.js";
+import tournamentsController from "../../../controllers/v1/admin/tournaments.controller.js";
+import clubsController from "../../../controllers/v1/admin/clubs.controller.js";
 import { auditTrail } from "../../../middlewares/auditTrail.middleware.js";
 import { requirePasswordChanged } from "../../../middlewares/requirePasswordChanged.middleware.js";
 
@@ -64,6 +67,12 @@ router.use("/closures", requireAuth, auditTrail("closures"), closuresController)
 router.use("/bookings", requireAuth, auditTrail("bookings"), bookingsController);
 // PLAN-008 phase C: the company's own Xendit account (write-only keys)
 router.use("/company-payments", requireAuth, auditTrail("company-payments"), companyPaymentsController);
+// PLAN-009 phase C: Open Play sessions, their spots and weekly series
+router.use("/open-play", requireAuth, auditTrail("open_play"), openPlayController);
+// PLAN-009 phase E: tournaments — divisions, teams, the draw, matches
+router.use("/tournaments", requireAuth, auditTrail("tournaments"), tournamentsController);
+// PLAN-009 phase F: clubs and their members
+router.use("/clubs", requireAuth, auditTrail("clubs"), clubsController);
 
 
 export default router;

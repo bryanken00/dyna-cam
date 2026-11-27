@@ -97,16 +97,28 @@ export const firstBookableDate = (hours, nowLocal = getCurrentTimestampLocal()) 
  * @param {string} window.startLocal - "YYYY-MM-DD HH:mm:ss" (Manila)
  * @param {string} window.endLocal
  * @param {string} [window.ignoreBookingId] - a booking being moved or checked in
+ * @param {string} [window.ignorePlaySessionId] - PLAN-009: an Open Play session being moved
+ *   (its own court blocks — closures tied to it — don't count)
+ * @param {string} [window.ignoreTournamentId] - PLAN-009 phase E: a tournament re-holding its courts
  * @param {boolean} [window.checkHours] - also refuse outside opening hours (bookings)
  * @param {string} [window.now] - getCurrentTimestampLocal() (tests pass a fixed one)
- * @returns {Promise<null | { type: "GAME"|"BOOKING"|"CLOSURE"|"CLOSED", from: string|null,
+ * @returns {Promise<null | { type: "GAME"|"BOOKING"|"CLOSURE"|"OPEN_PLAY"|"TOURNAMENT"|"CLOSED", from: string|null,
  *   until: string|null, id: string|null, code?: string }>} the earliest-starting conflict
  *   (code: a booking's bookingCode)
  *   (CLOSED — outside opening hours — has no window or id)
  */
 export const findConflict = async (
   db,
-  { courtId, startLocal, endLocal, ignoreBookingId = null, checkHours = false, now }
+  {
+    courtId,
+    startLocal,
+    endLocal,
+    ignoreBookingId = null,
+    ignorePlaySessionId = null,
+    ignoreTournamentId = null,
+    checkHours = false,
+    now,
+  }
 ) => {
   const at = now || getCurrentTimestampLocal();
   const [court] = await selectRows(db, `SELECT venueId FROM courts WHERE courtId = ?`, [courtId]);
@@ -133,19 +145,35 @@ export const findConflict = async (
     ),
     selectRows(
       db,
-      `SELECT c.closureId AS id, c.startAt AS \`from\`, c.endAt AS \`until\`
+      `SELECT c.closureId AS id, c.startAt AS \`from\`, c.endAt AS \`until\`, c.playSessionId, c.tournamentId
        FROM court_closures c
        WHERE c.venueId = ? AND (c.courtId IS NULL OR c.courtId = ?) AND c.status = 'Active'
          AND c.startAt < ? AND c.endAt > ?
+         AND (? IS NULL OR c.playSessionId IS NULL OR c.playSessionId != ?)
+         AND (? IS NULL OR c.tournamentId IS NULL OR c.tournamentId != ?)
        ORDER BY c.startAt ASC`,
-      [court.venueId, courtId, endLocal, startLocal]
+      [
+        court.venueId,
+        courtId,
+        endLocal,
+        startLocal,
+        ignorePlaySessionId,
+        ignorePlaySessionId,
+        ignoreTournamentId,
+        ignoreTournamentId,
+      ]
     ),
   ]);
 
   const found = [
     ...games.map((g) => ({ type: "GAME", ...g })),
     ...bookings.map((b) => ({ type: "BOOKING", ...b })),
-    ...closures.map((c) => ({ type: "CLOSURE", ...c })),
+    // PLAN-009: an Open Play session's court block is a closure tied to the session
+    // …and a tournament's hold on its courts (phase E) too
+    ...closures.map(({ playSessionId, tournamentId, ...c }) => ({
+      type: playSessionId ? "OPEN_PLAY" : tournamentId ? "TOURNAMENT" : "CLOSURE",
+      ...c,
+    })),
   ].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
   if (found.length > 0) return found[0];
 

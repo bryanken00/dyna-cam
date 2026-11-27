@@ -62,13 +62,16 @@ router.get(
     const [countRows, payments, totals] = await Promise.all([
       req.db.query(`SELECT COUNT(*) AS total FROM payments p ${whereClause}`, params),
       req.db.query(
-        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId,
+        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId, p.playSignupId, p.tournamentTeamId,
                 CASE WHEN p.sessionId IS NOT NULL THEN 'Game'
                      WHEN p.bookingId IS NOT NULL THEN 'Booking'
+                     WHEN p.playSignupId IS NOT NULL THEN 'Open Play'
+                     WHEN p.tournamentTeamId IS NOT NULL THEN 'Tournament'
                      ELSE 'Clip' END AS kind,
-                p.venueId, v.name AS venueName, c.name AS courtName,
-                COALESCE(cl.payCode, s.payCode, bk.bookingCode) AS payCode,
-                COALESCE(cl.requestedAt, s.startAt, bk.startAt) AS requestedAt,
+                p.venueId, v.name AS venueName,
+                COALESCE(c.name, CONCAT('Open Play: ', pss.title), CONCAT('Tournament: ', trn.name)) AS courtName,
+                COALESCE(cl.payCode, s.payCode, bk.bookingCode, psu.signupCode, tt.teamCode) AS payCode,
+                COALESCE(cl.requestedAt, s.startAt, bk.startAt, pss.startAt, CONCAT(trn.startDate, ' 00:00:00')) AS requestedAt,
                 p.amount, p.method, p.status, p.note, p.paidAt, p.refundedAt, p.refundError,
                 COALESCE(CONCAT(u.firstName, ' ', u.lastName), CONCAT(pa.name, ' (phone)'))
                   AS receivedBy
@@ -77,7 +80,14 @@ router.get(
          LEFT JOIN clips cl ON cl.clipId = p.clipId
          LEFT JOIN recording_sessions s ON s.sessionId = p.sessionId
          LEFT JOIN bookings bk ON bk.bookingId = p.bookingId
-         JOIN courts c ON c.courtId = COALESCE(cl.courtId, s.courtId, bk.courtId)
+         -- PLAN-009: an Open Play spot's payment names its session, not one court
+         LEFT JOIN play_signups psu ON psu.playSignupId = p.playSignupId
+         LEFT JOIN play_sessions pss ON pss.playSessionId = psu.playSessionId
+         -- …and a tournament entry's, its tournament
+         LEFT JOIN tournament_teams tt ON tt.tournamentTeamId = p.tournamentTeamId
+         LEFT JOIN tournament_divisions tdv ON tdv.divisionId = tt.divisionId
+         LEFT JOIN tournaments trn ON trn.tournamentId = tdv.tournamentId
+         LEFT JOIN courts c ON c.courtId = COALESCE(cl.courtId, s.courtId, bk.courtId)
          LEFT JOIN users u ON u.accountId = p.receivedByAccountId
          LEFT JOIN paired_apps pa ON pa.pairedAppId = p.pairedAppId
          ${whereClause}
@@ -150,7 +160,9 @@ router.post(
     try {
       conn = await req.db.beginTransaction();
       const [rows] = await conn.execute(
-        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId, p.status, p.refundError FROM payments p
+        `SELECT p.paymentId, p.clipId, p.sessionId, p.bookingId, p.playSignupId, p.tournamentTeamId, p.status,
+                p.refundError
+         FROM payments p
          WHERE p.paymentId = ? AND ${inCompanyVenues("p")} LIMIT 1 FOR UPDATE`,
         [req.params.paymentId, callerCompany(req)]
       );
@@ -159,7 +171,11 @@ router.post(
         return res.sendError("Payment not found", 404);
       }
       // Phase F: an online refund Xendit refused — staff repaid the player by hand
-      if (rows[0].bookingId && rows[0].status === "Paid" && rows[0].refundError) {
+      if (
+        (rows[0].bookingId || rows[0].playSignupId || rows[0].tournamentTeamId) &&
+        rows[0].status === "Paid" &&
+        rows[0].refundError
+      ) {
         if (rows[0].refundError === REFUND_SENDING) {
           await req.db.rollback(conn);
           return res.sendError(
@@ -188,8 +204,30 @@ router.post(
              AND NOT EXISTS (SELECT 1 FROM payments WHERE bookingId = ? AND status = 'Paid')`,
           [now, rows[0].bookingId, rows[0].bookingId]
         );
+        // PLAN-009: an Open Play spot the same way
+        await conn.execute(
+          `UPDATE play_signups SET paymentStatus = 'Refunded', dateUpdated = ?
+           WHERE playSignupId = ? AND paymentStatus = 'Paid' AND status IN ('Cancelled', 'Expired')
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE playSignupId = ? AND status = 'Paid')`,
+          [now, rows[0].playSignupId, rows[0].playSignupId]
+        );
+        // PLAN-009 phase E: a tournament entry the same way
+        await conn.execute(
+          `UPDATE tournament_teams SET paymentStatus = 'Refunded', dateUpdated = ?
+           WHERE tournamentTeamId = ? AND paymentStatus = 'Paid' AND status IN ('Withdrawn', 'Expired')
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE tournamentTeamId = ? AND status = 'Paid')`,
+          [now, rows[0].tournamentTeamId, rows[0].tournamentTeamId]
+        );
         await req.db.commit(conn);
         return res.sendSuccess("Marked as repaid by hand");
+      }
+      if (rows[0].tournamentTeamId) {
+        await req.db.rollback(conn);
+        return res.sendError("This is a tournament entry — refund it by withdrawing the team in Tournaments", 409);
+      }
+      if (rows[0].playSignupId) {
+        await req.db.rollback(conn);
+        return res.sendError("This is an Open Play spot — refund it by cancelling the spot in Open Play", 409);
       }
       // PLAN-003: a booking is refunded by cancelling it, which frees its slot too
       if (rows[0].bookingId) {

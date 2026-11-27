@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 
 import { useBoardPageHooks } from "./hooks";
 import BoardClock from "./components/BoardClock";
+import OpenPlayPanel from "./components/OpenPlayPanel";
+import TournamentPanel from "./components/TournamentPanel";
 import CourtDayGrid from "../../../components/CourtDayGrid";
 import DGMark from "../../../components/brand/DGMark";
 import Wordmark from "../../../components/brand/Wordmark";
@@ -146,6 +148,20 @@ const BoardPage = () => {
           Book a court online
         </span>
       </div>
+
+      {/* PLAN-009 phase D: Open Play running now — its courts, next games and line */}
+      {(board?.openPlay || []).map((session) => (
+        <OpenPlayPanel key={`${session.title}-${session.startAt}`} session={session} />
+      ))}
+
+      {/* PLAN-009 phase E: a tournament on today */}
+      {(board?.tournaments || []).map((t) => (
+        <TournamentPanel
+          key={t.name}
+          tournament={t}
+          courtName={(courtKey) => board.courts.find((c) => c.key === courtKey)?.name || null}
+        />
+      ))}
 
       {/* Today */}
       <div className="flex-1 min-h-0" style={{ background: "var(--color-surface)" }}>

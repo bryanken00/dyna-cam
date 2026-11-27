@@ -374,6 +374,93 @@ export const bookingPaymentRefundedEmail = (b) => ({
   ),
 });
 
+// ── PLAN-009 phase C: Open Play ──────────────────────────────────────────────
+
+/** The facts of an Open Play spot: where, when, and the session's page. */
+const playFacts = (o) => `
+  <table role="presentation" style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 0 0 20px; border: 1px solid #e4e4e7; border-radius: 8px;">
+    <tr><td style="padding: 10px 14px; color: #71717a;">What</td>
+        <td style="padding: 10px 14px; text-align: right;">${escapeHtml(o.title)}</td></tr>
+    <tr><td style="padding: 10px 14px; color: #71717a; border-top: 1px solid #e4e4e7;">Where</td>
+        <td style="padding: 10px 14px; text-align: right; border-top: 1px solid #e4e4e7;">${escapeHtml(o.courts)} · ${escapeHtml(o.venueName)}</td></tr>
+    <tr><td style="padding: 10px 14px; color: #71717a; border-top: 1px solid #e4e4e7;">When</td>
+        <td style="padding: 10px 14px; text-align: right; border-top: 1px solid #e4e4e7;">${escapeHtml(o.day)}<br />${escapeHtml(o.time)}</td></tr>
+  </table>`;
+
+const playLink = (o, label = "Open the session") => `
+  <p style="margin: 0 0 20px;">${button(escapeHtml(o.sessionUrl), label)}</p>`;
+
+/**
+ * You're in: a spot paid for (or free).
+ * @param {{ playerName, title, venueName, courts, day, time, paidLine, sessionUrl, directionsUrl }} o
+ */
+export const openPlayConfirmedEmail = (o) => ({
+  subject: `You're in: ${o.title} at ${o.venueName}, ${o.day}`,
+  html: layout(
+    "You're in",
+    `${p(`${hi(o.playerName)} your spot is saved. ${escapeHtml(o.paidLine)}.`)}
+     ${playFacts(o)}
+     ${directionsLink(o.directionsUrl)}
+     ${playLink(o)}
+     ${muted("Can't make it? Cancel from the session's page before the venue's cut-off.")}`
+  ),
+});
+
+/** The reminder before the session starts. */
+export const openPlayReminderEmail = (o) => ({
+  subject: `Today: ${o.title} at ${o.venueName}, ${o.time}`,
+  html: layout(
+    "See you on court",
+    `${p(`${hi(o.playerName)} your Open Play session starts ${escapeHtml(o.startsIn)}.`)}
+     ${playFacts(o)}
+     ${directionsLink(o.directionsUrl)}
+     ${playLink(o)}`
+  ),
+});
+
+/**
+ * The spot (or the whole session) was cancelled.
+ * @param {{ why: string, refundLine: string|null }} o - plus the facts
+ */
+export const openPlayCancelledEmail = (o) => ({
+  subject: `Cancelled: ${o.title} at ${o.venueName}, ${o.day}`,
+  html: layout(
+    "Your spot was cancelled",
+    `${p(`${hi(o.playerName)} ${escapeHtml(o.why)}`)}
+     ${playFacts(o)}
+     ${o.refundLine ? p(escapeHtml(o.refundLine)) : ""}
+     ${muted("Questions? Contact the venue.")}`
+  ),
+});
+
+/** A payment the spot couldn't keep (the session filled up, was cancelled, …). */
+export const openPlayPaymentRefundedEmail = (o) => ({
+  subject: `Your payment to ${o.venueName} is being refunded`,
+  html: layout(
+    "We're refunding your payment",
+    `${p(`${hi(o.playerName)} ${escapeHtml(o.why)}`)}
+     ${playFacts(o)}
+     ${p(escapeHtml(o.refundLine))}
+     ${playLink(o)}`
+  ),
+});
+
+// ── PLAN-009 phase E: tournaments ───────────────────────────────────────────
+
+/**
+ * One tournament email: a heading, a few plain lines, and a button.
+ * @param {{ subject, heading, playerName, lines: string[], buttonUrl?, buttonLabel? }} o
+ */
+export const tournamentEmail = (o) => ({
+  subject: o.subject,
+  html: layout(
+    escapeHtml(o.heading),
+    `${p(hi(o.playerName))}
+     ${o.lines.map((line) => p(escapeHtml(line))).join("")}
+     ${o.buttonUrl ? `<p style="margin: 0 0 20px;">${button(escapeHtml(o.buttonUrl), escapeHtml(o.buttonLabel || "Open"))}</p>` : ""}`
+  ),
+});
+
 /**
  * PLAN-008 phase B: a new company's Owner, onboarded from the back office — where to
  * sign in and the temporary password (they must choose their own at first sign-in).

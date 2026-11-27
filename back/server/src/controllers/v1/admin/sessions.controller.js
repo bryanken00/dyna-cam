@@ -423,8 +423,8 @@ const createOpenGame = async (req, res) => {
       await req.db.rollback(conn);
       const from = moment.tz(ahead.from, FORMAT, TIMEZONE).format("h:mm A");
       return res.sendError(
-        ahead.type === "CLOSURE"
-          ? `This court is closed from ${from} — give the game a game time that ends before then`
+        ["CLOSURE", "OPEN_PLAY", "TOURNAMENT"].includes(ahead.type)
+          ? `This court is ${ahead.type === "CLOSURE" ? "closed" : `booked for ${ahead.type === "OPEN_PLAY" ? "Open Play" : "a tournament"}`} from ${from} — give the game a game time that ends before then`
           : ahead.type === "BOOKING"
             ? `Booking ${ahead.code} has this court from ${from} — give the game a game time that ends before then`
             : "This court already has a game — end it before starting a new one",
@@ -546,9 +546,9 @@ router.post(
             409
           );
         }
-        if (conflict?.type === "CLOSURE") {
+        if (["CLOSURE", "OPEN_PLAY", "TOURNAMENT"].includes(conflict?.type)) {
           return res.sendError(
-            `This court is closed from ${moment
+            `This court is ${conflict.type === "CLOSURE" ? "closed" : `booked for ${conflict.type === "OPEN_PLAY" ? "Open Play" : "a tournament"}`} from ${moment
               .tz(conflict.from, FORMAT, TIMEZONE)
               .format("MMM D, h:mm A")} — pick a shorter game time or another court`,
             409
@@ -694,8 +694,8 @@ router.post(
             ? `Booking ${inTheWay.code} has this court from ${moment
                 .tz(inTheWay.from, FORMAT, TIMEZONE)
                 .format("h:mm A")} — add less time`
-            : inTheWay.type === "CLOSURE"
-              ? "The court is closed in that time — add less time"
+            : ["CLOSURE", "OPEN_PLAY", "TOURNAMENT"].includes(inTheWay.type)
+              ? `The court is ${inTheWay.type === "CLOSURE" ? "closed" : `booked for ${inTheWay.type === "OPEN_PLAY" ? "Open Play" : "a tournament"}`} in that time — add less time`
               : "Another session is booked on this court in that time",
           409
         );

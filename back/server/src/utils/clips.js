@@ -58,17 +58,38 @@ export const appUrl = () =>
     .trim()
     .replace(/\/+$/, "");
 
+/**
+ * PLAN-009: base URL of the player app (web-app/) — booking pages, a booking's
+ * own link and the end of a Google sign-in. Falls back to APP_URL, so until
+ * PLAYER_APP_URL is set the player pages stay on the main web app. Game, clip,
+ * stream and TV board pages stay on APP_URL either way.
+ */
+export const playerAppUrl = () =>
+  (process.env.PLAYER_APP_URL || "").split(",")[0].trim().replace(/\/+$/, "") || appUrl();
+
 /** Public page for a court's QR sign — CR-027: where a player starts a game. */
 export const courtQrUrl = (qrToken) => `${appUrl()}/court/${qrToken}`;
 
 /** PLAN-003: a venue's public booking page (its online booking link). */
-export const bookingPageUrl = (bookingToken) => `${appUrl()}/book/${bookingToken}`;
+export const bookingPageUrl = (bookingToken) => `${playerAppUrl()}/book/${bookingToken}`;
 
 /** CR-038: a venue's TV court board (its display link). */
 export const courtBoardUrl = (displayToken) => `${appUrl()}/board/${displayToken}`;
 
+/** PLAN-009 phase C: an Open Play session's page in the player app (its public link). */
+export const openPlayUrl = (playToken) => `${playerAppUrl()}/open-play/${playToken}`;
+
+/** PLAN-009 phase F: a club's page in the player app (its public link). */
+export const clubUrl = (publicToken) => `${playerAppUrl()}/clubs/${publicToken}`;
+
+/** PLAN-009 phase E: a tournament's page in the player app (its public link). */
+export const tournamentUrl = (publicToken) => `${playerAppUrl()}/events/${publicToken}`;
+
+/** PLAN-009 phase E: the link a captain sends their partner to join the team. */
+export const teamInviteUrl = (inviteToken) => `${playerAppUrl()}/team-invite/${inviteToken}`;
+
 /** PLAN-003: one booking's own page (its manage link). */
-export const bookingManageUrl = (manageToken) => `${appUrl()}/booking/${manageToken}`;
+export const bookingManageUrl = (manageToken) => `${playerAppUrl()}/booking/${manageToken}`;
 
 /** Public page for a clip's share link. */
 export const clipShareUrl = (shareToken) => `${appUrl()}/clip/${shareToken}`;

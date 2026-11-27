@@ -28,9 +28,12 @@ const router = express.Router();
 const CLOSURE_COLUMNS = `cl.closureId, cl.venueId, cl.courtId, c.name AS courtName, cl.startAt,
   cl.endAt, cl.reason, cl.status, cl.dateCreated, cl.dateUpdated`;
 
-// PLAN-008: one `?` — the caller's companyId (another company's closure is a 404)
+// PLAN-008: one `?` — the caller's companyId (another company's closure is a 404).
+// PLAN-009: an Open Play session's (and a tournament's) court blocks are closures too,
+// but they're theirs (changed in Open Play / Tournaments) — never listed, edited or removed here.
 const CLOSURE_FROM = `court_closures cl
   JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted' AND v.companyId = ?
+    AND cl.playSessionId IS NULL AND cl.tournamentId IS NULL
   LEFT JOIN courts c ON c.courtId = cl.courtId`;
 
 /**
@@ -367,7 +370,8 @@ router.delete(
       `UPDATE court_closures cl
        JOIN venues v ON v.venueId = cl.venueId AND v.status != 'Deleted' AND v.companyId = ?
        SET cl.status = 'Deleted', cl.dateUpdated = ?
-       WHERE cl.closureId = ? AND cl.status != 'Deleted'`,
+       WHERE cl.closureId = ? AND cl.status != 'Deleted' AND cl.playSessionId IS NULL
+         AND cl.tournamentId IS NULL`,
       [callerCompany(req), getCurrentTimestampLocal(), req.params.closureId]
     );
     if (result.affectedRows === 0) {

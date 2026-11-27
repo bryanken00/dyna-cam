@@ -1,5 +1,5 @@
 import express from "express";
-import { catchAsync, validateBody, validateQuery } from "../../../utils/catchAsync.js";
+import { catchAsync, validateBody, validateParams, validateQuery } from "../../../utils/catchAsync.js";
 import { ERROR_CODES } from "../../../utils/APIError.js";
 import { dynamicLimiter } from "../../../middlewares/rateLimiter.js";
 import { noIdempotencyCache } from "../../../middlewares/idempotency.middleware.js";
@@ -18,7 +18,17 @@ import {
   playerProfileSchema,
   playerRefreshSchema,
   playerSessionSchema,
+  playerSportSchema,
+  venueKeyParamsSchema,
 } from "../../../validators/player.validator.js";
+import {
+  findVenueByKey,
+  followedVenues,
+  playerSports,
+  recentVenues,
+  savePlayerSport,
+  setFollow,
+} from "../../../utils/playerProfile.js";
 
 /**
  * PLAN-006: a signed-in player — mounted at /api/v1/player.
@@ -30,6 +40,11 @@ import {
  *   PATCH /me                { firstName, middleName?, lastName, phone? } — the profile; asked on
  *                            the first sign-in (pre-filled from Google), booking needs it
  *   GET  /games?page&limit   the game log: upcoming bookings, then past ones, with their games
+ *   GET  /sports             PLAN-009 phase B: the sport profile (level, DUPR — unverified)
+ *   PUT  /sports             { sport, skillLevel?, duprId?, duprRating? } — one sport's answers
+ *   GET  /follows            the venues the player follows
+ *   POST /follows/:venueKey  follow a venue · DELETE unfollows it
+ *   GET  /recent-venues      venues booked lately (Book again)
  *
  * The session routes take no token (they make or end one); the rest go
  * through requirePlayer and only ever read the caller's own data.
@@ -105,6 +120,54 @@ router.get(
     const log = await gameLog(req.db, req.player, req.query);
     return res.sendSuccess("Game log", log);
   })
+);
+
+// ── PLAN-009 phase B: sport profile, follows, Book again ─────────────────────
+
+router.get(
+  "/sports",
+  requirePlayer,
+  catchAsync(async (req, res) =>
+    res.sendSuccess("Sports", { sports: await playerSports(req.db, req.player.playerId) })
+  )
+);
+
+router.put(
+  "/sports",
+  requirePlayer,
+  validateBody(playerSportSchema),
+  catchAsync(async (req, res) => {
+    const sports = await savePlayerSport(req.db, req.player.playerId, req.body);
+    return res.sendSuccess("Saved", { sports });
+  })
+);
+
+router.get(
+  "/follows",
+  requirePlayer,
+  catchAsync(async (req, res) =>
+    res.sendSuccess("Following", { venues: await followedVenues(req.db, req.player.playerId) })
+  )
+);
+
+/** Follow / unfollow: an unknown, Deleted or Inactive venue's key is a 404. */
+const follow = (on) =>
+  catchAsync(async (req, res) => {
+    const venueId = await findVenueByKey(req.db, req.params.venueKey);
+    if (!venueId) return res.sendError("Venue not found", 404);
+    await setFollow(req.db, req.player.playerId, venueId, on);
+    return res.sendSuccess(on ? "Following" : "Unfollowed", { following: on });
+  });
+
+router.post("/follows/:venueKey", requirePlayer, validateParams(venueKeyParamsSchema), follow(true));
+router.delete("/follows/:venueKey", requirePlayer, validateParams(venueKeyParamsSchema), follow(false));
+
+router.get(
+  "/recent-venues",
+  requirePlayer,
+  catchAsync(async (req, res) =>
+    res.sendSuccess("Booked lately", { venues: await recentVenues(req.db, req.player.playerId) })
+  )
 );
 
 export default router;

@@ -11,6 +11,7 @@ import {
   listVenuesQuerySchema,
   updateVenueSchema,
 } from "../../../validators/venues.validator.js";
+import { amenityList, amenityValue } from "../../../utils/venueFacts.js";
 
 /**
  * Venues — pickleball venues that host Dyna Cam courts (PLAN-001).
@@ -20,7 +21,7 @@ import {
 const router = express.Router();
 
 const VENUE_COLUMNS = `v.venueId, v.name, v.address, v.regionCode, v.provinceCode, v.cityMunCode,
-  v.barangayCode, v.street, v.latitude, v.longitude, v.phone, v.logoUrl, v.clipRetentionDays,
+  v.barangayCode, v.street, v.latitude, v.longitude, v.amenities, v.phone, v.logoUrl, v.clipRetentionDays,
   v.clipPrice, v.status, v.dateCreated, v.dateUpdated`;
 
 // Courts and recorder boxes per venue, for the list and the detail view
@@ -35,6 +36,8 @@ const toVenue = (row) => ({
   // CR-050: the map pin (DECIMAL → number; null = no pin)
   latitude: row.latitude === null || row.latitude === undefined ? null : Number(row.latitude),
   longitude: row.longitude === null || row.longitude === undefined ? null : Number(row.longitude),
+  // PLAN-009 phase B: what the venue has, in the fixed order
+  amenities: amenityList(row.amenities),
 });
 
 /** CR-050: the location columns from a validated body, in LOCATION_COLUMNS order. */
@@ -169,15 +172,16 @@ router.post(
 
       await conn.execute(
         `INSERT INTO venues
-           (venueId, companyId, name, address, ${LOCATION_COLUMNS.join(", ")}, phone, logoUrl,
+           (venueId, companyId, name, address, ${LOCATION_COLUMNS.join(", ")}, amenities, phone, logoUrl,
             clipRetentionDays, clipPrice, status, dateCreated, dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           venueId,
           req.user.companyId,
           name,
           address || null,
           ...locationValues(req.body),
+          amenityValue(req.body.amenities),
           phone || null,
           logoUrl || null,
           clipRetentionDays,
@@ -237,12 +241,13 @@ router.put(
       await conn.execute(
         `UPDATE venues
          SET name = ?, address = ?, ${LOCATION_COLUMNS.map((c) => `${c} = ?`).join(", ")},
-             phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?, status = ?, dateUpdated = ?
+             amenities = ?, phone = ?, logoUrl = ?, clipRetentionDays = ?, clipPrice = ?, status = ?, dateUpdated = ?
          WHERE venueId = ? AND companyId = ?`,
         [
           name,
           address || null,
           ...locationValues(req.body),
+          amenityValue(req.body.amenities),
           phone || null,
           logoUrl || null,
           clipRetentionDays,

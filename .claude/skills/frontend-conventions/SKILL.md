@@ -1,9 +1,14 @@
 ---
 name: frontend-conventions
-description: The non-negotiable conventions for this repo's React 19 + Vite client (front/) — code style and library choices, folder structure and route registration, the table-page hooks.jsx contract, the api/ + requests/ service layers and React Query keys, the Zustand auth store and permission gating, the "Modern" design system tokens, and the Sheet form-drawer pattern. Load BEFORE writing or editing anything under front/src — any page, hook, component, form, service, store, or route. Also load when reviewing frontend code, answering how the client is structured, or deciding where a new file goes.
+description: The non-negotiable conventions for this repo's React 19 + Vite client (front/) and the player app (web-app/, PLAN-009) — code style and library choices, folder structure and route registration, the table-page hooks.jsx contract, the api/ + requests/ service layers and React Query keys, the Zustand auth store and permission gating, the "Modern" design system tokens, and the Sheet form-drawer pattern. Load BEFORE writing or editing anything under front/src or web-app/src — any page, hook, component, form, service, store, or route. Also load when reviewing frontend code, answering how the client is structured, or deciding where a new file goes.
 ---
 
-# Frontend conventions (`front/`)
+# Frontend conventions (`front/`, and `web-app/`)
+
+> **`web-app/`** (PLAN-009) is the player app: same stack, tokens and service-layer rules, but no
+> staff login, no permissions, no table pages — its pages follow `front/src/pages/Public/` (a
+> `hooks.jsx` + presentational `index.jsx`, `PublicLayout`). Signed-in calls go through
+> `playerAxios` (`services/api/public/player.js`). See `web-app/CLAUDE.md`.
 
 React 19 (hooks only) · JavaScript, no TypeScript · Vite · **shadcn/ui** (`@/components/ui/*`) ·
 Tailwind v4 · Zustand · TanStack React Query · react-hook-form + zod · sonner · TanStack Table via

@@ -5,6 +5,8 @@ import { getCurrentTimestampLocal, moment } from "./dateUtils.js";
 import { bookingManageUrl } from "./clips.js";
 import { findConflict } from "./courtTimeline.js";
 import { sendBookingEmail, sendOrderConfirmedEmail } from "./bookingEmails.js";
+import { settlePlayInvoice } from "./playPayments.js";
+import { settleTeamInvoice } from "./tournamentPayments.js";
 
 /**
  * PLAN-003 Phase F — paying a booking online through Xendit, and giving the
@@ -47,9 +49,12 @@ const fail = (status, message, code) => ({ ok: false, status, message, code });
 export const invoiceExternalId = (bookingCode) => `booking-${bookingCode}`;
 /** CR-047: an order's invoice pays several bookings at once. */
 export const orderExternalId = (orderCode) => `order-${orderCode}`;
-/** → { kind: "booking"|"order", code } or null (not one of ours). */
+/**
+ * → { kind: "booking"|"order"|"play"|"team", code } or null (not one of ours).
+ * PLAN-009: play = an Open Play spot, team = a tournament entry.
+ */
 const invoiceRef = (externalId) => {
-  const match = /^(booking|order)-([A-Z0-9]{4,12})$/.exec(externalId || "");
+  const match = /^(booking|order|play|team)-([A-Z0-9]{4,12})$/.exec(externalId || "");
   return match ? { kind: match[1], code: match[2] } : null;
 };
 
@@ -79,8 +84,13 @@ export const accountForCheckout = async (db, checkoutId) => {
   const rows = await db.query(
     `SELECT venueId FROM bookings WHERE checkoutId = ?
      UNION SELECT venueId FROM payments WHERE providerRef = ?
+     UNION SELECT s.venueId FROM play_signups su
+       JOIN play_sessions s ON s.playSessionId = su.playSessionId WHERE su.checkoutId = ?
+     UNION SELECT t.venueId FROM tournament_teams tt
+       JOIN tournament_divisions d ON d.divisionId = tt.divisionId
+       JOIN tournaments t ON t.tournamentId = d.tournamentId WHERE tt.checkoutId = ?
      LIMIT 1`,
-    [checkoutId, checkoutId]
+    [checkoutId, checkoutId, checkoutId, checkoutId]
   );
   return rows[0] ? paymentAccountForVenue(db, rows[0].venueId) : null;
 };
@@ -379,6 +389,8 @@ export const settleInvoice = async (db, invoiceId, { invoice: known, account, co
     return { outcome: "UNKNOWN_BOOKING" };
   }
   if (ref.kind === "order") return settleOrderInvoice(db, invoice, ref.code, companyId);
+  if (ref.kind === "play") return settlePlayInvoice(db, invoice, ref.code, companyId);
+  if (ref.kind === "team") return settleTeamInvoice(db, invoice, ref.code, companyId);
   const bookingCode = ref.code;
 
   const now = getCurrentTimestampLocal();
@@ -659,6 +671,24 @@ const markBookingRefunded = (db, bookingId, now) =>
     [now, bookingId, bookingId]
   );
 
+/** PLAN-009: an Open Play spot reads Refunded once its payments are back (cancelled / expired spots only). */
+const markSpotRefunded = (db, playSignupId, now) =>
+  db.query(
+    `UPDATE play_signups SET paymentStatus = 'Refunded', dateUpdated = ?
+     WHERE playSignupId = ? AND paymentStatus = 'Paid' AND status IN ('Cancelled', 'Expired')
+       AND NOT EXISTS (SELECT 1 FROM payments WHERE playSignupId = ? AND status = 'Paid')`,
+    [now, playSignupId, playSignupId]
+  );
+
+/** PLAN-009 phase E: a withdrawn / expired tournament entry reads Refunded once its payments are back. */
+const markTeamRefunded = (db, tournamentTeamId, now) =>
+  db.query(
+    `UPDATE tournament_teams SET paymentStatus = 'Refunded', dateUpdated = ?
+     WHERE tournamentTeamId = ? AND paymentStatus = 'Paid' AND status IN ('Withdrawn', 'Expired')
+       AND NOT EXISTS (SELECT 1 FROM payments WHERE tournamentTeamId = ? AND status = 'Paid')`,
+    [now, tournamentTeamId, tournamentTeamId]
+  );
+
 /**
  * Send the refunds of online payments queued for one (refundError set,
  * still Paid). Each is claimed first, so two senders never refund twice.
@@ -693,7 +723,8 @@ export const sendRefunds = async (
       continue;
     }
     const [payment] = await db.query(
-      `SELECT paymentId, bookingId, venueId, amount, providerRef FROM payments WHERE paymentId = ?`,
+      `SELECT paymentId, bookingId, playSignupId, tournamentTeamId, venueId, amount, providerRef
+       FROM payments WHERE paymentId = ?`,
       [paymentId]
     );
     // PLAN-008: refunded from the company's own Xendit account it was paid into
@@ -740,6 +771,8 @@ export const sendRefunds = async (
       [done, accountId, refundId, done, paymentId]
     );
     await markBookingRefunded(db, payment.bookingId, done);
+    if (payment.playSignupId) await markSpotRefunded(db, payment.playSignupId, done);
+    if (payment.tournamentTeamId) await markTeamRefunded(db, payment.tournamentTeamId, done);
     results.push({ paymentId, ok: true, amount: Number(payment.amount) });
   }
   return results;
@@ -754,7 +787,7 @@ export const sendRefunds = async (
  */
 export const handleRefundEvent = async (db, refundId, { companyId = null } = {}) => {
   const rows = await db.query(
-    `SELECT p.paymentId, p.bookingId, p.status, p.venueId, v.companyId
+    `SELECT p.paymentId, p.bookingId, p.playSignupId, p.tournamentTeamId, p.status, p.venueId, v.companyId
      FROM payments p JOIN venues v ON v.venueId = p.venueId
      WHERE p.providerRefundRef = ? LIMIT 1`,
     [refundId]
@@ -780,6 +813,16 @@ export const handleRefundEvent = async (db, refundId, { companyId = null } = {})
     `UPDATE bookings SET paymentStatus = 'Paid', dateUpdated = ?
      WHERE bookingId = ? AND paymentStatus = 'Refunded'`,
     [now, rows[0].bookingId]
+  );
+  await db.query(
+    `UPDATE play_signups SET paymentStatus = 'Paid', dateUpdated = ?
+     WHERE playSignupId = ? AND paymentStatus = 'Refunded'`,
+    [now, rows[0].playSignupId]
+  );
+  await db.query(
+    `UPDATE tournament_teams SET paymentStatus = 'Paid', dateUpdated = ?
+     WHERE tournamentTeamId = ? AND paymentStatus = 'Refunded'`,
+    [now, rows[0].tournamentTeamId]
   );
   logger.error("Xendit: a refund failed after it was accepted", {
     paymentId: rows[0].paymentId,

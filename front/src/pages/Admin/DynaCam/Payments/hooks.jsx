@@ -86,7 +86,7 @@ export const usePaymentHooks = () => {
     async (record) => {
       const ok = await confirm({
         title: "Mark as repaid by hand",
-        description: `The online refund of ${formatPeso(record.amount)} for booking ${formatPayCode(
+        description: `The online refund of ${formatPeso(record.amount)} for ${record.kind === "Open Play" ? "Open Play spot" : "booking"} ${formatPayCode(
           record.payCode,
         )} failed (${decodeHTML(record.refundError)}). Mark it refunded once you've given the player their money back another way.`,
         confirmText: "Mark repaid",
@@ -119,7 +119,8 @@ export const usePaymentHooks = () => {
     (record) => {
       if (!canWrite || record.status !== "Paid") return [];
       // Phase F: a failed online refund of a booking, repaid by hand
-      if (record.kind === "Booking" && record.refundError) {
+      // PLAN-009: an Open Play spot's the same way
+      if (["Booking", "Open Play", "Tournament"].includes(record.kind) && record.refundError) {
         return [
           {
             key: "repaid",
@@ -131,6 +132,10 @@ export const usePaymentHooks = () => {
       }
       // PLAN-003: a booking is refunded by cancelling it in Bookings
       if (record.kind === "Booking") return [];
+      // PLAN-009: an Open Play spot is refunded by cancelling it in Open Play
+      if (record.kind === "Open Play") return [];
+      // PLAN-009 phase E: a tournament entry is refunded by withdrawing the team
+      if (record.kind === "Tournament") return [];
       return [
         {
           key: "refund",

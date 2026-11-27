@@ -15,6 +15,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   Tooltip,
@@ -28,6 +35,12 @@ import { useDiscardGuard } from "../../../../hooks/useDiscardGuard";
 import { decodeHTML } from "../../../../utils/decode-html";
 import { courtUpdatePayload } from "../../../../utils/dynaCam";
 import {
+  COURT_SURFACES,
+  NOT_SAID,
+  indoorToSelect,
+  selectToIndoor,
+} from "../../../../utils/venueFacts";
+import {
   useCreateCourt,
   useUpdateCourt,
 } from "../../../../services/requests/admin/courts";
@@ -39,9 +52,18 @@ const courtSchema = z.object({
     .min(1, "Name is required")
     .max(100, "Name must not exceed 100 characters"),
   status: z.enum(["Active", "Inactive"]),
+  // PLAN-009 phase B: what players see on Discover; "none" = not said
+  surface: z.enum([NOT_SAID, ...COURT_SURFACES]),
+  indoor: z.enum([NOT_SAID, "indoor", "outdoor"]),
 });
 
-const EMPTY = { name: "", status: "Active" };
+const EMPTY = { name: "", status: "Active", surface: NOT_SAID, indoor: NOT_SAID };
+
+/** The court's facts as the API takes them ("" / null = not said). */
+const factsPayload = (values) => ({
+  surface: values.surface === NOT_SAID ? "" : values.surface,
+  isIndoor: selectToIndoor(values.indoor),
+});
 
 const iconPrefix =
   "pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2";
@@ -74,6 +96,8 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         ? {
             name: decodeHTML(entity.name) ?? "",
             status: entity.status === "Inactive" ? "Inactive" : "Active",
+            surface: entity.surface || NOT_SAID,
+            indoor: indoorToSelect(entity.isIndoor),
           }
         : EMPTY,
     );
@@ -107,6 +131,7 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
           courtData: courtUpdatePayload(entity, {
             name: values.name,
             status: values.status,
+            ...factsPayload(values),
           }),
         });
         markSaved();
@@ -115,6 +140,7 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         const response = await createMutation.mutateAsync({
           venueId: entity?.venueId,
           name: values.name,
+          ...factsPayload(values),
         });
         markSaved();
         onSuccess?.({ courtId: response?.data?.courtId });
@@ -170,7 +196,7 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                       }}
                     >
                       {isEditMode
-                        ? "Rename the court or take it out of use"
+                        ? "Rename the court, describe it, or take it out of use"
                         : "Next you'll set up its camera"}
                     </p>
                   </div>
@@ -228,6 +254,60 @@ const CourtFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                   </FormItem>
                 )}
               />
+
+              {/* PLAN-009 phase B: shown to players on Discover, and its filters */}
+              <div className="mt-7">
+                <SectionLabel>What players see</SectionLabel>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="surface"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Surface</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="h-10 w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NOT_SAID}>Not said</SelectItem>
+                            {COURT_SURFACES.map((surface) => (
+                              <SelectItem key={surface} value={surface}>
+                                {surface}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="indoor"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Indoor or outdoor</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger className="h-10 w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NOT_SAID}>Not said</SelectItem>
+                            <SelectItem value="indoor">Indoor (covered)</SelectItem>
+                            <SelectItem value="outdoor">Outdoor</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
 
               {isEditMode && (
                 <div className="mt-7">

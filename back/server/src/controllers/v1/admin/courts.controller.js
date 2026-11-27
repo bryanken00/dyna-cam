@@ -48,6 +48,7 @@ const COURT_SELECT = `
   SELECT c.courtId, c.venueId, v.name AS venueName, v.logoUrl AS venueLogoUrl, c.name,
          c.cameraRtspUrl, c.camera2RtspUrl, c.qrToken, c.streamEnabled,
          c.streamRtmpUrl, c.streamWatchUrl, c.streamLayout, c.snapshotPath, c.snapshotAt,
+         c.surface, c.isIndoor,
          c.snapshot2Path, c.snapshot2At, ${COURT_DRIVE_COLUMNS("c")},
          c.status, c.dateCreated, c.dateUpdated,
          EXISTS (
@@ -130,6 +131,15 @@ const toCamera = (stored, live, snapshotPath, snapshotAt) => ({
   snapshotSecondsAgo: secondsSince(snapshotAt),
 });
 
+/** PLAN-009 phase B: isIndoor from a body (true / false / null / omitted) → the column's 1 / 0 / NULL. */
+const indoorValue = (value) => (value === undefined || value === null ? null : value ? 1 : 0);
+
+/** On an edit: an omitted surface / isIndoor keeps the stored value, "" / null clears it. */
+const courtFacts = ({ surface, isIndoor }, stored) => ({
+  surface: surface === undefined ? stored.surface : surface || null,
+  isIndoor: isIndoor === undefined ? stored.isIndoor : indoorValue(isIndoor),
+});
+
 const toCourt = (row, live = new Map(), queue = null) => {
   const {
     cameraRtspUrl,
@@ -153,6 +163,8 @@ const toCourt = (row, live = new Map(), queue = null) => {
     ...court,
     venueLogoUrl: signUploadUrl(row.venueLogoUrl),
     recorderOnline: Boolean(row.recorderOnline),
+    // PLAN-009 phase B: null = not said
+    isIndoor: row.isIndoor === null || row.isIndoor === undefined ? null : Boolean(row.isIndoor),
     // The court's QR sign — CR-027: players start their own game there
     qrUrl: courtQrUrl(row.qrToken),
     camera: toCamera(cameraRtspUrl, live.get(liveKey(row.courtId, 1)), snapshotPath, snapshotAt),
@@ -313,6 +325,8 @@ router.post(
       streamRtmpUrl,
       streamWatchUrl,
       streamLayout = "CAM1",
+      surface,
+      isIndoor,
     } = req.body;
     if (streamEnabled && !streamRtmpUrl) {
       return res.sendError("Enter the stream's RTMP address to turn live streaming on", 400);
@@ -357,9 +371,9 @@ router.post(
       await conn.execute(
         `INSERT INTO courts
            (courtId, venueId, name, cameraRtspUrl, camera2RtspUrl, qrToken,
-            streamEnabled, streamRtmpUrl, streamWatchUrl, streamLayout, status, dateCreated,
-            dateUpdated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
+            streamEnabled, streamRtmpUrl, streamWatchUrl, streamLayout, surface, isIndoor, status,
+            dateCreated, dateUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, ?)`,
         [
           courtId,
           venueId,
@@ -371,6 +385,8 @@ router.post(
           encryptSecret(streamRtmpUrl),
           streamWatchUrl || null,
           streamLayout,
+          surface || null,
+          indoorValue(isIndoor),
           now,
           now,
         ]
@@ -421,7 +437,7 @@ router.put(
 
       const [target] = await conn.execute(
         `SELECT c.courtId, c.venueId, c.cameraRtspUrl, c.camera2RtspUrl, c.streamRtmpUrl,
-                c.streamLayout
+                c.streamLayout, c.surface, c.isIndoor
          FROM courts c
          JOIN venues v ON v.venueId = c.venueId AND v.status != 'Deleted' AND v.companyId = ?
          WHERE c.courtId = ? AND c.status != 'Deleted'
@@ -473,10 +489,12 @@ router.put(
         return res.sendError("Enter the stream's RTMP address to turn live streaming on", 400);
       }
 
+      const facts = courtFacts(req.body, target[0]);
       await conn.execute(
         `UPDATE courts
          SET name = ?, cameraRtspUrl = ?, camera2RtspUrl = ?, streamEnabled = ?,
-             streamRtmpUrl = ?, streamWatchUrl = ?, streamLayout = ?, status = ?, dateUpdated = ?
+             streamRtmpUrl = ?, streamWatchUrl = ?, streamLayout = ?, surface = ?, isIndoor = ?,
+             status = ?, dateUpdated = ?
          WHERE courtId = ?`,
         [
           name,
@@ -486,6 +504,8 @@ router.put(
           storedStream,
           streamWatchUrl || null,
           layout,
+          facts.surface,
+          facts.isIndoor,
           status || "Active",
           now,
           courtId,

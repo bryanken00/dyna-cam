@@ -1,43 +1,46 @@
-# Frontend — (React 19 + Vite)
+# Player app — (React 19 + Vite) · PLAN-009
 
-## ⚠️ Before writing any code in `front/src`, load the `frontend-conventions` skill
+The players' own app: find a venue, book and pay, see your games, keep your profile. Later phases
+of [PLAN-009](../docs/plans/PLAN-009-player-app-pickleball/plan.md) add Open Play, the queue,
+tournaments, clubs and coaching. Staff work stays in the main app's Admin portal (`front/`).
 
-The conventions are **non-negotiable** and live in that skill's `references/`
-([`.claude/skills/frontend-conventions/`](../.claude/skills/frontend-conventions/SKILL.md)) —
-eight topic docs covering code style, folder structure and route registration, the `hooks.jsx`
-contract, the API service layers, auth/permissions, the design system, and the form pattern. The
-skill's table says which one to read for the area you're touching. Read it **before** writing, not
-after.
+## ⚠️ Before writing any code in `web-app/src`, load the `frontend-conventions` skill
 
-Building a whole new CRUD module? Use the **`new-module`** skill instead — it drives this one plus
-the backend half in the right order.
+The same conventions as `front/` apply (code style, service layers, React Query keys, design
+tokens, forms) — the skill's `references/` are the rules. What's different here:
+
+- **No staff login, no permissions, no table pages.** Pages follow the player-page shape from
+  `front/src/pages/Public/`: a `hooks.jsx` with the state and handlers, a presentational
+  `index.jsx`, wrapped in `components/layout/PublicLayout.jsx` (top bar, and the
+  Discover / Play / Profile tabs from `components/layout/PlayerTabs.jsx` — bottom bar on phones).
+- **Two axios instances.** `services/api/axios.js` (plain, for `/api/v1/public/*` and the player
+  session routes — no CSRF, the API checks it only on Admin routes) and `playerAxios` in
+  `services/api/public/player.js` (`Authorization: Player <token>`, refreshes itself).
+  `store/playerStore.js` keeps only the refresh token.
+- **Same paths as the main app used** (`/book`, `/book/:bookingToken`, `/booking/:manageToken`,
+  `/me/games`, `/me/profile`, `/signed-in`): links the API sends (emails, Xendit return, Google
+  sign-in) point here once `PLAYER_APP_URL` is set in `back/.env`. A new page a sign-in should
+  return to must also be added to `RETURN_ROOTS` in `back/server/src/utils/googleSignIn.js`.
+- **Game, clip, stream and TV board pages stay on the main app** — link to them with full URLs
+  from `utils/mainApp.js` (`VITE_MAIN_APP_URL`), never a router `<Link>`.
+
+## Running it
+
+`npm install`, copy `.env.example` to `.env`, `npm run dev` → http://localhost:4022. `/api/v1`
+and `/public/uploads` are proxied to `VITE_API_URL` (the API on `4021`). Verify a change with
+`npm run lint && npm run build`.
 
 ## Stack
 
 React 19 (function components, hooks only) · JavaScript (no TypeScript) · Vite ·
-**shadcn/ui** (Radix primitives + Tailwind, in `src/components/ui/`) · Tailwind CSS v4 · Zustand ·
-TanStack React Query · **react-hook-form + zod** (forms) · **sonner** (toasts) ·
-**@tanstack/react-table** (tables, via the shared `DataTable`) · axios · react-router v8 ·
-lucide-react · dayjs. Type is **Onest** (UI) + **JetBrains Mono** (micro-data only), self-hosted
+**shadcn/ui** (in `src/components/ui/`) · Tailwind CSS v4 · Zustand · TanStack React Query ·
+**react-hook-form + zod** · **sonner** · axios · react-router v8 · lucide-react · dayjs. Type is
+**Onest** (UI) + **JetBrains Mono** (micro-data) + **Space Grotesk** (the wordmark), self-hosted
 via `@fontsource-variable`.
 
-> All UI primitives are **shadcn/ui** — import them from `@/components/ui/*` (the `@/` alias →
-> `src/`) and use lucide-react for icons. Don't introduce another component or icon library.
+## Design system
 
-## Design system — "Modern"
-
-Monochrome surfaces + hairline borders + **one green accent used sparingly**. Structure comes from
-borders, **not shadows**; the primary button is **inverted monochrome** (never the accent, never a
-gradient) — that's the shadcn `<Button>` default variant, which the token bridge maps to the
-inverted colours. Every color is a token in `src/index.css` — **never hardcode a hex**.
-
-shadcn's semantic tokens (`--background`, `--card`, `--primary`, `--border`, `--ring`, …) are
-bridged onto the Modern tokens in `src/index.css` (the `@theme inline` block), so shadcn
-components inherit this design in light and dark with no per-component theming.
-
-- **`modern-module-pattern.md`** (in the skill) — the canonical, copy-paste spec for a module's
-  list page + create/edit drawer. Read it before building either.
-- **`src/pages/Admin/UserManagement/Roles/`** — the reference implementation. Copy its shape.
-- Shared building blocks: `components/PageHeader.jsx`, `StatCard.jsx`, `DataTable.jsx`,
-  `SearchInput.jsx`, `RowActions.jsx`, `PaginationFooter.jsx`, `SectionLabel.jsx`,
-  `StatusToggle.jsx`, `PasswordInput.jsx`, `DescriptionList.jsx`, `Spinner.jsx`, `ResultState.jsx`.
+The main app's DGSports brand (CR-036): `src/index.css` is the same token file as
+`front/src/index.css` — keep the two in step. Blue primary buttons with white text (lime with
+dark text in dark), hairline borders instead of shadows, every colour a token — **never hardcode a
+hex**. Mobile-first: one column, 44 px+ touch targets, room for the bottom tab bar.

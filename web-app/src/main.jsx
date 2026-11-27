@@ -6,6 +6,7 @@ import App from "./App.jsx";
 // Google Fonts <link> is only a dev/CDN fallback.
 import "@fontsource-variable/onest";
 import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/space-grotesk";
 
 import "./index.css";
 import { initSentry } from "./config/sentry.js";

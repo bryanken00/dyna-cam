@@ -2,6 +2,10 @@ import { logger } from "../../config/logger.js";
 import { getCurrentTimestampLocal } from "../utils/dateUtils.js";
 import { expireHolds } from "../utils/bookings.js";
 import { runBookingEmails } from "../utils/bookingEmails.js";
+import { expirePlayHolds } from "../utils/openPlay.js";
+import { runPlayEmails } from "../utils/openPlayEmails.js";
+import { runPlaySeries } from "../utils/playSeries.js";
+import { expireTeamHolds } from "../utils/tournaments.js";
 
 /**
  * PLAN-003 Phase E: keep bookings' statuses true without anyone opening a page.
@@ -13,6 +17,9 @@ import { runBookingEmails } from "../utils/bookingEmails.js";
  *   4. Phase G emails (with SendGrid set up): the reminder BOOKING_REMINDER_MINUTES
  *      before a Confirmed booking, and "your court was released" for holds that
  *      ran out in the last hour (utils/bookingEmails.js).
+ *   5. PLAN-009: Open Play spots whose hold ran out → Expired, their reminders
+ *      (utils/openPlayEmails.js), and — once an hour — each weekly series' sessions
+ *      4 weeks ahead (utils/playSeries.js).
  *
  * Steps 1–3 are each one idempotent UPDATE, and every email is claimed on its
  * column before it's sent, so two API processes running this at once do no harm.
@@ -46,12 +53,22 @@ export const runBookingMaintenance = async (db, { now = getCurrentTimestampLocal
 
   const emails = await runBookingEmails(db, { now });
 
+  const playExpired = await expirePlayHolds(db, { now });
+  const playEmails = await runPlayEmails(db, { now });
+  const series = await runPlaySeries(db, { now });
+  // Phase E: unpaid tournament entries whose hold ran out
+  const teamsExpired = await expireTeamHolds(db, { now });
+
   return {
     expired,
     noShows: Number(noShows.affectedRows || 0),
     completed: Number(completed.affectedRows || 0),
     reminders: emails.reminders,
     released: emails.released,
+    playExpired,
+    playReminders: playEmails.reminders,
+    playSessionsMade: series.made,
+    teamsExpired,
   };
 };
 

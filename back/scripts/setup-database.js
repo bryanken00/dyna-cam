@@ -80,6 +80,12 @@ async function main() {
       { module: "payments", submodule: null, description: "Clip payments (cash)" },
       // PLAN-003 — also inserted by migration 033 on existing databases
       { module: "bookings", submodule: null, description: "Court bookings" },
+      // PLAN-009 phase C — also inserted by migration 050 on existing databases
+      { module: "open_play", submodule: null, description: "Open Play sessions" },
+      // PLAN-009 phase E — also inserted by migration 052
+      { module: "tournaments", submodule: null, description: "Tournaments" },
+      // PLAN-009 phase F — also inserted by migration 053
+      { module: "clubs", submodule: null, description: "Clubs" },
       // (PLAN-002's paired_apps was retired by migration 010 — devices pair to a session)
     ];
 

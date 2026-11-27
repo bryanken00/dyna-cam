@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/tooltip";
 
 import SearchableSelect from "../../../../../components/SearchableSelect";
+import PickChip from "../../../../../components/PickChip";
 import SectionLabel from "../../../../../components/SectionLabel";
 import VenueLocationPicker from "../../../../../components/VenueLocationPicker";
 import StatusToggle from "../../../../../components/StatusToggle";
@@ -68,6 +69,7 @@ import {
   useDeleteFile,
   useUploadImage,
 } from "../../../../../services/requests/upload";
+import { VENUE_AMENITIES } from "../../../../../utils/venueFacts";
 
 // CR-050: a coordinate typed or set by the pin — "" = none
 const coordinate = (label, limit) =>
@@ -111,6 +113,8 @@ const venueSchema = z.object({
     .regex(/^\d+(\.\d{1,2})?$/, "Enter an amount like 50 or 49.50")
     .refine((v) => Number(v) <= 100000, "The price is too high"),
   status: z.enum(["Active", "Inactive"]),
+  // PLAN-009 phase B: what the venue has (players filter by it on Discover)
+  amenities: z.array(z.enum(VENUE_AMENITIES)),
 }).superRefine((v, ctx) => {
   // Once a region is picked, the rest of the address is needed down to the barangay
   if (v.regionCode) {
@@ -141,6 +145,7 @@ const EMPTY = {
   clipRetentionDays: "7",
   clipPrice: "0",
   status: "Active",
+  amenities: [],
 };
 
 const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
@@ -224,6 +229,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
             clipRetentionDays: String(entity.clipRetentionDays ?? 7),
             clipPrice: String(Number(entity.clipPrice) || 0),
             status: entity.status === "Inactive" ? "Inactive" : "Active",
+            amenities: entity.amenities ?? [],
           }
         : EMPTY,
     );
@@ -311,6 +317,7 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
         clipRetentionDays: Number(values.clipRetentionDays),
         // Always sent: the API treats a missing price as 0 (free)
         clipPrice: Number(values.clipPrice),
+        amenities: values.amenities,
       };
 
       if (isEditMode) {
@@ -622,6 +629,42 @@ const VenueFormDrawer = ({ open, onClose, onSuccess, entity = null }) => {
                     )}
                   />
                 </div>
+              </div>
+
+              {/* PLAN-009 phase B: shown on the venue's card in the player app */}
+              <div className="mt-7">
+                <SectionLabel>Amenities</SectionLabel>
+                <FormField
+                  control={form.control}
+                  name="amenities"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex flex-wrap gap-2" role="group" aria-label="Amenities">
+                        {VENUE_AMENITIES.map((amenity) => {
+                          const on = field.value.includes(amenity);
+                          return (
+                            <PickChip
+                              key={amenity}
+                              selected={on}
+                              className="px-3 h-9 text-[13.5px]"
+                              onClick={() =>
+                                field.onChange(
+                                  on
+                                    ? field.value.filter((a) => a !== amenity)
+                                    : VENUE_AMENITIES.filter((a) => a === amenity || field.value.includes(a)),
+                                )
+                              }
+                            >
+                              {amenity}
+                            </PickChip>
+                          );
+                        })}
+                      </div>
+                      <FormDescription>Players can filter venues by these.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <div className="mt-7">

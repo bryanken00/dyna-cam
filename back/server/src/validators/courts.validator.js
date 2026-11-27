@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { emptyToUndefined, queryEnum, queryEnumDefault, queryInt } from "./_helpers.js";
+import { COURT_SURFACES } from "../utils/venueFacts.js";
 
 /**
  * The court camera's RTSP URL, e.g. rtsp://user:pass@192.168.1.50:554/stream1.
@@ -62,6 +63,11 @@ const optionalWatchUrl = () =>
 export const STREAM_LAYOUTS = ["CAM1", "CAM2", "STACKED"];
 const optionalLayout = () => emptyToUndefined(z.enum(STREAM_LAYOUTS).optional());
 
+// PLAN-009 phase B: what the court is like (Discover's filters). Omitted keeps the stored
+// value on an edit; "" / null clears it.
+const surface = z.union([z.enum(COURT_SURFACES), z.literal(""), z.null()]).optional();
+const isIndoor = z.boolean().nullable().optional();
+
 // POST /
 export const createCourtSchema = z.object({
   venueId: z.string().min(1, "Venue is required").max(50),
@@ -73,6 +79,8 @@ export const createCourtSchema = z.object({
   streamRtmpUrl: optionalRtmpUrl(),
   streamWatchUrl: optionalWatchUrl(),
   streamLayout: optionalLayout(),
+  surface,
+  isIndoor,
 });
 
 // PUT /:courtId
@@ -93,6 +101,8 @@ export const updateCourtSchema = z.object({
   streamRtmpUrl: optionalRtmpUrl(),
   removeStream: z.boolean().optional().default(false),
   streamWatchUrl: optionalWatchUrl(),
+  surface,
+  isIndoor,
   status: z.enum(["Active", "Inactive"]).optional(),
 });
 

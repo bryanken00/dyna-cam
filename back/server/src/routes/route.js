@@ -43,6 +43,15 @@ import bookingPublicRoute from "../controllers/v1/public/booking.controller.js";
 import paymentSandboxRoute from "../controllers/v1/public/payment-sandbox.controller.js";
 import courtBoardRoute from "../controllers/v1/public/board.controller.js";
 router.use("/v1/public/board", courtBoardRoute); // CR-038: a venue's TV court board (display link)
+// PLAN-009 phase C: Open Play sessions anyone can see (no login)
+import openPlayPublicRoute from "../controllers/v1/public/open-play.controller.js";
+router.use("/v1/public/open-play", openPlayPublicRoute);
+// PLAN-009 phase E: tournaments anyone can see (no login)
+import tournamentsPublicRoute from "../controllers/v1/public/tournaments.controller.js";
+router.use("/v1/public/tournaments", tournamentsPublicRoute);
+// PLAN-009 phase F: clubs anyone can see (no login)
+import clubsPublicRoute from "../controllers/v1/public/clubs.controller.js";
+router.use("/v1/public/clubs", clubsPublicRoute);
 router.use("/v1/public/payment-sandbox", paymentSandboxRoute); // CR-033: test checkout (PAYMENT_SANDBOX)
 router.use("/v1/public", bookingPublicRoute);
 router.use("/v1/public", publicRoute);
@@ -53,6 +62,15 @@ import playerGoogleRoute from "../controllers/v1/auth/google.controller.js";
 router.use("/v1/auth/google", playerGoogleRoute);
 // PLAN-006: a signed-in player — Authorization: Player <token> (the session routes make one)
 import playerRoute from "../controllers/v1/player/player.controller.js";
+// PLAN-009 phase C: a signed-in player's Open Play spots
+import playerOpenPlayRoute from "../controllers/v1/player/open-play.controller.js";
+router.use("/v1/player/play", playerOpenPlayRoute);
+// PLAN-009 phase E: a signed-in player's tournament teams
+import playerTournamentsRoute from "../controllers/v1/player/tournaments.controller.js";
+router.use("/v1/player/tournaments", playerTournamentsRoute);
+// PLAN-009 phase F: a signed-in player's clubs
+import playerClubsRoute from "../controllers/v1/player/clubs.controller.js";
+router.use("/v1/player/clubs", playerClubsRoute);
 router.use("/v1/player", playerRoute);
 
 // PLAN-002 pairing — a 6-digit key is the credential, once (no login)

@@ -8,6 +8,8 @@ import { expireHolds } from "../../../utils/bookings.js";
 import { advanceSessions } from "../../../utils/sessions.js";
 import { signUploadUrl } from "../../../utils/file/signedUrl.js";
 import { displayTokenParamsSchema } from "../../../validators/public.validator.js";
+import { firstName } from "../../../utils/openPlay.js";
+import { loadQueue } from "../../../utils/openPlayGames.js";
 
 /**
  * CR-038 — a venue's TV court board, mounted at /api/v1/public/board with NO
@@ -93,7 +95,83 @@ router.get(
     ]);
 
     const key = (courtId) => courtKey(displayToken, courtId);
+
+    // PLAN-009 phase D: Open Play running now — who's on which court, who's next, how many wait
+    const nowLocal = getCurrentTimestampLocal();
+    const liveSessions = await req.db.query(
+      `SELECT playSessionId, title, startAt, endAt, queuePaused FROM play_sessions
+       WHERE venueId = ? AND status = 'Scheduled' AND startAt <= ? AND endAt > ?
+       ORDER BY startAt ASC`,
+      [venue.venueId, nowLocal, nowLocal]
+    );
+    const openPlay = [];
+    for (const session of liveSessions) {
+      const state = await loadQueue(req.db, session.playSessionId);
+      const names = (ids) => ids.map((id) => firstName(state.byId.get(id)?.name));
+      openPlay.push({
+        title: session.title,
+        startAt: session.startAt,
+        endAt: session.endAt,
+        paused: Boolean(session.queuePaused),
+        courts: state.courts.map((c) => {
+          const game = state.playing.find((g) => g.courtId === c.courtId);
+          return {
+            courtKey: key(c.courtId),
+            name: c.name,
+            game: game ? { teamA: names(game.teamA), teamB: names(game.teamB), startedAt: game.startedAt } : null,
+          };
+        }),
+        next: state.queued.slice(0, 3).map((g) => ({ teamA: names(g.teamA), teamB: names(g.teamB) })),
+        waiting: state.waiting.length,
+        waitingNames: names(state.waiting.slice(0, 12).map((p) => p.id)),
+      });
+    }
+
+    // PLAN-009 phase E: a tournament on today — matches on court, up next, results (team names only)
+    const todaysTournaments = await req.db.query(
+      `SELECT tournamentId, name FROM tournaments
+       WHERE venueId = ? AND status IN ('Open', 'Closed', 'Live') AND startDate <= ? AND endDate >= ?
+       ORDER BY startDate ASC`,
+      [venue.venueId, date, date]
+    );
+    const tournaments = [];
+    for (const t of todaysTournaments) {
+      const matches = await req.db.query(
+        `SELECT m.status, m.scheduledAt, m.scoreA, m.scoreB, m.winnerTeamId, m.teamAId, m.teamBId, m.courtId,
+                d.name AS divisionName, ta.name AS teamA, tb.name AS teamB
+         FROM tournament_matches m
+         JOIN tournament_divisions d ON d.divisionId = m.divisionId AND d.tournamentId = ? AND d.status = 'Active'
+         LEFT JOIN tournament_teams ta ON ta.tournamentTeamId = m.teamAId
+         LEFT JOIN tournament_teams tb ON tb.tournamentTeamId = m.teamBId
+         WHERE m.status IN ('Playing', 'Ready', 'Done')
+         ORDER BY m.dateUpdated DESC`,
+        [t.tournamentId]
+      );
+      const view = (m) => ({
+        courtKey: m.courtId ? key(m.courtId) : null,
+        division: m.divisionName,
+        teamA: m.teamA,
+        teamB: m.teamB,
+        scheduledAt: m.scheduledAt,
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        winner: m.winnerTeamId ? (m.winnerTeamId === m.teamAId ? "A" : "B") : null,
+      });
+      tournaments.push({
+        name: t.name,
+        playing: matches.filter((m) => m.status === "Playing").map(view),
+        next: matches
+          .filter((m) => m.status === "Ready" && m.courtId && m.scheduledAt)
+          .sort((a, b) => (a.scheduledAt < b.scheduledAt ? -1 : 1))
+          .slice(0, 6)
+          .map(view),
+        results: matches.filter((m) => m.status === "Done").slice(0, 6).map(view),
+      });
+    }
+
     return res.sendSuccess("Court board", {
+      openPlay,
+      tournaments,
       venue: { name: venue.name, logoUrl: signUploadUrl(venue.logoUrl) },
       date,
       now: getCurrentTimestampLocal(),

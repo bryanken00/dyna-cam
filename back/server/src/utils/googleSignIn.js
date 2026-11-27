@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { decryptSecret, encryptSecret } from "./crypto/secretBox.js";
-import { appUrl } from "./clips.js";
+import { playerAppUrl } from "./clips.js";
 
 /**
  * PLAN-006: players sign in with Google (OpenID Connect "web server" flow,
@@ -43,8 +43,8 @@ export const playerSignInConfigured = () => {
 
 // ── where the player goes back to ───────────────────────────────────────────
 
-/** Player pages a sign-in may return to: /book…, /booking…, /me/games (path + a plain query). */
-const RETURN_ROOTS = ["/book", "/booking", "/me/games"];
+/** Player pages a sign-in may return to: /book…, /booking…, /me/games, /me/profile, /open-play… (path + a plain query). */
+const RETURN_ROOTS = ["/book", "/booking", "/me/games", "/me/profile", "/open-play", "/events", "/team-invite", "/clubs", "/coaching"];
 const PATH_CHARS = /^[A-Za-z0-9_/-]+$/;
 const QUERY_CHARS = /^[A-Za-z0-9_\-=&%.:+]*$/;
 export const DEFAULT_RETURN_PATH = "/me/games";
@@ -64,7 +64,7 @@ export const safeReturnPath = (value) => {
 };
 
 /** The front page that finishes a sign-in: `/signed-in?code=…&next=…` or `?error=…&next=…`. */
-export const signedInUrl = (query) => `${appUrl()}/signed-in?${new URLSearchParams(query)}`;
+export const signedInUrl = (query) => `${playerAppUrl()}/signed-in?${new URLSearchParams(query)}`;
 
 // ── state ───────────────────────────────────────────────────────────────────
 
